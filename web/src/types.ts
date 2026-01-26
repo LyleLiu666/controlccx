@@ -7,7 +7,7 @@ export type TaskStatus =
   | "interrupted"
   | "blocked";
 
-export type WorkerType = "claude-code" | "codex" | "exec";
+export type WorkerType = "claude-code" | "codex";
 
 export type Task = {
   id: string;
@@ -57,4 +57,3 @@ export type ServerEvent = {
   time: string;
   payload?: any;
 };
-

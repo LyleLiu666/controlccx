@@ -184,7 +184,6 @@ const sortedTasks = computed(() => {
             <select v-model="newWorkerType">
               <option value="claude-code">claude-code</option>
               <option value="codex">codex</option>
-              <option value="exec">exec</option>
             </select>
           </label>
           <label>
@@ -533,4 +532,3 @@ button.primary {
   }
 }
 </style>
-
