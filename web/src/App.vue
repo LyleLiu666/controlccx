@@ -2175,3 +2175,4 @@ button.primary:active:not(:disabled) {
     max-height: none;
   }
 }
+</style>
