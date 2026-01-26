@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"controlccx/internal/auth"
 	"controlccx/internal/chat"
 	"controlccx/internal/db"
 	"controlccx/internal/events"
@@ -133,7 +134,7 @@ func TestAPI_TasksAndChat(t *testing.T) {
 		}
 	})
 
-	t.Run("fs", func(t *testing.T) {
+		t.Run("fs", func(t *testing.T) {
 		root := filepath.Join(t.TempDir(), "root")
 		if err := os.MkdirAll(filepath.Join(root, "a"), 0o755); err != nil {
 			t.Fatalf("mkdir: %v", err)
@@ -177,5 +178,53 @@ func TestAPI_TasksAndChat(t *testing.T) {
 		if outRes.StatusCode != http.StatusForbidden {
 			t.Fatalf("outside status=%d, want 403", outRes.StatusCode)
 		}
-	})
-}
+		})
+
+		t.Run("auth", func(t *testing.T) {
+			t.Setenv("ANTHROPIC_API_KEY", "")
+			t.Setenv("ANTHROPIC_AUTH_TOKEN", "")
+			t.Setenv("OPENAI_API_KEY", "")
+
+			store, err := auth.Load(filepath.Join(t.TempDir(), "secrets.json"))
+			if err != nil {
+				t.Fatalf("auth load: %v", err)
+			}
+			apiSvc.Auth = store
+
+			res, err := http.Get(srv.URL + "/api/auth/status")
+			if err != nil {
+				t.Fatalf("get status: %v", err)
+			}
+			defer res.Body.Close()
+			if res.StatusCode != http.StatusOK {
+				t.Fatalf("status=%d, want 200", res.StatusCode)
+			}
+			var st auth.Status
+			if err := json.NewDecoder(res.Body).Decode(&st); err != nil {
+				t.Fatalf("decode: %v", err)
+			}
+			if st.Claude.Available || st.Codex.Available {
+				t.Fatalf("expected unavailable, got claude=%v codex=%v", st.Claude.Available, st.Codex.Available)
+			}
+
+			openaiKey := "sk-openai-abc123"
+			buf, _ := json.Marshal(map[string]string{"openai_api_key": openaiKey})
+			setRes, err := http.Post(srv.URL+"/api/auth", "application/json", bytes.NewReader(buf))
+			if err != nil {
+				t.Fatalf("post auth: %v", err)
+			}
+			defer setRes.Body.Close()
+			if setRes.StatusCode != http.StatusOK {
+				t.Fatalf("set status=%d, want 200", setRes.StatusCode)
+			}
+			var setBody struct {
+				Status auth.Status `json:"status"`
+			}
+			if err := json.NewDecoder(setRes.Body).Decode(&setBody); err != nil {
+				t.Fatalf("decode set: %v", err)
+			}
+			if !setBody.Status.Codex.Available || setBody.Status.Codex.APIKey.Effective != "stored" {
+				t.Fatalf("unexpected set status: %+v", setBody.Status.Codex)
+			}
+		})
+	}

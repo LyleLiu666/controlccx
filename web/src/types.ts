@@ -73,3 +73,31 @@ export type ServerEvent = {
   time: string;
   payload?: any;
 };
+
+export type AuthFieldStatus = {
+  effective: "env" | "stored" | "none";
+  masked?: string;
+};
+
+export type AuthStatus = {
+  claude: {
+    api_key: AuthFieldStatus;
+    auth_token: AuthFieldStatus;
+    available: boolean;
+  };
+  codex: {
+    api_key: AuthFieldStatus;
+    available: boolean;
+  };
+};
+
+export type AuthInfo = {
+  status: AuthStatus;
+  storage_path: string;
+};
+
+export type AuthPatch = {
+  anthropic_api_key?: string;
+  anthropic_auth_token?: string;
+  openai_api_key?: string;
+};

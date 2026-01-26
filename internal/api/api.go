@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"controlccx/internal/auth"
 	"controlccx/internal/chat"
 	"controlccx/internal/events"
 	"controlccx/internal/observer"
@@ -26,6 +27,7 @@ type API struct {
 	Chat     *chat.Store
 	Hub      *events.Hub
 	FSRoots  []FSRoot
+	Auth     *auth.Store
 }
 
 func (a *API) Handler() http.Handler {
@@ -37,6 +39,8 @@ func (a *API) Handler() http.Handler {
 	mux.HandleFunc("/api/fs/list", a.handleFSList)
 	mux.HandleFunc("/api/events", a.handleEvents)
 	mux.HandleFunc("/api/chat", a.handleChat)
+	mux.HandleFunc("/api/auth", a.handleAuth)
+	mux.HandleFunc("/api/auth/status", a.handleAuthStatus)
 	return mux
 }
 

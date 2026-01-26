@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import type {
+  AuthInfo,
+  AuthPatch,
+  AuthStatus,
   ChatMessage,
   FSListEntry,
   FSRoot,
@@ -13,6 +16,7 @@ import type {
 import {
   cancelTask,
   createTask,
+  fetchAuthInfo,
   fetchChat,
   fetchFSList,
   fetchFSRoots,
@@ -21,6 +25,7 @@ import {
   fetchTasks,
   resumeTask,
   sendChat,
+  updateAuth,
 } from "./api";
 
 const tasks = ref<Map<string, Task>>(new Map());
@@ -37,6 +42,15 @@ const newPrompt = ref<string>("");
 const resumePrompt = ref<string>("");
 const chatInput = ref<string>("");
 const errorBanner = ref<string>("");
+
+const authInfo = ref<AuthInfo | null>(null);
+const authStatus = computed<AuthStatus | null>(() => authInfo.value?.status ?? null);
+const authSettingsOpen = ref(false);
+const authSaving = ref(false);
+const authSettingsError = ref("");
+const authAnthropicApiKey = ref("");
+const authAnthropicAuthToken = ref("");
+const authOpenAIApiKey = ref("");
 
 const selectedTask = computed(() => tasks.value.get(selectedTaskId.value) ?? null);
 const selectedLogs = computed(() => logsByTask.value.get(selectedTaskId.value) ?? []);
@@ -78,6 +92,14 @@ async function refresh() {
   systemInfo.value = sys;
   taskList.forEach((t) => upsertTask(t));
   chat.value = chatList;
+}
+
+async function refreshAuth() {
+  try {
+    authInfo.value = await fetchAuthInfo();
+  } catch {
+    // ignore auth status failures (UI still works; tasks will surface logs)
+  }
 }
 
 async function loadLogs(taskId: string) {
@@ -207,9 +229,66 @@ function connectEvents() {
   es.addEventListener("heartbeat", () => {});
 }
 
+function openAuthSettings() {
+  authSettingsError.value = "";
+  authSettingsOpen.value = true;
+  refreshAuth();
+}
+
+async function saveAuthSettings() {
+  authSettingsError.value = "";
+  authSaving.value = true;
+  try {
+    const patch: AuthPatch = {};
+    if (authAnthropicApiKey.value.trim()) patch.anthropic_api_key = authAnthropicApiKey.value.trim();
+    if (authAnthropicAuthToken.value.trim())
+      patch.anthropic_auth_token = authAnthropicAuthToken.value.trim();
+    if (authOpenAIApiKey.value.trim()) patch.openai_api_key = authOpenAIApiKey.value.trim();
+
+    if (Object.keys(patch).length > 0) {
+      authInfo.value = await updateAuth(patch);
+    } else {
+      await refreshAuth();
+    }
+
+    authAnthropicApiKey.value = "";
+    authAnthropicAuthToken.value = "";
+    authOpenAIApiKey.value = "";
+  } catch (e: any) {
+    authSettingsError.value = e?.message ?? String(e);
+  } finally {
+    authSaving.value = false;
+  }
+}
+
+async function clearStoredAuth(field: keyof AuthPatch) {
+  authSettingsError.value = "";
+  authSaving.value = true;
+  try {
+    authInfo.value = await updateAuth({ [field]: "" } as AuthPatch);
+  } catch (e: any) {
+    authSettingsError.value = e?.message ?? String(e);
+  } finally {
+    authSaving.value = false;
+  }
+}
+
+const missingAuthText = computed(() => {
+  const st = authStatus.value;
+  if (!st) return "";
+  if (newWorkerType.value === "claude-code" && !st.claude.available) {
+    return "claude-code 未检测到可用鉴权：请设置 ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN，或在终端运行一次 `claude /login`。";
+  }
+  if (newWorkerType.value === "codex" && !st.codex.available) {
+    return "codex 未检测到可用鉴权：请设置 OPENAI_API_KEY。";
+  }
+  return "";
+});
+
 onMounted(async () => {
   await refresh();
   if (selectedTaskId.value) await loadLogs(selectedTaskId.value);
+  await refreshAuth();
   connectEvents();
 });
 
@@ -229,8 +308,11 @@ const sortedTasks = computed(() => {
   <div class="page">
     <header class="header">
       <div class="title">ControlCCX</div>
-      <div class="sub" v-if="systemInfo">
-        {{ systemInfo.os }}/{{ systemInfo.arch }} · {{ systemInfo.hostname }} · Go {{ systemInfo.go_version }}
+      <div class="headerRight">
+        <div class="sub" v-if="systemInfo">
+          {{ systemInfo.os }}/{{ systemInfo.arch }} · {{ systemInfo.hostname }} · Go {{ systemInfo.go_version }}
+        </div>
+        <button type="button" class="settingsBtn" @click="openAuthSettings">Settings</button>
       </div>
     </header>
 
@@ -254,6 +336,10 @@ const sortedTasks = computed(() => {
               <button type="button" @click="openDirPicker">Browse</button>
             </div>
           </label>
+          <div v-if="missingAuthText" class="authHint full">
+            <div class="text">{{ missingAuthText }}</div>
+            <button type="button" @click="openAuthSettings">Auth Settings</button>
+          </div>
           <label class="full">
             Prompt
             <textarea v-model="newPrompt" rows="5" placeholder="Describe the task to run..." />
@@ -332,6 +418,89 @@ const sortedTasks = computed(() => {
           </div>
         </div>
       </section>
+    </div>
+
+    <div v-if="authSettingsOpen" class="modalOverlay" @click.self="authSettingsOpen = false">
+      <div class="modal settingsModal">
+        <div class="modalHeader">
+          <div class="modalTitle">Auth Settings</div>
+          <button class="iconBtn" type="button" @click="authSettingsOpen = false">✕</button>
+        </div>
+
+        <div class="modalBody settingsBody">
+          <div class="settingsMeta" v-if="authInfo?.storage_path">
+            Storage: <span class="mono">{{ authInfo.storage_path }}</span>
+          </div>
+
+          <div v-if="authSettingsError" class="modalError">{{ authSettingsError }}</div>
+
+          <div class="settingsSection">
+            <div class="settingsSectionTitle">Claude Code</div>
+            <div class="kv">
+              <span class="k">ANTHROPIC_API_KEY</span>
+              <span class="mono">{{ authStatus?.claude.api_key.effective }} {{ authStatus?.claude.api_key.masked }}</span>
+            </div>
+            <div class="kv">
+              <span class="k">ANTHROPIC_AUTH_TOKEN</span>
+              <span class="mono"
+                >{{ authStatus?.claude.auth_token.effective }} {{ authStatus?.claude.auth_token.masked }}</span
+              >
+            </div>
+
+            <label class="full">
+              Store ANTHROPIC_API_KEY
+              <div class="secretRow">
+                <input v-model="authAnthropicApiKey" type="password" placeholder="Paste key…" autocomplete="off" />
+                <button type="button" @click="clearStoredAuth('anthropic_api_key')" :disabled="authSaving">
+                  Clear stored
+                </button>
+              </div>
+            </label>
+            <label class="full">
+              Store ANTHROPIC_AUTH_TOKEN
+              <div class="secretRow">
+                <input
+                  v-model="authAnthropicAuthToken"
+                  type="password"
+                  placeholder="Paste token…"
+                  autocomplete="off"
+                />
+                <button type="button" @click="clearStoredAuth('anthropic_auth_token')" :disabled="authSaving">
+                  Clear stored
+                </button>
+              </div>
+            </label>
+
+            <div class="settingsHelp">
+              如果你使用 Claude Code 订阅登录模式，也可以在终端运行一次 <span class="mono">claude /login</span>。
+            </div>
+          </div>
+
+          <div class="settingsSection">
+            <div class="settingsSectionTitle">Codex</div>
+            <div class="kv">
+              <span class="k">OPENAI_API_KEY</span>
+              <span class="mono">{{ authStatus?.codex.api_key.effective }} {{ authStatus?.codex.api_key.masked }}</span>
+            </div>
+            <label class="full">
+              Store OPENAI_API_KEY
+              <div class="secretRow">
+                <input v-model="authOpenAIApiKey" type="password" placeholder="Paste key…" autocomplete="off" />
+                <button type="button" @click="clearStoredAuth('openai_api_key')" :disabled="authSaving">
+                  Clear stored
+                </button>
+              </div>
+            </label>
+          </div>
+        </div>
+
+        <div class="modalFooter">
+          <button type="button" @click="authSettingsOpen = false">Close</button>
+          <button type="button" class="primary" @click="saveAuthSettings" :disabled="authSaving">
+            {{ authSaving ? "Saving..." : "Save" }}
+          </button>
+        </div>
+      </div>
     </div>
 
     <div v-if="dirPickerOpen" class="modalOverlay" @click.self="dirPickerOpen = false">

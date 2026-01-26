@@ -5,10 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
+	"runtime"
+	"strings"
 	"sync"
 	"time"
 
+	"controlccx/internal/auth"
 	"controlccx/internal/config"
 	"controlccx/internal/events"
 	"controlccx/internal/tasks"
@@ -18,16 +22,18 @@ type Manager struct {
 	cfg   config.Config
 	store *tasks.Store
 	hub   *events.Hub
+	auth  *auth.Store
 
 	mu      sync.Mutex
 	cancels map[string]context.CancelFunc
 }
 
-func NewManager(cfg config.Config, store *tasks.Store, hub *events.Hub) *Manager {
+func NewManager(cfg config.Config, store *tasks.Store, hub *events.Hub, authStore *auth.Store) *Manager {
 	return &Manager{
 		cfg:     cfg,
 		store:   store,
 		hub:     hub,
+		auth:    authStore,
 		cancels: make(map[string]context.CancelFunc),
 	}
 }
@@ -100,8 +106,9 @@ func (m *Manager) run(ctx context.Context, task tasks.Task) error {
 		m.publishTaskUpdated(task.ID)
 	}
 
-	cmd := exec.CommandContext(ctx, tool.Command, tool.Args...)
-	cmd.Dir = tool.Dir
+		cmd := exec.CommandContext(ctx, tool.Command, tool.Args...)
+		cmd.Dir = tool.Dir
+		cmd.Env = m.envForWorker(task.WorkerType)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -163,6 +170,79 @@ func (m *Manager) run(ctx context.Context, task tasks.Task) error {
 	})
 	m.publishTaskUpdated(task.ID)
 	return nil
+}
+
+func (m *Manager) envForWorker(workerType tasks.WorkerType) []string {
+	base := os.Environ()
+	if m == nil || m.auth == nil {
+		return base
+	}
+	secrets := m.auth.Get()
+
+	additions := map[string]string{}
+	switch workerType {
+	case tasks.WorkerClaudeCode:
+		if strings.TrimSpace(secrets.AnthropicAPIKey) != "" {
+			additions["ANTHROPIC_API_KEY"] = strings.TrimSpace(secrets.AnthropicAPIKey)
+		}
+		if strings.TrimSpace(secrets.AnthropicAuthToken) != "" {
+			additions["ANTHROPIC_AUTH_TOKEN"] = strings.TrimSpace(secrets.AnthropicAuthToken)
+		}
+	case tasks.WorkerCodex:
+		if strings.TrimSpace(secrets.OpenAIAPIKey) != "" {
+			additions["OPENAI_API_KEY"] = strings.TrimSpace(secrets.OpenAIAPIKey)
+		}
+	default:
+		return base
+	}
+	return mergeEnv(base, additions)
+}
+
+func mergeEnv(base []string, additions map[string]string) []string {
+	out := append([]string{}, base...)
+
+	index := make(map[string]int, len(out))
+	valueEmpty := make(map[string]bool, len(out))
+
+	for i, kv := range out {
+		j := strings.IndexByte(kv, '=')
+		if j <= 0 {
+			continue
+		}
+		k := kv[:j]
+		v := kv[j+1:]
+		if runtime.GOOS == "windows" {
+			k = strings.ToUpper(k)
+		}
+		if _, ok := index[k]; ok {
+			continue
+		}
+		index[k] = i
+		valueEmpty[k] = strings.TrimSpace(v) == ""
+	}
+
+	for k, v := range additions {
+		v = strings.TrimSpace(v)
+		if v == "" {
+			continue
+		}
+		check := k
+		if runtime.GOOS == "windows" {
+			check = strings.ToUpper(check)
+		}
+		if i, ok := index[check]; ok {
+			if valueEmpty[check] {
+				out[i] = k + "=" + v
+				valueEmpty[check] = false
+			}
+			continue
+		}
+		index[check] = len(out)
+		valueEmpty[check] = false
+		out = append(out, k+"="+v)
+	}
+
+	return out
 }
 
 func (m *Manager) consumeStdout(task tasks.Task, stdout io.Reader, sidMu *sync.Mutex, sid *string) {

@@ -1,4 +1,15 @@
-import type { ChatMessage, FSListResponse, FSRoot, LogEntry, SystemInfo, Task, WorkerType } from "./types";
+import type {
+  AuthInfo,
+  AuthPatch,
+  AuthStatus,
+  ChatMessage,
+  FSListResponse,
+  FSRoot,
+  LogEntry,
+  SystemInfo,
+  Task,
+  WorkerType,
+} from "./types";
 
 async function getJSON<T>(path: string): Promise<T> {
   const res = await fetch(path, { credentials: "same-origin" });
@@ -66,4 +77,16 @@ export async function fetchFSRoots(): Promise<FSRoot[]> {
 export async function fetchFSList(path: string): Promise<FSListResponse> {
   const url = `/api/fs/list?path=${encodeURIComponent(path)}`;
   return getJSON<FSListResponse>(url);
+}
+
+export async function fetchAuthStatus(): Promise<AuthStatus> {
+  return getJSON<AuthStatus>("/api/auth/status");
+}
+
+export async function fetchAuthInfo(): Promise<AuthInfo> {
+  return getJSON<AuthInfo>("/api/auth");
+}
+
+export async function updateAuth(patch: AuthPatch): Promise<AuthInfo> {
+  return postJSON<AuthInfo>("/api/auth", patch);
 }

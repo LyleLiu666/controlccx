@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"controlccx"
+	"controlccx/internal/auth"
 	"controlccx/internal/api"
 	"controlccx/internal/chat"
 	"controlccx/internal/config"
@@ -65,8 +66,13 @@ func main() {
 		log.Fatal(err)
 	}
 
+	authStore, err := auth.Load(filepath.Join(cfg.Paths.DataDir, "secrets.json"))
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	hub := events.NewHub()
-	workerMgr := worker.NewManager(cfg, taskStore, hub)
+	workerMgr := worker.NewManager(cfg, taskStore, hub, authStore)
 	observerSvc := &observer.Service{Store: taskStore}
 	chatStore := chat.NewStore(conn)
 
@@ -76,6 +82,7 @@ func main() {
 		Observer: observerSvc,
 		Chat:     chatStore,
 		Hub:      hub,
+		Auth:     authStore,
 	}
 
 	mux := http.NewServeMux()
