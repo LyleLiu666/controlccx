@@ -15,3 +15,11 @@ Each event MUST include a type, timestamp, and payload.
 - **THEN** the server emits an event with type `task.updated`
 - **AND** the payload contains the task ID and new status
 
+### Requirement: Connection robustness
+The server MUST keep the event stream usable for long-lived connections.
+
+#### Scenario: Heartbeat
+- **GIVEN** a client is connected to the event stream
+- **WHEN** no task events occur for a period of time
+- **THEN** the server periodically emits a heartbeat event so intermediaries do not silently close the connection
+

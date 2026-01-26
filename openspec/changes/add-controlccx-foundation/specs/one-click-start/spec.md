@@ -14,3 +14,10 @@ Users MUST be able to run a production-like server that serves the web UI and AP
 - **WHEN** a user runs the documented start command
 - **THEN** a single HTTP origin serves both the UI and API endpoints
 
+### Requirement: Standalone server binary
+Users MUST be able to run the backend server without requiring Node.js at runtime (after assets are built).
+
+#### Scenario: Run server binary
+- **GIVEN** the web assets have been built
+- **WHEN** a user runs the server binary directly
+- **THEN** the UI and API are served from the same origin

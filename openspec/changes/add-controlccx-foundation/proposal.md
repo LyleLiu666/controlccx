@@ -15,8 +15,8 @@ The project must be easy to start (one command), cross-platform, and simple to o
   - Task/worker lifecycle management (create/list/get/cancel).
   - Real-time event streaming (SSE) for task state/logs and observer responses.
   - System info endpoint for the observer and UI.
-  - A pluggable observer interface (MVP: heuristic observer; later: real LLM).
--  - Durable persistence and resume (tasks/logs survive restart; long-running tasks can be re-attached).
+  - A pluggable observer interface (built-in heuristic + optional external LLM provider).
+  - Durable persistence and resume (tasks/logs survive restart; long-running tasks can be re-attached).
 - Add a Vue (Vite) web UI providing:
   - Task dashboard with live status/logs.
   - Chat panel to talk to the observer.
