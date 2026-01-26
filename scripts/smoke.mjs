@@ -1,6 +1,6 @@
 import net from "node:net";
 import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, renameSync } from "node:fs";
 import path from "node:path";
 
 async function pickPort() {
@@ -20,15 +20,39 @@ const isWin = process.platform === "win32";
 const binName = isWin ? "controlccx.exe" : "controlccx";
 const binPath = path.join("dist", binName);
 
-if (!existsSync(binPath) || !existsSync("web/dist")) {
+if (!existsSync(binPath) || !existsSync("web/dist/index.html")) {
   console.error("Missing build artifacts; run `pnpm build` first.");
   process.exit(1);
 }
 
+// Prove the server serves embedded assets: temporarily hide disk assets.
+const diskIndex = path.join("web", "dist", "index.html");
+const diskAssets = path.join("web", "dist", "assets");
+const bakIndex = path.join("web", "dist", "index.html.bak");
+const bakAssets = path.join("web", "dist", "assets.bak");
+
+let moved = false;
+function restoreDiskAssets() {
+  if (!moved) return;
+  try {
+    if (existsSync(bakIndex)) renameSync(bakIndex, diskIndex);
+    if (existsSync(bakAssets)) renameSync(bakAssets, diskAssets);
+  } catch {
+    // best-effort
+  } finally {
+    moved = false;
+  }
+}
+process.on("exit", restoreDiskAssets);
+
+renameSync(diskIndex, bakIndex);
+renameSync(diskAssets, bakAssets);
+moved = true;
+
 const port = await pickPort();
 const base = `http://127.0.0.1:${port}`;
 
-const child = spawn(path.resolve(binPath), ["--addr", `127.0.0.1:${port}`, "--static-dir", "web/dist"], {
+const child = spawn(path.resolve(binPath), ["--addr", `127.0.0.1:${port}`], {
   stdio: "inherit",
 });
 
@@ -63,10 +87,27 @@ if (!sys || !sys.os || !sys.arch) {
 const html = await (await fetch(`${base}/`)).text();
 if (!html.includes("ControlCCX")) {
   child.kill();
+  restoreDiskAssets();
   console.error("Smoke failed: UI not served");
   process.exit(1);
 }
 
-child.kill();
-console.log("Smoke OK");
+const match = html.match(/\/assets\/[^"']+\.(?:js|css)/);
+if (!match) {
+  child.kill();
+  restoreDiskAssets();
+  console.error("Smoke failed: could not find asset reference in HTML");
+  process.exit(1);
+}
+const assetPath = match[0];
+const assetRes = await fetch(`${base}${assetPath}`);
+if (!assetRes.ok) {
+  child.kill();
+  restoreDiskAssets();
+  console.error(`Smoke failed: asset not served: ${assetPath}`);
+  process.exit(1);
+}
 
+child.kill();
+restoreDiskAssets();
+console.log("Smoke OK");

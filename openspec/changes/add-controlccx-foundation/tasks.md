@@ -19,7 +19,7 @@
 ## 3. One-command Start
 - [x] 3.1 Add root `package.json` scripts: `dev`, `build`, `start`
 - [x] 3.2 Configure Vite proxy for `/api/*` and `/api/events`
-- [x] 3.3 Add production build pipeline (Go serves `web/dist`)
+- [x] 3.3 Add production build pipeline (embed built web assets into server binary)
 
 ## 4. Validation (TDD)
 - [x] 4.1 Unit tests for DB-backed task store lifecycle + scoring

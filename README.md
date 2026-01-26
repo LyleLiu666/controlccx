@@ -19,6 +19,12 @@ pnpm start
 ```
 
 - Server: `http://127.0.0.1:5174`
+- The web UI is embedded into the server binary after build (no runtime static directory required).
+
+### Startup scripts
+
+- macOS/Linux: `./start.sh`
+- Windows (PowerShell): `powershell -ExecutionPolicy Bypass -File .\\start.ps1`
 
 ## Configuration
 
@@ -42,4 +48,3 @@ paths:
 ## Resume (断点接续)
 
 Tasks and logs are persisted in SQLite. If the server exits while tasks are running, those tasks will appear as `interrupted` on next startup. You can resume by starting a new run using the persisted session/thread ID (UI has a “Resume” action when `session_id` exists).
-

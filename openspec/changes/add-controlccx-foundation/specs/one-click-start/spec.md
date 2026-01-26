@@ -21,3 +21,4 @@ Users MUST be able to run the backend server without requiring Node.js at runtim
 - **GIVEN** the web assets have been built
 - **WHEN** a user runs the server binary directly
 - **THEN** the UI and API are served from the same origin
+- **AND** the UI does not require a separate runtime static directory

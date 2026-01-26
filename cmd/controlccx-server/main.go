@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io/fs"
 	"log"
 	"net/http"
 	"net/url"
@@ -14,6 +15,7 @@ import (
 	"syscall"
 	"time"
 
+	"controlccx"
 	"controlccx/internal/api"
 	"controlccx/internal/chat"
 	"controlccx/internal/config"
@@ -27,7 +29,7 @@ import (
 func main() {
 	dataDirFlag := flag.String("data-dir", "", "data directory (default: ~/.controlccx)")
 	addrFlag := flag.String("addr", "", "listen address (default from config.yaml)")
-	staticDirFlag := flag.String("static-dir", "", "directory for built web assets (default: web/dist if present)")
+	staticDirFlag := flag.String("static-dir", "", "directory for built web assets (override embedded assets)")
 	claudePathFlag := flag.String("claude-path", "", "path to claude executable (optional)")
 	codexPathFlag := flag.String("codex-path", "", "path to codex executable (optional)")
 	gitBashPathFlag := flag.String("gitbash-path", "", "path to Git Bash bash.exe on Windows (optional)")
@@ -50,12 +52,6 @@ func main() {
 	if *gitBashPathFlag != "" {
 		cfg.Paths.GitBash = *gitBashPathFlag
 	}
-
-	staticDir := strings.TrimSpace(*staticDirFlag)
-	if staticDir == "" {
-		staticDir = defaultStaticDir()
-	}
-	staticDir = filepath.Clean(staticDir)
 
 	ctx := context.Background()
 	conn, err := db.Open(ctx, db.Options{Path: cfg.Paths.DBPath})
@@ -85,7 +81,7 @@ func main() {
 	mux := http.NewServeMux()
 	mux.Handle("/api/", apiSvc.Handler())
 	mux.Handle("/api", apiSvc.Handler())
-	mux.Handle("/", spaOrFallback(staticDir))
+	mux.Handle("/", spaOrFallback(resolveUIFS(*staticDirFlag)))
 
 	srv := &http.Server{
 		Addr:         cfg.Server.Addr,
@@ -114,27 +110,21 @@ func waitForShutdown(srv *http.Server) {
 	_ = srv.Shutdown(ctx)
 }
 
-func defaultStaticDir() string {
-	if stat, err := os.Stat("web/dist"); err == nil && stat.IsDir() {
-		return "web/dist"
+func resolveUIFS(staticDirFlag string) fs.FS {
+	staticDir := strings.TrimSpace(staticDirFlag)
+	if staticDir != "" {
+		return os.DirFS(filepath.Clean(staticDir))
 	}
-	return ""
+	return controlccx.WebDistFS()
 }
 
-func spaOrFallback(staticDir string) http.Handler {
-	if staticDir == "" {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.URL.Path == "/" {
-				w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-				_, _ = fmt.Fprintln(w, "controlccx: web assets not found; run pnpm -C web dev or build web/dist")
-				return
-			}
-			http.NotFound(w, r)
-		})
+func spaOrFallback(fsys fs.FS) http.Handler {
+	if fsys == nil {
+		return missingUIHandler()
 	}
 
-	root := http.Dir(staticDir)
-	fs := http.FileServer(root)
+	indexExists := fsExists(fsys, "index.html")
+	fileServer := http.FileServer(http.FS(fsys))
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
@@ -145,20 +135,20 @@ func spaOrFallback(staticDir string) http.Handler {
 		if path == "" {
 			path = "index.html"
 		}
-		f, err := root.Open(path)
-		if err == nil {
-			_ = f.Close()
-		}
-		if err != nil {
-			// SPA fallback.
-			r2 := new(http.Request)
-			*r2 = *r
-			r2.URL = newCopyURL(r.URL)
-			r2.URL.Path = "/index.html"
-			fs.ServeHTTP(w, r2)
+		if fsExists(fsys, path) {
+			fileServer.ServeHTTP(w, r)
 			return
 		}
-		fs.ServeHTTP(w, r)
+		if !indexExists {
+			missingUIHandler().ServeHTTP(w, r)
+			return
+		}
+		// SPA fallback.
+		r2 := new(http.Request)
+		*r2 = *r
+		r2.URL = newCopyURL(r.URL)
+		r2.URL.Path = "/index.html"
+		fileServer.ServeHTTP(w, r2)
 	})
 }
 
@@ -168,4 +158,20 @@ func newCopyURL(u *url.URL) *url.URL {
 	}
 	v := *u
 	return &v
+}
+
+func fsExists(fsys fs.FS, name string) bool {
+	_, err := fs.Stat(fsys, name)
+	return err == nil
+}
+
+func missingUIHandler() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/" {
+			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+			_, _ = fmt.Fprintln(w, "controlccx: web UI not built yet; run `pnpm build` or `pnpm dev`.")
+			return
+		}
+		http.NotFound(w, r)
+	})
 }

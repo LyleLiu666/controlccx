@@ -1,8 +1,8 @@
 dist/
 node_modules/
 web/node_modules/
-web/dist/
+web/dist/*
+!web/dist/placeholder.txt
 *.db
 *.db-journal
 *.log
-

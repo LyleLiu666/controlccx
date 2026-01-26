@@ -74,6 +74,6 @@ Cross-platform startup is easiest using `pnpm` scripts:
 - `pnpm dev` uses a JS process runner (e.g. `concurrently`) to start:
   - Go backend (hot reload optional),
   - Vite dev server with proxy to backend.
-- `pnpm start` builds the web assets and runs the Go server serving the built UI.
+- `pnpm start` builds the web assets, embeds them into the Go server binary, and runs a single-origin server (UI + API).
 
 This keeps the user experience “one command”, even though internally it runs two processes in dev.

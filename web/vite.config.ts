@@ -3,6 +3,11 @@ import vue from "@vitejs/plugin-vue";
 
 export default defineConfig({
   plugins: [vue()],
+  build: {
+    // Keep placeholder.txt so the Go embed patterns always have at least one match.
+    // The root build script cleans web/dist before running vite build.
+    emptyOutDir: false,
+  },
   server: {
     proxy: {
       "/api": {
@@ -12,4 +17,3 @@ export default defineConfig({
     },
   },
 });
-
