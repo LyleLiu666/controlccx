@@ -35,11 +35,17 @@ The server MUST persist tasks so that task history is not lost after process res
 ### Requirement: Resume and reattach
 The server MUST support “断点接续” by resuming or re-attaching to in-flight tasks when feasible.
 
-#### Scenario: Reattach to an in-flight task
-- **GIVEN** a task is still running when the server process restarts
+#### Scenario: Mark interrupted tasks after restart
+- **GIVEN** a task was running when the server process exited unexpectedly
 - **WHEN** the server starts again
-- **THEN** the task appears as running
-- **AND** new output continues to be recorded and streamed
+- **THEN** the task status becomes `interrupted`
+- **AND** the task remains resumable using its persisted session/thread ID (if available)
+
+#### Scenario: Resume a task using session/thread ID
+- **GIVEN** a task has a persisted session/thread ID
+- **WHEN** a client requests a resume run for that task
+- **THEN** the server starts a new worker run using the CLI’s resume mechanism
+- **AND** new output is recorded and streamed
 
 ### Requirement: Supported worker types
 The system MUST support running both `claude code` and `codex` workers.

@@ -39,19 +39,15 @@ The project must be easy to start (one command), cross-platform, and simple to o
 
 ## Assumptions
 - Users run this locally on a developer machine; scale is “developer-grade” but reliability is production-minded.
-- Worker execution is local process-based, supporting both non-interactive exec and interactive PTY-backed CLIs.
+- Worker execution is local process-based, using each CLI’s supported streaming JSON output and session resume features.
 - Task persistence uses an embedded database (SQLite) by default for cross-platform portability.
 
-## Open Questions (need confirmation before implementation)
-1. **DB location**: default data dir should be:
-   - A) `~/.controlccx/` (recommended), or
-   - B) project-local `./.controlccx/` (easier per-repo isolation)?
-2. **Claude Code binary**: should we assume `claude` is on `PATH`, or add explicit config for:
-   - the `claude` executable path and
-   - Git Bash `bash.exe` path on Windows?
-3. **Resume semantics** (“断点接续”): for tasks that were `running` at crash/restart, should we:
-   - A) guarantee the worker process keeps running (detached runner) and reattach, or
-   - B) mark as `orphaned` and offer an explicit “restart task” action (safer if reattach is impossible)?
+## Decisions (confirmed)
+1. **Data dir**: `~/.controlccx/`
+2. **Tool paths**: configured paths are supported (and preferred); fallback to `PATH` when not set.
+3. **Resume semantics**: follow the pattern of session resume used by projects like `myclaude` / `WebCode`:
+   - tasks and logs are persisted,
+   - if a run is interrupted, the user can “resume” by starting a new run against the persisted session/thread ID.
 
 ## Acceptance Criteria
 - A user can start the app with a single command and open a browser to:
@@ -59,5 +55,5 @@ The project must be easy to start (one command), cross-platform, and simple to o
   - see logs streaming,
   - ask the observer about current tasks and get a grounded answer.
 - The backend builds on macOS/Linux/Windows and the dev workflow is cross-platform.
-- Task data survives restart and can be reloaded; “in-flight” tasks support resume/reattach per the chosen semantics.
+- Task data survives restart and can be reloaded; interrupted work can be resumed using persisted session/thread IDs.
 - The API surface is fully described by OpenSpec deltas in this change.

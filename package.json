@@ -1,0 +1,15 @@
+{
+  "name": "controlccx",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@9.15.4",
+  "scripts": {
+    "dev": "concurrently -k \"go run ./cmd/controlccx-server --addr 127.0.0.1:5174\" \"pnpm -C web dev\"",
+    "build": "node scripts/build.mjs",
+    "start": "node scripts/start.mjs",
+    "smoke": "node scripts/smoke.mjs"
+  },
+  "devDependencies": {
+    "concurrently": "^9.0.0"
+  }
+}
