@@ -2,12 +2,17 @@ package api
 
 import (
 	"encoding/json"
+	"net"
 	"net/http"
 
 	"controlccx/internal/auth"
 )
 
 func (a *API) handleAuthStatus(w http.ResponseWriter, r *http.Request) {
+	if !isLoopbackRequest(r) {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -20,6 +25,10 @@ func (a *API) handleAuthStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) handleAuth(w http.ResponseWriter, r *http.Request) {
+	if !isLoopbackRequest(r) {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
 	switch r.Method {
 	case http.MethodGet:
 		secrets := auth.Secrets{}
@@ -56,3 +65,17 @@ func (a *API) handleAuth(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func isLoopbackRequest(r *http.Request) bool {
+	if r == nil {
+		return false
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = r.RemoteAddr
+	}
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return false
+	}
+	return ip.IsLoopback()
+}

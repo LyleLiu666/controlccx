@@ -51,4 +51,3 @@ func TestComputeStatus_UsesStoredWhenEnvMissing(t *testing.T) {
 		t.Fatalf("effective=%q, want stored", st.Codex.APIKey.Effective)
 	}
 }
-

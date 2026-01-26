@@ -25,3 +25,15 @@ The web UI MUST display basic system information for the running server.
 #### Scenario: View server system info
 - **WHEN** a user opens the system info panel
 - **THEN** the UI shows OS and architecture information from the backend
+
+### Requirement: Worker auth settings
+The web UI MUST provide an entrypoint to configure worker authentication and surface a clear hint when auth is missing.
+
+#### Scenario: Show missing auth hint
+- **GIVEN** the selected worker has no available auth (per backend auth status)
+- **WHEN** a user opens the task creation form
+- **THEN** the UI shows a clear warning and provides a Settings entry
+
+#### Scenario: Save auth in UI
+- **WHEN** a user saves worker auth secrets in the Settings UI
+- **THEN** the UI shows the updated auth status from the backend

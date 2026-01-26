@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import type {
   AuthInfo,
   AuthPatch,
@@ -68,6 +68,89 @@ const filteredDirEntries = computed(() => {
   const needle = dirFilter.value.trim().toLowerCase();
   if (!needle) return dirEntries.value;
   return dirEntries.value.filter((e) => e.name.toLowerCase().includes(needle));
+});
+
+const LS_KEY_PINNED_WORKSPACES = "controlccx.pinned_workspaces.v1";
+const LS_KEY_WORKSPACE_FILTER = "controlccx.workspace_filter.v1";
+
+function getLocalStorage(): Storage | null {
+  try {
+    return window?.localStorage ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function loadStringArray(key: string): string[] {
+  const st = getLocalStorage();
+  if (!st) return [];
+  try {
+    const raw = st.getItem(key);
+    if (!raw) return [];
+    const v = JSON.parse(raw);
+    if (!Array.isArray(v)) return [];
+    return v.map((x) => (typeof x === "string" ? x.trim() : "")).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+function saveStringArray(key: string, items: string[]) {
+  const st = getLocalStorage();
+  if (!st) return;
+  try {
+    st.setItem(key, JSON.stringify(items));
+  } catch {
+    // ignore
+  }
+}
+
+function loadString(key: string): string {
+  const st = getLocalStorage();
+  if (!st) return "";
+  try {
+    return st.getItem(key) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+function saveString(key: string, value: string) {
+  const st = getLocalStorage();
+  if (!st) return;
+  try {
+    if (value.trim()) st.setItem(key, value);
+    else st.removeItem(key);
+  } catch {
+    // ignore
+  }
+}
+
+function normalizePathForCompare(p: string): string {
+  let s = p.trim();
+  if (!s) return "";
+  s = s.replaceAll("\\", "/").replace(/\/+/g, "/");
+  while (s.length > 1 && s.endsWith("/")) s = s.slice(0, -1);
+  if (/^[a-zA-Z]:/.test(s)) s = s.toLowerCase();
+  return s;
+}
+
+function isWithinWorkspace(root: string, path: string): boolean {
+  const r = normalizePathForCompare(root);
+  if (!r) return true;
+  if (r === "/") return true;
+  const p = normalizePathForCompare(path);
+  if (!p) return false;
+  return p === r || p.startsWith(r + "/");
+}
+
+const pinnedWorkspaces = ref<string[]>(loadStringArray(LS_KEY_PINNED_WORKSPACES));
+const workspaceFilter = ref<string>(loadString(LS_KEY_WORKSPACE_FILTER));
+
+watch(pinnedWorkspaces, (v) => saveStringArray(LS_KEY_PINNED_WORKSPACES, v), { deep: true });
+watch(workspaceFilter, (v) => {
+  saveString(LS_KEY_WORKSPACE_FILTER, v);
+  if (v.trim()) newWorkdir.value = v;
 });
 
 let es: EventSource | null = null;
@@ -203,6 +286,29 @@ function selectDir(path: string) {
   dirPickerOpen.value = false;
 }
 
+function setWorkspace(path: string) {
+  workspaceFilter.value = path;
+}
+
+function clearWorkspace() {
+  workspaceFilter.value = "";
+}
+
+function pinWorkspace(path: string) {
+  const p = path.trim();
+  if (!p) return;
+  const key = normalizePathForCompare(p);
+  const existing = pinnedWorkspaces.value.filter(Boolean);
+  if (existing.some((x) => normalizePathForCompare(x) === key)) return;
+  pinnedWorkspaces.value = [p, ...existing].slice(0, 12);
+}
+
+function unpinWorkspace(path: string) {
+  const key = normalizePathForCompare(path);
+  pinnedWorkspaces.value = pinnedWorkspaces.value.filter((x) => normalizePathForCompare(x) !== key);
+  if (normalizePathForCompare(workspaceFilter.value) === key) workspaceFilter.value = "";
+}
+
 function connectEvents() {
   es = new EventSource("/api/events");
 
@@ -302,6 +408,31 @@ const sortedTasks = computed(() => {
     return b.score - a.score;
   });
 });
+
+const recentWorkspaces = computed(() => {
+  const latestByPath = new Map<string, string>();
+  for (const t of tasks.value.values()) {
+    const p = t.workdir?.trim();
+    if (!p) continue;
+    const prev = latestByPath.get(p);
+    if (!prev || t.created_at > prev) latestByPath.set(p, t.created_at);
+  }
+  return Array.from(latestByPath.entries())
+    .sort((a, b) => b[1].localeCompare(a[1]))
+    .map(([p]) => p)
+    .slice(0, 20);
+});
+
+const recentWorkspacesUnpinned = computed(() => {
+  const pinned = new Set(pinnedWorkspaces.value.map((p) => normalizePathForCompare(p)));
+  return recentWorkspaces.value.filter((p) => !pinned.has(normalizePathForCompare(p)));
+});
+
+const filteredTasks = computed(() => {
+  const root = workspaceFilter.value.trim();
+  if (!root) return sortedTasks.value;
+  return sortedTasks.value.filter((t) => isWithinWorkspace(root, t.workdir));
+});
 </script>
 
 <template>
@@ -348,8 +479,53 @@ const sortedTasks = computed(() => {
         </div>
 
         <div class="list">
+          <div class="workspaceBar">
+            <div class="workspaceLeft">
+              <span class="workspaceTitle">Workspace</span>
+              <select v-model="workspaceFilter">
+                <option value="">All</option>
+                <optgroup v-if="pinnedWorkspaces.length" label="Pinned">
+                  <option v-for="p in pinnedWorkspaces" :key="'p-' + p" :value="p">{{ p }}</option>
+                </optgroup>
+                <optgroup v-if="recentWorkspacesUnpinned.length" label="Recent">
+                  <option v-for="p in recentWorkspacesUnpinned" :key="'r-' + p" :value="p">{{ p }}</option>
+                </optgroup>
+              </select>
+            </div>
+            <button type="button" @click="setWorkspace(newWorkdir)" :disabled="!newWorkdir.trim()">
+              Use Workdir
+            </button>
+            <button
+              type="button"
+              @click="pinWorkspace(workspaceFilter || newWorkdir)"
+              :disabled="!(workspaceFilter || newWorkdir).trim()"
+            >
+              Pin
+            </button>
+            <button type="button" @click="clearWorkspace" :disabled="!workspaceFilter">All</button>
+          </div>
+
+          <div v-if="pinnedWorkspaces.length" class="pinnedWorkspaces">
+            <div v-for="p in pinnedWorkspaces" :key="p" class="pinnedItem">
+              <button
+                type="button"
+                class="pinnedBtn"
+                :class="{ active: workspaceFilter === p }"
+                @click="setWorkspace(p)"
+                :title="p"
+              >
+                <span class="mono">{{ p }}</span>
+              </button>
+              <button type="button" class="pinnedX" @click="unpinWorkspace(p)" title="Unpin">✕</button>
+            </div>
+          </div>
+
+          <div v-if="workspaceFilter" class="listMeta">
+            Showing {{ filteredTasks.length }} / {{ sortedTasks.length }} tasks
+          </div>
+
           <button
-            v-for="t in sortedTasks"
+            v-for="t in filteredTasks"
             :key="t.id"
             class="row"
             :class="{ active: t.id === selectedTaskId }"
@@ -364,6 +540,7 @@ const sortedTasks = computed(() => {
               <span class="score">score {{ t.score }}</span>
               <span v-if="t.warning" class="warn">⚠</span>
             </div>
+            <div class="rowPath mono" :title="t.workdir">{{ t.workdir }}</div>
             <div class="rowBottom">{{ t.prompt }}</div>
           </button>
         </div>
@@ -378,6 +555,7 @@ const sortedTasks = computed(() => {
             <div><span class="k">Worker</span> {{ selectedTask.worker_type }} ({{ selectedTask.mode }})</div>
             <div><span class="k">Status</span> {{ selectedTask.status }}</div>
             <div><span class="k">Score</span> {{ selectedTask.score }} (stderr {{ selectedTask.stderr_count }})</div>
+            <div><span class="k">Workdir</span> <span class="mono">{{ selectedTask.workdir }}</span></div>
             <div v-if="selectedTask.session_id"><span class="k">Session</span> <span class="mono">{{ selectedTask.session_id }}</span></div>
             <div v-if="selectedTask.warning"><span class="k">Warning</span> {{ selectedTask.warning }}</div>
             <div v-if="selectedTask.error"><span class="k">Error</span> {{ selectedTask.error }}</div>
@@ -385,6 +563,7 @@ const sortedTasks = computed(() => {
 
           <div class="actions">
             <button @click="onCancelTask" :disabled="selectedTask.status !== 'running'">Cancel</button>
+            <button type="button" @click="setWorkspace(selectedTask.workdir)">Focus Workdir</button>
           </div>
 
           <div class="resume">
@@ -510,7 +689,7 @@ const sortedTasks = computed(() => {
           <button class="iconBtn" type="button" @click="dirPickerOpen = false">✕</button>
         </div>
 
-        <div class="modalBody">
+        <div class="modalBody dirModalBody">
           <div class="roots">
             <button
               v-for="r in dirRoots"
@@ -569,10 +748,15 @@ const sortedTasks = computed(() => {
 .header {
   display: flex;
   justify-content: space-between;
-  align-items: baseline;
+  align-items: center;
   padding: 16px 20px;
   border-bottom: 1px solid #e5e7eb;
   background: white;
+}
+.headerRight {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 .title {
   font-weight: 700;
@@ -581,6 +765,9 @@ const sortedTasks = computed(() => {
 .sub {
   color: #6b7280;
   font-size: 12px;
+}
+.settingsBtn {
+  padding: 6px 10px;
 }
 .banner {
   margin: 10px 20px 0;
@@ -627,6 +814,23 @@ h2 {
 }
 .form .full {
   grid-column: 1 / -1;
+}
+.authHint {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  background: #fff7ed;
+  border: 1px solid #fed7aa;
+  color: #9a3412;
+  padding: 8px 10px;
+  border-radius: 10px;
+  font-size: 12px;
+}
+.authHint .text {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 input,
 select,
@@ -690,9 +894,54 @@ button {
 }
 .modalBody {
   padding: 12px;
+  overflow: auto;
+}
+.dirModalBody {
   display: grid;
   grid-template-rows: auto auto auto auto 1fr;
   gap: 10px;
+  overflow: hidden;
+}
+.settingsModal {
+  width: min(760px, 95vw);
+  height: min(560px, 90vh);
+}
+.settingsBody {
+  display: grid;
+  gap: 12px;
+  overflow: auto;
+}
+.settingsMeta {
+  color: #6b7280;
+  font-size: 12px;
+}
+.settingsSection {
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  padding: 10px;
+  display: grid;
+  gap: 8px;
+}
+.settingsSectionTitle {
+  font-weight: 700;
+  font-size: 13px;
+}
+.kv {
+  display: grid;
+  grid-template-columns: 180px 1fr;
+  gap: 8px;
+  align-items: center;
+  font-size: 12px;
+  color: #374151;
+}
+.settingsHelp {
+  color: #6b7280;
+  font-size: 12px;
+}
+.secretRow {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
 }
 .roots {
   display: flex;
@@ -769,6 +1018,7 @@ button {
   border-top: 1px solid #e5e7eb;
   display: flex;
   justify-content: flex-end;
+  gap: 8px;
 }
 button:disabled {
   opacity: 0.5;
@@ -783,6 +1033,71 @@ button.primary {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+.workspaceBar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 0;
+}
+.workspaceLeft {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+}
+.workspaceTitle {
+  font-size: 12px;
+  color: #6b7280;
+  white-space: nowrap;
+}
+.workspaceBar select {
+  flex: 1;
+  min-width: 0;
+}
+.pinnedWorkspaces {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.pinnedItem {
+  display: flex;
+  align-items: stretch;
+  border: 1px solid #e5e7eb;
+  border-radius: 999px;
+  overflow: hidden;
+  background: #f9fafb;
+}
+.pinnedBtn {
+  border: none;
+  background: transparent;
+  padding: 6px 10px;
+  cursor: pointer;
+  max-width: 260px;
+  text-align: left;
+}
+.pinnedBtn.active {
+  background: #111827;
+  color: white;
+}
+.pinnedBtn .mono {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pinnedX {
+  border: none;
+  border-left: 1px solid #e5e7eb;
+  background: transparent;
+  padding: 6px 8px;
+  cursor: pointer;
+}
+.listMeta {
+  font-size: 12px;
+  color: #6b7280;
+  margin-top: -2px;
 }
 .row {
   text-align: left;
@@ -807,6 +1122,17 @@ button.primary {
   color: #6b7280;
   font-size: 12px;
   margin-bottom: 6px;
+}
+.rowPath {
+  font-size: 12px;
+  color: #6b7280;
+  margin-bottom: 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rowPath.mono {
+  overflow-wrap: normal;
 }
 .rowBottom {
   font-size: 12px;

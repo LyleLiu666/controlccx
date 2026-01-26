@@ -16,8 +16,8 @@ import (
 	"time"
 
 	"controlccx"
-	"controlccx/internal/auth"
 	"controlccx/internal/api"
+	"controlccx/internal/auth"
 	"controlccx/internal/chat"
 	"controlccx/internal/config"
 	"controlccx/internal/db"

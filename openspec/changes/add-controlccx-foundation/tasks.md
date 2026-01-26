@@ -8,6 +8,7 @@
 - [x] 1.7 Add SSE event hub and wire task/log/chat events
 - [x] 1.8 Add observer interface + heuristic observer (grounded answers)
 - [x] 1.9 Add API handlers: tasks, events, chat, system info, logs
+- [x] 1.10 Add persisted auth store + API endpoints (`/api/auth*`)
 
 ## 2. Web UI
 - [x] 2.1 Create Vue 3 + Vite app scaffold
@@ -15,6 +16,7 @@
 - [x] 2.3 Implement task dashboard (list/detail/log stream)
 - [x] 2.4 Implement chat UI (user + observer messages)
 - [x] 2.5 Implement system info panel
+- [x] 2.6 Add auth settings UI + missing-auth hint
 
 ## 3. One-command Start
 - [x] 3.1 Add root `package.json` scripts: `dev`, `build`, `start`
@@ -29,3 +31,4 @@
 - [x] 4.5 HTTP tests for API endpoints (tasks + logs + chat)
 - [x] 4.6 Cross-compile check for Windows (build tags + `GOOS=windows`)
 - [x] 4.7 Smoke test script for one-command startup
+- [x] 4.8 Unit/HTTP tests for auth persistence + status

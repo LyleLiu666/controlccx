@@ -17,10 +17,12 @@ The project must be easy to start (one command), cross-platform, and simple to o
   - System info endpoint for the observer and UI.
   - A pluggable observer interface (built-in heuristic + optional external LLM provider).
   - Durable persistence and resume (tasks/logs survive restart; long-running tasks can be re-attached).
+  - Local worker auth helpers (status + persisted secrets) to make Claude/Codex usable without relying solely on process env.
 - Add a Vue (Vite) web UI providing:
   - Task dashboard with live status/logs.
   - Chat panel to talk to the observer.
   - System info panel.
+  - Settings UI to configure worker authentication when missing.
 - Provide one-command startup:
   - `pnpm dev` runs backend + frontend for development.
   - `pnpm start` runs a production-like server serving the built UI.
@@ -33,7 +35,7 @@ The project must be easy to start (one command), cross-platform, and simple to o
 - **Persistence & resume**: MUST persist tasks and logs, and support “断点接续” (restart does not lose task history; and in-flight work can be resumed/reattached when feasible).
 
 ## Out of scope (v1)
-- Authn/authz (assume local-only deployment).
+- App authn/authz (assume local-only deployment).
 - Multi-host worker scheduling (single machine).
 - Cloud deployment hardening (TLS, RBAC, etc.).
 

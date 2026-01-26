@@ -39,4 +39,3 @@ func TestBuildClaude_DoesNotDisableSettingSources(t *testing.T) {
 		}
 	}
 }
-

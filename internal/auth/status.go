@@ -72,4 +72,3 @@ func MaskSecret(s string) string {
 	}
 	return s[:keepPrefix] + "…" + s[len(s)-keepSuffix:]
 }
-

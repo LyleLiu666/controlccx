@@ -139,4 +139,3 @@ func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
 	}
 	return nil
 }
-

@@ -86,13 +86,13 @@ func (m *Manager) run(ctx context.Context, task tasks.Task) error {
 	}
 	m.publishTaskUpdated(task.ID)
 
-		tool, err := BuildToolCommand(m.cfg, task)
-		if err != nil {
-			_, _ = m.store.AppendLog(context.Background(), task.ID, tasks.LogSystem, fmt.Sprintf("worker setup error: %v", err))
-			_ = m.store.FinishTask(context.Background(), task.ID, tasks.FinishTaskInput{
-				Status:     tasks.StatusFailed,
-				ExitCode:   nil,
-				Error:      err.Error(),
+	tool, err := BuildToolCommand(m.cfg, task)
+	if err != nil {
+		_, _ = m.store.AppendLog(context.Background(), task.ID, tasks.LogSystem, fmt.Sprintf("worker setup error: %v", err))
+		_ = m.store.FinishTask(context.Background(), task.ID, tasks.FinishTaskInput{
+			Status:     tasks.StatusFailed,
+			ExitCode:   nil,
+			Error:      err.Error(),
 			SessionID:  "",
 			FinishedAt: time.Now().UTC(),
 		})
@@ -106,9 +106,9 @@ func (m *Manager) run(ctx context.Context, task tasks.Task) error {
 		m.publishTaskUpdated(task.ID)
 	}
 
-		cmd := exec.CommandContext(ctx, tool.Command, tool.Args...)
-		cmd.Dir = tool.Dir
-		cmd.Env = m.envForWorker(task.WorkerType)
+	cmd := exec.CommandContext(ctx, tool.Command, tool.Args...)
+	cmd.Dir = tool.Dir
+	cmd.Env = m.envForWorker(task.WorkerType)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {

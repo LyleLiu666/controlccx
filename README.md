@@ -47,7 +47,7 @@ paths:
 
 ## Worker authentication
 
-ControlCCX does not manage API keys. Workers inherit environment variables from the ControlCCX server process, so set env vars before running `pnpm dev` / `pnpm start` (and restart after changes).
+Workers inherit environment variables from the ControlCCX server process. You can also set keys/tokens in the web UI (Settings), which persists them to `~/.controlccx/secrets.json` and injects them into newly started worker processes (env vars take precedence).
 
 - Claude Code (API key): `ANTHROPIC_API_KEY`
 - Claude Code (subscription token): `ANTHROPIC_AUTH_TOKEN` (or run `claude /login` once in a terminal on this machine)
