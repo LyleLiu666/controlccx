@@ -184,6 +184,8 @@ func TestAPI_TasksAndChat(t *testing.T) {
 		t.Setenv("ANTHROPIC_API_KEY", "")
 		t.Setenv("ANTHROPIC_AUTH_TOKEN", "")
 		t.Setenv("OPENAI_API_KEY", "")
+		t.Setenv("CODEX_HOME", t.TempDir())
+		t.Setenv("HOME", t.TempDir())
 
 		store, err := auth.Load(filepath.Join(t.TempDir(), "secrets.json"))
 		if err != nil {

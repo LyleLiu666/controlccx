@@ -48,8 +48,11 @@ const authStatus = computed<AuthStatus | null>(() => authInfo.value?.status ?? n
 const authSettingsOpen = ref(false);
 const authSaving = ref(false);
 const authSettingsError = ref("");
+const authAnthropicBaseURL = ref("");
 const authAnthropicApiKey = ref("");
 const authAnthropicAuthToken = ref("");
+const authAnthropicModel = ref("");
+const authAnthropicSmallFastModel = ref("");
 const authOpenAIApiKey = ref("");
 
 const selectedTask = computed(() => tasks.value.get(selectedTaskId.value) ?? null);
@@ -153,6 +156,26 @@ watch(workspaceFilter, (v) => {
   if (v.trim()) newWorkdir.value = v;
 });
 
+type SessionGroup = {
+  key: string;
+  session_id: string;
+  worker_type: WorkerType;
+  workdir: string;
+  status: Task["status"];
+  score: number;
+  stderr_count: number;
+  warning: string;
+  updated_at: string;
+  latest: Task;
+  runs: Task[];
+};
+
+function sessionKeyForTask(t: Task): string {
+  const sid = t.session_id?.trim();
+  if (sid) return `s:${sid}`;
+  return `t:${t.id}`;
+}
+
 let es: EventSource | null = null;
 
 function upsertTask(task: Task) {
@@ -199,6 +222,7 @@ async function onCreateTask() {
       workdir: newWorkdir.value,
     });
     upsertTask(t);
+    selectedTaskId.value = t.id;
     newPrompt.value = "";
     await loadLogs(t.id);
   } catch (e: any) {
@@ -222,16 +246,17 @@ async function onCancelTask() {
 }
 
 async function onResumeTask() {
-  const t = selectedTask.value;
-  if (!t) return;
-  if (!t.session_id) {
-    errorBanner.value = "该任务没有 session_id，无法 resume。";
+  const sess = selectedSession.value;
+  if (!sess) return;
+  if (!sess.session_id) {
+    errorBanner.value = "该 session 还没有 session_id，无法 resume。";
     return;
   }
   errorBanner.value = "";
   try {
-    const nt = await resumeTask(t.id, resumePrompt.value);
+    const nt = await resumeTask(sess.latest.id, resumePrompt.value);
     upsertTask(nt);
+    selectedTaskId.value = nt.id;
     resumePrompt.value = "";
     await loadLogs(nt.id);
   } catch (e: any) {
@@ -346,9 +371,13 @@ async function saveAuthSettings() {
   authSaving.value = true;
   try {
     const patch: AuthPatch = {};
+    if (authAnthropicBaseURL.value.trim()) patch.anthropic_base_url = authAnthropicBaseURL.value.trim();
     if (authAnthropicApiKey.value.trim()) patch.anthropic_api_key = authAnthropicApiKey.value.trim();
     if (authAnthropicAuthToken.value.trim())
       patch.anthropic_auth_token = authAnthropicAuthToken.value.trim();
+    if (authAnthropicModel.value.trim()) patch.anthropic_model = authAnthropicModel.value.trim();
+    if (authAnthropicSmallFastModel.value.trim())
+      patch.anthropic_small_fast_model = authAnthropicSmallFastModel.value.trim();
     if (authOpenAIApiKey.value.trim()) patch.openai_api_key = authOpenAIApiKey.value.trim();
 
     if (Object.keys(patch).length > 0) {
@@ -357,8 +386,11 @@ async function saveAuthSettings() {
       await refreshAuth();
     }
 
+    authAnthropicBaseURL.value = "";
     authAnthropicApiKey.value = "";
     authAnthropicAuthToken.value = "";
+    authAnthropicModel.value = "";
+    authAnthropicSmallFastModel.value = "";
     authOpenAIApiKey.value = "";
   } catch (e: any) {
     authSettingsError.value = e?.message ?? String(e);
@@ -409,6 +441,69 @@ const sortedTasks = computed(() => {
   });
 });
 
+const selectedSessionKey = computed(() => {
+  const t = selectedTask.value;
+  if (!t) return "";
+  return sessionKeyForTask(t);
+});
+
+const sessionsAll = computed<SessionGroup[]>(() => {
+  const groups = new Map<string, Task[]>();
+  for (const t of tasks.value.values()) {
+    const key = sessionKeyForTask(t);
+    const list = groups.get(key) ?? [];
+    list.push(t);
+    groups.set(key, list);
+  }
+
+  const out: SessionGroup[] = [];
+  for (const [key, runs] of groups.entries()) {
+    runs.sort((a, b) => a.created_at.localeCompare(b.created_at));
+    const latest = runs[runs.length - 1];
+
+    let score = 0;
+    let stderrCount = 0;
+    let warning = "";
+    for (const r of runs) {
+      score = Math.max(score, r.score);
+      stderrCount = Math.max(stderrCount, r.stderr_count);
+      if (!warning && r.warning) warning = r.warning;
+    }
+
+    out.push({
+      key,
+      session_id: latest.session_id?.trim() ?? "",
+      worker_type: latest.worker_type,
+      workdir: latest.workdir,
+      status: latest.status,
+      score,
+      stderr_count: stderrCount,
+      warning,
+      updated_at: latest.updated_at,
+      latest,
+      runs,
+    });
+  }
+
+  out.sort((a, b) => {
+    if (a.score === b.score) return b.updated_at.localeCompare(a.updated_at);
+    return b.score - a.score;
+  });
+  return out;
+});
+
+const filteredSessions = computed(() => {
+  const root = workspaceFilter.value.trim();
+  if (!root) return sessionsAll.value;
+  return sessionsAll.value.filter((s) => isWithinWorkspace(root, s.workdir));
+});
+
+const selectedSession = computed(() => {
+  const key = selectedSessionKey.value;
+  if (!key) return null;
+  return sessionsAll.value.find((s) => s.key === key) ?? null;
+});
+
 const recentWorkspaces = computed(() => {
   const latestByPath = new Map<string, string>();
   for (const t of tasks.value.values()) {
@@ -428,10 +523,53 @@ const recentWorkspacesUnpinned = computed(() => {
   return recentWorkspaces.value.filter((p) => !pinned.has(normalizePathForCompare(p)));
 });
 
-const filteredTasks = computed(() => {
-  const root = workspaceFilter.value.trim();
-  if (!root) return sortedTasks.value;
-  return sortedTasks.value.filter((t) => isWithinWorkspace(root, t.workdir));
+const secretaryCounts = computed(() => {
+  const out: Record<string, number> = {
+    total: sessionsAll.value.length,
+    running: 0,
+    queued: 0,
+    blocked: 0,
+    failed: 0,
+    interrupted: 0,
+    succeeded: 0,
+    canceled: 0,
+  };
+  for (const s of sessionsAll.value) {
+    out[s.status] = (out[s.status] ?? 0) + 1;
+  }
+  return out;
+});
+
+const needsAttentionSessions = computed(() => {
+  return sessionsAll.value
+    .filter((s) => s.status !== "succeeded" && (s.score > 0 || s.status === "failed" || s.status === "blocked"))
+    .slice(0, 6);
+});
+
+const secretaryBriefing = computed(() => {
+  const c = secretaryCounts.value;
+  if (c.total === 0) return "当前还没有 session。";
+
+  const lines: string[] = [];
+  lines.push(`Session 总数：${c.total}`);
+  lines.push(
+    `running ${c.running} · blocked ${c.blocked} · failed ${c.failed} · interrupted ${c.interrupted} · queued ${c.queued} · succeeded ${c.succeeded}`
+  );
+
+  const top = needsAttentionSessions.value;
+  if (top.length === 0) {
+    lines.push("");
+    lines.push("需要关注：暂无（看起来都很顺利）。");
+    return lines.join("\n");
+  }
+
+  lines.push("");
+  lines.push("需要关注（按 score / 最近更新）：");
+  for (const s of top) {
+    const sid = s.session_id ? s.session_id.slice(0, 8) : s.latest.id.slice(0, 8);
+    lines.push(`- ${sid} · ${s.status} · score ${s.score} · ${s.workdir}`);
+  }
+  return lines.join("\n");
 });
 </script>
 
@@ -451,7 +589,7 @@ const filteredTasks = computed(() => {
 
     <div class="grid">
       <section class="panel">
-        <h2>Tasks</h2>
+        <h2>Sessions</h2>
         <div class="form">
           <label>
             Worker
@@ -521,49 +659,55 @@ const filteredTasks = computed(() => {
           </div>
 
           <div v-if="workspaceFilter" class="listMeta">
-            Showing {{ filteredTasks.length }} / {{ sortedTasks.length }} tasks
+            Showing {{ filteredSessions.length }} / {{ sessionsAll.length }} sessions
           </div>
 
           <button
-            v-for="t in filteredTasks"
-            :key="t.id"
+            v-for="s in filteredSessions"
+            :key="s.key"
             class="row"
-            :class="{ active: t.id === selectedTaskId }"
-            @click="onSelectTask(t.id)"
+            :class="{ active: s.key === selectedSessionKey }"
+            @click="onSelectTask(s.latest.id)"
           >
             <div class="rowTop">
-              <span class="mono">{{ t.id.slice(0, 8) }}</span>
-              <span class="pill" :class="t.status">{{ t.status }}</span>
+              <span class="mono" :title="s.session_id || s.latest.id">{{
+                (s.session_id || s.latest.id).slice(0, 8)
+              }}</span>
+              <span class="pill" :class="s.status">{{ s.status }}</span>
             </div>
             <div class="rowMid">
-              <span class="pill kind">{{ t.worker_type }}</span>
-              <span class="score">score {{ t.score }}</span>
-              <span v-if="t.warning" class="warn">⚠</span>
+              <span class="pill kind">{{ s.worker_type }}</span>
+              <span class="score">score {{ s.score }}</span>
+              <span class="pill kind">{{ s.runs.length }} runs</span>
+              <span v-if="s.warning" class="warn">⚠</span>
             </div>
-            <div class="rowPath mono" :title="t.workdir">{{ t.workdir }}</div>
-            <div class="rowBottom">{{ t.prompt }}</div>
+            <div class="rowPath mono" :title="s.workdir">{{ s.workdir }}</div>
+            <div class="rowBottom">{{ s.latest.prompt }}</div>
           </button>
         </div>
       </section>
 
       <section class="panel">
-        <h2>Task Detail</h2>
-        <div v-if="!selectedTask" class="empty">Select a task</div>
+        <h2>Session Detail</h2>
+        <div v-if="!selectedSession" class="empty">Select a session</div>
         <div v-else class="detail">
           <div class="meta">
-            <div><span class="k">ID</span> <span class="mono">{{ selectedTask.id }}</span></div>
-            <div><span class="k">Worker</span> {{ selectedTask.worker_type }} ({{ selectedTask.mode }})</div>
-            <div><span class="k">Status</span> {{ selectedTask.status }}</div>
-            <div><span class="k">Score</span> {{ selectedTask.score }} (stderr {{ selectedTask.stderr_count }})</div>
-            <div><span class="k">Workdir</span> <span class="mono">{{ selectedTask.workdir }}</span></div>
-            <div v-if="selectedTask.session_id"><span class="k">Session</span> <span class="mono">{{ selectedTask.session_id }}</span></div>
-            <div v-if="selectedTask.warning"><span class="k">Warning</span> {{ selectedTask.warning }}</div>
-            <div v-if="selectedTask.error"><span class="k">Error</span> {{ selectedTask.error }}</div>
+            <div>
+              <span class="k">Session</span>
+              <span class="mono">{{ selectedSession.session_id || "(pending)" }}</span>
+            </div>
+            <div><span class="k">Worker</span> {{ selectedSession.worker_type }}</div>
+            <div><span class="k">Workdir</span> <span class="mono">{{ selectedSession.workdir }}</span></div>
+            <div><span class="k">Status</span> {{ selectedSession.status }}</div>
+            <div><span class="k">Score</span> {{ selectedSession.score }} (stderr {{ selectedSession.stderr_count }})</div>
+            <div><span class="k">Runs</span> {{ selectedSession.runs.length }}</div>
+            <div v-if="selectedSession.warning"><span class="k">Warning</span> {{ selectedSession.warning }}</div>
+            <div v-if="selectedTask?.error"><span class="k">Last Err</span> {{ selectedTask.error }}</div>
           </div>
 
           <div class="actions">
-            <button @click="onCancelTask" :disabled="selectedTask.status !== 'running'">Cancel</button>
-            <button type="button" @click="setWorkspace(selectedTask.workdir)">Focus Workdir</button>
+            <button @click="onCancelTask" :disabled="selectedTask?.status !== 'running'">Cancel Run</button>
+            <button type="button" @click="setWorkspace(selectedSession.workdir)">Focus Workdir</button>
           </div>
 
           <div class="resume">
@@ -571,7 +715,34 @@ const filteredTasks = computed(() => {
               Resume Prompt
               <textarea v-model="resumePrompt" rows="3" placeholder="Continue with..." />
             </label>
-            <button @click="onResumeTask" :disabled="!resumePrompt.trim() || !selectedTask.session_id">Resume</button>
+            <button @click="onResumeTask" :disabled="!resumePrompt.trim() || !selectedSession.session_id">
+              Resume Session
+            </button>
+          </div>
+
+          <div class="runs">
+            <div class="runsHeader">Runs</div>
+            <div class="runList">
+              <button
+                v-for="r in selectedSession.runs.slice().reverse()"
+                :key="r.id"
+                type="button"
+                class="runRow"
+                :class="{ active: r.id === selectedTaskId }"
+                @click="onSelectTask(r.id)"
+              >
+                <div class="runTop">
+                  <span class="mono">{{ r.id.slice(0, 8) }}</span>
+                  <span class="pill" :class="r.status">{{ r.status }}</span>
+                </div>
+                <div class="runMid">
+                  <span class="pill kind">{{ r.mode }}</span>
+                  <span class="score">score {{ r.score }}</span>
+                  <span class="mono">{{ r.created_at }}</span>
+                </div>
+                <div class="runBottom">{{ r.prompt }}</div>
+              </button>
+            </div>
           </div>
 
           <div class="logs">
@@ -583,18 +754,69 @@ const filteredTasks = computed(() => {
       </section>
 
       <section class="panel">
-        <h2>Observer Chat</h2>
-        <div class="chat">
-          <div class="msgs">
-            <div v-for="m in chat" :key="m.id" class="msg" :class="m.role">
-              <div class="role">{{ m.role }}</div>
-              <div class="content">{{ m.content }}</div>
+        <h2>Secretary</h2>
+        <div class="secretary">
+          <div class="secretaryCards">
+            <div class="secCard">
+              <div class="secK">Sessions</div>
+              <div class="secV">{{ secretaryCounts.total }}</div>
+            </div>
+            <div class="secCard">
+              <div class="secK">Running</div>
+              <div class="secV">{{ secretaryCounts.running }}</div>
+            </div>
+            <div class="secCard">
+              <div class="secK">Blocked</div>
+              <div class="secV">{{ secretaryCounts.blocked }}</div>
+            </div>
+            <div class="secCard">
+              <div class="secK">Failed</div>
+              <div class="secV">{{ secretaryCounts.failed }}</div>
             </div>
           </div>
-          <div class="input">
-            <textarea v-model="chatInput" rows="3" placeholder="Ask the observer..." />
-            <button class="primary" @click="onSendChat" :disabled="!chatInput.trim()">Send</button>
+
+          <div class="secSection">
+            <div class="secSectionTitle">Needs Attention</div>
+            <div v-if="needsAttentionSessions.length === 0" class="empty">暂无需要关注的 session</div>
+            <button
+              v-for="s in needsAttentionSessions"
+              :key="s.key"
+              type="button"
+              class="secRow"
+              @click="onSelectTask(s.latest.id)"
+            >
+              <div class="rowTop">
+                <span class="mono">{{ (s.session_id || s.latest.id).slice(0, 8) }}</span>
+                <span class="pill" :class="s.status">{{ s.status }}</span>
+              </div>
+              <div class="rowMid">
+                <span class="pill kind">{{ s.worker_type }}</span>
+                <span class="score">score {{ s.score }}</span>
+              </div>
+              <div class="rowPath mono">{{ s.workdir }}</div>
+            </button>
           </div>
+
+          <div class="secSection">
+            <div class="secSectionTitle">Briefing</div>
+            <pre class="briefing">{{ secretaryBriefing }}</pre>
+          </div>
+
+          <details class="secChat">
+            <summary>Chat (optional)</summary>
+            <div class="chat">
+              <div class="msgs">
+                <div v-for="m in chat" :key="m.id" class="msg" :class="m.role">
+                  <div class="role">{{ m.role }}</div>
+                  <div class="content">{{ m.content }}</div>
+                </div>
+              </div>
+              <div class="input">
+                <textarea v-model="chatInput" rows="3" placeholder="Ask the secretary..." />
+                <button class="primary" @click="onSendChat" :disabled="!chatInput.trim()">Send</button>
+              </div>
+            </div>
+          </details>
         </div>
       </section>
     </div>
@@ -616,6 +838,12 @@ const filteredTasks = computed(() => {
           <div class="settingsSection">
             <div class="settingsSectionTitle">Claude Code</div>
             <div class="kv">
+              <span class="k">ANTHROPIC_BASE_URL</span>
+              <span class="mono"
+                >{{ authStatus?.claude.base_url.effective }} {{ authStatus?.claude.base_url.masked }}</span
+              >
+            </div>
+            <div class="kv">
               <span class="k">ANTHROPIC_API_KEY</span>
               <span class="mono">{{ authStatus?.claude.api_key.effective }} {{ authStatus?.claude.api_key.masked }}</span>
             </div>
@@ -625,7 +853,27 @@ const filteredTasks = computed(() => {
                 >{{ authStatus?.claude.auth_token.effective }} {{ authStatus?.claude.auth_token.masked }}</span
               >
             </div>
+            <div class="kv">
+              <span class="k">ANTHROPIC_MODEL</span>
+              <span class="mono">{{ authStatus?.claude.model.effective }} {{ authStatus?.claude.model.masked }}</span>
+            </div>
+            <div class="kv">
+              <span class="k">ANTHROPIC_SMALL_FAST_MODEL</span>
+              <span class="mono"
+                >{{ authStatus?.claude.small_fast_model.effective }}
+                {{ authStatus?.claude.small_fast_model.masked }}</span
+              >
+            </div>
 
+            <label class="full">
+              Store ANTHROPIC_BASE_URL
+              <div class="secretRow">
+                <input v-model="authAnthropicBaseURL" placeholder="https://..." autocomplete="off" />
+                <button type="button" @click="clearStoredAuth('anthropic_base_url')" :disabled="authSaving">
+                  Clear stored
+                </button>
+              </div>
+            </label>
             <label class="full">
               Store ANTHROPIC_API_KEY
               <div class="secretRow">
@@ -645,6 +893,28 @@ const filteredTasks = computed(() => {
                   autocomplete="off"
                 />
                 <button type="button" @click="clearStoredAuth('anthropic_auth_token')" :disabled="authSaving">
+                  Clear stored
+                </button>
+              </div>
+            </label>
+            <label class="full">
+              Store ANTHROPIC_MODEL
+              <div class="secretRow">
+                <input v-model="authAnthropicModel" placeholder="model name…" autocomplete="off" />
+                <button type="button" @click="clearStoredAuth('anthropic_model')" :disabled="authSaving">
+                  Clear stored
+                </button>
+              </div>
+            </label>
+            <label class="full">
+              Store ANTHROPIC_SMALL_FAST_MODEL
+              <div class="secretRow">
+                <input v-model="authAnthropicSmallFastModel" placeholder="model name…" autocomplete="off" />
+                <button
+                  type="button"
+                  @click="clearStoredAuth('anthropic_small_fast_model')"
+                  :disabled="authSaving"
+                >
                   Clear stored
                 </button>
               </div>
@@ -1200,6 +1470,58 @@ button.primary {
   gap: 8px;
   margin-bottom: 10px;
 }
+.runs {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.runsHeader {
+  font-size: 12px;
+  color: #6b7280;
+}
+.runList {
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  overflow: auto;
+  padding: 6px;
+  background: #fff;
+  max-height: 220px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.runRow {
+  text-align: left;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  padding: 10px;
+}
+.runRow.active {
+  border-color: #111827;
+}
+.runTop {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.runMid {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #6b7280;
+  font-size: 12px;
+  margin-bottom: 6px;
+}
+.runBottom {
+  font-size: 12px;
+  color: #111827;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
 .logsHeader {
   font-size: 12px;
   color: #6b7280;
@@ -1222,6 +1544,79 @@ button.primary {
 .empty {
   color: #6b7280;
   font-size: 13px;
+}
+.secretary {
+  display: grid;
+  gap: 12px;
+  height: calc(100vh - 120px);
+}
+.secretaryCards {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
+.secCard {
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  background: #f9fafb;
+  padding: 10px;
+}
+.secK {
+  font-size: 12px;
+  color: #6b7280;
+}
+.secV {
+  font-size: 18px;
+  font-weight: 800;
+  margin-top: 2px;
+}
+.secSection {
+  display: grid;
+  gap: 8px;
+}
+.secSectionTitle {
+  font-size: 12px;
+  color: #6b7280;
+}
+.secRow {
+  text-align: left;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  padding: 10px;
+}
+.secRow:hover {
+  border-color: #d1d5db;
+  background: #f9fafb;
+}
+.briefing {
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  padding: 10px;
+  background: #f9fafb;
+  font-size: 12px;
+  color: #111827;
+  white-space: pre-wrap;
+  overflow: auto;
+  max-height: 240px;
+}
+.secChat {
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  padding: 10px;
+  background: #fff;
+}
+.secChat summary {
+  cursor: pointer;
+  font-size: 12px;
+  color: #374151;
+}
+.secChat .chat {
+  height: auto;
+  margin-top: 10px;
+}
+.secChat .msgs {
+  max-height: 320px;
 }
 .chat {
   display: grid;
@@ -1265,6 +1660,9 @@ button.primary {
 @media (max-width: 1100px) {
   .grid {
     grid-template-columns: 1fr;
+  }
+  .secretary {
+    height: auto;
   }
   .chat {
     height: auto;

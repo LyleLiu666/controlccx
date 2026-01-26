@@ -182,11 +182,20 @@ func (m *Manager) envForWorker(workerType tasks.WorkerType) []string {
 	additions := map[string]string{}
 	switch workerType {
 	case tasks.WorkerClaudeCode:
+		if strings.TrimSpace(secrets.AnthropicBaseURL) != "" {
+			additions["ANTHROPIC_BASE_URL"] = strings.TrimSpace(secrets.AnthropicBaseURL)
+		}
 		if strings.TrimSpace(secrets.AnthropicAPIKey) != "" {
 			additions["ANTHROPIC_API_KEY"] = strings.TrimSpace(secrets.AnthropicAPIKey)
 		}
 		if strings.TrimSpace(secrets.AnthropicAuthToken) != "" {
 			additions["ANTHROPIC_AUTH_TOKEN"] = strings.TrimSpace(secrets.AnthropicAuthToken)
+		}
+		if strings.TrimSpace(secrets.AnthropicModel) != "" {
+			additions["ANTHROPIC_MODEL"] = strings.TrimSpace(secrets.AnthropicModel)
+		}
+		if strings.TrimSpace(secrets.AnthropicSmallFastModel) != "" {
+			additions["ANTHROPIC_SMALL_FAST_MODEL"] = strings.TrimSpace(secrets.AnthropicSmallFastModel)
 		}
 	case tasks.WorkerCodex:
 		if strings.TrimSpace(secrets.OpenAIAPIKey) != "" {

@@ -81,8 +81,11 @@ export type AuthFieldStatus = {
 
 export type AuthStatus = {
   claude: {
+    base_url: AuthFieldStatus;
     api_key: AuthFieldStatus;
     auth_token: AuthFieldStatus;
+    model: AuthFieldStatus;
+    small_fast_model: AuthFieldStatus;
     available: boolean;
   };
   codex: {
@@ -97,7 +100,10 @@ export type AuthInfo = {
 };
 
 export type AuthPatch = {
+  anthropic_base_url?: string;
   anthropic_api_key?: string;
   anthropic_auth_token?: string;
+  anthropic_model?: string;
+  anthropic_small_fast_model?: string;
   openai_api_key?: string;
 };

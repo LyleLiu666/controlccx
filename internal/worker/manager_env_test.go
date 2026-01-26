@@ -58,3 +58,37 @@ func TestManager_envForWorker_InjectsStoredSecrets(t *testing.T) {
 		t.Fatalf("expected OPENAI_API_KEY to be injected, env=%v", out)
 	}
 }
+
+func TestManager_envForWorker_InjectsStoredClaudeConfig(t *testing.T) {
+	old, had := os.LookupEnv("ANTHROPIC_BASE_URL")
+	_ = os.Unsetenv("ANTHROPIC_BASE_URL")
+	t.Cleanup(func() {
+		if had {
+			_ = os.Setenv("ANTHROPIC_BASE_URL", old)
+		} else {
+			_ = os.Unsetenv("ANTHROPIC_BASE_URL")
+		}
+	})
+
+	store, err := auth.Load(filepath.Join(t.TempDir(), "secrets.json"))
+	if err != nil {
+		t.Fatalf("auth.Load: %v", err)
+	}
+	baseURL := "https://open.bigmodel.cn/api/anthropic"
+	if _, err := store.ApplyPatch(auth.Patch{AnthropicBaseURL: &baseURL}); err != nil {
+		t.Fatalf("store.ApplyPatch: %v", err)
+	}
+	m := &Manager{auth: store}
+
+	out := m.envForWorker(tasks.WorkerClaudeCode)
+	found := false
+	for _, kv := range out {
+		if kv == "ANTHROPIC_BASE_URL=https://open.bigmodel.cn/api/anthropic" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected ANTHROPIC_BASE_URL to be injected, env=%v", out)
+	}
+}

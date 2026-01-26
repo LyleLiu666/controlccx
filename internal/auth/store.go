@@ -12,14 +12,20 @@ import (
 )
 
 type Secrets struct {
+	AnthropicBaseURL   string `json:"anthropic_base_url,omitempty"`
 	AnthropicAPIKey    string `json:"anthropic_api_key,omitempty"`
 	AnthropicAuthToken string `json:"anthropic_auth_token,omitempty"`
+	AnthropicModel     string `json:"anthropic_model,omitempty"`
+	AnthropicSmallFastModel string `json:"anthropic_small_fast_model,omitempty"`
 	OpenAIAPIKey       string `json:"openai_api_key,omitempty"`
 }
 
 type Patch struct {
+	AnthropicBaseURL   *string `json:"anthropic_base_url,omitempty"`
 	AnthropicAPIKey    *string `json:"anthropic_api_key,omitempty"`
 	AnthropicAuthToken *string `json:"anthropic_auth_token,omitempty"`
+	AnthropicModel     *string `json:"anthropic_model,omitempty"`
+	AnthropicSmallFastModel *string `json:"anthropic_small_fast_model,omitempty"`
 	OpenAIAPIKey       *string `json:"openai_api_key,omitempty"`
 }
 
@@ -66,8 +72,11 @@ func (s *Store) ApplyPatch(p Patch) (Secrets, error) {
 		}
 		*dst = strings.TrimSpace(*v)
 	}
+	apply(&s.secrets.AnthropicBaseURL, p.AnthropicBaseURL)
 	apply(&s.secrets.AnthropicAPIKey, p.AnthropicAPIKey)
 	apply(&s.secrets.AnthropicAuthToken, p.AnthropicAuthToken)
+	apply(&s.secrets.AnthropicModel, p.AnthropicModel)
+	apply(&s.secrets.AnthropicSmallFastModel, p.AnthropicSmallFastModel)
 	apply(&s.secrets.OpenAIAPIKey, p.OpenAIAPIKey)
 
 	if err := s.saveLocked(); err != nil {
