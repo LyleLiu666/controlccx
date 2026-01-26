@@ -52,6 +52,22 @@ export type SystemInfo = {
   now: string;
 };
 
+export type FSRoot = {
+  name: string;
+  path: string;
+};
+
+export type FSListEntry = {
+  name: string;
+  path: string;
+};
+
+export type FSListResponse = {
+  path: string;
+  parent?: string;
+  entries: FSListEntry[];
+};
+
 export type ServerEvent = {
   type: string;
   time: string;

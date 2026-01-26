@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -23,6 +25,7 @@ type API struct {
 	Observer *observer.Service
 	Chat     *chat.Store
 	Hub      *events.Hub
+	FSRoots  []FSRoot
 }
 
 func (a *API) Handler() http.Handler {
@@ -30,6 +33,8 @@ func (a *API) Handler() http.Handler {
 	mux.HandleFunc("/api/system", a.handleSystem)
 	mux.HandleFunc("/api/tasks", a.handleTasks)
 	mux.HandleFunc("/api/tasks/", a.handleTaskByID)
+	mux.HandleFunc("/api/fs/roots", a.handleFSRoots)
+	mux.HandleFunc("/api/fs/list", a.handleFSList)
 	mux.HandleFunc("/api/events", a.handleEvents)
 	mux.HandleFunc("/api/chat", a.handleChat)
 	return mux
@@ -41,6 +46,58 @@ func (a *API) handleSystem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, systeminfo.Snapshot())
+}
+
+func (a *API) handleFSRoots(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	roots := a.FSRoots
+	if len(roots) == 0 {
+		roots = DefaultFSRoots()
+	}
+	writeJSON(w, map[string]any{"roots": roots})
+}
+
+func (a *API) handleFSList(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	raw := strings.TrimSpace(r.URL.Query().Get("path"))
+	if raw == "" {
+		http.Error(w, "path is required", http.StatusBadRequest)
+		return
+	}
+
+	path := filepath.Clean(raw)
+	if !filepath.IsAbs(path) {
+		cwd, err := os.Getwd()
+		if err != nil {
+			http.Error(w, "cannot resolve cwd", http.StatusInternalServerError)
+			return
+		}
+		path = filepath.Join(cwd, path)
+	}
+
+	roots := a.FSRoots
+	if len(roots) == 0 {
+		roots = DefaultFSRoots()
+	}
+
+	if !isUnderAnyRoot(path, roots) {
+		http.Error(w, "path not allowed", http.StatusForbidden)
+		return
+	}
+
+	resp, err := ListDirs(path)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	writeJSON(w, resp)
 }
 
 func (a *API) handleTasks(w http.ResponseWriter, r *http.Request) {
@@ -297,4 +354,3 @@ func (a *API) validate() error {
 	}
 	return nil
 }
-

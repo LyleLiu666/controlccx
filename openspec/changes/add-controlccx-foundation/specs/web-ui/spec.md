@@ -7,6 +7,11 @@ The web UI MUST show a list of tasks with real-time status updates and allow ins
 - **WHEN** a task status changes on the server
 - **THEN** the UI reflects the new status without manual refresh
 
+#### Scenario: Pick a work directory
+- **WHEN** a user starts a new task
+- **THEN** the UI allows selecting a working directory using a folder picker UI
+- **AND** the selected directory is used as the task workdir
+
 ### Requirement: Chat UI
 The web UI MUST allow the user to send messages to the observer and see responses in real time.
 
@@ -20,4 +25,3 @@ The web UI MUST display basic system information for the running server.
 #### Scenario: View server system info
 - **WHEN** a user opens the system info panel
 - **THEN** the UI shows OS and architecture information from the backend
-

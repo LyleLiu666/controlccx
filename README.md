@@ -45,6 +45,14 @@ paths:
   git_bash: C:\Program Files\Git\bin\bash.exe
 ```
 
+## Worker authentication
+
+ControlCCX does not manage API keys. Workers inherit environment variables from the ControlCCX server process, so set env vars before running `pnpm dev` / `pnpm start` (and restart after changes).
+
+- Claude Code (API key): `ANTHROPIC_API_KEY`
+- Claude Code (subscription token): `ANTHROPIC_AUTH_TOKEN` (or run `claude /login` once in a terminal on this machine)
+- Codex: `OPENAI_API_KEY`
+
 ## Resume (断点接续)
 
 Tasks and logs are persisted in SQLite. If the server exits while tasks are running, those tasks will appear as `interrupted` on next startup. You can resume by starting a new run using the persisted session/thread ID (UI has a “Resume” action when `session_id` exists).

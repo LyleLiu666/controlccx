@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -129,6 +130,52 @@ func TestAPI_TasksAndChat(t *testing.T) {
 		}
 		if reply["message"] == "" {
 			t.Fatalf("expected reply message")
+		}
+	})
+
+	t.Run("fs", func(t *testing.T) {
+		root := filepath.Join(t.TempDir(), "root")
+		if err := os.MkdirAll(filepath.Join(root, "a"), 0o755); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		if err := os.MkdirAll(filepath.Join(root, "b"), 0o755); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		apiSvc.FSRoots = []FSRoot{{Name: "Root", Path: root}}
+
+		res, err := http.Get(srv.URL + "/api/fs/roots")
+		if err != nil {
+			t.Fatalf("get roots: %v", err)
+		}
+		defer res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("status=%d, want 200", res.StatusCode)
+		}
+
+		listRes, err := http.Get(srv.URL + "/api/fs/list?path=" + root)
+		if err != nil {
+			t.Fatalf("get list: %v", err)
+		}
+		defer listRes.Body.Close()
+		if listRes.StatusCode != http.StatusOK {
+			t.Fatalf("list status=%d, want 200", listRes.StatusCode)
+		}
+		var listed FSListResponse
+		if err := json.NewDecoder(listRes.Body).Decode(&listed); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if len(listed.Entries) != 2 {
+			t.Fatalf("entries=%d, want 2", len(listed.Entries))
+		}
+
+		outside := filepath.Dir(root)
+		outRes, err := http.Get(srv.URL + "/api/fs/list?path=" + outside)
+		if err != nil {
+			t.Fatalf("get outside: %v", err)
+		}
+		defer outRes.Body.Close()
+		if outRes.StatusCode != http.StatusForbidden {
+			t.Fatalf("outside status=%d, want 403", outRes.StatusCode)
 		}
 	})
 }

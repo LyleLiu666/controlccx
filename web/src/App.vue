@@ -1,10 +1,21 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
-import type { ChatMessage, LogEntry, ServerEvent, SystemInfo, Task, WorkerType } from "./types";
+import type {
+  ChatMessage,
+  FSListEntry,
+  FSRoot,
+  LogEntry,
+  ServerEvent,
+  SystemInfo,
+  Task,
+  WorkerType,
+} from "./types";
 import {
   cancelTask,
   createTask,
   fetchChat,
+  fetchFSList,
+  fetchFSRoots,
   fetchLogs,
   fetchSystemInfo,
   fetchTasks,
@@ -29,6 +40,21 @@ const errorBanner = ref<string>("");
 
 const selectedTask = computed(() => tasks.value.get(selectedTaskId.value) ?? null);
 const selectedLogs = computed(() => logsByTask.value.get(selectedTaskId.value) ?? []);
+
+const dirPickerOpen = ref(false);
+const dirRoots = ref<FSRoot[]>([]);
+const dirPath = ref<string>("");
+const dirParent = ref<string>("");
+const dirEntries = ref<FSListEntry[]>([]);
+const dirLoading = ref(false);
+const dirFilter = ref("");
+const dirError = ref("");
+
+const filteredDirEntries = computed(() => {
+  const needle = dirFilter.value.trim().toLowerCase();
+  if (!needle) return dirEntries.value;
+  return dirEntries.value.filter((e) => e.name.toLowerCase().includes(needle));
+});
 
 let es: EventSource | null = null;
 
@@ -120,6 +146,41 @@ async function onSendChat() {
   }
 }
 
+async function openDirPicker() {
+  dirPickerOpen.value = true;
+  dirError.value = "";
+  dirFilter.value = "";
+  try {
+    dirRoots.value = await fetchFSRoots();
+  } catch (e: any) {
+    dirError.value = e?.message ?? String(e);
+    dirRoots.value = [];
+  }
+
+  const initial = newWorkdir.value || (dirRoots.value[0]?.path ?? ".");
+  await loadDir(initial);
+}
+
+async function loadDir(path: string) {
+  dirLoading.value = true;
+  dirError.value = "";
+  try {
+    const res = await fetchFSList(path);
+    dirPath.value = res.path;
+    dirParent.value = res.parent ?? "";
+    dirEntries.value = res.entries;
+  } catch (e: any) {
+    dirError.value = e?.message ?? String(e);
+  } finally {
+    dirLoading.value = false;
+  }
+}
+
+function selectDir(path: string) {
+  newWorkdir.value = path;
+  dirPickerOpen.value = false;
+}
+
 function connectEvents() {
   es = new EventSource("/api/events");
 
@@ -188,7 +249,10 @@ const sortedTasks = computed(() => {
           </label>
           <label>
             Workdir
-            <input v-model="newWorkdir" placeholder="." />
+            <div class="workdirRow">
+              <input v-model="newWorkdir" placeholder="." />
+              <button type="button" @click="openDirPicker">Browse</button>
+            </div>
           </label>
           <label class="full">
             Prompt
@@ -269,6 +333,59 @@ const sortedTasks = computed(() => {
         </div>
       </section>
     </div>
+
+    <div v-if="dirPickerOpen" class="modalOverlay" @click.self="dirPickerOpen = false">
+      <div class="modal">
+        <div class="modalHeader">
+          <div class="modalTitle">Select folder</div>
+          <button class="iconBtn" type="button" @click="dirPickerOpen = false">✕</button>
+        </div>
+
+        <div class="modalBody">
+          <div class="roots">
+            <button
+              v-for="r in dirRoots"
+              :key="r.path"
+              type="button"
+              class="rootBtn"
+              @click="loadDir(r.path)"
+            >
+              {{ r.name }}
+            </button>
+          </div>
+
+          <div class="pathRow">
+            <button type="button" @click="dirParent && loadDir(dirParent)" :disabled="!dirParent">Up</button>
+            <div class="path mono">{{ dirPath }}</div>
+            <button type="button" class="primary" @click="selectDir(dirPath)" :disabled="!dirPath">Select</button>
+          </div>
+
+          <div v-if="dirError" class="modalError">{{ dirError }}</div>
+
+          <div class="filterRow">
+            <input v-model="dirFilter" placeholder="Filter folders..." />
+            <span v-if="dirLoading" class="loading">Loading...</span>
+          </div>
+
+          <div class="dirList">
+            <button
+              v-for="e in filteredDirEntries"
+              :key="e.path"
+              type="button"
+              class="dirItem"
+              @click="loadDir(e.path)"
+            >
+              <span class="mono">📁</span>
+              <span class="name">{{ e.name }}</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="modalFooter">
+          <button type="button" @click="dirPickerOpen = false">Cancel</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -307,9 +424,11 @@ const sortedTasks = computed(() => {
 }
 .grid {
   display: grid;
-  grid-template-columns: 1.1fr 1.6fr 1.2fr;
+  grid-template-columns: minmax(320px, 420px) minmax(560px, 1fr) minmax(340px, 480px);
   gap: 12px;
   padding: 12px 20px 20px;
+  width: 100%;
+  box-sizing: border-box;
 }
 .panel {
   background: white;
@@ -317,6 +436,7 @@ const sortedTasks = computed(() => {
   border-radius: 12px;
   padding: 12px;
   min-height: 200px;
+  min-width: 0;
 }
 h2 {
   margin: 0 0 10px;
@@ -357,6 +477,129 @@ button {
   padding: 8px 10px;
   background: #f9fafb;
   cursor: pointer;
+}
+.workdirRow {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+}
+.modalOverlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(17, 24, 39, 0.55);
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  z-index: 999;
+}
+.modal {
+  width: min(860px, 95vw);
+  height: min(560px, 90vh);
+  background: white;
+  border-radius: 14px;
+  border: 1px solid #e5e7eb;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  overflow: hidden;
+}
+.modalHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 12px;
+  border-bottom: 1px solid #e5e7eb;
+}
+.modalTitle {
+  font-weight: 700;
+  font-size: 14px;
+}
+.iconBtn {
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  padding: 6px 10px;
+  background: #f9fafb;
+}
+.modalBody {
+  padding: 12px;
+  display: grid;
+  grid-template-rows: auto auto auto auto 1fr;
+  gap: 10px;
+}
+.roots {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.rootBtn {
+  font-size: 12px;
+  padding: 6px 10px;
+  border-radius: 999px;
+}
+.pathRow {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 8px;
+  align-items: center;
+}
+.path {
+  padding: 8px 10px;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  background: #f9fafb;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.filterRow {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.loading {
+  font-size: 12px;
+  color: #6b7280;
+}
+.dirList {
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  overflow: auto;
+  padding: 6px;
+  background: #fff;
+}
+.dirItem {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 22px 1fr;
+  gap: 8px;
+  align-items: center;
+  text-align: left;
+  border: 1px solid transparent;
+  background: transparent;
+  padding: 8px 10px;
+  border-radius: 10px;
+}
+.dirItem:hover {
+  border-color: #e5e7eb;
+  background: #f9fafb;
+}
+.dirItem .name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.modalError {
+  background: #fee2e2;
+  border: 1px solid #fecaca;
+  color: #991b1b;
+  padding: 8px 10px;
+  border-radius: 10px;
+  font-size: 12px;
+}
+.modalFooter {
+  padding: 12px;
+  border-top: 1px solid #e5e7eb;
+  display: flex;
+  justify-content: flex-end;
 }
 button:disabled {
   opacity: 0.5;
@@ -406,6 +649,7 @@ button.primary {
 }
 .mono {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  overflow-wrap: anywhere;
 }
 .pill {
   font-size: 11px;
@@ -476,6 +720,9 @@ button.primary {
   overflow: auto;
   font-size: 12px;
   line-height: 1.4;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 .empty {
   color: #6b7280;

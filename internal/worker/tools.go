@@ -48,8 +48,7 @@ func buildClaude(cfg config.Config, task tasks.Task) (ToolCommand, error) {
 	args := []string{"-p"}
 	// Default to skip permissions for consistent automation. Can be made configurable later.
 	args = append(args, "--dangerously-skip-permissions")
-	// Disable all Claude setting sources to avoid recursion/unexpected behavior.
-	args = append(args, "--setting-sources", "")
+	// Note: do not force --setting-sources. Users often rely on their normal Claude settings/auth.
 	if task.Mode == tasks.ModeResume && strings.TrimSpace(task.SessionID) != "" {
 		args = append(args, "-r", strings.TrimSpace(task.SessionID))
 	}
