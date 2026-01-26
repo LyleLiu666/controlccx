@@ -44,7 +44,9 @@ const chatInput = ref<string>("");
 const errorBanner = ref<string>("");
 
 const authInfo = ref<AuthInfo | null>(null);
-const authStatus = computed<AuthStatus | null>(() => authInfo.value?.status ?? null);
+const authStatus = computed<AuthStatus | null>(
+  () => authInfo.value?.status ?? null,
+);
 const authSettingsOpen = ref(false);
 const authSaving = ref(false);
 const authSettingsError = ref("");
@@ -54,9 +56,15 @@ const authAnthropicAuthToken = ref("");
 const authAnthropicModel = ref("");
 const authAnthropicSmallFastModel = ref("");
 const authOpenAIApiKey = ref("");
+const authCodexModel = ref("");
+const authCodexReasoningEffort = ref("");
 
-const selectedTask = computed(() => tasks.value.get(selectedTaskId.value) ?? null);
-const selectedLogs = computed(() => logsByTask.value.get(selectedTaskId.value) ?? []);
+const selectedTask = computed(
+  () => tasks.value.get(selectedTaskId.value) ?? null,
+);
+const selectedLogs = computed(
+  () => logsByTask.value.get(selectedTaskId.value) ?? [],
+);
 
 const dirPickerOpen = ref(false);
 const dirRoots = ref<FSRoot[]>([]);
@@ -92,7 +100,9 @@ function loadStringArray(key: string): string[] {
     if (!raw) return [];
     const v = JSON.parse(raw);
     if (!Array.isArray(v)) return [];
-    return v.map((x) => (typeof x === "string" ? x.trim() : "")).filter(Boolean);
+    return v
+      .map((x) => (typeof x === "string" ? x.trim() : ""))
+      .filter(Boolean);
   } catch {
     return [];
   }
@@ -147,10 +157,14 @@ function isWithinWorkspace(root: string, path: string): boolean {
   return p === r || p.startsWith(r + "/");
 }
 
-const pinnedWorkspaces = ref<string[]>(loadStringArray(LS_KEY_PINNED_WORKSPACES));
+const pinnedWorkspaces = ref<string[]>(
+  loadStringArray(LS_KEY_PINNED_WORKSPACES),
+);
 const workspaceFilter = ref<string>(loadString(LS_KEY_WORKSPACE_FILTER));
 
-watch(pinnedWorkspaces, (v) => saveStringArray(LS_KEY_PINNED_WORKSPACES, v), { deep: true });
+watch(pinnedWorkspaces, (v) => saveStringArray(LS_KEY_PINNED_WORKSPACES, v), {
+  deep: true,
+});
 watch(workspaceFilter, (v) => {
   saveString(LS_KEY_WORKSPACE_FILTER, v);
   if (v.trim()) newWorkdir.value = v;
@@ -330,8 +344,11 @@ function pinWorkspace(path: string) {
 
 function unpinWorkspace(path: string) {
   const key = normalizePathForCompare(path);
-  pinnedWorkspaces.value = pinnedWorkspaces.value.filter((x) => normalizePathForCompare(x) !== key);
-  if (normalizePathForCompare(workspaceFilter.value) === key) workspaceFilter.value = "";
+  pinnedWorkspaces.value = pinnedWorkspaces.value.filter(
+    (x) => normalizePathForCompare(x) !== key,
+  );
+  if (normalizePathForCompare(workspaceFilter.value) === key)
+    workspaceFilter.value = "";
 }
 
 function connectEvents() {
@@ -371,14 +388,23 @@ async function saveAuthSettings() {
   authSaving.value = true;
   try {
     const patch: AuthPatch = {};
-    if (authAnthropicBaseURL.value.trim()) patch.anthropic_base_url = authAnthropicBaseURL.value.trim();
-    if (authAnthropicApiKey.value.trim()) patch.anthropic_api_key = authAnthropicApiKey.value.trim();
+    if (authAnthropicBaseURL.value.trim())
+      patch.anthropic_base_url = authAnthropicBaseURL.value.trim();
+    if (authAnthropicApiKey.value.trim())
+      patch.anthropic_api_key = authAnthropicApiKey.value.trim();
     if (authAnthropicAuthToken.value.trim())
       patch.anthropic_auth_token = authAnthropicAuthToken.value.trim();
-    if (authAnthropicModel.value.trim()) patch.anthropic_model = authAnthropicModel.value.trim();
+    if (authAnthropicModel.value.trim())
+      patch.anthropic_model = authAnthropicModel.value.trim();
     if (authAnthropicSmallFastModel.value.trim())
-      patch.anthropic_small_fast_model = authAnthropicSmallFastModel.value.trim();
-    if (authOpenAIApiKey.value.trim()) patch.openai_api_key = authOpenAIApiKey.value.trim();
+      patch.anthropic_small_fast_model =
+        authAnthropicSmallFastModel.value.trim();
+    if (authOpenAIApiKey.value.trim())
+      patch.openai_api_key = authOpenAIApiKey.value.trim();
+    if (authCodexModel.value.trim())
+      patch.codex_model = authCodexModel.value.trim();
+    if (authCodexReasoningEffort.value.trim())
+      patch.codex_reasoning_effort = authCodexReasoningEffort.value.trim();
 
     if (Object.keys(patch).length > 0) {
       authInfo.value = await updateAuth(patch);
@@ -392,6 +418,8 @@ async function saveAuthSettings() {
     authAnthropicModel.value = "";
     authAnthropicSmallFastModel.value = "";
     authOpenAIApiKey.value = "";
+    authCodexModel.value = "";
+    authCodexReasoningEffort.value = "";
   } catch (e: any) {
     authSettingsError.value = e?.message ?? String(e);
   } finally {
@@ -519,8 +547,12 @@ const recentWorkspaces = computed(() => {
 });
 
 const recentWorkspacesUnpinned = computed(() => {
-  const pinned = new Set(pinnedWorkspaces.value.map((p) => normalizePathForCompare(p)));
-  return recentWorkspaces.value.filter((p) => !pinned.has(normalizePathForCompare(p)));
+  const pinned = new Set(
+    pinnedWorkspaces.value.map((p) => normalizePathForCompare(p)),
+  );
+  return recentWorkspaces.value.filter(
+    (p) => !pinned.has(normalizePathForCompare(p)),
+  );
 });
 
 const secretaryCounts = computed(() => {
@@ -542,7 +574,11 @@ const secretaryCounts = computed(() => {
 
 const needsAttentionSessions = computed(() => {
   return sessionsAll.value
-    .filter((s) => s.status !== "succeeded" && (s.score > 0 || s.status === "failed" || s.status === "blocked"))
+    .filter(
+      (s) =>
+        s.status !== "succeeded" &&
+        (s.score > 0 || s.status === "failed" || s.status === "blocked"),
+    )
     .slice(0, 6);
 });
 
@@ -553,7 +589,7 @@ const secretaryBriefing = computed(() => {
   const lines: string[] = [];
   lines.push(`Session 总数：${c.total}`);
   lines.push(
-    `running ${c.running} · blocked ${c.blocked} · failed ${c.failed} · interrupted ${c.interrupted} · queued ${c.queued} · succeeded ${c.succeeded}`
+    `running ${c.running} · blocked ${c.blocked} · failed ${c.failed} · interrupted ${c.interrupted} · queued ${c.queued} · succeeded ${c.succeeded}`,
   );
 
   const top = needsAttentionSessions.value;
@@ -566,7 +602,9 @@ const secretaryBriefing = computed(() => {
   lines.push("");
   lines.push("需要关注（按 score / 最近更新）：");
   for (const s of top) {
-    const sid = s.session_id ? s.session_id.slice(0, 8) : s.latest.id.slice(0, 8);
+    const sid = s.session_id
+      ? s.session_id.slice(0, 8)
+      : s.latest.id.slice(0, 8);
     lines.push(`- ${sid} · ${s.status} · score ${s.score} · ${s.workdir}`);
   }
   return lines.join("\n");
@@ -579,9 +617,12 @@ const secretaryBriefing = computed(() => {
       <div class="title">ControlCCX</div>
       <div class="headerRight">
         <div class="sub" v-if="systemInfo">
-          {{ systemInfo.os }}/{{ systemInfo.arch }} · {{ systemInfo.hostname }} · Go {{ systemInfo.go_version }}
+          {{ systemInfo.os }}/{{ systemInfo.arch }} ·
+          {{ systemInfo.hostname }} · Go {{ systemInfo.go_version }}
         </div>
-        <button type="button" class="settingsBtn" @click="openAuthSettings">Settings</button>
+        <button type="button" class="settingsBtn" @click="openAuthSettings">
+          Settings
+        </button>
       </div>
     </header>
 
@@ -607,13 +648,25 @@ const secretaryBriefing = computed(() => {
           </label>
           <div v-if="missingAuthText" class="authHint full">
             <div class="text">{{ missingAuthText }}</div>
-            <button type="button" @click="openAuthSettings">Auth Settings</button>
+            <button type="button" @click="openAuthSettings">
+              Auth Settings
+            </button>
           </div>
           <label class="full">
             Prompt
-            <textarea v-model="newPrompt" rows="5" placeholder="Describe the task to run..." />
+            <textarea
+              v-model="newPrompt"
+              rows="5"
+              placeholder="Describe the task to run..."
+            ></textarea>
           </label>
-          <button class="primary" @click="onCreateTask" :disabled="!newPrompt.trim()">Start</button>
+          <button
+            class="primary"
+            @click="onCreateTask"
+            :disabled="!newPrompt.trim()"
+          >
+            Start
+          </button>
         </div>
 
         <div class="list">
@@ -623,14 +676,30 @@ const secretaryBriefing = computed(() => {
               <select v-model="workspaceFilter">
                 <option value="">All</option>
                 <optgroup v-if="pinnedWorkspaces.length" label="Pinned">
-                  <option v-for="p in pinnedWorkspaces" :key="'p-' + p" :value="p">{{ p }}</option>
+                  <option
+                    v-for="p in pinnedWorkspaces"
+                    :key="'p-' + p"
+                    :value="p"
+                  >
+                    {{ p }}
+                  </option>
                 </optgroup>
                 <optgroup v-if="recentWorkspacesUnpinned.length" label="Recent">
-                  <option v-for="p in recentWorkspacesUnpinned" :key="'r-' + p" :value="p">{{ p }}</option>
+                  <option
+                    v-for="p in recentWorkspacesUnpinned"
+                    :key="'r-' + p"
+                    :value="p"
+                  >
+                    {{ p }}
+                  </option>
                 </optgroup>
               </select>
             </div>
-            <button type="button" @click="setWorkspace(newWorkdir)" :disabled="!newWorkdir.trim()">
+            <button
+              type="button"
+              @click="setWorkspace(newWorkdir)"
+              :disabled="!newWorkdir.trim()"
+            >
               Use Workdir
             </button>
             <button
@@ -640,7 +709,13 @@ const secretaryBriefing = computed(() => {
             >
               Pin
             </button>
-            <button type="button" @click="clearWorkspace" :disabled="!workspaceFilter">All</button>
+            <button
+              type="button"
+              @click="clearWorkspace"
+              :disabled="!workspaceFilter"
+            >
+              All
+            </button>
           </div>
 
           <div v-if="pinnedWorkspaces.length" class="pinnedWorkspaces">
@@ -654,12 +729,20 @@ const secretaryBriefing = computed(() => {
               >
                 <span class="mono">{{ p }}</span>
               </button>
-              <button type="button" class="pinnedX" @click="unpinWorkspace(p)" title="Unpin">✕</button>
+              <button
+                type="button"
+                class="pinnedX"
+                @click="unpinWorkspace(p)"
+                title="Unpin"
+              >
+                ✕
+              </button>
             </div>
           </div>
 
           <div v-if="workspaceFilter" class="listMeta">
-            Showing {{ filteredSessions.length }} / {{ sessionsAll.length }} sessions
+            Showing {{ filteredSessions.length }} /
+            {{ sessionsAll.length }} sessions
           </div>
 
           <button
@@ -694,28 +777,63 @@ const secretaryBriefing = computed(() => {
           <div class="meta">
             <div>
               <span class="k">Session</span>
-              <span class="mono">{{ selectedSession.session_id || "(pending)" }}</span>
+              <span class="mono">{{
+                selectedSession.session_id || "(pending)"
+              }}</span>
             </div>
-            <div><span class="k">Worker</span> {{ selectedSession.worker_type }}</div>
-            <div><span class="k">Workdir</span> <span class="mono">{{ selectedSession.workdir }}</span></div>
-            <div><span class="k">Status</span> {{ selectedSession.status }}</div>
-            <div><span class="k">Score</span> {{ selectedSession.score }} (stderr {{ selectedSession.stderr_count }})</div>
-            <div><span class="k">Runs</span> {{ selectedSession.runs.length }}</div>
-            <div v-if="selectedSession.warning"><span class="k">Warning</span> {{ selectedSession.warning }}</div>
-            <div v-if="selectedTask?.error"><span class="k">Last Err</span> {{ selectedTask.error }}</div>
+            <div>
+              <span class="k">Worker</span> {{ selectedSession.worker_type }}
+            </div>
+            <div>
+              <span class="k">Workdir</span>
+              <span class="mono">{{ selectedSession.workdir }}</span>
+            </div>
+            <div>
+              <span class="k">Status</span> {{ selectedSession.status }}
+            </div>
+            <div>
+              <span class="k">Score</span> {{ selectedSession.score }} (stderr
+              {{ selectedSession.stderr_count }})
+            </div>
+            <div>
+              <span class="k">Runs</span> {{ selectedSession.runs.length }}
+            </div>
+            <div v-if="selectedSession.warning">
+              <span class="k">Warning</span> {{ selectedSession.warning }}
+            </div>
+            <div v-if="selectedTask?.error">
+              <span class="k">Last Err</span> {{ selectedTask.error }}
+            </div>
           </div>
 
           <div class="actions">
-            <button @click="onCancelTask" :disabled="selectedTask?.status !== 'running'">Cancel Run</button>
-            <button type="button" @click="setWorkspace(selectedSession.workdir)">Focus Workdir</button>
+            <button
+              @click="onCancelTask"
+              :disabled="selectedTask?.status !== 'running'"
+            >
+              Cancel Run
+            </button>
+            <button
+              type="button"
+              @click="setWorkspace(selectedSession.workdir)"
+            >
+              Focus Workdir
+            </button>
           </div>
 
           <div class="resume">
             <label class="full">
               Resume Prompt
-              <textarea v-model="resumePrompt" rows="3" placeholder="Continue with..." />
+              <textarea
+                v-model="resumePrompt"
+                rows="3"
+                placeholder="Continue with..."
+              ></textarea>
             </label>
-            <button @click="onResumeTask" :disabled="!resumePrompt.trim() || !selectedSession.session_id">
+            <button
+              @click="onResumeTask"
+              :disabled="!resumePrompt.trim() || !selectedSession.session_id"
+            >
               Resume Session
             </button>
           </div>
@@ -747,7 +865,9 @@ const secretaryBriefing = computed(() => {
 
           <div class="logs">
             <div class="logsHeader">Logs</div>
-            <pre class="logbox"><template v-for="l in selectedLogs" :key="l.id">[{{ l.stream }}] {{ l.message }}
+            <pre
+              class="logbox"
+            ><template v-for="l in selectedLogs" :key="l.id">[{{ l.stream }}] {{ l.message }}
 </template></pre>
           </div>
         </div>
@@ -777,7 +897,9 @@ const secretaryBriefing = computed(() => {
 
           <div class="secSection">
             <div class="secSectionTitle">Needs Attention</div>
-            <div v-if="needsAttentionSessions.length === 0" class="empty">暂无需要关注的 session</div>
+            <div v-if="needsAttentionSessions.length === 0" class="empty">
+              暂无需要关注的 session
+            </div>
             <button
               v-for="s in needsAttentionSessions"
               :key="s.key"
@@ -786,7 +908,9 @@ const secretaryBriefing = computed(() => {
               @click="onSelectTask(s.latest.id)"
             >
               <div class="rowTop">
-                <span class="mono">{{ (s.session_id || s.latest.id).slice(0, 8) }}</span>
+                <span class="mono">{{
+                  (s.session_id || s.latest.id).slice(0, 8)
+                }}</span>
                 <span class="pill" :class="s.status">{{ s.status }}</span>
               </div>
               <div class="rowMid">
@@ -812,8 +936,18 @@ const secretaryBriefing = computed(() => {
                 </div>
               </div>
               <div class="input">
-                <textarea v-model="chatInput" rows="3" placeholder="Ask the secretary..." />
-                <button class="primary" @click="onSendChat" :disabled="!chatInput.trim()">Send</button>
+                <textarea
+                  v-model="chatInput"
+                  rows="3"
+                  placeholder="Ask the secretary..."
+                ></textarea>
+                <button
+                  class="primary"
+                  @click="onSendChat"
+                  :disabled="!chatInput.trim()"
+                >
+                  Send
+                </button>
               </div>
             </div>
           </details>
@@ -821,11 +955,21 @@ const secretaryBriefing = computed(() => {
       </section>
     </div>
 
-    <div v-if="authSettingsOpen" class="modalOverlay" @click.self="authSettingsOpen = false">
+    <div
+      v-if="authSettingsOpen"
+      class="modalOverlay"
+      @click.self="authSettingsOpen = false"
+    >
       <div class="modal settingsModal">
         <div class="modalHeader">
           <div class="modalTitle">Auth Settings</div>
-          <button class="iconBtn" type="button" @click="authSettingsOpen = false">✕</button>
+          <button
+            class="iconBtn"
+            type="button"
+            @click="authSettingsOpen = false"
+          >
+            ✕
+          </button>
         </div>
 
         <div class="modalBody settingsBody">
@@ -833,29 +977,39 @@ const secretaryBriefing = computed(() => {
             Storage: <span class="mono">{{ authInfo.storage_path }}</span>
           </div>
 
-          <div v-if="authSettingsError" class="modalError">{{ authSettingsError }}</div>
+          <div v-if="authSettingsError" class="modalError">
+            {{ authSettingsError }}
+          </div>
 
           <div class="settingsSection">
             <div class="settingsSectionTitle">Claude Code</div>
             <div class="kv">
               <span class="k">ANTHROPIC_BASE_URL</span>
               <span class="mono"
-                >{{ authStatus?.claude.base_url.effective }} {{ authStatus?.claude.base_url.masked }}</span
+                >{{ authStatus?.claude.base_url.effective }}
+                {{ authStatus?.claude.base_url.masked }}</span
               >
             </div>
             <div class="kv">
               <span class="k">ANTHROPIC_API_KEY</span>
-              <span class="mono">{{ authStatus?.claude.api_key.effective }} {{ authStatus?.claude.api_key.masked }}</span>
+              <span class="mono"
+                >{{ authStatus?.claude.api_key.effective }}
+                {{ authStatus?.claude.api_key.masked }}</span
+              >
             </div>
             <div class="kv">
               <span class="k">ANTHROPIC_AUTH_TOKEN</span>
               <span class="mono"
-                >{{ authStatus?.claude.auth_token.effective }} {{ authStatus?.claude.auth_token.masked }}</span
+                >{{ authStatus?.claude.auth_token.effective }}
+                {{ authStatus?.claude.auth_token.masked }}</span
               >
             </div>
             <div class="kv">
               <span class="k">ANTHROPIC_MODEL</span>
-              <span class="mono">{{ authStatus?.claude.model.effective }} {{ authStatus?.claude.model.masked }}</span>
+              <span class="mono"
+                >{{ authStatus?.claude.model.effective }}
+                {{ authStatus?.claude.model.masked }}</span
+              >
             </div>
             <div class="kv">
               <span class="k">ANTHROPIC_SMALL_FAST_MODEL</span>
@@ -868,8 +1022,16 @@ const secretaryBriefing = computed(() => {
             <label class="full">
               Store ANTHROPIC_BASE_URL
               <div class="secretRow">
-                <input v-model="authAnthropicBaseURL" placeholder="https://..." autocomplete="off" />
-                <button type="button" @click="clearStoredAuth('anthropic_base_url')" :disabled="authSaving">
+                <input
+                  v-model="authAnthropicBaseURL"
+                  placeholder="https://..."
+                  autocomplete="off"
+                />
+                <button
+                  type="button"
+                  @click="clearStoredAuth('anthropic_base_url')"
+                  :disabled="authSaving"
+                >
                   Clear stored
                 </button>
               </div>
@@ -877,8 +1039,17 @@ const secretaryBriefing = computed(() => {
             <label class="full">
               Store ANTHROPIC_API_KEY
               <div class="secretRow">
-                <input v-model="authAnthropicApiKey" type="password" placeholder="Paste key…" autocomplete="off" />
-                <button type="button" @click="clearStoredAuth('anthropic_api_key')" :disabled="authSaving">
+                <input
+                  v-model="authAnthropicApiKey"
+                  type="password"
+                  placeholder="Paste key…"
+                  autocomplete="off"
+                />
+                <button
+                  type="button"
+                  @click="clearStoredAuth('anthropic_api_key')"
+                  :disabled="authSaving"
+                >
                   Clear stored
                 </button>
               </div>
@@ -892,7 +1063,11 @@ const secretaryBriefing = computed(() => {
                   placeholder="Paste token…"
                   autocomplete="off"
                 />
-                <button type="button" @click="clearStoredAuth('anthropic_auth_token')" :disabled="authSaving">
+                <button
+                  type="button"
+                  @click="clearStoredAuth('anthropic_auth_token')"
+                  :disabled="authSaving"
+                >
                   Clear stored
                 </button>
               </div>
@@ -900,8 +1075,16 @@ const secretaryBriefing = computed(() => {
             <label class="full">
               Store ANTHROPIC_MODEL
               <div class="secretRow">
-                <input v-model="authAnthropicModel" placeholder="model name…" autocomplete="off" />
-                <button type="button" @click="clearStoredAuth('anthropic_model')" :disabled="authSaving">
+                <input
+                  v-model="authAnthropicModel"
+                  placeholder="model name…"
+                  autocomplete="off"
+                />
+                <button
+                  type="button"
+                  @click="clearStoredAuth('anthropic_model')"
+                  :disabled="authSaving"
+                >
                   Clear stored
                 </button>
               </div>
@@ -909,7 +1092,11 @@ const secretaryBriefing = computed(() => {
             <label class="full">
               Store ANTHROPIC_SMALL_FAST_MODEL
               <div class="secretRow">
-                <input v-model="authAnthropicSmallFastModel" placeholder="model name…" autocomplete="off" />
+                <input
+                  v-model="authAnthropicSmallFastModel"
+                  placeholder="model name…"
+                  autocomplete="off"
+                />
                 <button
                   type="button"
                   @click="clearStoredAuth('anthropic_small_fast_model')"
@@ -921,7 +1108,8 @@ const secretaryBriefing = computed(() => {
             </label>
 
             <div class="settingsHelp">
-              如果你使用 Claude Code 订阅登录模式，也可以在终端运行一次 <span class="mono">claude /login</span>。
+              如果你使用 Claude Code 订阅登录模式，也可以在终端运行一次
+              <span class="mono">claude /login</span>。
             </div>
           </div>
 
@@ -929,13 +1117,75 @@ const secretaryBriefing = computed(() => {
             <div class="settingsSectionTitle">Codex</div>
             <div class="kv">
               <span class="k">OPENAI_API_KEY</span>
-              <span class="mono">{{ authStatus?.codex.api_key.effective }} {{ authStatus?.codex.api_key.masked }}</span>
+              <span class="mono"
+                >{{ authStatus?.codex.api_key.effective }}
+                {{ authStatus?.codex.api_key.masked }}</span
+              >
+            </div>
+            <div class="kv">
+              <span class="k">MODEL</span>
+              <span class="mono"
+                >{{ authStatus?.codex.model.effective }}
+                {{ authStatus?.codex.model.masked }}</span
+              >
+            </div>
+            <div class="kv">
+              <span class="k">REASONING</span>
+              <span class="mono"
+                >{{ authStatus?.codex.reasoning_effort.effective }}
+                {{ authStatus?.codex.reasoning_effort.masked }}</span
+              >
             </div>
             <label class="full">
               Store OPENAI_API_KEY
               <div class="secretRow">
-                <input v-model="authOpenAIApiKey" type="password" placeholder="Paste key…" autocomplete="off" />
-                <button type="button" @click="clearStoredAuth('openai_api_key')" :disabled="authSaving">
+                <input
+                  v-model="authOpenAIApiKey"
+                  type="password"
+                  placeholder="Paste key…"
+                  autocomplete="off"
+                />
+                <button
+                  type="button"
+                  @click="clearStoredAuth('openai_api_key')"
+                  :disabled="authSaving"
+                >
+                  Clear stored
+                </button>
+              </div>
+            </label>
+            <label class="full">
+              Set model (default gpt-5.2)
+              <div class="secretRow">
+                <input
+                  v-model="authCodexModel"
+                  placeholder="gpt-5.2"
+                  autocomplete="off"
+                />
+                <button
+                  type="button"
+                  @click="clearStoredAuth('codex_model')"
+                  :disabled="authSaving"
+                >
+                  Clear stored
+                </button>
+              </div>
+            </label>
+            <label class="full">
+              Set reasoning effort (default xhigh)
+              <div class="secretRow">
+                <select v-model="authCodexReasoningEffort">
+                  <option value="">(keep)</option>
+                  <option value="low">low</option>
+                  <option value="medium">medium</option>
+                  <option value="high">high</option>
+                  <option value="xhigh">xhigh</option>
+                </select>
+                <button
+                  type="button"
+                  @click="clearStoredAuth('codex_reasoning_effort')"
+                  :disabled="authSaving"
+                >
                   Clear stored
                 </button>
               </div>
@@ -945,18 +1195,29 @@ const secretaryBriefing = computed(() => {
 
         <div class="modalFooter">
           <button type="button" @click="authSettingsOpen = false">Close</button>
-          <button type="button" class="primary" @click="saveAuthSettings" :disabled="authSaving">
+          <button
+            type="button"
+            class="primary"
+            @click="saveAuthSettings"
+            :disabled="authSaving"
+          >
             {{ authSaving ? "Saving..." : "Save" }}
           </button>
         </div>
       </div>
     </div>
 
-    <div v-if="dirPickerOpen" class="modalOverlay" @click.self="dirPickerOpen = false">
+    <div
+      v-if="dirPickerOpen"
+      class="modalOverlay"
+      @click.self="dirPickerOpen = false"
+    >
       <div class="modal">
         <div class="modalHeader">
           <div class="modalTitle">Select folder</div>
-          <button class="iconBtn" type="button" @click="dirPickerOpen = false">✕</button>
+          <button class="iconBtn" type="button" @click="dirPickerOpen = false">
+            ✕
+          </button>
         </div>
 
         <div class="modalBody dirModalBody">
@@ -973,9 +1234,22 @@ const secretaryBriefing = computed(() => {
           </div>
 
           <div class="pathRow">
-            <button type="button" @click="dirParent && loadDir(dirParent)" :disabled="!dirParent">Up</button>
+            <button
+              type="button"
+              @click="dirParent && loadDir(dirParent)"
+              :disabled="!dirParent"
+            >
+              Up
+            </button>
             <div class="path mono">{{ dirPath }}</div>
-            <button type="button" class="primary" @click="selectDir(dirPath)" :disabled="!dirPath">Select</button>
+            <button
+              type="button"
+              class="primary"
+              @click="selectDir(dirPath)"
+              :disabled="!dirPath"
+            >
+              Select
+            </button>
           </div>
 
           <div v-if="dirError" class="modalError">{{ dirError }}</div>
@@ -1008,667 +1282,896 @@ const secretaryBriefing = computed(() => {
 </template>
 
 <style scoped>
-.page {
-  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji",
-    "Segoe UI Emoji";
-  color: #111827;
-  background: #f8fafc;
-  min-height: 100vh;
+:root {
+  --bg-app: #f1f5f9; /* Slate 100 - slightly darker than before for contrast */
+  --bg-panel: #ffffff;
+  --bg-subtle: #f8fafc;
+  --color-primary: #0d9488; /* Teal 600 */
+  --color-primary-hover: #0f766e; /* Teal 700 */
+  --color-primary-bg: #ccfbf1; /* Teal 100 */
+  --text-main: #334155; /* Slate 700 */
+  --text-sub: #64748b; /* Slate 500 */
+  --border-color: #e2e8f0;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+  --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.06), 0 2px 4px -2px rgb(0 0 0 / 0.06);
+  --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.05), 0 4px 6px -4px rgb(0 0 0 / 0.05);
+  --font-main: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
 }
+
+.page {
+  font-family: var(--font-main);
+  color: var(--text-main);
+  background: var(--bg-app);
+  min-height: 100vh;
+  box-sizing: border-box;
+  padding-bottom: 20px;
+}
+
 .header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 16px 20px;
-  border-bottom: 1px solid #e5e7eb;
-  background: white;
+  padding: 16px 32px;
+  background: rgba(255, 255, 255, 0.9);
+  backdrop-filter: blur(12px);
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.5);
+  box-shadow: var(--shadow-sm);
+  margin-bottom: 24px;
 }
+
 .headerRight {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
 }
+
 .title {
-  font-weight: 700;
-  font-size: 18px;
+  font-weight: 800;
+  font-size: 20px;
+  background: linear-gradient(135deg, #0d9488 0%, #0ea5e9 100%);
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  letter-spacing: -0.02em;
 }
+
 .sub {
-  color: #6b7280;
+  color: var(--text-sub);
   font-size: 12px;
+  font-weight: 500;
+  background: var(--bg-app);
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
 }
+
 .settingsBtn {
-  padding: 6px 10px;
-}
-.banner {
-  margin: 10px 20px 0;
-  background: #fee2e2;
-  border: 1px solid #fecaca;
-  color: #991b1b;
-  padding: 8px 10px;
-  border-radius: 8px;
+  border: none;
+  background: transparent;
+  color: var(--text-sub);
+  font-weight: 600;
   font-size: 13px;
+  cursor: pointer;
+  transition: color 0.2s;
 }
+.settingsBtn:hover {
+  color: var(--color-primary);
+}
+
+.banner {
+  margin: 0 24px 20px;
+  background: #fef2f2;
+  border: 1px solid #fee2e2;
+  color: #ef4444;
+  padding: 12px 16px;
+  border-radius: var(--radius-md);
+  font-size: 13px;
+  font-weight: 500;
+  box-shadow: var(--shadow-sm);
+}
+
 .grid {
   display: grid;
-  grid-template-columns: minmax(320px, 420px) minmax(560px, 1fr) minmax(340px, 480px);
-  gap: 12px;
-  padding: 12px 20px 20px;
+  grid-template-columns: minmax(340px, 380px) minmax(500px, 1fr) minmax(300px, 340px);
+  gap: 24px;
+  padding: 0 32px;
   width: 100%;
   box-sizing: border-box;
+  max-width: 1920px;
+  margin: 0 auto;
+  align-items: start; /* Important for sticky to work */
 }
+
 .panel {
-  background: white;
-  border: 1px solid #e5e7eb;
-  border-radius: 12px;
-  padding: 12px;
+  background: var(--bg-panel);
+  border: 1px solid white;
+  border-radius: var(--radius-lg);
+  padding: 0; /* Removing padding from parent, moved to children */
   min-height: 200px;
   min-width: 0;
+  box-shadow: var(--shadow-md);
+  display: flex;
+  flex-direction: column;
+  transition: box-shadow 0.3s ease;
+  overflow: hidden; /* For header radius */
 }
+
+/* Sticky sidebars */
+.grid > section:first-child,
+.grid > section:last-child {
+  position: sticky;
+  top: 90px; /* Header height + spacing */
+  max-height: calc(100vh - 110px);
+  overflow-y: auto;
+}
+
+.panel:hover {
+  box-shadow: var(--shadow-lg);
+}
+
 h2 {
-  margin: 0 0 10px;
-  font-size: 14px;
+  margin: 0;
+  padding: 16px 20px;
+  font-size: 15px;
   font-weight: 700;
+  color: var(--text-main);
+  background: #f8fafc;
+  border-bottom: 1px solid var(--border-color);
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
+
+.form, .list, .detail, .secretary {
+  padding: 20px;
+}
+
 .form {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 8px;
-  margin-bottom: 12px;
+  gap: 16px;
+  margin-bottom: 20px;
 }
+
 .form label {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  font-size: 12px;
-  color: #374151;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-main);
 }
+
 .form .full {
   grid-column: 1 / -1;
 }
+
 .authHint {
   grid-column: 1 / -1;
   display: flex;
-  gap: 10px;
+  gap: 12px;
   align-items: center;
   background: #fff7ed;
-  border: 1px solid #fed7aa;
-  color: #9a3412;
-  padding: 8px 10px;
-  border-radius: 10px;
-  font-size: 12px;
+  border: 1px solid #ffedd5;
+  color: #c2410c;
+  padding: 12px;
+  border-radius: var(--radius-md);
+  font-size: 13px;
 }
+
 .authHint .text {
   flex: 1;
   min-width: 0;
   overflow-wrap: anywhere;
 }
+
 input,
 select,
 textarea {
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
-  padding: 8px;
-  font-size: 13px;
+  border: 1px solid var(--border-color);
+  background: #f8fafc;
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+  font-size: 14px;
   outline: none;
+  transition: all 0.2s;
+  color: var(--text-main);
+  font-family: var(--font-main);
+  width: 100%;
+  box-sizing: border-box;
 }
+
+input:focus,
+select:focus,
+textarea:focus {
+  border-color: var(--color-primary);
+  background: #fff;
+  box-shadow: 0 0 0 3px var(--color-primary-bg);
+}
+
 textarea {
   resize: vertical;
+  line-height: 1.5;
 }
+
 button {
-  border: 1px solid #e5e7eb;
-  border-radius: 10px;
-  padding: 8px 10px;
-  background: #f9fafb;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 8px 14px;
+  background: white;
+  color: var(--text-main);
+  font-weight: 500;
+  font-size: 13px;
   cursor: pointer;
+  transition: all 0.2s;
 }
+
+button:hover:not(:disabled) {
+  background: #f8fafc;
+  border-color: #cbd5e1;
+  color: var(--color-primary);
+}
+
+button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  background: #f1f5f9;
+}
+
+button.primary {
+  background: var(--color-primary);
+  color: white;
+  border-color: var(--color-primary);
+  box-shadow: 0 2px 4px rgba(13, 148, 136, 0.2);
+}
+
+button.primary:hover:not(:disabled) {
+  background: var(--color-primary-hover);
+  border-color: var(--color-primary-hover);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 6px rgba(13, 148, 136, 0.3);
+  color: white;
+}
+
+button.primary:active:not(:disabled) {
+  transform: translateY(0);
+}
+
 .workdirRow {
   display: grid;
   grid-template-columns: 1fr auto;
-  gap: 8px;
+  gap: 10px;
 }
+
 .modalOverlay {
   position: fixed;
   inset: 0;
-  background: rgba(17, 24, 39, 0.55);
+  background: rgba(240, 253, 250, 0.6);
+  backdrop-filter: blur(4px);
   display: grid;
   place-items: center;
-  padding: 18px;
+  padding: 24px;
   z-index: 999;
 }
+
+.modal, .settingsModal {
+  background: white;
+  border-radius: 24px;
+  border: 1px solid #fff;
+  box-shadow: 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1);
+  overflow: hidden;
+  animation: popIn 0.2s ease-out;
+}
+
 .modal {
   width: min(860px, 95vw);
-  height: min(560px, 90vh);
-  background: white;
-  border-radius: 14px;
-  border: 1px solid #e5e7eb;
+  height: min(600px, 90vh);
   display: grid;
   grid-template-rows: auto 1fr auto;
-  overflow: hidden;
 }
+
+.settingsModal {
+  width: min(760px, 95vw);
+  height: min(600px, 90vh);
+}
+
+@keyframes popIn {
+  from { opacity: 0; transform: scale(0.95); }
+  to { opacity: 1; transform: scale(1); }
+}
+
 .modalHeader {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 12px 12px;
-  border-bottom: 1px solid #e5e7eb;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border-color);
+  background: #f8fafc;
 }
+
 .modalTitle {
   font-weight: 700;
-  font-size: 14px;
+  font-size: 16px;
+  color: var(--text-main);
 }
+
 .iconBtn {
-  border: 1px solid #e5e7eb;
-  border-radius: 10px;
-  padding: 6px 10px;
-  background: #f9fafb;
+  border: none;
+  background: transparent;
+  padding: 8px;
+  color: var(--text-sub);
+  border-radius: 50%;
 }
-.modalBody {
-  padding: 12px;
-  overflow: auto;
+.iconBtn:hover {
+  background: #e2e8f0;
+  color: var(--text-main);
 }
+
+.modalBody, .settingsBody, .dirModalBody {
+  padding: 20px;
+}
+
 .dirModalBody {
   display: grid;
   grid-template-rows: auto auto auto auto 1fr;
-  gap: 10px;
-  overflow: hidden;
+  gap: 16px;
 }
-.settingsModal {
-  width: min(760px, 95vw);
-  height: min(560px, 90vh);
-}
+
 .settingsBody {
   display: grid;
-  gap: 12px;
-  overflow: auto;
+  gap: 20px;
 }
-.settingsMeta {
-  color: #6b7280;
-  font-size: 12px;
-}
+
 .settingsSection {
-  border: 1px solid #e5e7eb;
-  border-radius: 12px;
-  padding: 10px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  padding: 16px;
   display: grid;
-  gap: 8px;
+  gap: 12px;
+  background: #fcfcfc;
 }
+
 .settingsSectionTitle {
   font-weight: 700;
-  font-size: 13px;
+  font-size: 14px;
+  color: var(--color-primary);
 }
+
 .kv {
   display: grid;
   grid-template-columns: 180px 1fr;
-  gap: 8px;
+  gap: 12px;
   align-items: center;
-  font-size: 12px;
-  color: #374151;
+  font-size: 13px;
 }
-.settingsHelp {
-  color: #6b7280;
-  font-size: 12px;
-}
+
 .secretRow {
   display: grid;
   grid-template-columns: 1fr auto;
-  gap: 8px;
+  gap: 10px;
 }
+
 .roots {
   display: flex;
-  gap: 8px;
+  gap: 10px;
   flex-wrap: wrap;
 }
+
 .rootBtn {
-  font-size: 12px;
-  padding: 6px 10px;
+  font-size: 13px;
+  padding: 6px 14px;
   border-radius: 999px;
+  background: white;
+  border: 1px solid var(--border-color);
+  color: var(--text-main);
 }
+
+.rootBtn:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+  background: var(--color-primary-bg);
+}
+
 .pathRow {
   display: grid;
   grid-template-columns: auto 1fr auto;
-  gap: 8px;
+  gap: 12px;
   align-items: center;
 }
+
 .path {
-  padding: 8px 10px;
-  border: 1px solid #e5e7eb;
-  border-radius: 10px;
-  background: #f9fafb;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  padding: 10px 14px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: #f8fafc;
+  color: var(--text-sub);
+  font-family: var(--font-mono);
+  font-size: 13px;
 }
-.filterRow {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-}
-.loading {
-  font-size: 12px;
-  color: #6b7280;
-}
+
 .dirList {
-  border: 1px solid #e5e7eb;
-  border-radius: 12px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
   overflow: auto;
-  padding: 6px;
+  padding: 8px;
   background: #fff;
+  max-height: 100%;
 }
+
 .dirItem {
   width: 100%;
   display: grid;
-  grid-template-columns: 22px 1fr;
-  gap: 8px;
+  grid-template-columns: 24px 1fr;
+  gap: 10px;
   align-items: center;
   text-align: left;
   border: 1px solid transparent;
   background: transparent;
-  padding: 8px 10px;
-  border-radius: 10px;
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  font-size: 14px;
+  color: var(--text-main);
 }
+
 .dirItem:hover {
-  border-color: #e5e7eb;
-  background: #f9fafb;
+  background: var(--bg-subtle);
+  color: var(--color-primary);
 }
-.dirItem .name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.modalError {
-  background: #fee2e2;
-  border: 1px solid #fecaca;
-  color: #991b1b;
-  padding: 8px 10px;
-  border-radius: 10px;
-  font-size: 12px;
-}
-.modalFooter {
-  padding: 12px;
-  border-top: 1px solid #e5e7eb;
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-}
-button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-button.primary {
-  background: #111827;
-  color: white;
-  border-color: #111827;
-}
+
 .list {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 12px;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  padding: 20px; /* match panel content padding */
 }
+
 .workspaceBar {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 2px 0;
+  gap: 10px;
+  padding-bottom: 8px;
 }
+
 .workspaceLeft {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   flex: 1;
-  min-width: 0;
 }
+
 .workspaceTitle {
   font-size: 12px;
-  color: #6b7280;
-  white-space: nowrap;
+  font-weight: 600;
+  color: var(--text-sub);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
 }
-.workspaceBar select {
-  flex: 1;
-  min-width: 0;
-}
+
 .pinnedWorkspaces {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 8px;
+  margin-bottom: 8px;
 }
+
 .pinnedItem {
   display: flex;
   align-items: stretch;
-  border: 1px solid #e5e7eb;
+  border: 1px solid var(--border-color);
   border-radius: 999px;
   overflow: hidden;
-  background: #f9fafb;
+  background: white;
+  box-shadow: var(--shadow-sm);
+  transition: all 0.2s;
 }
+
+.pinnedItem:hover {
+  box-shadow: var(--shadow-md);
+  border-color: var(--color-primary);
+}
+
 .pinnedBtn {
   border: none;
   background: transparent;
-  padding: 6px 10px;
+  padding: 6px 14px;
   cursor: pointer;
-  max-width: 260px;
+  max-width: 220px;
   text-align: left;
+  font-size: 12px;
 }
+
 .pinnedBtn.active {
-  background: #111827;
+  background: var(--color-primary);
   color: white;
 }
-.pinnedBtn .mono {
-  display: block;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
+
 .pinnedX {
   border: none;
-  border-left: 1px solid #e5e7eb;
+  border-left: 1px solid var(--border-color);
   background: transparent;
-  padding: 6px 8px;
+  padding: 6px 10px;
   cursor: pointer;
+  color: var(--text-sub);
 }
+.pinnedX:hover {
+  color: #ef4444;
+  background: #fef2f2;
+}
+
 .listMeta {
   font-size: 12px;
-  color: #6b7280;
-  margin-top: -2px;
+  color: var(--text-sub);
+  margin-bottom: 4px;
+  padding-left: 4px;
 }
+
 .row {
   text-align: left;
-  background: #fff;
-  border: 1px solid #e5e7eb;
-  border-radius: 12px;
-  padding: 10px;
+  background: white;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  padding: 14px;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: var(--shadow-sm);
+  cursor: pointer;
+  position: relative;
+  overflow: hidden;
 }
+
+.row:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 12px -3px rgba(0,0,0,0.05);
+  border-color: var(--color-primary-bg);
+}
+
 .row.active {
-  border-color: #111827;
+  border-color: var(--color-primary);
+  background: #f0fdfa;
+  box-shadow: 0 0 0 2px var(--color-primary-bg);
 }
+
 .rowTop {
   display: flex;
   justify-content: space-between;
-  gap: 8px;
-  margin-bottom: 6px;
+  gap: 10px;
+  margin-bottom: 8px;
 }
+
 .rowMid {
   display: flex;
   align-items: center;
-  gap: 6px;
-  color: #6b7280;
+  gap: 8px;
+  color: var(--text-sub);
   font-size: 12px;
-  margin-bottom: 6px;
+  margin-bottom: 8px;
 }
+
 .rowPath {
   font-size: 12px;
-  color: #6b7280;
+  color: var(--text-sub);
   margin-bottom: 6px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  background: #f1f5f9;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
 }
-.rowPath.mono {
-  overflow-wrap: normal;
-}
+
 .rowBottom {
-  font-size: 12px;
-  color: #111827;
+  font-size: 13px;
+  color: var(--text-main);
   display: -webkit-box;
+  line-clamp: 2;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
+  line-height: 1.5;
 }
+
 .mono {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-  overflow-wrap: anywhere;
+  font-family: var(--font-mono);
+  font-size: 0.9em;
 }
+
 .pill {
   font-size: 11px;
-  padding: 2px 8px;
+  padding: 2px 10px;
   border-radius: 999px;
-  border: 1px solid #e5e7eb;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border: 1px solid transparent;
 }
+
 .pill.kind {
-  background: #f3f4f6;
+  background: #e2e8f0;
+  color: var(--text-sub);
 }
+
 .pill.running {
   background: #dbeafe;
-  border-color: #bfdbfe;
+  color: #1e40af;
 }
+
 .pill.succeeded {
-  background: #dcfce7;
-  border-color: #bbf7d0;
+  background: #d1fae5;
+  color: #065f46;
 }
+
 .pill.failed {
   background: #fee2e2;
-  border-color: #fecaca;
+  color: #991b1b;
 }
+
 .pill.canceled,
 .pill.interrupted,
 .pill.queued,
 .pill.blocked {
-  background: #f3f4f6;
+  background: #f1f5f9;
+  color: #64748b;
 }
+
 .score {
-  font-weight: 600;
+  font-weight: 700;
+  color: var(--color-primary);
 }
-.warn {
-  color: #b45309;
+
+.detail {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
 }
+
 .detail .meta {
   display: grid;
-  gap: 6px;
-  font-size: 12px;
-  color: #374151;
+  gap: 8px;
+  font-size: 13px;
+  background: white;
+  padding: 16px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-color);
+  margin-bottom: 16px;
+  box-shadow: var(--shadow-sm);
 }
+
 .detail .k {
   display: inline-block;
-  width: 64px;
-  color: #6b7280;
+  width: 70px;
+  color: var(--text-sub);
+  font-weight: 600;
 }
+
 .actions {
-  margin: 10px 0;
+  margin-bottom: 16px;
   display: flex;
-  gap: 8px;
+  gap: 10px;
 }
+
 .resume {
   display: grid;
-  gap: 8px;
-  margin-bottom: 10px;
+  gap: 10px;
+  margin-bottom: 16px;
 }
+
 .runs {
   display: grid;
-  gap: 8px;
-  margin-bottom: 10px;
+  gap: 10px;
+  margin-bottom: 16px;
+  flex: 0 0 auto;
 }
+
 .runsHeader {
-  font-size: 12px;
-  color: #6b7280;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-main);
 }
+
 .runList {
-  border: 1px solid #e5e7eb;
-  border-radius: 12px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
   overflow: auto;
-  padding: 6px;
-  background: #fff;
-  max-height: 220px;
+  padding: 8px;
+  background: #f8fafc;
+  max-height: 200px;
   display: flex;
   flex-direction: column;
   gap: 8px;
+  box-shadow: inset 0 2px 4px rgba(0,0,0,0.03);
 }
+
 .runRow {
-  text-align: left;
-  background: #fff;
-  border: 1px solid #e5e7eb;
-  border-radius: 12px;
+  background: white;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
   padding: 10px;
+  transition: all 0.2s;
+  cursor: pointer;
+}
+
+.runRow:hover {
+  border-color: var(--color-primary);
 }
 .runRow.active {
-  border-color: #111827;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 2px var(--color-primary-bg);
 }
-.runTop {
+
+.logs {
+  flex: 1;
   display: flex;
-  justify-content: space-between;
-  gap: 8px;
-  margin-bottom: 6px;
+  flex-direction: column;
+  min-height: 400px; /* Ensure reasonable height */
 }
-.runMid {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  color: #6b7280;
-  font-size: 12px;
-  margin-bottom: 6px;
-}
-.runBottom {
-  font-size: 12px;
-  color: #111827;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
+
 .logsHeader {
-  font-size: 12px;
-  color: #6b7280;
-  margin-bottom: 6px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-main);
+  margin-bottom: 8px;
 }
+
 .logbox {
-  border: 1px solid #e5e7eb;
-  border-radius: 10px;
-  padding: 10px;
-  background: #0b1020;
-  color: #d1d5db;
-  height: 360px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 14px;
+  background: #1e293b; /* Dark Slate Blue for logs */
+  color: #e2e8f0;
+  flex: 1;
   overflow: auto;
   font-size: 12px;
-  line-height: 1.4;
+  line-height: 1.5;
   white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  word-break: break-word;
+  font-family: var(--font-mono);
+  box-shadow: inset 0 2px 4px rgba(0,0,0,0.1);
 }
-.empty {
-  color: #6b7280;
-  font-size: 13px;
-}
+
 .secretary {
   display: grid;
-  gap: 12px;
-  height: calc(100vh - 120px);
+  gap: 20px;
+  height: auto; /* Allow auto height now that we are sticky */
+  grid-template-rows: auto 1fr auto;
 }
+
 .secretaryCards {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 8px;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
 }
+
 .secCard {
-  border: 1px solid #e5e7eb;
-  border-radius: 12px;
-  background: #f9fafb;
-  padding: 10px;
+  border: 1px solid white;
+  border-radius: var(--radius-md);
+  background: #f8fafc;
+  padding: 16px;
+  box-shadow: var(--shadow-sm);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
 }
+
 .secK {
-  font-size: 12px;
-  color: #6b7280;
+  font-size: 11px;
+  color: var(--text-sub);
+  text-transform: uppercase;
+  font-weight: 700;
+  letter-spacing: 0.05em;
 }
+
 .secV {
-  font-size: 18px;
+  font-size: 24px;
   font-weight: 800;
-  margin-top: 2px;
+  color: var(--color-primary);
+  margin-top: 6px;
 }
+
 .secSection {
   display: grid;
-  gap: 8px;
+  gap: 10px;
 }
+
 .secSectionTitle {
-  font-size: 12px;
-  color: #6b7280;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-main);
 }
+
 .secRow {
   text-align: left;
-  background: #fff;
-  border: 1px solid #e5e7eb;
-  border-radius: 12px;
-  padding: 10px;
+  background: white;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 12px;
+  transition: all 0.2s;
+  cursor: pointer;
 }
+
 .secRow:hover {
-  border-color: #d1d5db;
-  background: #f9fafb;
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
+  border-color: var(--color-primary-bg);
 }
+
 .briefing {
-  border: 1px solid #e5e7eb;
-  border-radius: 10px;
-  padding: 10px;
-  background: #f9fafb;
-  font-size: 12px;
-  color: #111827;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 14px;
+  background: white;
+  font-size: 13px;
+  color: var(--text-main);
   white-space: pre-wrap;
   overflow: auto;
-  max-height: 240px;
+  max-height: 200px;
+  line-height: 1.6;
 }
+
 .secChat {
-  border: 1px solid #e5e7eb;
-  border-radius: 12px;
-  padding: 10px;
-  background: #fff;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  padding: 16px;
+  background: #f8fafc;
 }
+
 .secChat summary {
+  font-weight: 600;
+  color: var(--color-primary);
   cursor: pointer;
-  font-size: 12px;
-  color: #374151;
 }
-.secChat .chat {
-  height: auto;
-  margin-top: 10px;
-}
-.secChat .msgs {
-  max-height: 320px;
-}
-.chat {
-  display: grid;
-  grid-template-rows: 1fr auto;
-  gap: 8px;
-  height: calc(100vh - 120px);
-}
+
 .msgs {
-  border: 1px solid #e5e7eb;
-  border-radius: 10px;
-  padding: 10px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 12px;
   overflow: auto;
-  background: #f9fafb;
-}
-.msg {
-  display: grid;
-  gap: 4px;
-  padding: 8px;
-  border-radius: 10px;
-  margin-bottom: 8px;
   background: white;
-  border: 1px solid #e5e7eb;
+  max-height: 300px;
 }
-.msg.assistant {
-  border-color: #bfdbfe;
+
+.msg {
+  padding: 10px 14px;
+  border-radius: var(--radius-md);
+  margin-bottom: 10px;
+  background: #f8fafc;
+  border: 1px solid transparent;
 }
+
+.msg.user {
+  background: var(--color-primary-bg);
+  color: #0f766e;
+}
+
 .role {
   font-size: 11px;
-  color: #6b7280;
+  color: var(--text-sub);
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.05em;
+  margin-bottom: 4px;
+  font-weight: 700;
 }
-.content {
-  font-size: 13px;
-  white-space: pre-wrap;
-}
-.input {
-  display: grid;
-  gap: 8px;
-}
+
 @media (max-width: 1100px) {
   .grid {
     grid-template-columns: 1fr;
+    gap: 16px;
   }
-  .secretary {
-    height: auto;
+  .secretaryCards {
+    grid-template-columns: repeat(4, 1fr);
   }
-  .chat {
-    height: auto;
-  }
-  .logbox {
-    height: 260px;
+  /* Disable sticky on mobile */
+  .grid > section:first-child,
+  .grid > section:last-child {
+    position: static;
+    max-height: none;
   }
 }
-</style>

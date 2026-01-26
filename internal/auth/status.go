@@ -7,7 +7,7 @@ import (
 )
 
 type FieldStatus struct {
-	Effective string `json:"effective"` // "env" | "stored" | "codex" | "none"
+	Effective string `json:"effective"` // "env" | "stored" | "codex" | "default" | "none"
 	Masked    string `json:"masked,omitempty"`
 }
 
@@ -21,8 +21,10 @@ type ClaudeStatus struct {
 }
 
 type CodexStatus struct {
-	APIKey    FieldStatus `json:"api_key"`
-	Available bool        `json:"available"`
+	APIKey           FieldStatus `json:"api_key"`
+	Model            FieldStatus `json:"model"`
+	ReasoningEffort  FieldStatus `json:"reasoning_effort"`
+	Available        bool        `json:"available"`
 }
 
 type Status struct {
@@ -37,6 +39,8 @@ func ComputeStatus(secrets Secrets) Status {
 	model := computeFieldStatusDisplay("ANTHROPIC_MODEL", secrets.AnthropicModel)
 	smallFast := computeFieldStatusDisplay("ANTHROPIC_SMALL_FAST_MODEL", secrets.AnthropicSmallFastModel)
 	openaiKey := computeCodexAuthStatus(secrets.OpenAIAPIKey)
+	codexModel := computeCodexSettingStatus(secrets.CodexModel, "gpt-5.2")
+	codexEffort := computeCodexSettingStatus(secrets.CodexReasoningEffort, "xhigh")
 
 	return Status{
 		Claude: ClaudeStatus{
@@ -48,8 +52,10 @@ func ComputeStatus(secrets Secrets) Status {
 			Available: apiKey.Effective != "none" || authToken.Effective != "none",
 		},
 		Codex: CodexStatus{
-			APIKey:    openaiKey,
-			Available: openaiKey.Effective != "none",
+			APIKey:          openaiKey,
+			Model:           codexModel,
+			ReasoningEffort: codexEffort,
+			Available:       openaiKey.Effective != "none",
 		},
 	}
 }
@@ -84,6 +90,18 @@ func TruncateDisplay(s string, max int) string {
 	}
 	// Keep the beginning; it's usually what users care about (URL prefix, model name, etc).
 	return s[:max-1] + "…"
+}
+
+func computeCodexSettingStatus(stored string, defaultValue string) FieldStatus {
+	stored = strings.TrimSpace(stored)
+	if stored != "" {
+		return FieldStatus{Effective: "stored", Masked: TruncateDisplay(stored, 96)}
+	}
+	defaultValue = strings.TrimSpace(defaultValue)
+	if defaultValue == "" {
+		return FieldStatus{Effective: "none"}
+	}
+	return FieldStatus{Effective: "default", Masked: TruncateDisplay(defaultValue, 96)}
 }
 
 func computeCodexAuthStatus(stored string) FieldStatus {

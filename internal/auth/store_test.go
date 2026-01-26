@@ -90,3 +90,27 @@ func TestComputeStatus_CodexAuth_UsesCodexHomeAuthJSON(t *testing.T) {
 		t.Fatalf("expected codex available")
 	}
 }
+
+func TestComputeStatus_CodexModel_Defaults(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("CODEX_HOME", t.TempDir())
+	st := ComputeStatus(Secrets{})
+	if st.Codex.Model.Effective != "default" || st.Codex.Model.Masked != "gpt-5.2" {
+		t.Fatalf("model=%+v, want default gpt-5.2", st.Codex.Model)
+	}
+	if st.Codex.ReasoningEffort.Effective != "default" || st.Codex.ReasoningEffort.Masked != "xhigh" {
+		t.Fatalf("effort=%+v, want default xhigh", st.Codex.ReasoningEffort)
+	}
+}
+
+func TestComputeStatus_CodexModel_UsesStored(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("CODEX_HOME", t.TempDir())
+	st := ComputeStatus(Secrets{CodexModel: "o3", CodexReasoningEffort: "high"})
+	if st.Codex.Model.Effective != "stored" || st.Codex.Model.Masked != "o3" {
+		t.Fatalf("model=%+v, want stored o3", st.Codex.Model)
+	}
+	if st.Codex.ReasoningEffort.Effective != "stored" || st.Codex.ReasoningEffort.Masked != "high" {
+		t.Fatalf("effort=%+v, want stored high", st.Codex.ReasoningEffort)
+	}
+}

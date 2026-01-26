@@ -75,7 +75,7 @@ export type ServerEvent = {
 };
 
 export type AuthFieldStatus = {
-  effective: "env" | "stored" | "none";
+  effective: "env" | "stored" | "codex" | "default" | "none";
   masked?: string;
 };
 
@@ -90,6 +90,8 @@ export type AuthStatus = {
   };
   codex: {
     api_key: AuthFieldStatus;
+    model: AuthFieldStatus;
+    reasoning_effort: AuthFieldStatus;
     available: boolean;
   };
 };
@@ -106,4 +108,6 @@ export type AuthPatch = {
   anthropic_model?: string;
   anthropic_small_fast_model?: string;
   openai_api_key?: string;
+  codex_model?: string;
+  codex_reasoning_effort?: string;
 };

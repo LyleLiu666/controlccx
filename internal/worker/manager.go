@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -86,7 +87,7 @@ func (m *Manager) run(ctx context.Context, task tasks.Task) error {
 	}
 	m.publishTaskUpdated(task.ID)
 
-	tool, err := BuildToolCommand(m.cfg, task)
+	tool, err := m.buildToolCommand(task)
 	if err != nil {
 		_, _ = m.store.AppendLog(context.Background(), task.ID, tasks.LogSystem, fmt.Sprintf("worker setup error: %v", err))
 		_ = m.store.FinishTask(context.Background(), task.ID, tasks.FinishTaskInput{
@@ -172,10 +173,89 @@ func (m *Manager) run(ctx context.Context, task tasks.Task) error {
 	return nil
 }
 
+func (m *Manager) buildToolCommand(task tasks.Task) (ToolCommand, error) {
+	tool, err := BuildToolCommand(m.cfg, task)
+	if err != nil {
+		return ToolCommand{}, err
+	}
+	if task.WorkerType == tasks.WorkerCodex {
+		tool.Args = m.withCodexDefaults(tool.Args)
+	}
+	return tool, nil
+}
+
+func (m *Manager) withCodexDefaults(args []string) []string {
+	if len(args) == 0 {
+		return args
+	}
+	if args[0] != "e" && args[0] != "exec" {
+		return args
+	}
+
+	model := "gpt-5.2"
+	effort := "xhigh"
+	if m != nil && m.auth != nil {
+		secrets := m.auth.Get()
+		if strings.TrimSpace(secrets.CodexModel) != "" {
+			model = strings.TrimSpace(secrets.CodexModel)
+		}
+		if strings.TrimSpace(secrets.CodexReasoningEffort) != "" {
+			effort = strings.TrimSpace(secrets.CodexReasoningEffort)
+		}
+	}
+
+	insert := make([]string, 0, 4)
+	if !hasAnyFlag(args, "-m", "--model") && strings.TrimSpace(model) != "" {
+		insert = append(insert, "-m", strings.TrimSpace(model))
+	}
+	if !hasConfigKey(args, "model_reasoning_effort") && strings.TrimSpace(effort) != "" {
+		insert = append(insert, "-c", fmt.Sprintf("model_reasoning_effort=%q", strings.TrimSpace(effort)))
+	}
+	if len(insert) == 0 {
+		return args
+	}
+	out := make([]string, 0, len(args)+len(insert))
+	out = append(out, args[:1]...)
+	out = append(out, insert...)
+	out = append(out, args[1:]...)
+	return out
+}
+
+func hasAnyFlag(args []string, flags ...string) bool {
+	for _, a := range args {
+		for _, f := range flags {
+			if a == f {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func hasConfigKey(args []string, key string) bool {
+	if key == "" {
+		return false
+	}
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] == "-c" || args[i] == "--config" {
+			v := strings.TrimSpace(args[i+1])
+			if strings.HasPrefix(v, key+"=") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func (m *Manager) envForWorker(workerType tasks.WorkerType) []string {
+	env, _ := m.envForWorkerWithReport(workerType)
+	return env
+}
+
+func (m *Manager) envForWorkerWithReport(workerType tasks.WorkerType) ([]string, []string) {
 	base := os.Environ()
 	if m == nil || m.auth == nil {
-		return base
+		return base, nil
 	}
 	secrets := m.auth.Get()
 
@@ -202,16 +282,22 @@ func (m *Manager) envForWorker(workerType tasks.WorkerType) []string {
 			additions["OPENAI_API_KEY"] = strings.TrimSpace(secrets.OpenAIAPIKey)
 		}
 	default:
-		return base
+		return base, nil
 	}
-	return mergeEnv(base, additions)
+	return mergeEnvWithReport(base, additions)
 }
 
 func mergeEnv(base []string, additions map[string]string) []string {
+	out, _ := mergeEnvWithReport(base, additions)
+	return out
+}
+
+func mergeEnvWithReport(base []string, additions map[string]string) ([]string, []string) {
 	out := append([]string{}, base...)
 
 	index := make(map[string]int, len(out))
 	valueEmpty := make(map[string]bool, len(out))
+	applied := make([]string, 0, len(additions))
 
 	for i, kv := range out {
 		j := strings.IndexByte(kv, '=')
@@ -243,15 +329,18 @@ func mergeEnv(base []string, additions map[string]string) []string {
 			if valueEmpty[check] {
 				out[i] = k + "=" + v
 				valueEmpty[check] = false
+				applied = append(applied, k)
 			}
 			continue
 		}
 		index[check] = len(out)
 		valueEmpty[check] = false
+		applied = append(applied, k)
 		out = append(out, k+"="+v)
 	}
 
-	return out
+	sort.Strings(applied)
+	return out, applied
 }
 
 func (m *Manager) consumeStdout(task tasks.Task, stdout io.Reader, sidMu *sync.Mutex, sid *string) {

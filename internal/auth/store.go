@@ -18,6 +18,8 @@ type Secrets struct {
 	AnthropicModel     string `json:"anthropic_model,omitempty"`
 	AnthropicSmallFastModel string `json:"anthropic_small_fast_model,omitempty"`
 	OpenAIAPIKey       string `json:"openai_api_key,omitempty"`
+	CodexModel         string `json:"codex_model,omitempty"`
+	CodexReasoningEffort string `json:"codex_reasoning_effort,omitempty"`
 }
 
 type Patch struct {
@@ -27,6 +29,8 @@ type Patch struct {
 	AnthropicModel     *string `json:"anthropic_model,omitempty"`
 	AnthropicSmallFastModel *string `json:"anthropic_small_fast_model,omitempty"`
 	OpenAIAPIKey       *string `json:"openai_api_key,omitempty"`
+	CodexModel         *string `json:"codex_model,omitempty"`
+	CodexReasoningEffort *string `json:"codex_reasoning_effort,omitempty"`
 }
 
 type Store struct {
@@ -78,6 +82,8 @@ func (s *Store) ApplyPatch(p Patch) (Secrets, error) {
 	apply(&s.secrets.AnthropicModel, p.AnthropicModel)
 	apply(&s.secrets.AnthropicSmallFastModel, p.AnthropicSmallFastModel)
 	apply(&s.secrets.OpenAIAPIKey, p.OpenAIAPIKey)
+	apply(&s.secrets.CodexModel, p.CodexModel)
+	apply(&s.secrets.CodexReasoningEffort, p.CodexReasoningEffort)
 
 	if err := s.saveLocked(); err != nil {
 		return Secrets{}, err
