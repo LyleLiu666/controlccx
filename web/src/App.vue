@@ -165,6 +165,10 @@ const dirLoading = ref(false);
 const dirFilter = ref("");
 const dirError = ref("");
 
+// Cockpit UI State
+const sidebarExpanded = ref(false);
+const secretaryOpen = ref(false);
+
 const filteredDirEntries = computed(() => {
   const needle = dirFilter.value.trim().toLowerCase();
   if (!needle) return dirEntries.value;
@@ -815,9 +819,16 @@ const secretaryBriefing = computed(() => {
 
     <div v-if="errorBanner" class="banner">{{ errorBanner }}</div>
 
-    <div class="grid">
-      <section class="panel">
-        <h2>Sessions</h2>
+    <div class="cockpit">
+      <aside class="missionControl" :class="{ collapsed: !sidebarExpanded }">
+        <div class="mcHeader">
+          <div class="mcTitle">CCX Cockpit</div>
+          <button class="mcToggle" @click="sidebarExpanded = !sidebarExpanded">
+            {{ sidebarExpanded ? "◀" : "▶" }}
+          </button>
+        </div>
+        <div class="mcBody">
+          <div v-if="sidebarExpanded" class="form">
         <div class="form">
           <label>
             Worker
@@ -932,125 +943,68 @@ const secretaryBriefing = computed(() => {
             {{ sessionsAll.length }} sessions
           </div>
 
-          <button
-            v-for="s in filteredSessions"
-            :key="s.key"
-            class="row"
-            :class="{ active: s.key === selectedSessionKey }"
-            @click="onSelectTask(s.latest.id)"
-          >
-            <div class="rowTop">
-              <span class="mono" :title="s.session_id || s.latest.id">{{
-                (s.session_id || s.latest.id).slice(0, 8)
-              }}</span>
-              <span class="pill" :class="s.status">{{ s.status }}</span>
-            </div>
-            <div class="rowMid">
-              <span class="pill kind">{{ s.worker_type }}</span>
-              <span class="score">score {{ s.score }}</span>
-              <span class="pill kind">{{ s.runs.length }} runs</span>
-              <span v-if="s.warning" class="warn">⚠</span>
-            </div>
-            <div class="rowPath mono" :title="s.workdir">{{ s.workdir }}</div>
-            <div class="rowBottom">{{ s.latest.prompt }}</div>
-          </button>
+          </div> <!-- Close v-if=sidebarExpanded -->
+
+          <div class="list">
+            <div
+              v-for="s in filteredSessions"
+              :key="s.key"
+              class="taskItem"
+              :class="{ active: s.key === selectedSessionKey }"
+              @click="onSelectTask(s.latest.id)"
+              :title="s.latest.prompt"
+            >
+              <div class="taskIcon">
+                 <span v-if="s.worker_type === 'claude-code'">🤖</span>
+                 <span v-else-if="s.worker_type === 'exec'">💻</span>
+                 <span v-else>🧠</span>
+                 <div class="statusDot" :class="s.status"></div>
+              </div>
+              <div class="taskInfo">
+                 <div class="taskTitle">{{ s.latest.prompt || s.session_id }}</div>
+                 <div class="taskMeta">
+                   <span>{{ (s.session_id || s.latest.id).slice(0, 8) }}</span>
+                   <span>·</span>
+                   <span :class="s.status">{{ s.status }}</span>
+                 </div>
+              </div>
+             </div>
+          </div>
         </div>
-      </section>
+      </aside>
 
-      <section class="panel">
-        <h2>Session Detail</h2>
-        <div v-if="!selectedSession" class="empty">Select a session</div>
-        <div v-else class="detail">
-          <div class="meta">
-            <div>
-              <span class="k">Session</span>
-              <span class="mono">{{
-                selectedSession.session_id || "(pending)"
-              }}</span>
+      <main class="viewport">
+        <div class="viewHeader">
+            <div class="hudStat">
+               <span class="hudLabel">SESSION</span>
+               <span class="hudValue">{{ selectedSession?.session_id?.slice(0,8) || "N/A" }}</span>
             </div>
-            <div>
-              <span class="k">Worker</span> {{ selectedSession.worker_type }}
+             <div class="hudStat">
+               <span class="hudLabel">STATUS</span>
+               <span class="hudValue" :style="{ color: selectedSession?.status === 'running' ? '#22c55e' : '#94a3b8' }">
+                 {{ selectedSession?.status || "IDLE" }}
+               </span>
             </div>
-            <div>
-              <span class="k">Workdir</span>
-              <span class="mono">{{ selectedSession.workdir }}</span>
+            <div class="hudStat" v-if="selectedSession?.score">
+               <span class="hudLabel">SCORE</span>
+               <span class="hudValue">{{ selectedSession.score }}</span>
             </div>
-            <div>
-              <span class="k">Status</span> {{ selectedSession.status }}
-            </div>
-            <div>
-              <span class="k">Score</span> {{ selectedSession.score }} (stderr
-              {{ selectedSession.stderr_count }})
-            </div>
-            <div>
-              <span class="k">Runs</span> {{ selectedSession.runs.length }}
-            </div>
-            <div v-if="selectedSession.warning">
-              <span class="k">Warning</span> {{ selectedSession.warning }}
-            </div>
-            <div v-if="selectedTask?.error">
-              <span class="k">Last Err</span> {{ selectedTask.error }}
-            </div>
-          </div>
+             <div style="flex:1"></div>
+             <!-- Actions will be injected here or below -->
+        </div>
 
-          <div class="actions">
-            <button
-              @click="onCancelTask"
-              :disabled="selectedTask?.status !== 'running'"
-            >
-              Cancel Run
-            </button>
-            <button
-              type="button"
-              @click="setWorkspace(selectedSession.workdir)"
-            >
-              Focus Workdir
-            </button>
-          </div>
+        <div v-if="!selectedSession" class="empty" style="padding: 40px; text-align:center; color: var(--text-sub);">
+           No active session. Select a task from the sidebar or start a new one.
+        </div>
+        <div v-else class="viewBody">
+          <!-- Hidden meta block refactored into HUD -->
+          <div style="display:none">
 
-          <div class="resume">
-            <label class="full">
-              Resume Prompt
-              <textarea
-                v-model="resumePrompt"
-                rows="3"
-                placeholder="Continue with..."
-              ></textarea>
-            </label>
-            <button
-              @click="onResumeTask"
-              :disabled="!resumePrompt.trim() || !selectedSession.session_id"
-            >
-              Resume Session
-            </button>
-          </div>
 
-          <div class="runs">
-            <div class="runsHeader">Runs</div>
-            <div class="runList">
-              <button
-                v-for="r in selectedSession.runs.slice().reverse()"
-                :key="r.id"
-                type="button"
-                class="runRow"
-                :class="{ active: r.id === selectedTaskId }"
-                @click="onSelectTask(r.id)"
-              >
-                <div class="runTop">
-                  <span class="mono">{{ r.id.slice(0, 8) }}</span>
-                  <span class="pill" :class="r.status">{{ r.status }}</span>
-                </div>
-                <div class="runMid">
-                  <span class="pill kind">{{ r.mode }}</span>
-                  <span class="score">score {{ r.score }}</span>
-                  <span class="mono">{{ r.created_at }}</span>
-                </div>
-                <div class="runBottom">{{ r.prompt }}</div>
-              </button>
-            </div>
-          </div>
+          </div> <!-- Close hidden meta -->
 
-          <div class="logs">
+          <div class="terminalArea">
+
             <div class="outputTabs">
               <button
                 type="button"
@@ -1131,12 +1085,26 @@ const secretaryBriefing = computed(() => {
               </div>
             </div>
           </div>
+          <div class="controlDeck" style="padding: 12px; border-top: 1px solid var(--border-color); background: rgba(0,0,0,0.2); display: flex; gap: 10px;">
+             <button @click="onCancelTask" :disabled="selectedTask?.status !== 'running'" style="background: rgba(239, 68, 68, 0.1); color: #ef4444; border-color: rgba(239, 68, 68, 0.3);">
+                Stop
+             </button>
+             <div style="flex:1"></div>
+             <button @click="setWorkspace(selectedSession.workdir)">Focus Workdir</button>
+          </div>
         </div>
-      </section>
+      </main>
 
-      <section class="panel">
-        <h2>Secretary</h2>
-        <div class="secretary">
+      <div class="secretaryOrb" @click="secretaryOpen = !secretaryOpen">
+         <span style="font-size: 24px;">🤖</span>
+      </div>
+      <div class="secretaryPanel" :class="{ hidden: !secretaryOpen }">
+         <div class="mcHeader">
+            <div class="mcTitle">Secretary</div>
+            <button class="iconBtn" @click="secretaryOpen = false">✕</button>
+         </div>
+         <div class="mcBody">
+            <div class="secretary">
           <div class="secretaryCards">
             <div class="secCard">
               <div class="secK">Sessions</div>
@@ -1247,7 +1215,8 @@ const secretaryBriefing = computed(() => {
             </div>
           </details>
         </div>
-      </section>
+      </div>
+    </div>
     </div>
 
     <div
@@ -1576,1154 +1545,362 @@ const secretaryBriefing = computed(() => {
   </div>
 </template>
 
+
 <style scoped>
 :global(:root) {
-  --bg-app: #f1f5f9; /* Slate 100 - slightly darker than before for contrast */
-  --bg-panel: #ffffff;
-  --bg-subtle: #f8fafc;
-  --color-primary: #0d9488; /* Teal 600 */
-  --color-primary-hover: #0f766e; /* Teal 700 */
-  --color-primary-bg: #ccfbf1; /* Teal 100 */
-  --text-main: #334155; /* Slate 700 */
-  --text-sub: #64748b; /* Slate 500 */
-  --border-color: #e2e8f0;
+  --bg-app: #0f172a; /* Deep Space */
+  --bg-panel: #1e293b; /* Slate 800 */
+  --bg-subtle: #334155; /* Slate 700 */
+  --color-primary: #38bdf8; /* Sky 400 */
+  --color-primary-hover: #0ea5e9; /* Sky 500 */
+  --color-primary-bg: rgba(56, 189, 248, 0.1);
+  --text-main: #f8fafc; /* Slate 50 */
+  --text-sub: #94a3b8; /* Slate 400 */
+  --border-color: #334155;
   --radius-sm: 8px;
   --radius-md: 12px;
   --radius-lg: 16px;
-  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
-  --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.06), 0 2px 4px -2px rgb(0 0 0 / 0.06);
-  --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.05), 0 4px 6px -4px rgb(0 0 0 / 0.05);
-  --font-main: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.3);
+  --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.3), 0 2px 4px -2px rgb(0 0 0 / 0.3);
+  --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.3), 0 4px 6px -4px rgb(0 0 0 / 0.3);
+  --font-main: "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
 }
 
 .page {
   font-family: var(--font-main);
   color: var(--text-main);
-  background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
-  min-height: 100vh;
-  box-sizing: border-box;
-  padding-bottom: 20px;
+  background: var(--bg-app);
+  height: 100vh;
+  width: 100vw;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
-.header {
+/* --- Cockpit Layout --- */
+
+.cockpit {
   display: flex;
+  flex: 1;
+  min-height: 0; /* Important for nested flex scroll */
+  position: relative;
+}
+
+/* Mission Control (Sidebar) */
+.missionControl {
+  width: 320px;
+  background: #111827;
+  border-right: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  z-index: 20;
+  flex-shrink: 0;
+}
+
+.missionControl.collapsed {
+  width: 64px;
+}
+
+.mcHeader {
+  height: 60px;
+  display: flex;
+  align-items: center;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--border-color);
   justify-content: space-between;
-  align-items: center;
-  padding: 16px 32px;
-  background: rgba(255, 255, 255, 0.9);
-  backdrop-filter: blur(12px);
-  position: sticky;
-  top: 0;
-  z-index: 50;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.5);
-  box-shadow: var(--shadow-sm);
-  margin-bottom: 24px;
 }
 
-.headerRight {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.title {
+.mcTitle {
   font-weight: 800;
-  font-size: 20px;
-  background: linear-gradient(135deg, #0d9488 0%, #0ea5e9 100%);
+  font-size: 18px;
+  background: linear-gradient(135deg, #38bdf8 0%, #818cf8 100%);
   background-clip: text;
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
-  letter-spacing: -0.02em;
+  white-space: nowrap;
+  overflow: hidden;
 }
 
-.sub {
+.mcToggle {
   color: var(--text-sub);
-  font-size: 12px;
-  font-weight: 500;
-  background: var(--bg-app);
-  padding: 4px 8px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 8px;
   border-radius: var(--radius-sm);
 }
-
-.settingsBtn {
-  border: none;
-  background: transparent;
-  color: var(--text-sub);
-  font-weight: 600;
-  font-size: 13px;
-  cursor: pointer;
-  transition: color 0.2s;
-}
-.settingsBtn:hover {
-  color: var(--color-primary);
-}
-
-.banner {
-  margin: 0 24px 20px;
-  background: #fef2f2;
-  border: 1px solid #fee2e2;
-  color: #ef4444;
-  padding: 12px 16px;
-  border-radius: var(--radius-md);
-  font-size: 13px;
-  font-weight: 500;
-  box-shadow: var(--shadow-sm);
-}
-
-.grid {
-  display: grid;
-  grid-template-columns:
-    minmax(340px, 1fr)
-    minmax(560px, 2fr)
-    minmax(340px, 1fr);
-  gap: 24px;
-  padding: 0 clamp(16px, 2vw, 32px);
-  width: 100%;
-  box-sizing: border-box;
-  max-width: 3200px;
-  margin: 0 auto;
-  align-items: start; /* Important for sticky to work */
-}
-
-.panel {
-  background: var(--bg-panel);
-  border: 1px solid white;
-  border-radius: var(--radius-lg);
-  padding: 0; /* Removing padding from parent, moved to children */
-  min-height: 200px;
-  min-width: 0;
-  box-shadow: var(--shadow-md);
-  display: flex;
-  flex-direction: column;
-  transition: box-shadow 0.3s ease;
-  overflow: hidden; /* For header radius */
-}
-
-/* Sticky sidebars */
-.grid > section:first-child,
-.grid > section:last-child {
-  position: sticky;
-  top: 90px; /* Header height + spacing */
-  max-height: calc(100vh - 110px);
-  overflow-y: auto;
-}
-
-.panel:hover {
-  box-shadow: var(--shadow-lg);
-}
-
-h2 {
-  margin: 0;
-  padding: 16px 20px;
-  font-size: 15px;
-  font-weight: 700;
-  color: white;
-  background: linear-gradient(135deg, #0d9488 0%, #0891b2 100%);
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  text-shadow: 0 1px 2px rgba(0,0,0,0.1);
-}
-
-.form, .list, .detail, .secretary {
-  padding: 20px;
-}
-
-.form {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 16px;
-  margin-bottom: 20px;
-}
-
-.form > button.primary {
-  grid-column: 1 / -1;
-  padding: 12px 16px;
-  font-size: 14px;
-  font-weight: 700;
-}
-
-.form label {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  font-size: 13px;
-  font-weight: 600;
+.mcToggle:hover {
   color: var(--text-main);
+  background: rgba(255,255,255,0.05);
 }
 
-.form .full {
-  grid-column: 1 / -1;
-}
-
-.authHint {
-  grid-column: 1 / -1;
-  display: flex;
-  gap: 12px;
-  align-items: center;
-  background: #fff7ed;
-  border: 1px solid #ffedd5;
-  color: #c2410c;
-  padding: 12px;
-  border-radius: var(--radius-md);
-  font-size: 13px;
-}
-
-.authHint .text {
+.mcBody {
   flex: 1;
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-
-input,
-select,
-textarea {
-  border: 1px solid var(--border-color);
-  background-color: var(--bg-subtle);
-  border-radius: var(--radius-md);
-  padding: 10px 12px;
-  font-size: 14px;
-  outline: none;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease;
-  color: var(--text-main);
-  font-family: var(--font-main);
-  width: 100%;
-  box-sizing: border-box;
-}
-
-input:focus,
-select:focus,
-textarea:focus {
-  border-color: var(--color-primary);
-  background: #fff;
-  box-shadow: 0 0 0 3px var(--color-primary-bg);
-}
-
-textarea {
-  resize: vertical; /* Only allow vertical resize */
-  line-height: 1.6;
-  min-height: 92px;
-  max-height: 60vh;
-  background-color: #fff;
-  padding: 12px 14px;
-  font-size: 14px;
-  color: var(--text-main);
-  font-family: var(--font-main);
-  outline: none;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease;
-  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.04);
-  overflow: auto;
+  overflow-y: auto;
   overflow-x: hidden;
-  overscroll-behavior: contain;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
-textarea:hover {
-  border-color: #94a3b8;
-  background-color: #fff;
+/* Viewport (Center Stage) */
+.viewport {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  background: radial-gradient(circle at top right, #1e293b 0%, #0f172a 40%);
+  position: relative;
 }
 
-textarea:focus {
-  border-color: var(--color-primary);
-  background-color: #fff;
-  box-shadow: 0 0 0 3px var(--color-primary-bg), inset 0 1px 2px rgba(0, 0, 0, 0.04);
+.viewHeader {
+  height: 60px;
+  display: flex;
+  align-items: center;
+  padding: 0 24px;
+  border-bottom: 1px solid var(--border-color);
+  gap: 16px;
+  background: rgba(15, 23, 42, 0.8);
+  backdrop-filter: blur(8px);
 }
 
-textarea::placeholder {
-  color: #94a3b8;
-  font-style: italic;
+.viewBody {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: 0; /* Full bleed */
+  min-height: 0;
+  position: relative;
 }
 
-button {
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-md);
-  padding: 8px 14px;
-  background: white;
-  color: var(--text-main);
-  font-weight: 500;
-  font-size: 13px;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-button:hover:not(:disabled) {
-  background: #f8fafc;
-  border-color: #cbd5e1;
-  color: var(--color-primary);
-}
-
-button:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-  background: #f1f5f9;
-}
-
-button.primary {
-  background: var(--color-primary);
-  color: white;
-  border-color: var(--color-primary);
-  box-shadow: 0 2px 4px rgba(13, 148, 136, 0.2);
-}
-
-button.primary:disabled {
-  background: #94a3b8;
-  border-color: #94a3b8;
-  opacity: 1;
-  box-shadow: none;
-}
-
-button.primary:hover:not(:disabled) {
-  background: var(--color-primary-hover);
-  border-color: var(--color-primary-hover);
-  transform: translateY(-1px);
-  box-shadow: 0 4px 6px rgba(13, 148, 136, 0.3);
-  color: white;
-}
-
-button.primary:active:not(:disabled) {
-  transform: translateY(0);
-}
-
-.workdirRow {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 10px;
-}
-
-.modalOverlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(240, 253, 250, 0.6);
-  backdrop-filter: blur(4px);
+/* Secretary (Floating Overlay) */
+.secretaryOrb {
+  position: absolute;
+  bottom: 24px;
+  right: 24px;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #38bdf8 0%, #6366f1 100%);
+  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.4);
   display: grid;
   place-items: center;
-  padding: 24px;
-  z-index: 999;
-}
-
-.modal, .settingsModal {
-  background: white;
-  border-radius: 24px;
-  border: 1px solid #fff;
-  box-shadow: 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1);
-  overflow: hidden;
-  animation: popIn 0.2s ease-out;
-}
-
-.modal {
-  width: min(860px, 95vw);
-  height: min(600px, 90vh);
-  display: grid;
-  grid-template-rows: auto 1fr auto;
-}
-
-.settingsModal {
-  width: min(760px, 95vw);
-  height: min(600px, 90vh);
-}
-
-@keyframes popIn {
-  from { opacity: 0; transform: scale(0.95); }
-  to { opacity: 1; transform: scale(1); }
-}
-
-.modalHeader {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 16px 20px;
-  border-bottom: 1px solid var(--border-color);
-  background: #f8fafc;
-}
-
-.modalTitle {
-  font-weight: 700;
-  font-size: 16px;
-  color: var(--text-main);
-}
-
-.iconBtn {
-  border: none;
-  background: transparent;
-  padding: 8px;
-  color: var(--text-sub);
-  border-radius: 50%;
-}
-.iconBtn:hover {
-  background: #e2e8f0;
-  color: var(--text-main);
-}
-
-.modalBody, .settingsBody, .dirModalBody {
-  padding: 20px;
-  min-height: 0;
-}
-
-.settingsModal .modalBody {
-  overflow: auto;
-}
-
-.dirModalBody {
-  display: grid;
-  grid-template-rows: auto auto auto auto 1fr;
-  gap: 16px;
-}
-
-.settingsBody {
-  display: grid;
-  gap: 20px;
-}
-
-.settingsSection {
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-lg);
-  padding: 16px;
-  display: grid;
-  gap: 12px;
-  background: #fcfcfc;
-}
-
-.settingsSectionTitle {
-  font-weight: 700;
-  font-size: 14px;
-  color: var(--color-primary);
-}
-
-.kv {
-  display: grid;
-  grid-template-columns: 180px 1fr;
-  gap: 12px;
-  align-items: center;
-  font-size: 13px;
-}
-
-.secretRow {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 10px;
-}
-
-.roots {
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-
-.rootBtn {
-  font-size: 13px;
-  padding: 6px 14px;
-  border-radius: 999px;
-  background: white;
-  border: 1px solid var(--border-color);
-  color: var(--text-main);
-}
-
-.rootBtn:hover {
-  border-color: var(--color-primary);
-  color: var(--color-primary);
-  background: var(--color-primary-bg);
-}
-
-.pathRow {
-  display: grid;
-  grid-template-columns: auto 1fr auto;
-  gap: 12px;
-  align-items: center;
-}
-
-.path {
-  padding: 10px 14px;
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-md);
-  background: #f8fafc;
-  color: var(--text-sub);
-  font-family: var(--font-mono);
-  font-size: 13px;
-}
-
-.dirList {
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-md);
-  overflow: auto;
-  padding: 8px;
-  background: #fff;
-  max-height: 100%;
-}
-
-.dirItem {
-  width: 100%;
-  display: grid;
-  grid-template-columns: 24px 1fr;
-  gap: 10px;
-  align-items: center;
-  text-align: left;
-  border: 1px solid transparent;
-  background: transparent;
-  padding: 10px 12px;
-  border-radius: var(--radius-md);
-  font-size: 14px;
-  color: var(--text-main);
-}
-
-.dirItem:hover {
-  background: var(--bg-subtle);
-  color: var(--color-primary);
-}
-
-.list {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  flex: 1;
-  min-height: 0;
-  overflow: hidden;
-  padding: 20px; /* match panel content padding */
-}
-
-.workspaceBar {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding-bottom: 8px;
-}
-
-.workspaceLeft {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex: 1;
-}
-
-.workspaceTitle {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text-sub);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-
-.pinnedWorkspaces {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-bottom: 8px;
-}
-
-.pinnedItem {
-  display: flex;
-  align-items: stretch;
-  border: 1px solid var(--border-color);
-  border-radius: 999px;
-  overflow: hidden;
-  background: white;
-  box-shadow: var(--shadow-sm);
-  transition: all 0.2s;
-}
-
-.pinnedItem:hover {
-  box-shadow: var(--shadow-md);
-  border-color: var(--color-primary);
-}
-
-.pinnedBtn {
-  border: none;
-  background: transparent;
-  padding: 6px 14px;
   cursor: pointer;
-  max-width: 220px;
-  text-align: left;
-  font-size: 12px;
-}
-
-.pinnedBtn.active {
-  background: var(--color-primary);
+  z-index: 50;
+  transition: transform 0.2s, box-shadow 0.2s;
+  font-size: 24px;
   color: white;
 }
 
-.pinnedX {
-  border: none;
-  border-left: 1px solid var(--border-color);
-  background: transparent;
-  padding: 6px 10px;
-  cursor: pointer;
-  color: var(--text-sub);
-}
-.pinnedX:hover {
-  color: #ef4444;
-  background: #fef2f2;
+.secretaryOrb:hover {
+  transform: scale(1.05);
+  box-shadow: 0 8px 20px rgba(99, 102, 241, 0.5);
 }
 
-.listMeta {
-  font-size: 12px;
-  color: var(--text-sub);
-  margin-bottom: 4px;
-  padding-left: 4px;
-}
-
-.row {
-  text-align: left;
-  background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
-  border: 1px solid #e2e8f0;
-  border-radius: var(--radius-md);
-  padding: 14px;
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-  box-shadow: 0 2px 4px rgba(0,0,0,0.03);
-  cursor: pointer;
-  position: relative;
-  overflow: hidden;
-}
-
-.row::before {
-  content: '';
+.secretaryPanel {
   position: absolute;
-  left: 0;
-  top: 0;
-  bottom: 0;
-  width: 3px;
-  background: transparent;
-  transition: background 0.2s;
-}
-
-.row:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 8px 16px -4px rgba(0,0,0,0.1);
-  border-color: var(--color-primary-bg);
-}
-
-.row:hover::before {
-  background: linear-gradient(180deg, #0d9488 0%, #0891b2 100%);
-}
-
-.row.active {
-  border-color: var(--color-primary);
-  background: linear-gradient(135deg, #f0fdfa 0%, #e0f2fe 100%);
-  box-shadow: 0 0 0 3px rgba(13, 148, 136, 0.15);
-}
-
-.row.active::before {
-  background: linear-gradient(180deg, #0d9488 0%, #0891b2 100%);
-}
-
-.rowTop {
+  top: 60px; /* Below header */
+  bottom: 24px;
+  right: 24px;
+  width: 400px;
+  background: rgba(30, 41, 59, 0.95);
+  backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: var(--radius-lg);
+  box-shadow: -8px 0 32px rgba(0, 0, 0, 0.5);
+  z-index: 40;
   display: flex;
-  justify-content: space-between;
-  gap: 10px;
-  margin-bottom: 8px;
+  flex-direction: column;
+  transform: translateX(0);
+  transition: transform 0.3s ease, opacity 0.3s ease;
 }
 
-.rowMid {
+.secretaryPanel.hidden {
+  transform: translateX(20px);
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* --- Components --- */
+
+/* Task Items in Sidebar */
+.taskItem {
   display: flex;
   align-items: center;
-  gap: 8px;
-  color: var(--text-sub);
-  font-size: 12px;
-  margin-bottom: 8px;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: all 0.2s;
+  background: rgba(255,255,255,0.02);
 }
 
-.rowPath {
-  font-size: 12px;
-  color: var(--text-sub);
-  margin-bottom: 6px;
+.taskItem:hover {
+  background: rgba(255,255,255,0.05);
+}
+
+.taskItem.active {
+  background: rgba(56, 189, 248, 0.1);
+  border-color: rgba(56, 189, 248, 0.3);
+}
+
+.taskIcon {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: #334155;
+  display: grid;
+  place-items: center;
+  font-size: 16px;
+  flex-shrink: 0;
+  position: relative;
+}
+
+.statusDot {
+  position: absolute;
+  bottom: -2px;
+  right: -2px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 2px solid #111827;
+}
+
+.statusDot.running { background: #22c55e; box-shadow: 0 0 8px #22c55e; }
+.statusDot.failed { background: #ef4444; }
+.statusDot.succeeded { background: #3b82f6; }
+.statusDot.queued { background: #eab308; }
+
+.taskInfo {
+  flex: 1;
+  min-width: 0;
+}
+
+.taskTitle {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-main);
+  white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
-  background: #f1f5f9;
-  padding: 4px 8px;
-  border-radius: var(--radius-sm);
 }
 
-.rowBottom {
-  font-size: 13px;
-  color: var(--text-main);
-  display: -webkit-box;
-  line-clamp: 2;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-  line-height: 1.5;
-}
-
-.mono {
-  font-family: var(--font-mono);
-  font-size: 0.9em;
-}
-
-.pill {
+.taskMeta {
   font-size: 11px;
-  padding: 2px 10px;
-  border-radius: 999px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  border: 1px solid transparent;
-}
-
-.pill.kind {
-  background: #e2e8f0;
   color: var(--text-sub);
+  display: flex;
+  gap: 8px;
 }
 
-.pill.running {
-  background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
-  color: white;
-  animation: pulse 2s infinite;
+/* Collapsed Sidebar overrides */
+.missionControl.collapsed .taskInfo,
+.missionControl.collapsed .mcTitle {
+  display: none;
 }
 
-@keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.8; }
+.missionControl.collapsed .mcHeader {
+  justify-content: center;
+  padding: 0;
 }
 
-.pill.succeeded {
-  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
-  color: white;
+.missionControl.collapsed .taskItem {
+  justify-content: center;
+  padding: 10px 0;
 }
 
-.pill.failed {
-  background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
-  color: white;
-}
-
-.pill.canceled,
-.pill.interrupted {
-  background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
-  color: white;
-}
-
-.pill.queued {
-  background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%);
-  color: white;
-}
-
-.pill.blocked {
-  background: linear-gradient(135deg, #f97316 0%, #ea580c 100%);
-  color: white;
-}
-
-.score {
-  font-weight: 700;
-  color: var(--color-primary);
-}
-
-.detail {
+/* HUD / Viewport Header */
+.hudStat {
   display: flex;
   flex-direction: column;
-  height: 100%;
 }
-
-.detail .meta {
-  display: grid;
-  gap: 8px;
-  font-size: 13px;
-  background: white;
-  padding: 16px;
-  border-radius: var(--radius-md);
-  border: 1px solid var(--border-color);
-  margin-bottom: 16px;
-  box-shadow: var(--shadow-sm);
-}
-
-.detail .k {
-  display: inline-block;
-  width: 70px;
+.hudLabel {
+  font-size: 10px;
   color: var(--text-sub);
-  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
 }
-
-.actions {
-  margin-bottom: 16px;
-  display: flex;
-  gap: 10px;
-}
-
-.resume {
-  display: grid;
-  gap: 10px;
-  margin-bottom: 16px;
-}
-
-.runs {
-  display: grid;
-  gap: 10px;
-  margin-bottom: 16px;
-  flex: 0 0 auto;
-}
-
-.runsHeader {
+.hudValue {
   font-size: 14px;
   font-weight: 700;
   color: var(--text-main);
-}
-
-.runList {
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-md);
-  overflow: auto;
-  padding: 8px;
-  background: #f8fafc;
-  max-height: 200px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  box-shadow: inset 0 2px 4px rgba(0,0,0,0.03);
-}
-
-.runRow {
-  background: white;
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-md);
-  padding: 10px;
-  transition: all 0.2s;
-  cursor: pointer;
-}
-
-.runRow:hover {
-  border-color: var(--color-primary);
-}
-.runRow.active {
-  border-color: var(--color-primary);
-  box-shadow: 0 0 0 2px var(--color-primary-bg);
-}
-
-.logs {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  min-height: 400px; /* Ensure reasonable height */
-}
-
-.outputTabs {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 8px;
-  flex: 0 0 auto;
-}
-
-.tabBtn {
-  padding: 6px 12px;
-  border-radius: 999px;
-}
-
-.tabBtn.active {
-  border-color: var(--color-primary);
-  background: var(--color-primary-bg);
-  color: var(--color-primary);
-}
-
-.tabSpacer {
-  flex: 1;
-}
-
-.resultPanel, .logsPanel {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.resultBox {
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-md);
-  padding: 16px;
-  background: white;
-  color: var(--text-main);
-  flex: 1;
-  overflow: auto;
-  font-size: 13px;
-  line-height: 1.7;
-  white-space: pre-wrap;
-  font-family: var(--font-main);
-  box-shadow: inset 0 2px 4px rgba(0,0,0,0.03);
-}
-
-.logControls {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
-  flex: 0 0 auto;
-}
-
-.logFilters {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-
-.logFilter {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  color: var(--text-sub);
-  user-select: none;
-}
-
-.logMeta {
-  font-size: 12px;
-  color: var(--text-sub);
-}
-
-.logbox {
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-md);
-  padding: 10px 12px;
-  background: #0f172a;
-  color: #e2e8f0;
-  flex: 1;
-  min-height: 0;
-  overflow: auto;
-  font-size: 12px;
-  line-height: 1.5;
   font-family: var(--font-mono);
-  box-shadow: inset 0 2px 4px rgba(0,0,0,0.1);
 }
 
-.logLine {
-  display: grid;
-  grid-template-columns: 64px 74px 1fr;
-  gap: 10px;
-  padding: 6px 0;
-  border-bottom: 1px solid rgba(148, 163, 184, 0.14);
-  align-items: start;
-}
-
-.logLine:last-child {
-  border-bottom: none;
-}
-
-.logTime {
-  font-size: 11px;
-  color: #94a3b8;
-}
-
-.logTag {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  height: 18px;
-  padding: 0 8px;
-  border-radius: 999px;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.2px;
-  border: 1px solid rgba(226, 232, 240, 0.16);
-  text-transform: lowercase;
-}
-
-.logTag.stdout {
-  background: rgba(56, 189, 248, 0.15);
-  border-color: rgba(56, 189, 248, 0.25);
-  color: #7dd3fc;
-}
-
-.logTag.stderr {
-  background: rgba(248, 113, 113, 0.15);
-  border-color: rgba(248, 113, 113, 0.25);
-  color: #fca5a5;
-}
-
-.logTag.system {
-  background: rgba(148, 163, 184, 0.15);
-  border-color: rgba(148, 163, 184, 0.25);
-  color: #cbd5e1;
-}
-
-.logTag.assistant {
-  background: rgba(34, 197, 94, 0.15);
-  border-color: rgba(34, 197, 94, 0.25);
-  color: #86efac;
-}
-
-.logMsg {
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-.secretary {
-  display: grid;
-  gap: 20px;
-  height: auto; /* Allow auto height now that we are sticky */
-  grid-template-rows: auto 1fr auto;
-}
-
-.secretaryCards {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 12px;
-}
-
-.secCard {
-  border: none;
-  border-radius: var(--radius-md);
-  background: linear-gradient(135deg, #f0fdfa 0%, #e0f2fe 100%);
-  padding: 16px;
-  box-shadow: 0 2px 8px rgba(13, 148, 136, 0.1);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  text-align: center;
-  transition: transform 0.2s, box-shadow 0.2s;
-}
-
-.secCard:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(13, 148, 136, 0.15);
-}
-
-.secK {
-  font-size: 11px;
-  color: var(--text-sub);
-  text-transform: uppercase;
-  font-weight: 700;
-  letter-spacing: 0.05em;
-}
-
-.secV {
-  font-size: 24px;
-  font-weight: 800;
-  color: var(--color-primary);
-  margin-top: 6px;
-}
-
-.secSection {
-  display: grid;
-  gap: 10px;
-}
-
-.secSectionTitle {
+/* Terminal / Output Area */
+.terminalArea {
+  flex: 1;
+  background: #0b0f19;
+  border-top: 1px solid var(--border-color);
+  padding: 20px;
+  overflow-y: auto;
+  font-family: var(--font-mono);
   font-size: 13px;
-  font-weight: 700;
-  color: var(--text-main);
-}
-
-.secRow {
-  text-align: left;
-  background: white;
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-md);
-  padding: 12px;
-  transition: all 0.2s;
-  cursor: pointer;
-}
-
-.secRow:hover {
-  transform: translateY(-2px);
-  box-shadow: var(--shadow-md);
-  border-color: var(--color-primary-bg);
-}
-
-.briefing {
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-md);
-  padding: 14px;
-  background: white;
-  font-size: 13px;
-  color: var(--text-main);
-  white-space: pre-wrap;
-  overflow: auto;
-  max-height: 200px;
   line-height: 1.6;
 }
 
-.secChat {
+/* Modals & Inputs (Dark Theme Override) */
+.modal, .settingsModal {
+  background: var(--bg-panel);
   border: 1px solid var(--border-color);
-  border-radius: var(--radius-lg);
-  padding: 16px;
-  background: #f8fafc;
+  color: var(--text-main);
+}
+.modalHeader {
+  background: rgba(0,0,0,0.2);
+  border-bottom-color: var(--border-color);
+}
+.modalTitle { color: var(--text-main); }
+.modalBody { color: var(--text-main); }
+input, select, textarea {
+  background: #0f172a;
+  border-color: var(--border-color);
+  color: var(--text-main);
+}
+input:focus, textarea:focus {
+  border-color: var(--color-primary);
+  background: #0f172a;
+  box-shadow: 0 0 0 2px var(--color-primary-bg);
+}
+button {
+  background: var(--bg-subtle);
+  border-color: var(--border-color);
+  color: var(--text-main);
+}
+button:hover:not(:disabled) {
+  background: #475569;
+  border-color: #64748b;
+  color: white;
+}
+.logbox, .resultBox {
+  background: #0b0f19 !important;
+  color: #e2e8f0;
+  border: none;
 }
 
-.secChat summary {
-  font-weight: 600;
-  color: var(--color-primary);
-  cursor: pointer;
-}
+.logTag.stdout { background: rgba(56, 189, 248, 0.1); color: #7dd3fc; border: none; }
+.logTag.stderr { background: rgba(248, 113, 113, 0.1); color: #fca5a5; border: none; }
+.logTag.system { background: rgba(148, 163, 184, 0.1); color: #cbd5e1; border: none; }
+.logTag.assistant { background: rgba(34, 197, 94, 0.1); color: #86efac; border: none; }
+.logLine { border-bottom: 1px solid rgba(255,255,255,0.05); }
 
-.chatControls {
-  display: flex;
-  gap: 12px;
-  align-items: flex-end;
-  margin: 12px 0;
-  flex-wrap: wrap;
-}
+/* Secretary Chat in Dark Theme */
+.chatMsg.assistant { background: rgba(255,255,255,0.05); }
+.chatMsg.user { background: rgba(56, 189, 248, 0.15); border-left: 3px solid var(--color-primary); }
 
-.chatControls label {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  font-size: 12px;
-  color: var(--text-sub);
-}
-
-.chatControls select,
-.chatControls input[type="number"] {
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-md);
-  padding: 8px 10px;
-  background: white;
-  font-size: 13px;
-}
-
-.chatControls label.chatToggle {
-  flex-direction: row;
-  gap: 8px;
-  align-items: center;
-  padding-bottom: 8px;
-}
-
-.msgs {
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-md);
-  padding: 12px;
-  overflow: auto;
-  background: white;
-  max-height: 300px;
-}
-
-.msg {
-  padding: 10px 14px;
-  border-radius: var(--radius-md);
-  margin-bottom: 10px;
-  background: #f8fafc;
-  border: 1px solid transparent;
-}
-
-.msg.user {
-  background: var(--color-primary-bg);
-  color: #0f766e;
-}
-
-.msg.streaming {
-  border-style: dashed;
-  opacity: 0.9;
-}
-
-.role {
-  font-size: 11px;
-  color: var(--text-sub);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  margin-bottom: 4px;
-  font-weight: 700;
-}
-
-@media (max-width: 1300px) {
-  .grid {
-    grid-template-columns: 1fr;
-    gap: 16px;
-  }
-  .secretaryCards {
-    grid-template-columns: repeat(4, 1fr);
-  }
-  /* Disable sticky on mobile */
-  .grid > section:first-child,
-  .grid > section:last-child {
-    position: static;
-    max-height: none;
-  }
-}
+/* Scrollbars */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #475569; border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: #64748b; }
 </style>
+
+/* Restored Form Styles */
+.form { display: flex; flex-direction: column; gap: 12px; padding: 10px; }
+.form label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text-sub); }
+.workdirRow { display: flex; gap: 8px; }
+.authHint { background: rgba(255,100,0,0.1); color: #fb923c; padding: 8px; border-radius: 8px; font-size: 12px; }
+.full { width: 100%; }
+

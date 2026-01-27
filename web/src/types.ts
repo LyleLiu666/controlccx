@@ -7,7 +7,7 @@ export type TaskStatus =
   | "interrupted"
   | "blocked";
 
-export type WorkerType = "claude-code" | "codex";
+export type WorkerType = "claude-code" | "codex" | "exec";
 
 export type Task = {
   id: string;
