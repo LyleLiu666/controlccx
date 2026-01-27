@@ -198,6 +198,38 @@ function escapeHtml(s: string): string {
     .replaceAll("'", "&#39;");
 }
 
+function normalizeFilePathRef(raw: string): string {
+  const t = (raw ?? "").trim();
+  if (!t) return "";
+
+  // Support common "path#L12" formats.
+  const hashIdx = t.indexOf("#");
+  if (hashIdx > 0) {
+    const base = t.slice(0, hashIdx).trim();
+    if (base) return base;
+  }
+
+  // Support "path:line", "path:line-col", "path:line:col" formats.
+  // Avoid clobbering Windows drive "C:\..." by requiring a colon after the drive.
+  if (/^[a-z]:[\\/]/i.test(t)) {
+    const lastColon = t.lastIndexOf(":");
+    if (lastColon <= 1) return t;
+    const suffix = t.slice(lastColon + 1);
+    if (/^\d+(-\d+)?$/.test(suffix)) return t.slice(0, lastColon).trim();
+    if (/^\d+:\d+$/.test(suffix)) return t.slice(0, lastColon).trim();
+    return t;
+  }
+
+  const lastColon = t.lastIndexOf(":");
+  if (lastColon > 0) {
+    const suffix = t.slice(lastColon + 1);
+    if (/^\d+(-\d+)?$/.test(suffix)) return t.slice(0, lastColon).trim();
+    if (/^\d+:\d+$/.test(suffix)) return t.slice(0, lastColon).trim();
+  }
+
+  return t;
+}
+
 function looksLikeFilePath(s: string): boolean {
   const t = (s ?? "").trim();
   if (!t) return false;
@@ -246,14 +278,10 @@ md.renderer.rules.fence = (tokens, idx, options, env, self) => {
     // Mermaid will consume plain text. Keep it escaped to avoid HTML injection.
     return `<div class="mermaid">${escapeHtml(token.content)}</div>`;
   }
+  // No syntax highlighting: keep dependencies slim and avoid runtime issues.
   const lang = info.split(/\s+/)[0];
-  if (lang && hljs.getLanguage(lang)) {
-    const highlighted = hljs.highlight(token.content, {
-      language: lang,
-      ignoreIllegals: true,
-    }).value;
-    return `<pre class="hljs"><code class="hljs language-${escapeHtml(lang)}">${highlighted}</code></pre>`;
-  }
+  const cls = lang ? `language-${escapeHtml(lang)}` : "";
+  return `<pre><code class="${cls}">${escapeHtml(token.content)}</code></pre>`;
   if (defaultFence) return defaultFence(tokens, idx, options, env, self);
   return self.renderToken(tokens, idx, options);
 };
@@ -450,7 +478,7 @@ async function onResultMarkdownClick(e: MouseEvent) {
   e.preventDefault();
   e.stopPropagation();
   const base = selectedTask.value?.workdir ?? ".";
-  await openFilePreview(path, base);
+  await openFilePreview(normalizeFilePathRef(path), base);
 }
 
 async function onFilePreviewMarkdownClick(e: MouseEvent) {
@@ -460,7 +488,7 @@ async function onFilePreviewMarkdownClick(e: MouseEvent) {
   e.stopPropagation();
   const current = filePreviewResolvedPath.value || filePreviewRawPath.value;
   const base = dirnameForBase(current);
-  await openFilePreview(path, base);
+  await openFilePreview(normalizeFilePathRef(path), base);
 }
 
 const dirPickerOpen = ref(false);
