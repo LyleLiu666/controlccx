@@ -10,8 +10,9 @@ import (
 )
 
 type Config struct {
-	Server ServerConfig `yaml:"server"`
-	Paths  PathsConfig  `yaml:"paths"`
+	Server  ServerConfig  `yaml:"server"`
+	Paths   PathsConfig   `yaml:"paths"`
+	Workers WorkersConfig `yaml:"workers"`
 }
 
 type ServerConfig struct {
@@ -19,13 +20,19 @@ type ServerConfig struct {
 }
 
 type PathsConfig struct {
-	Claude   string `yaml:"claude"`
-	Codex    string `yaml:"codex"`
-	GitBash  string `yaml:"git_bash"`
-	DataDir  string `yaml:"-"`
-	DBPath   string `yaml:"-"`
-	LogsDir  string `yaml:"-"`
+	Claude    string `yaml:"claude"`
+	Codex     string `yaml:"codex"`
+	GitBash   string `yaml:"git_bash"`
+	DataDir   string `yaml:"-"`
+	DBPath    string `yaml:"-"`
+	LogsDir   string `yaml:"-"`
 	StaticDir string `yaml:"-"`
+}
+
+type WorkersConfig struct {
+	// UnsafeAutomation enables "dangerously-*" flags for unattended runs.
+	// Default is false to avoid autonomous approvals/actions.
+	UnsafeAutomation bool `yaml:"unsafe_automation"`
 }
 
 func DefaultDataDir() (string, error) {
@@ -43,6 +50,9 @@ func Default() Config {
 			Claude:  "claude",
 			Codex:   "codex",
 			GitBash: defaultGitBashPath(),
+		},
+		Workers: WorkersConfig{
+			UnsafeAutomation: false,
 		},
 	}
 }
@@ -85,4 +95,3 @@ func defaultGitBashPath() string {
 	// Best-effort common location; can be overridden by config.
 	return `C:\Program Files\Git\bin\bash.exe`
 }
-

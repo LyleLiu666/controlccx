@@ -4280,11 +4280,11 @@ button.primary:active:not(:disabled) {
 .list {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
   flex: 1;
   min-height: 0;
   overflow: hidden;
-  padding: 20px; /* match panel content padding */
+  padding: 16px; /* match panel content padding (compact) */
 }
 
 .workspaceBar {
@@ -4380,7 +4380,7 @@ button.primary:active:not(:disabled) {
   background: linear-gradient(135deg, var(--bg-panel) 0%, var(--bg-subtle) 100%);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
-  padding: 14px;
+  padding: 10px 12px;
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   box-shadow: 0 2px 4px rgba(0,0,0,0.03);
   cursor: pointer;
@@ -4423,7 +4423,7 @@ button.primary:active:not(:disabled) {
   display: flex;
   justify-content: space-between;
   gap: 10px;
-  margin-bottom: 8px;
+  margin-bottom: 6px;
 }
 
 .rowMid {
@@ -4431,31 +4431,31 @@ button.primary:active:not(:disabled) {
   align-items: center;
   gap: 8px;
   color: var(--text-sub);
-  font-size: 12px;
-  margin-bottom: 8px;
+  font-size: 11px;
+  margin-bottom: 6px;
 }
 
 .rowPath {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--text-sub);
-  margin-bottom: 6px;
+  margin-bottom: 4px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  background: var(--bg-subtle);
-  padding: 4px 8px;
-  border-radius: var(--radius-sm);
+  background: rgba(15, 23, 42, 0.06);
+  padding: 2px 8px;
+  border-radius: 999px;
 }
 
 .rowBottom {
-  font-size: 13px;
+  font-size: 12px;
   color: var(--text-main);
   display: -webkit-box;
-  line-clamp: 2;
-  -webkit-line-clamp: 2;
+  line-clamp: 1;
+  -webkit-line-clamp: 1;
   -webkit-box-orient: vertical;
   overflow: hidden;
-  line-height: 1.5;
+  line-height: 1.35;
 }
 
 .mono {

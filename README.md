@@ -43,6 +43,10 @@ paths:
   codex: /path/to/codex
   # Windows only (Claude Code runs via Git Bash for consistency)
   git_bash: C:\Program Files\Git\bin\bash.exe
+workers:
+  # Default: false. When true, enables unattended "dangerously-*" flags
+  # (e.g. Claude Code skip permissions, Codex bypass approvals/sandbox).
+  unsafe_automation: false
 ```
 
 ## Worker authentication
