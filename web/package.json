@@ -9,6 +9,8 @@
     "preview": "vite preview --port 5173 --strictPort"
   },
   "dependencies": {
+    "markdown-it": "^14.1.0",
+    "mermaid": "^11.12.2",
     "vue": "^3.5.0"
   },
   "devDependencies": {
@@ -17,4 +19,3 @@
     "vite": "^6.0.0"
   }
 }
-

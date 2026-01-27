@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import MarkdownIt from "markdown-it";
+import mermaid from "mermaid";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import type {
   AuthInfo,
@@ -91,10 +93,13 @@ const sessionSearch = ref("");
 const secretaryOpen = ref(false);
 const secretaryView = ref<"chat" | "overview" | "feed">("chat");
 const feedScope = ref<"current" | "all">("current");
+const feedMode = ref<"milestones" | "all">("milestones");
 const feedPaused = ref(false);
 const feedWrap = ref(true);
 const feedBoxEl = ref<HTMLDivElement | null>(null);
 const feedNowMs = ref(Date.now());
+const feedCoachDismissed = ref(false);
+const feedCoachOpen = ref(false);
 
 function formatLogTime(ts: string): string {
   const s = ts.trim();
@@ -134,9 +139,47 @@ const selectedResultText = computed(() => {
   return out || err;
 });
 
+function escapeHtml(s: string): string {
+  return (s ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+const md = new MarkdownIt({
+  html: false,
+  linkify: true,
+  typographer: true,
+  breaks: true,
+});
+
+const defaultFence = md.renderer.rules.fence;
+md.renderer.rules.fence = (tokens, idx, options, env, self) => {
+  const token = tokens[idx];
+  const info = (token.info ?? "").trim().toLowerCase();
+  if (info === "mermaid") {
+    // Mermaid will consume plain text. Keep it escaped to avoid HTML injection.
+    return `<div class="mermaid">${escapeHtml(token.content)}</div>`;
+  }
+  if (defaultFence) return defaultFence(tokens, idx, options, env, self);
+  return self.renderToken(tokens, idx, options);
+};
+
+const selectedResultHtml = computed(() => {
+  const text = selectedResultText.value ?? "";
+  if (!text.trim()) return "";
+  try {
+    return md.render(text);
+  } catch {
+    return `<pre>${escapeHtml(text)}</pre>`;
+  }
+});
+
 const filteredLogs = computed(() => {
   const q = logSearch.value.trim().toLowerCase();
-  return selectedLogs.value.filter((l) => {
+  const list = selectedLogs.value.filter((l) => {
     if (l.stream === "assistant" && !logShowAssistant.value) return false;
     if (l.stream === "stdout" && !logShowStdout.value) return false;
     if (l.stream === "stderr" && !logShowStderr.value) return false;
@@ -147,6 +190,8 @@ const filteredLogs = computed(() => {
       (l.message ?? "").toLowerCase().includes(q)
     );
   });
+  // Newest first for easier scanning.
+  return list.slice().reverse();
 });
 
 async function copySelectedResult() {
@@ -200,6 +245,8 @@ const LS_KEY_SECRETARY_VIEW = "controlccx.secretary.view.v1";
 const LS_KEY_THEME = "controlccx.theme.v1";
 const LS_KEY_FEED_SCOPE = "controlccx.feed.scope.v1";
 const LS_KEY_FEED_WRAP = "controlccx.feed.wrap.v1";
+const LS_KEY_FEED_MODE = "controlccx.feed.mode.v1";
+const LS_KEY_COACH_FEED = "controlccx.coach.feed.v1";
 
 function getLocalStorage(): Storage | null {
   try {
@@ -330,6 +377,8 @@ const workspaceFilter = ref<string>(loadString(LS_KEY_WORKSPACE_FILTER));
 
   const fs = loadString(LS_KEY_FEED_SCOPE).trim();
   if (fs === "current" || fs === "all") feedScope.value = fs;
+  const fm = loadString(LS_KEY_FEED_MODE).trim();
+  if (fm === "milestones" || fm === "all") feedMode.value = fm;
   feedWrap.value = loadBool(LS_KEY_FEED_WRAP, true);
 
   const t = loadString(LS_KEY_THEME).trim();
@@ -342,6 +391,8 @@ const workspaceFilter = ref<string>(loadString(LS_KEY_WORKSPACE_FILTER));
       window.matchMedia("(prefers-color-scheme: dark)").matches;
     applyTheme(prefersDark ? "dark" : "light");
   }
+
+  feedCoachDismissed.value = loadBool(LS_KEY_COACH_FEED, false);
 }
 
 watch(pinnedWorkspaces, (v) => saveStringArray(LS_KEY_PINNED_WORKSPACES, v), {
@@ -358,12 +409,19 @@ watch(secretaryView, (v) => saveString(LS_KEY_SECRETARY_VIEW, v));
 watch(theme, (v) => saveString(LS_KEY_THEME, v));
 watch(feedScope, (v) => saveString(LS_KEY_FEED_SCOPE, v));
 watch(feedWrap, (v) => saveBool(LS_KEY_FEED_WRAP, v));
+watch(feedMode, (v) => saveString(LS_KEY_FEED_MODE, v));
+watch(feedCoachDismissed, (v) => saveBool(LS_KEY_COACH_FEED, v));
+
+function desiredOutputTabForTask(t: Task | null): "result" | "logs" {
+  if (!t) return "result";
+  if (t.status === "running" || t.status === "queued") return "logs";
+  return "result";
+}
 
 watch(selectedTaskId, () => {
   const t = selectedTask.value;
   if (!t) return;
-  const isLLM = t.worker_type === "claude-code" || t.worker_type === "codex";
-  outputTab.value = isLLM ? "result" : "logs";
+  outputTab.value = desiredOutputTabForTask(t);
   logShowAssistant.value = true;
   logShowStdout.value = true;
   logShowStderr.value = true;
@@ -371,6 +429,19 @@ watch(selectedTaskId, () => {
   logSearch.value = "";
   resumeExpanded.value = false;
 });
+
+watch(
+  () => selectedTask.value?.status ?? "",
+  (next, prev) => {
+    if (!next) return;
+    if (next === prev) return;
+    const t = selectedTask.value;
+    if (!t) return;
+    const desired = desiredOutputTabForTask(t);
+    // Auto switch only when it would help: running->logs, finished->result.
+    if (outputTab.value !== desired) outputTab.value = desired;
+  },
+);
 
 type SessionGroup = {
   key: string;
@@ -481,6 +552,18 @@ function toggleSecretary() {
 
 function closeSecretary() {
   secretaryOpen.value = false;
+}
+
+function openFeed() {
+  feedCoachOpen.value = false;
+  feedCoachDismissed.value = true;
+  secretaryOpen.value = true;
+  secretaryView.value = "feed";
+}
+
+function dismissFeedCoach() {
+  feedCoachDismissed.value = true;
+  feedCoachOpen.value = false;
 }
 
 function toggleTheme() {
@@ -868,6 +951,8 @@ const secretaryCounts = computed(() => {
   return out;
 });
 
+const anyRunning = computed(() => secretaryCounts.value.running > 0);
+
 const needsAttentionSessions = computed(() => {
   return sessionsAll.value
     .filter(
@@ -915,7 +1000,43 @@ type FeedItem = {
   message: string;
 };
 
-const feedItems = computed<FeedItem[]>(() => {
+function isMilestoneMessage(stream: LogEntry["stream"], message: string): boolean {
+  const msg = (message ?? "").trim();
+  if (!msg) return false;
+  const lower = msg.toLowerCase();
+
+  if (stream === "assistant") return true;
+
+  if (stream === "system") {
+    if (lower.startsWith("run.start")) return true;
+    if (lower.startsWith("run.finish")) return true;
+    if (lower.includes("error") || lower.includes("panic") || lower.includes("failed"))
+      return true;
+    if (lower.includes("skipped overlong") || lower.includes("read error"))
+      return true;
+    return false;
+  }
+
+  // stderr is noisy; keep only obvious problems.
+  if (stream === "stderr") {
+    if (lower.includes("error") || lower.includes("panic") || lower.includes("failed"))
+      return true;
+    return false;
+  }
+
+  // stdout is usually too chatty for milestones.
+  return false;
+}
+
+function summarizeForFeed(stream: LogEntry["stream"], message: string): string {
+  const msg = (message ?? "").trimEnd();
+  if (!msg) return "";
+  const max = stream === "assistant" ? 280 : 220;
+  if (msg.length <= max) return msg;
+  return msg.slice(0, max).trimEnd() + "…";
+}
+
+const feedItemsAll = computed<FeedItem[]>(() => {
   const scope = feedScope.value;
   const byTask: Array<{ taskId: string; logs: LogEntry[] }> = [];
 
@@ -958,14 +1079,23 @@ const feedItems = computed<FeedItem[]>(() => {
   return out.length > max ? out.slice(out.length - max) : out;
 });
 
-const feedLastTimeMs = computed(() => {
-  const list = feedItems.value;
+const feedItems = computed<FeedItem[]>(() => {
+  if (feedMode.value === "all") return feedItemsAll.value;
+  const out = feedItemsAll.value.filter((f) =>
+    isMilestoneMessage(f.stream, f.message),
+  );
+  return out.map((f) => ({ ...f, message: summarizeForFeed(f.stream, f.message) }));
+});
+
+const feedLastTimeMsAll = computed(() => {
+  const list = feedItemsAll.value;
   if (list.length === 0) return 0;
   return list[list.length - 1].time_ms;
 });
 
 const feedIdleSeconds = computed(() => {
-  const last = feedLastTimeMs.value;
+  // Idle should consider any output, not only milestones.
+  const last = feedLastTimeMsAll.value;
   if (!last) return 0;
   const s = Math.floor((feedNowMs.value - last) / 1000);
   return s > 0 ? s : 0;
@@ -1030,6 +1160,43 @@ watch(
   { immediate: false },
 );
 
+function applyMermaidTheme() {
+  try {
+    mermaid.initialize({
+      startOnLoad: false,
+      securityLevel: "strict",
+      theme: theme.value === "dark" ? "dark" : "default",
+    });
+  } catch {
+    // ignore
+  }
+}
+
+async function renderMermaidIfNeeded() {
+  if (outputTab.value !== "result") return;
+  const html = selectedResultHtml.value;
+  if (!html.includes("mermaid")) return;
+  await nextTick();
+  try {
+    const root = document.querySelector(".resultBox");
+    if (!root) return;
+    const nodes = Array.from(root.querySelectorAll<HTMLElement>(".mermaid"));
+    if (nodes.length === 0) return;
+    await mermaid.run({ nodes });
+  } catch {
+    // ignore mermaid parse errors
+  }
+}
+
+watch(
+  [theme, outputTab, selectedResultHtml],
+  async () => {
+    applyMermaidTheme();
+    await renderMermaidIfNeeded();
+  },
+  { immediate: true },
+);
+
 watch(
   [secretaryOpen, secretaryView, feedScope],
   async ([open, view]) => {
@@ -1072,6 +1239,26 @@ watch(
   },
   { immediate: true },
 );
+
+let feedCoachTimer: number | null = null;
+watch(
+  [anyRunning, feedCoachDismissed, secretaryOpen],
+  ([running, dismissed, open]) => {
+    if (dismissed) return;
+    if (open) {
+      feedCoachOpen.value = false;
+      return;
+    }
+    if (!running) return;
+
+    feedCoachOpen.value = true;
+    if (feedCoachTimer != null) window.clearTimeout(feedCoachTimer);
+    feedCoachTimer = window.setTimeout(() => {
+      if (!feedCoachDismissed.value) feedCoachOpen.value = false;
+    }, 12_000);
+  },
+  { immediate: true },
+);
 </script>
 
 <template>
@@ -1085,6 +1272,15 @@ watch(
         </div>
         <button type="button" class="themeBtn" @click="toggleTheme">
           {{ theme === "dark" ? "Day" : "Night" }}
+        </button>
+        <button
+          type="button"
+          class="liveBtn"
+          @click="openFeed"
+          :title="anyRunning ? 'Open Live Feed (running)' : 'Open Live Feed'"
+        >
+          <span v-if="anyRunning" class="liveDot" aria-hidden="true">●</span>
+          Live
         </button>
         <button type="button" class="primary" @click="openNewRun">
           New Run
@@ -1411,7 +1607,11 @@ watch(
                     : "No result yet."
                 }}
               </div>
-              <pre v-else class="resultBox">{{ selectedResultText }}</pre>
+              <div
+                v-else
+                class="resultBox markdown"
+                v-html="selectedResultHtml"
+              ></div>
             </div>
 
             <div v-else class="logsPanel">
@@ -1475,12 +1675,28 @@ watch(
       }}</span>
     </button>
 
+    <div v-if="feedCoachOpen" class="feedCoach" role="note">
+      <div class="feedCoachText">
+        Live Feed available · press <span class="mono">S</span> or click
+        <span class="mono">Live</span>
+      </div>
+      <div class="feedCoachActions">
+        <button type="button" class="primary" @click="openFeed">Open</button>
+        <button type="button" @click="dismissFeedCoach">✕</button>
+      </div>
+    </div>
+
     <div
       v-if="secretaryOpen"
       class="secDrawerOverlay"
       @click.self="closeSecretary"
     >
-      <aside class="secDrawer" role="dialog" aria-modal="true">
+      <aside
+        class="secDrawer"
+        :class="{ wide: secretaryView === 'feed' }"
+        role="dialog"
+        aria-modal="true"
+      >
         <div class="secDrawerHeader">
           <div class="secDrawerTitle">Secretary</div>
           <div class="secTabs" role="tablist" aria-label="Secretary tabs">
@@ -1541,6 +1757,13 @@ watch(
                     <option value="all">All</option>
                   </select>
                 </label>
+                <label class="feedLabel">
+                  View
+                  <select v-model="feedMode">
+                    <option value="milestones">Milestones</option>
+                    <option value="all">All Logs</option>
+                  </select>
+                </label>
                 <label class="feedToggle">
                   <input type="checkbox" v-model="feedWrap" />
                   Wrap
@@ -1550,6 +1773,13 @@ watch(
                 </button>
               </div>
               <div class="feedRight">
+                <span
+                  v-if="feedMode === 'milestones'"
+                  class="feedHint"
+                  title="Milestones show system run.start/run.finish, assistant output, and error-like lines."
+                >
+                  Milestones
+                </span>
                 <span
                   v-if="selectedTask?.status === 'running' && feedIdleSeconds >= 10"
                   class="feedIdle"
@@ -2253,6 +2483,33 @@ watch(
   background: var(--bg-subtle);
 }
 
+.liveBtn {
+  border: 1px solid var(--border-color);
+  background: var(--bg-panel);
+  color: var(--text-sub);
+  font-weight: 800;
+  font-size: 12px;
+  border-radius: 999px;
+  padding: 6px 12px;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.liveBtn:hover {
+  color: var(--color-primary);
+  border-color: rgba(45, 212, 191, 0.35);
+  background: var(--bg-subtle);
+}
+
+.liveDot {
+  font-size: 10px;
+  line-height: 1;
+  color: var(--color-primary);
+}
+
 .banner {
   margin: 0 24px 20px;
   background: #fef2f2;
@@ -2291,6 +2548,7 @@ watch(
   flex-direction: column;
   transition: box-shadow 0.3s ease;
   overflow: hidden; /* For header radius */
+  container-type: inline-size;
 }
 
 /* Sticky sidebars */
@@ -2597,6 +2855,37 @@ button.primary:active:not(:disabled) {
   grid-template-rows: auto 1fr;
 }
 
+.secDrawer.wide {
+  width: min(560px, calc(100vw - 32px));
+}
+
+.feedCoach {
+  position: fixed;
+  right: 88px;
+  bottom: 28px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-color);
+  box-shadow: var(--shadow-lg);
+  border-radius: 14px;
+  padding: 10px 12px;
+  display: grid;
+  gap: 10px;
+  z-index: 260;
+  max-width: min(360px, calc(100vw - 120px));
+}
+
+.feedCoachText {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+.feedCoachActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
 .secDrawerHeader {
   display: flex;
   align-items: center;
@@ -2742,6 +3031,16 @@ button.primary:active:not(:disabled) {
   border-radius: 999px;
 }
 
+.feedHint {
+  font-size: 12px;
+  font-weight: 900;
+  color: var(--text-sub);
+  background: var(--bg-subtle);
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  padding: 6px 10px;
+  border-radius: 999px;
+}
+
 .feedBox {
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
@@ -2800,6 +3099,55 @@ button.primary:active:not(:disabled) {
   white-space: pre;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* Narrow Sessions panel handling (container query) */
+@container (max-width: 420px) {
+  .workspaceBar {
+    flex-wrap: wrap;
+    align-items: stretch;
+  }
+
+  .workspaceLeft {
+    flex: 1 1 100%;
+  }
+
+  .workspaceTitle {
+    display: none;
+  }
+
+  .workspaceLeft select {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .workspaceBar button {
+    flex: 1 1 auto;
+    padding-left: 10px;
+    padding-right: 10px;
+    white-space: nowrap;
+  }
+
+  .pinnedWorkspaces {
+    flex-direction: column;
+  }
+
+  .pinnedItem {
+    width: 100%;
+    flex: 1 1 100%;
+  }
+
+  .pinnedBtn {
+    max-width: none;
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .pinnedX {
+    width: 44px;
+    padding-left: 0;
+    padding-right: 0;
+  }
 }
 
 .modalOverlay {
@@ -3059,6 +3407,14 @@ button.primary:active:not(:disabled) {
 .pinnedBtn.active {
   background: var(--color-primary);
   color: white;
+}
+
+.pinnedBtn .mono {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .pinnedX {
@@ -3495,6 +3851,94 @@ button.primary:active:not(:disabled) {
   box-shadow: inset 0 2px 4px rgba(0,0,0,0.03);
 }
 
+.resultBox.markdown {
+  white-space: normal;
+}
+
+.resultBox.markdown :deep(p) {
+  margin: 0 0 10px;
+}
+
+.resultBox.markdown :deep(h1),
+.resultBox.markdown :deep(h2),
+.resultBox.markdown :deep(h3) {
+  margin: 14px 0 10px;
+  line-height: 1.25;
+}
+
+.resultBox.markdown :deep(h1) { font-size: 20px; }
+.resultBox.markdown :deep(h2) { font-size: 17px; }
+.resultBox.markdown :deep(h3) { font-size: 15px; }
+
+.resultBox.markdown :deep(pre) {
+  margin: 10px 0;
+  padding: 12px;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  overflow: auto;
+}
+
+.resultBox.markdown :deep(code) {
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.resultBox.markdown :deep(p code),
+.resultBox.markdown :deep(li code) {
+  background: var(--bg-subtle);
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  padding: 1px 6px;
+  border-radius: 8px;
+}
+
+.resultBox.markdown :deep(a) {
+  color: var(--color-primary);
+  text-decoration: none;
+}
+
+.resultBox.markdown :deep(a:hover) {
+  text-decoration: underline;
+}
+
+.resultBox.markdown :deep(table) {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 10px 0;
+  font-size: 13px;
+}
+
+.resultBox.markdown :deep(th),
+.resultBox.markdown :deep(td) {
+  border: 1px solid var(--border-color);
+  padding: 8px 10px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.resultBox.markdown :deep(th) {
+  background: var(--bg-subtle);
+  font-weight: 800;
+}
+
+.resultBox.markdown :deep(blockquote) {
+  margin: 10px 0;
+  padding: 10px 12px;
+  border-left: 3px solid var(--color-primary);
+  background: var(--bg-subtle);
+  color: var(--text-main);
+  border-radius: 10px;
+}
+
+.resultBox.markdown :deep(.mermaid) {
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 12px;
+  overflow: auto;
+  margin: 10px 0;
+}
+
 .logControls {
   display: flex;
   align-items: center;
@@ -3795,6 +4239,17 @@ button.primary:active:not(:disabled) {
     bottom: 0;
     width: 100vw;
     border-radius: 0;
+  }
+
+  .secDrawer.wide {
+    width: 100vw;
+  }
+
+  .feedCoach {
+    right: 16px;
+    left: 16px;
+    bottom: 84px;
+    max-width: none;
   }
 }
 </style>
