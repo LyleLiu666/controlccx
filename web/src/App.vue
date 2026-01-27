@@ -1531,6 +1531,12 @@ button.primary {
   box-shadow: 0 2px 4px rgba(13, 148, 136, 0.2);
 }
 
+button.primary:disabled {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+  opacity: 0.5;
+}
+
 button.primary:hover:not(:disabled) {
   background: var(--color-primary-hover);
   border-color: var(--color-primary-hover);
