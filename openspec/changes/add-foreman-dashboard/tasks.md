@@ -11,6 +11,7 @@
 - [ ] 2.3 Add “Copy logs” + “Download logs” actions
 - [ ] 2.4 Add “Replay run” shortcut and “Resume session” shortcut (guard rails + confirmation)
 - [ ] 2.5 Improve discoverability for session switching and workspace filtering
+- [ ] 2.6 Support optional display names for pinned workspaces (rename)
 
 ## 3. Secretary
 - [ ] 3.1 Add attention queue actions (navigate, resume, cancel)
@@ -20,4 +21,3 @@
 - [ ] 4.1 Unit tests for invocation persistence and redaction rules
 - [ ] 4.2 API tests for log query and export
 - [ ] 4.3 UI smoke test for trace/log panels (minimal)
-

@@ -18,6 +18,9 @@ if [[ ! -d node_modules || ! -d web/node_modules ]]; then
   pnpm install
 fi
 
+# Clean frontend dist to ensure fresh build
+rm -rf web/dist
+
 echo "Starting ControlCCX (production-like)..."
 echo "URL: http://127.0.0.1:5174"
 pnpm start -- "$@"

@@ -14,6 +14,11 @@ The UI needs to scale from “single run” to “many concurrent sessions” wh
   - Introducing a full plugin framework
 
 ## Decisions
+- Decision: Workspaces are “path + optional display name”, kept minimal.
+  - Why: Names improve navigation for many folders, but we avoid introducing a full workspace registry.
+  - Approach:
+    - “Recent” workspaces are derived from task workdirs (path-only).
+    - “Pinned” workspaces store `{path, name?}` and support rename/unpin.
 - Decision: Persist structured run invocation metadata.
   - Why: Text-only logs are hard to query and brittle to parse; a trace view should be reliable and searchable.
   - Shape (tentative):
@@ -23,6 +28,8 @@ The UI needs to scale from “single run” to “many concurrent sessions” wh
 - Decision: Add server-side log query primitives.
   - Why: Client-side filtering becomes slow/incomplete with long-running sessions.
   - Approach: Extend log list API with optional filters (streams, query substring, time/id ranges) and an export route.
+- Decision: Log search is substring-only in v1.
+  - Why: Keeps UI/backend simple and predictable; regex can be introduced later if needed.
 - Decision: “Replay” is a clone operation, not a byte-perfect process re-run.
   - Why: CLIs evolve and local tool paths/config differ; the stable re-run inputs are:
     - worker type, workdir, prompt, and (optionally) session_id for resume mode.
@@ -40,7 +47,4 @@ The UI needs to scale from “single run” to “many concurrent sessions” wh
 3. Update APIs + UI to prefer structured invocation data; fall back to parsed logs if missing.
 
 ## Open Questions
-- Should “workspace” be a saved catalog entity (name + path), or remain “path-only” with pinning?
-- Should log search be substring-only (fast) or regex (powerful but riskier)?
 - What is the minimal replay UX that feels safe (confirm dialog, diff view of parameters, etc.)?
-

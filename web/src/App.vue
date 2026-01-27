@@ -1496,8 +1496,68 @@ textarea:focus {
 }
 
 textarea {
-  resize: vertical;
-  line-height: 1.5;
+  resize: vertical; /* Only allow vertical resize - more efficient */
+  line-height: 1.6;
+  min-height: 80px;
+  max-height: 400px;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+  font-size: 14px;
+  color: var(--text-main);
+  font-family: var(--font-main);
+  outline: none;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.04);
+  overflow-y: auto;
+  overflow-x: hidden;
+  /* Smooth scrolling for better performance */
+  scroll-behavior: smooth;
+  overscroll-behavior: contain;
+}
+
+textarea:hover {
+  border-color: #94a3b8;
+  background: linear-gradient(180deg, #ffffff 0%, #f1f5f9 100%);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.06), 0 2px 4px rgba(0, 0, 0, 0.04);
+}
+
+textarea:focus {
+  border-color: var(--color-primary);
+  background: #fff;
+  box-shadow: 0 0 0 3px var(--color-primary-bg), inset 0 1px 2px rgba(0, 0, 0, 0.02);
+}
+
+/* Custom resize handle styling */
+textarea::-webkit-resizer {
+  background: linear-gradient(135deg, transparent 60%, var(--color-primary) 60%, var(--color-primary) 70%, transparent 70%, transparent 80%, var(--color-primary) 80%);
+  border-radius: 0 0 var(--radius-md) 0;
+}
+
+/* Custom scrollbar for textarea */
+textarea::-webkit-scrollbar {
+  width: 8px;
+}
+
+textarea::-webkit-scrollbar-track {
+  background: #f1f5f9;
+  border-radius: 4px;
+}
+
+textarea::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, #94a3b8 0%, #64748b 100%);
+  border-radius: 4px;
+  border: 2px solid #f1f5f9;
+}
+
+textarea::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, #64748b 0%, #475569 100%);
+}
+
+textarea::placeholder {
+  color: #94a3b8;
+  font-style: italic;
 }
 
 button {

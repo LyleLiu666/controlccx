@@ -13,11 +13,11 @@ When a user manages ~10+ concurrent sessions across different folders (workspace
   - Sessions list as the primary navigation object (grouped by `session_id`)
   - Each session shows a run history and supports quick switching between runs
 - UI supports **workspace-first filtering**:
-  - Workspace selector with pinning and recent entries
+  - Workspace selector with pinning, recent entries, and optional display names for pinned workspaces
   - One-click “focus workdir” actions from session/run views
 - Add **execution traceability** features:
   - Record and display run invocation metadata (cmd/args/dir + injected env key names only)
-  - Log filtering (stream toggles), free-text search, and export (download)
+  - Log filtering (stream toggles), substring search, and export (download)
   - “Replay run” and “Resume session” shortcuts grounded in persisted session IDs
 - Expand the global **Secretary**:
   - Cross-session attention queue (blocked/failed/high-score)
@@ -42,4 +42,3 @@ When a user manages ~10+ concurrent sessions across different folders (workspace
 - For any run, users can answer “what exactly ran?” via a first-class trace view.
 - Users can filter/search/export logs and can replay/resume with a single action.
 - Secretary provides a trustworthy global view and quick navigation to “needs attention”.
-
