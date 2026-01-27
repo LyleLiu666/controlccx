@@ -100,6 +100,9 @@ func (b *ClaudeCLIBackend) Complete(ctx context.Context, prompt string) (string,
 	}
 
 	if err := toolCmd.Start(); err != nil {
+		if isExecutableNotFound(err) {
+			return "", fmt.Errorf("start: %w (hint: ensure %q is on PATH; binary install often uses ~/.local/bin, or set config paths.claude / --claude-path)", err, cmdPath)
+		}
 		return "", fmt.Errorf("start: %w", err)
 	}
 
@@ -172,6 +175,18 @@ type CodexCLIBackend struct {
 	auth *auth.Store
 }
 
+func isExecutableNotFound(err error) bool {
+	if err == nil {
+		return false
+	}
+	var ee *exec.Error
+	if errors.As(err, &ee) && errors.Is(ee.Err, exec.ErrNotFound) {
+		return true
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "executable file not found") || strings.Contains(msg, "no such file or directory")
+}
+
 func NewCodexCLIBackend(cfg config.Config, authStore *auth.Store) Backend {
 	return &CodexCLIBackend{cfg: cfg, auth: authStore}
 }
@@ -213,6 +228,9 @@ func (b *CodexCLIBackend) Complete(ctx context.Context, prompt string) (string, 
 	}
 
 	if err := toolCmd.Start(); err != nil {
+		if isExecutableNotFound(err) {
+			return "", fmt.Errorf("start: %w (hint: ensure %q is on PATH, or set config paths.codex / --codex-path)", err, cmdPath)
+		}
 		return "", fmt.Errorf("start: %w", err)
 	}
 

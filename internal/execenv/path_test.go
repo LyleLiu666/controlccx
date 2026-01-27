@@ -45,4 +45,3 @@ func envGet(env []string, key string) string {
 	}
 	return ""
 }
-

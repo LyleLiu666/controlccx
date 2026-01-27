@@ -15,8 +15,8 @@ import (
 
 	"controlccx/internal/auth"
 	"controlccx/internal/config"
-	"controlccx/internal/execenv"
 	"controlccx/internal/events"
+	"controlccx/internal/execenv"
 	"controlccx/internal/tasks"
 )
 
@@ -135,6 +135,9 @@ func (m *Manager) run(ctx context.Context, task tasks.Task) error {
 	}
 
 	if err := cmd.Start(); err != nil {
+		if isExecutableNotFound(err) {
+			m.appendLog(task.ID, tasks.LogSystem, missingExecutableHint(tool.Command, task.WorkerType))
+		}
 		return m.failTask(task.ID, fmt.Errorf("start: %w", err))
 	}
 
@@ -258,6 +261,40 @@ func hasConfigKey(args []string, key string) bool {
 		}
 	}
 	return false
+}
+
+func isExecutableNotFound(err error) bool {
+	if err == nil {
+		return false
+	}
+	var ee *exec.Error
+	if errors.As(err, &ee) && errors.Is(ee.Err, exec.ErrNotFound) {
+		return true
+	}
+	// Best-effort fallback for platform-specific messages.
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "executable file not found") || strings.Contains(msg, "no such file or directory")
+}
+
+func missingExecutableHint(cmd string, workerType tasks.WorkerType) string {
+	name := strings.TrimSpace(cmd)
+	if name == "" {
+		name = "<empty>"
+	}
+	switch workerType {
+	case tasks.WorkerClaudeCode:
+		return fmt.Sprintf(
+			`hint: %q not found. If you installed Claude Code as a binary, try: export PATH="$HOME/.local/bin:$PATH". If installed via node/brew, ensure its bin dir is on PATH. Or set an absolute path via config.yaml (paths.claude) or server flag --claude-path.`,
+			name,
+		)
+	case tasks.WorkerCodex:
+		return fmt.Sprintf(
+			`hint: %q not found. Ensure codex is on PATH, or set an absolute path via config.yaml (paths.codex) or server flag --codex-path.`,
+			name,
+		)
+	default:
+		return fmt.Sprintf(`hint: %q not found on PATH.`, name)
+	}
 }
 
 func (m *Manager) envForWorker(workerType tasks.WorkerType) []string {
