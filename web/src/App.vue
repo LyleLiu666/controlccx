@@ -1219,7 +1219,9 @@ watch(
           </div>
 
           <div class="runs">
-            <div class="runsHeader">Runs</div>
+            <div class="runsHeader">
+              Runs <span class="runsCount">{{ selectedSession.runs.length }}</span>
+            </div>
             <div class="runList">
               <button
                 v-for="r in selectedSession.runs.slice().reverse()"
@@ -3053,13 +3055,26 @@ button.primary:active:not(:disabled) {
   font-size: 14px;
   font-weight: 700;
   color: var(--text-main);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.runsCount {
+  font-size: 12px;
+  font-weight: 900;
+  color: var(--text-sub);
+  background: var(--bg-subtle);
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  padding: 2px 10px;
+  border-radius: 999px;
 }
 
 .runList {
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
   overflow: auto;
-  padding: 8px;
+  padding: 10px;
   background: var(--bg-subtle);
   max-height: 200px;
   display: flex;
@@ -3072,9 +3087,11 @@ button.primary:active:not(:disabled) {
   background: var(--bg-panel);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
-  padding: 10px;
+  padding: 12px 12px 10px;
   transition: all 0.2s;
   cursor: pointer;
+  width: 100%;
+  text-align: left;
 }
 
 .runRow:hover {
@@ -3083,6 +3100,35 @@ button.primary:active:not(:disabled) {
 .runRow.active {
   border-color: var(--color-primary);
   box-shadow: 0 0 0 2px var(--color-primary-bg);
+}
+
+.runTop {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.runMid {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  color: var(--text-sub);
+  font-size: 12px;
+  margin-bottom: 8px;
+}
+
+.runBottom {
+  font-size: 13px;
+  color: var(--text-main);
+  line-height: 1.45;
+  display: -webkit-box;
+  line-clamp: 2;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .logs {
