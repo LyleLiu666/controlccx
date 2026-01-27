@@ -55,6 +55,8 @@ const chatStreamStatus = ref<string>("");
 const chatStreamAnswer = ref<string>("");
 const chatSending = ref<boolean>(false);
 
+const theme = ref<"light" | "dark">("light");
+
 const authInfo = ref<AuthInfo | null>(null);
 const authStatus = computed<AuthStatus | null>(
   () => authInfo.value?.status ?? null,
@@ -190,6 +192,7 @@ const LS_KEY_CHAT_BACKEND = "controlccx.chat.backend.v1";
 const LS_KEY_CHAT_STREAM = "controlccx.chat.stream.v1";
 const LS_KEY_CHAT_MAX_STEPS = "controlccx.chat.max_steps.v1";
 const LS_KEY_SECRETARY_VIEW = "controlccx.secretary.view.v1";
+const LS_KEY_THEME = "controlccx.theme.v1";
 
 function getLocalStorage(): Storage | null {
   try {
@@ -268,6 +271,15 @@ function saveInt(key: string, value: number) {
   saveString(key, String(value));
 }
 
+function applyTheme(t: "light" | "dark") {
+  theme.value = t;
+  try {
+    document.documentElement.dataset.theme = t;
+  } catch {
+    // ignore
+  }
+}
+
 function normalizePathForCompare(p: string): string {
   let s = p.trim();
   if (!s) return "";
@@ -301,6 +313,17 @@ const workspaceFilter = ref<string>(loadString(LS_KEY_WORKSPACE_FILTER));
 
   const sec = loadString(LS_KEY_SECRETARY_VIEW).trim();
   if (sec === "chat" || sec === "overview") secretaryView.value = sec;
+
+  const t = loadString(LS_KEY_THEME).trim();
+  if (t === "dark" || t === "light") {
+    applyTheme(t);
+  } else {
+    const prefersDark =
+      typeof window !== "undefined" &&
+      typeof window.matchMedia === "function" &&
+      window.matchMedia("(prefers-color-scheme: dark)").matches;
+    applyTheme(prefersDark ? "dark" : "light");
+  }
 }
 
 watch(pinnedWorkspaces, (v) => saveStringArray(LS_KEY_PINNED_WORKSPACES, v), {
@@ -314,6 +337,7 @@ watch(chatBackend, (v) => saveString(LS_KEY_CHAT_BACKEND, v));
 watch(chatStreamEnabled, (v) => saveBool(LS_KEY_CHAT_STREAM, v));
 watch(chatMaxSteps, (v) => saveInt(LS_KEY_CHAT_MAX_STEPS, v));
 watch(secretaryView, (v) => saveString(LS_KEY_SECRETARY_VIEW, v));
+watch(theme, (v) => saveString(LS_KEY_THEME, v));
 
 watch(selectedTaskId, () => {
   const t = selectedTask.value;
@@ -437,6 +461,10 @@ function toggleSecretary() {
 
 function closeSecretary() {
   secretaryOpen.value = false;
+}
+
+function toggleTheme() {
+  applyTheme(theme.value === "dark" ? "light" : "dark");
 }
 
 async function onCancelTask() {
@@ -927,6 +955,9 @@ watch(
           {{ systemInfo.os }}/{{ systemInfo.arch }} ·
           {{ systemInfo.hostname }} · Go {{ systemInfo.go_version }}
         </div>
+        <button type="button" class="themeBtn" @click="toggleTheme">
+          {{ theme === "dark" ? "Day" : "Night" }}
+        </button>
         <button type="button" class="primary" @click="openNewRun">
           New Run
         </button>
@@ -1904,6 +1935,10 @@ watch(
   --text-main: #334155; /* Slate 700 */
   --text-sub: #64748b; /* Slate 500 */
   --border-color: #e2e8f0;
+  --bg-header: rgba(255, 255, 255, 0.9);
+  --bg-header-border: rgba(255, 255, 255, 0.5);
+  --overlay-modal: rgba(240, 253, 250, 0.6);
+  --overlay-drawer: rgba(15, 23, 42, 0.35);
   --radius-sm: 8px;
   --radius-md: 12px;
   --radius-lg: 16px;
@@ -1912,6 +1947,25 @@ watch(
   --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.05), 0 4px 6px -4px rgb(0 0 0 / 0.05);
   --font-main: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
+
+:global(:root[data-theme="dark"]) {
+  --bg-app: #0b1220;
+  --bg-panel: #0f172a;
+  --bg-subtle: #111c33;
+  --color-primary: #2dd4bf;
+  --color-primary-hover: #14b8a6;
+  --color-primary-bg: rgba(45, 212, 191, 0.14);
+  --text-main: #e5e7eb;
+  --text-sub: #94a3b8;
+  --border-color: rgba(148, 163, 184, 0.22);
+  --bg-header: rgba(15, 23, 42, 0.9);
+  --bg-header-border: rgba(148, 163, 184, 0.12);
+  --overlay-modal: rgba(2, 6, 23, 0.55);
+  --overlay-drawer: rgba(2, 6, 23, 0.55);
+  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.35);
+  --shadow-md: 0 6px 10px -1px rgb(0 0 0 / 0.35), 0 2px 6px -2px rgb(0 0 0 / 0.25);
+  --shadow-lg: 0 14px 22px -6px rgb(0 0 0 / 0.55), 0 10px 10px -8px rgb(0 0 0 / 0.35);
 }
 
 .page {
@@ -1923,17 +1977,21 @@ watch(
   padding-bottom: 20px;
 }
 
+:global(:root[data-theme="dark"]) .page {
+  background: linear-gradient(180deg, #0b1220 0%, #08101e 100%);
+}
+
 .header {
   display: flex;
   justify-content: space-between;
   align-items: center;
   padding: 16px 32px;
-  background: rgba(255, 255, 255, 0.9);
+  background: var(--bg-header);
   backdrop-filter: blur(12px);
   position: sticky;
   top: 0;
   z-index: 50;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.5);
+  border-bottom: 1px solid var(--bg-header-border);
   box-shadow: var(--shadow-sm);
   margin-bottom: 24px;
 }
@@ -1976,6 +2034,24 @@ watch(
   color: var(--color-primary);
 }
 
+.themeBtn {
+  border: 1px solid var(--border-color);
+  background: var(--bg-panel);
+  color: var(--text-sub);
+  font-weight: 800;
+  font-size: 12px;
+  border-radius: 999px;
+  padding: 6px 12px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.themeBtn:hover {
+  color: var(--color-primary);
+  border-color: rgba(45, 212, 191, 0.35);
+  background: var(--bg-subtle);
+}
+
 .banner {
   margin: 0 24px 20px;
   background: #fef2f2;
@@ -2004,7 +2080,7 @@ watch(
 
 .panel {
   background: var(--bg-panel);
-  border: 1px solid white;
+  border: 1px solid var(--border-color);
   border-radius: var(--radius-lg);
   padding: 0; /* Removing padding from parent, moved to children */
   min-height: 200px;
@@ -2111,7 +2187,7 @@ input:focus,
 select:focus,
 textarea:focus {
   border-color: var(--color-primary);
-  background: #fff;
+  background: var(--bg-panel);
   box-shadow: 0 0 0 3px var(--color-primary-bg);
 }
 
@@ -2120,7 +2196,7 @@ textarea {
   line-height: 1.6;
   min-height: 92px;
   max-height: 60vh;
-  background-color: #fff;
+  background-color: var(--bg-panel);
   padding: 12px 14px;
   font-size: 14px;
   color: var(--text-main);
@@ -2135,12 +2211,12 @@ textarea {
 
 textarea:hover {
   border-color: #94a3b8;
-  background-color: #fff;
+  background-color: var(--bg-panel);
 }
 
 textarea:focus {
   border-color: var(--color-primary);
-  background-color: #fff;
+  background-color: var(--bg-panel);
   box-shadow: 0 0 0 3px var(--color-primary-bg), inset 0 1px 2px rgba(0, 0, 0, 0.04);
 }
 
@@ -2153,7 +2229,7 @@ button {
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
   padding: 8px 14px;
-  background: white;
+  background: var(--bg-panel);
   color: var(--text-main);
   font-weight: 500;
   font-size: 13px;
@@ -2162,15 +2238,15 @@ button {
 }
 
 button:hover:not(:disabled) {
-  background: #f8fafc;
-  border-color: #cbd5e1;
+  background: var(--bg-subtle);
+  border-color: rgba(148, 163, 184, 0.5);
   color: var(--color-primary);
 }
 
 button:disabled {
   opacity: 0.6;
   cursor: not-allowed;
-  background: #f1f5f9;
+  background: var(--bg-subtle);
 }
 
 button.primary {
@@ -2293,7 +2369,7 @@ button.primary:active:not(:disabled) {
 .secDrawerOverlay {
   position: fixed;
   inset: 0;
-  background: rgba(15, 23, 42, 0.35);
+  background: var(--overlay-drawer);
   backdrop-filter: blur(2px);
   z-index: 200;
 }
@@ -2304,10 +2380,10 @@ button.primary:active:not(:disabled) {
   right: 16px;
   bottom: 16px;
   width: min(440px, calc(100vw - 32px));
-  background: white;
+  background: var(--bg-panel);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-lg);
-  border: 1px solid rgba(255, 255, 255, 0.85);
+  border: 1px solid var(--border-color);
   overflow: hidden;
   display: grid;
   grid-template-rows: auto 1fr;
@@ -2319,7 +2395,7 @@ button.primary:active:not(:disabled) {
   gap: 10px;
   padding: 12px 14px;
   border-bottom: 1px solid var(--border-color);
-  background: #f8fafc;
+  background: var(--bg-subtle);
 }
 
 .secDrawerTitle {
@@ -2401,7 +2477,7 @@ button.primary:active:not(:disabled) {
 .modalOverlay {
   position: fixed;
   inset: 0;
-  background: rgba(240, 253, 250, 0.6);
+  background: var(--overlay-modal);
   backdrop-filter: blur(4px);
   display: grid;
   place-items: center;
@@ -2410,9 +2486,9 @@ button.primary:active:not(:disabled) {
 }
 
 .modal, .settingsModal {
-  background: white;
+  background: var(--bg-panel);
   border-radius: 24px;
-  border: 1px solid #fff;
+  border: 1px solid var(--border-color);
   box-shadow: 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1);
   overflow: hidden;
   animation: popIn 0.2s ease-out;
@@ -2441,7 +2517,7 @@ button.primary:active:not(:disabled) {
   align-items: center;
   padding: 16px 20px;
   border-bottom: 1px solid var(--border-color);
-  background: #f8fafc;
+  background: var(--bg-subtle);
 }
 
 .modalFooter {
@@ -2450,7 +2526,7 @@ button.primary:active:not(:disabled) {
   gap: 10px;
   padding: 14px 20px;
   border-top: 1px solid var(--border-color);
-  background: #f8fafc;
+  background: var(--bg-subtle);
 }
 
 .modalTitle {
@@ -2467,7 +2543,7 @@ button.primary:active:not(:disabled) {
   border-radius: 50%;
 }
 .iconBtn:hover {
-  background: #e2e8f0;
+  background: var(--bg-subtle);
   color: var(--text-main);
 }
 
@@ -2497,7 +2573,7 @@ button.primary:active:not(:disabled) {
   padding: 16px;
   display: grid;
   gap: 12px;
-  background: #fcfcfc;
+  background: var(--bg-subtle);
 }
 
 .settingsSectionTitle {
@@ -2530,7 +2606,7 @@ button.primary:active:not(:disabled) {
   font-size: 13px;
   padding: 6px 14px;
   border-radius: 999px;
-  background: white;
+  background: var(--bg-panel);
   border: 1px solid var(--border-color);
   color: var(--text-main);
 }
@@ -2552,7 +2628,7 @@ button.primary:active:not(:disabled) {
   padding: 10px 14px;
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
-  background: #f8fafc;
+  background: var(--bg-subtle);
   color: var(--text-sub);
   font-family: var(--font-mono);
   font-size: 13px;
@@ -2563,7 +2639,7 @@ button.primary:active:not(:disabled) {
   border-radius: var(--radius-md);
   overflow: auto;
   padding: 8px;
-  background: #fff;
+  background: var(--bg-panel);
   max-height: 100%;
 }
 
@@ -2632,7 +2708,7 @@ button.primary:active:not(:disabled) {
   border: 1px solid var(--border-color);
   border-radius: 999px;
   overflow: hidden;
-  background: white;
+  background: var(--bg-panel);
   box-shadow: var(--shadow-sm);
   transition: all 0.2s;
 }
@@ -3212,7 +3288,7 @@ button.primary:active:not(:disabled) {
 
 .secRow {
   text-align: left;
-  background: white;
+  background: var(--bg-panel);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
   padding: 12px;
@@ -3230,7 +3306,7 @@ button.primary:active:not(:disabled) {
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
   padding: 14px;
-  background: white;
+  background: var(--bg-panel);
   font-size: 13px;
   color: var(--text-main);
   white-space: pre-wrap;
@@ -3243,7 +3319,7 @@ button.primary:active:not(:disabled) {
   border: 1px solid var(--border-color);
   border-radius: var(--radius-lg);
   padding: 16px;
-  background: #f8fafc;
+  background: var(--bg-subtle);
 }
 
 .secChat summary {
@@ -3273,7 +3349,7 @@ button.primary:active:not(:disabled) {
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
   padding: 8px 10px;
-  background: white;
+  background: var(--bg-panel);
   font-size: 13px;
 }
 
@@ -3289,7 +3365,7 @@ button.primary:active:not(:disabled) {
   border-radius: var(--radius-md);
   padding: 12px;
   overflow: auto;
-  background: white;
+  background: var(--bg-panel);
   max-height: 300px;
 }
 
@@ -3297,13 +3373,13 @@ button.primary:active:not(:disabled) {
   padding: 10px 14px;
   border-radius: var(--radius-md);
   margin-bottom: 10px;
-  background: #f8fafc;
+  background: var(--bg-subtle);
   border: 1px solid transparent;
 }
 
 .msg.user {
   background: var(--color-primary-bg);
-  color: #0f766e;
+  color: var(--color-primary-hover);
 }
 
 .msg.streaming {
