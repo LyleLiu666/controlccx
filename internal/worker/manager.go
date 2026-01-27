@@ -15,6 +15,7 @@ import (
 
 	"controlccx/internal/auth"
 	"controlccx/internal/config"
+	"controlccx/internal/execenv"
 	"controlccx/internal/events"
 	"controlccx/internal/tasks"
 )
@@ -296,7 +297,12 @@ func (m *Manager) envForWorkerWithReport(workerType tasks.WorkerType) ([]string,
 	default:
 		return base, nil
 	}
-	return mergeEnvWithReport(base, additions)
+	out, applied := mergeEnvWithReport(base, additions)
+	// Best-effort PATH augmentation for GUI-launched servers (missing shell init).
+	if workerType == tasks.WorkerClaudeCode || workerType == tasks.WorkerCodex {
+		out, _ = execenv.PrependPATH(out, execenv.DefaultExtraPathDirs())
+	}
+	return out, applied
 }
 
 func mergeEnv(base []string, additions map[string]string) []string {

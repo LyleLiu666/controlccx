@@ -15,6 +15,7 @@ import (
 
 	"controlccx/internal/auth"
 	"controlccx/internal/config"
+	"controlccx/internal/execenv"
 
 	"github.com/goccy/go-json"
 )
@@ -85,6 +86,7 @@ func (b *ClaudeCLIBackend) Complete(ctx context.Context, prompt string) (string,
 	toolCmd := exec.CommandContext(ctx, cmdPath, args...)
 	toolCmd.Dir = b.cfg.Paths.DataDir
 	toolCmd.Env = mergeEnv(os.Environ(), envAdditionsForClaude(b.auth))
+	toolCmd.Env, _ = execenv.PrependPATH(toolCmd.Env, execenv.DefaultExtraPathDirs())
 
 	toolCmd.Stdin = stringsReader(prompt)
 
@@ -198,6 +200,7 @@ func (b *CodexCLIBackend) Complete(ctx context.Context, prompt string) (string, 
 	toolCmd := exec.CommandContext(ctx, cmdPath, args...)
 	toolCmd.Dir = b.cfg.Paths.DataDir
 	toolCmd.Env = mergeEnv(os.Environ(), envAdditionsForCodex(b.auth))
+	toolCmd.Env, _ = execenv.PrependPATH(toolCmd.Env, execenv.DefaultExtraPathDirs())
 	toolCmd.Stdin = stringsReader(prompt)
 
 	stdout, err := toolCmd.StdoutPipe()

@@ -37,6 +37,11 @@ const tasks = ref<Map<string, Task>>(new Map());
 const selectedTaskId = ref<string>("");
 const logsByTask = ref<Map<string, LogEntry[]>>(new Map());
 
+const eventsConnected = ref(true);
+const eventsLastEventMs = ref(Date.now());
+const eventsLastHeartbeatMs = ref(0);
+const eventsLastError = ref("");
+
 const systemInfo = ref<SystemInfo | null>(null);
 const chat = ref<ChatMessage[]>([]);
 
@@ -1039,11 +1044,37 @@ function unpinWorkspace(path: string) {
 }
 
 function connectEvents() {
+  if (es) {
+    try {
+      es.close();
+    } catch {
+      // ignore
+    }
+    es = null;
+  }
+
+  eventsConnected.value = true;
+  eventsLastError.value = "";
+  eventsLastEventMs.value = Date.now();
   es = new EventSource("/api/events");
+
+  es.onopen = () => {
+    eventsConnected.value = true;
+    eventsLastError.value = "";
+    eventsLastEventMs.value = Date.now();
+  };
+
+  es.onerror = () => {
+    // EventSource will auto-reconnect, but we surface status to the user.
+    eventsConnected.value = false;
+    eventsLastError.value = "disconnected";
+  };
 
   const onAny = (e: MessageEvent) => {
     try {
       const evt = JSON.parse(e.data) as ServerEvent;
+      eventsConnected.value = true;
+      eventsLastEventMs.value = Date.now();
       if (evt.type === "task.created" || evt.type === "task.updated") {
         upsertTask(evt.payload as Task);
       } else if (evt.type === "task.log") {
@@ -1061,7 +1092,15 @@ function connectEvents() {
   es.addEventListener("task.log", onAny);
   es.addEventListener("chat.message", onAny);
   es.addEventListener("hello", onAny);
-  es.addEventListener("heartbeat", () => {});
+  es.addEventListener("heartbeat", () => {
+    eventsConnected.value = true;
+    eventsLastHeartbeatMs.value = Date.now();
+    eventsLastEventMs.value = eventsLastHeartbeatMs.value;
+  });
+}
+
+function reconnectEvents() {
+  connectEvents();
 }
 
 function openAuthSettings() {
@@ -1450,6 +1489,13 @@ const liveLastTimeMsAll = computed(() => {
   return list[list.length - 1].time_ms;
 });
 
+const eventsIdleSeconds = computed(() => {
+  const last = eventsLastEventMs.value;
+  if (!last) return 0;
+  const s = Math.floor((liveNowMs.value - last) / 1000);
+  return s > 0 ? s : 0;
+});
+
 const feedIdleSeconds = computed(() => {
   // Idle should consider any output, not only milestones.
   const last = liveLastTimeMsAll.value;
@@ -1598,6 +1644,24 @@ watch(
   async ([open]) => {
     if (!open) return;
     await nextTick();
+    // Backfill a small amount of logs to avoid "blank" Live after refresh.
+    if (liveScope.value === "current") {
+      const sess = selectedSession.value;
+      if (sess) {
+        const runs = sess.runs.slice(-6);
+        await Promise.all(
+          runs.map(async (r) => {
+            const existing = logsByTask.value.get(r.id);
+            if (existing && existing.length > 0) return;
+            try {
+              await loadLogs(r.id);
+            } catch {
+              // ignore
+            }
+          }),
+        );
+      }
+    }
     if (!livePaused.value) {
       const el = liveBoxEl.value;
       if (el) el.scrollTop = el.scrollHeight;
@@ -2384,6 +2448,26 @@ watch(
               </div>
               <div class="feedRight">
                 <span
+                  class="feedConn"
+                  :class="{ bad: !eventsConnected || eventsIdleSeconds >= 25 }"
+                  :title="
+                    eventsConnected
+                      ? `Connected · last event ${eventsIdleSeconds}s ago`
+                      : `Disconnected · last event ${eventsIdleSeconds}s ago`
+                  "
+                >
+                  {{ eventsConnected ? "Connected" : "Reconnecting…" }}
+                </span>
+                <button
+                  v-if="!eventsConnected || eventsIdleSeconds >= 25"
+                  type="button"
+                  class="feedReconnect"
+                  @click="reconnectEvents"
+                  title="Reconnect event stream"
+                >
+                  Reconnect
+                </button>
+                <span
                   v-if="liveMode === 'milestones'"
                   class="feedHint"
                   title="Milestones show system run.start/run.finish, assistant output, and error-like lines."
@@ -2393,9 +2477,14 @@ watch(
                 <span
                   v-if="selectedTask?.status === 'running' && feedIdleSeconds >= 10"
                   class="feedIdle"
-                  :title="`No output for ${feedIdleSeconds}s`"
+                  :title="
+                    feedIdleSeconds >= 300
+                      ? `Quiet for ${feedIdleSeconds}s · tools may be silent`
+                      : `No log output for ${feedIdleSeconds}s`
+                  "
                 >
-                  No output {{ feedIdleSeconds }}s
+                  {{ feedIdleSeconds >= 300 ? "Quiet" : "No logs" }}
+                  {{ feedIdleSeconds }}s
                 </span>
               </div>
             </div>
@@ -3709,6 +3798,29 @@ button.primary:active:not(:disabled) {
   display: flex;
   align-items: center;
   gap: 10px;
+}
+
+.feedConn {
+  font-size: 12px;
+  font-weight: 900;
+  color: var(--text-sub);
+  background: var(--bg-subtle);
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  padding: 6px 10px;
+  border-radius: 999px;
+}
+
+.feedConn.bad {
+  border-color: rgba(245, 158, 11, 0.35);
+  color: rgba(245, 158, 11, 0.95);
+  background: rgba(245, 158, 11, 0.08);
+}
+
+.feedReconnect {
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 900;
+  border-radius: 999px;
 }
 
 .feedIdle {
