@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#6366f1"/>
+      <stop offset="100%" style="stop-color:#8b5cf6"/>
+    </linearGradient>
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="1" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+  <!-- 圆角背景 -->
+  <rect x="2" y="2" width="28" height="28" rx="6" ry="6" fill="url(#bg)"/>
+  <!-- CCX 文字 -->
+  <text x="16" y="21" font-family="Arial, sans-serif" font-size="10" font-weight="bold" fill="white" text-anchor="middle" filter="url(#glow)">CCX</text>
+  <!-- 顶部控制指示器 -->
+  <circle cx="8" cy="7" r="2" fill="#4ade80"/>
+  <circle cx="16" cy="7" r="2" fill="#facc15"/>
+  <circle cx="24" cy="7" r="2" fill="#f87171"/>
+</svg>
