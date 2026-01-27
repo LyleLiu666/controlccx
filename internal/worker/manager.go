@@ -178,15 +178,34 @@ func (m *Manager) run(ctx context.Context, task tasks.Task) error {
 	sid := lastSessionID
 	lastSessionIDMu.Unlock()
 
+	sidToPersist, sidWarn := sessionIDToPersist(task, sid)
+	if sidWarn != "" {
+		m.appendLog(task.ID, tasks.LogSystem, sidWarn)
+	}
+
 	_ = m.store.FinishTask(context.Background(), task.ID, tasks.FinishTaskInput{
 		Status:     status,
 		ExitCode:   exitCode,
 		Error:      errText,
-		SessionID:  sid,
+		SessionID:  sidToPersist,
 		FinishedAt: time.Now().UTC(),
 	})
 	m.publishTaskUpdated(task.ID)
 	return nil
+}
+
+func sessionIDToPersist(task tasks.Task, observed string) (string, string) {
+	observed = strings.TrimSpace(observed)
+	requested := strings.TrimSpace(task.SessionID)
+	if task.Mode != tasks.ModeResume {
+		return observed, ""
+	}
+	// For resume tasks, keep the requested session_id stable for grouping.
+	// Some CLIs may emit a new session id when resume fails or falls back.
+	if requested != "" && observed != "" && observed != requested {
+		return "", fmt.Sprintf("resume warning: session_id changed (requested=%q observed=%q). Keeping requested session_id for this run.", requested, observed)
+	}
+	return observed, ""
 }
 
 func (m *Manager) buildToolCommand(task tasks.Task) (ToolCommand, error) {
