@@ -21,6 +21,7 @@ import {
   fetchAuthInfo,
   fetchChat,
   fetchFSList,
+  fetchFSRead,
   fetchFSRoots,
   fetchLogs,
   fetchSystemInfo,
@@ -46,7 +47,7 @@ const newRunOpen = ref(false);
 const newRunPromptEl = ref<HTMLTextAreaElement | null>(null);
 
 const resumePrompt = ref<string>("");
-const resumeExpanded = ref(false);
+const resumeExpanded = ref(true);
 const chatInput = ref<string>("");
 const chatInputEl = ref<HTMLTextAreaElement | null>(null);
 const errorBanner = ref<string>("");
@@ -89,17 +90,37 @@ const logShowStderr = ref(true);
 const logShowSystem = ref(true);
 const logSearch = ref("");
 const sessionSearch = ref("");
+const sessionsLimit = ref(40);
+
+const filePreviewOpen = ref(false);
+const filePreviewRawPath = ref("");
+const filePreviewBase = ref("");
+const filePreviewResolvedPath = ref("");
+const filePreviewSize = ref<number>(0);
+const filePreviewTruncated = ref(false);
+const filePreviewContent = ref("");
+const filePreviewLoading = ref(false);
+const filePreviewError = ref("");
+const filePreviewBoxEl = ref<HTMLDivElement | null>(null);
 
 const secretaryOpen = ref(false);
-const secretaryView = ref<"chat" | "overview" | "feed">("chat");
-const feedScope = ref<"current" | "all">("current");
-const feedMode = ref<"milestones" | "all">("milestones");
-const feedPaused = ref(false);
-const feedWrap = ref(true);
-const feedBoxEl = ref<HTMLDivElement | null>(null);
-const feedNowMs = ref(Date.now());
+const secretaryView = ref<"chat" | "overview">("chat");
+
+const liveOpen = ref(false);
+const liveScope = ref<"current" | "all">("current");
+const liveMode = ref<"milestones" | "all">("milestones");
+const livePaused = ref(false);
+const liveWrap = ref(true);
+const liveBoxEl = ref<HTMLDivElement | null>(null);
+const liveNowMs = ref(Date.now());
 const feedCoachDismissed = ref(false);
 const feedCoachOpen = ref(false);
+
+const runsOpen = ref(false);
+
+const isPhone = ref(false);
+const sessionsDrawerOpen = ref(false);
+const sessionsFiltersOpen = ref(false);
 
 function formatLogTime(ts: string): string {
   const s = ts.trim();
@@ -148,6 +169,39 @@ function escapeHtml(s: string): string {
     .replaceAll("'", "&#39;");
 }
 
+function looksLikeFilePath(s: string): boolean {
+  const t = (s ?? "").trim();
+  if (!t) return false;
+  if (t.length > 260) return false;
+  if (t.includes("\n") || t.includes("\r")) return false;
+
+  const lower = t.toLowerCase();
+  if (
+    lower.startsWith("http://") ||
+    lower.startsWith("https://") ||
+    lower.startsWith("mailto:") ||
+    lower.startsWith("data:")
+  ) {
+    return false;
+  }
+
+  if (
+    lower.startsWith("results/") ||
+    lower.startsWith("results\\") ||
+    lower.startsWith("./") ||
+    lower.startsWith("../") ||
+    lower.startsWith("~/") ||
+    lower.startsWith("/") ||
+    /^[a-z]:[\\/]/i.test(t)
+  ) {
+    return true;
+  }
+
+  if (t.includes("/") || t.includes("\\")) return true;
+  if (/\.[a-z0-9]{1,8}$/i.test(t)) return true;
+  return false;
+}
+
 const md = new MarkdownIt({
   html: false,
   linkify: true,
@@ -163,7 +217,27 @@ md.renderer.rules.fence = (tokens, idx, options, env, self) => {
     // Mermaid will consume plain text. Keep it escaped to avoid HTML injection.
     return `<div class="mermaid">${escapeHtml(token.content)}</div>`;
   }
+  const lang = info.split(/\s+/)[0];
+  if (lang && hljs.getLanguage(lang)) {
+    const highlighted = hljs.highlight(token.content, {
+      language: lang,
+      ignoreIllegals: true,
+    }).value;
+    return `<pre class="hljs"><code class="hljs language-${escapeHtml(lang)}">${highlighted}</code></pre>`;
+  }
   if (defaultFence) return defaultFence(tokens, idx, options, env, self);
+  return self.renderToken(tokens, idx, options);
+};
+
+const defaultInlineCode = md.renderer.rules.code_inline;
+md.renderer.rules.code_inline = (tokens, idx, options, env, self) => {
+  const token = tokens[idx];
+  const text = (token.content ?? "").trim();
+  if (looksLikeFilePath(text)) {
+    const escaped = escapeHtml(text);
+    return `<code class="fileRef" data-file-path="${escaped}">${escaped}</code>`;
+  }
+  if (defaultInlineCode) return defaultInlineCode(tokens, idx, options, env, self);
   return self.renderToken(tokens, idx, options);
 };
 
@@ -174,6 +248,61 @@ const selectedResultHtml = computed(() => {
     return md.render(text);
   } catch {
     return `<pre>${escapeHtml(text)}</pre>`;
+  }
+});
+
+const filePreviewIsMarkdown = computed(() => {
+  const p = (filePreviewResolvedPath.value || filePreviewRawPath.value).trim().toLowerCase();
+  return p.endsWith(".md") || p.endsWith(".markdown");
+});
+
+const filePreviewMarkdownHtml = computed(() => {
+  const text = filePreviewContent.value ?? "";
+  if (!text.trim()) return "";
+  try {
+    return md.render(text);
+  } catch {
+    return `<pre>${escapeHtml(text)}</pre>`;
+  }
+});
+
+function highlightLangFromPath(path: string): string | null {
+  const p = (path ?? "").toLowerCase();
+  if (p.endsWith(".ts") || p.endsWith(".mts") || p.endsWith(".cts")) return "typescript";
+  if (p.endsWith(".tsx")) return "tsx";
+  if (p.endsWith(".js") || p.endsWith(".mjs") || p.endsWith(".cjs")) return "javascript";
+  if (p.endsWith(".jsx")) return "jsx";
+  if (p.endsWith(".vue")) return "xml";
+  if (p.endsWith(".json")) return "json";
+  if (p.endsWith(".yaml") || p.endsWith(".yml")) return "yaml";
+  if (p.endsWith(".toml")) return "toml";
+  if (p.endsWith(".md") || p.endsWith(".markdown")) return "markdown";
+  if (p.endsWith(".go")) return "go";
+  if (p.endsWith(".py")) return "python";
+  if (p.endsWith(".sh") || p.endsWith(".bash") || p.endsWith(".zsh")) return "bash";
+  if (p.endsWith(".ps1")) return "powershell";
+  if (p.endsWith(".sql")) return "sql";
+  if (p.endsWith(".css")) return "css";
+  if (p.endsWith(".html") || p.endsWith(".htm")) return "xml";
+  if (p.endsWith(".xml")) return "xml";
+  if (p.endsWith(".diff") || p.endsWith(".patch")) return "diff";
+  if (p.endsWith(".txt") || p.endsWith(".log")) return "plaintext";
+  return null;
+}
+
+const filePreviewCodeHtml = computed(() => {
+  const text = filePreviewContent.value ?? "";
+  if (!text) return "";
+  const path = filePreviewResolvedPath.value || filePreviewRawPath.value;
+  const lang = highlightLangFromPath(path);
+  try {
+    if (lang === "plaintext") return escapeHtml(text);
+    if (lang && hljs.getLanguage(lang)) {
+      return hljs.highlight(text, { language: lang, ignoreIllegals: true }).value;
+    }
+    return hljs.highlightAuto(text).value;
+  } catch {
+    return escapeHtml(text);
   }
 });
 
@@ -221,6 +350,90 @@ async function copyText(text: string) {
   }
 }
 
+function closeFilePreview() {
+  filePreviewOpen.value = false;
+  filePreviewLoading.value = false;
+  filePreviewError.value = "";
+  filePreviewContent.value = "";
+  filePreviewRawPath.value = "";
+  filePreviewBase.value = "";
+  filePreviewResolvedPath.value = "";
+  filePreviewSize.value = 0;
+  filePreviewTruncated.value = false;
+}
+
+function dirnameForBase(path: string): string {
+  const s = (path ?? "").replaceAll("\\", "/");
+  const idx = s.lastIndexOf("/");
+  if (idx < 0) return ".";
+  if (idx === 0) return "/";
+  return s.slice(0, idx);
+}
+
+async function openFilePreview(path: string, base: string) {
+  const p = (path ?? "").trim();
+  if (!p) return;
+  filePreviewOpen.value = true;
+  filePreviewLoading.value = true;
+  filePreviewError.value = "";
+  filePreviewRawPath.value = p;
+  filePreviewBase.value = base ?? "";
+  filePreviewContent.value = "";
+  filePreviewResolvedPath.value = "";
+  filePreviewSize.value = 0;
+  filePreviewTruncated.value = false;
+  try {
+    const res = await fetchFSRead(p, base);
+    filePreviewResolvedPath.value = res.path;
+    filePreviewSize.value = res.size ?? 0;
+    filePreviewTruncated.value = Boolean(res.truncated);
+    filePreviewContent.value = res.content ?? "";
+  } catch (e: any) {
+    filePreviewError.value = e?.message ?? String(e);
+  } finally {
+    filePreviewLoading.value = false;
+  }
+}
+
+function filePathFromClickTarget(target: EventTarget | null): string | null {
+  const el = target as HTMLElement | null;
+  if (!el) return null;
+
+  const code = el.closest<HTMLElement>("[data-file-path]");
+  if (code) {
+    const p = (code.getAttribute("data-file-path") ?? "").trim();
+    return p || null;
+  }
+
+  const a = el.closest<HTMLAnchorElement>("a[href]");
+  if (a) {
+    const href = (a.getAttribute("href") ?? "").trim();
+    if (!href || href.startsWith("#")) return null;
+    if (looksLikeFilePath(href)) return href;
+  }
+
+  return null;
+}
+
+async function onResultMarkdownClick(e: MouseEvent) {
+  const path = filePathFromClickTarget(e.target);
+  if (!path) return;
+  e.preventDefault();
+  e.stopPropagation();
+  const base = selectedTask.value?.workdir ?? ".";
+  await openFilePreview(path, base);
+}
+
+async function onFilePreviewMarkdownClick(e: MouseEvent) {
+  const path = filePathFromClickTarget(e.target);
+  if (!path) return;
+  e.preventDefault();
+  e.stopPropagation();
+  const current = filePreviewResolvedPath.value || filePreviewRawPath.value;
+  const base = dirnameForBase(current);
+  await openFilePreview(path, base);
+}
+
 const dirPickerOpen = ref(false);
 const dirRoots = ref<FSRoot[]>([]);
 const dirPath = ref<string>("");
@@ -238,6 +451,7 @@ const filteredDirEntries = computed(() => {
 
 const LS_KEY_PINNED_WORKSPACES = "controlccx.pinned_workspaces.v1";
 const LS_KEY_WORKSPACE_FILTER = "controlccx.workspace_filter.v1";
+const LS_KEY_WORKSPACE_FILTERS = "controlccx.workspace_filters.v1";
 const LS_KEY_CHAT_BACKEND = "controlccx.chat.backend.v1";
 const LS_KEY_CHAT_STREAM = "controlccx.chat.stream.v1";
 const LS_KEY_CHAT_MAX_STEPS = "controlccx.chat.max_steps.v1";
@@ -361,7 +575,8 @@ function isWithinWorkspace(root: string, path: string): boolean {
 const pinnedWorkspaces = ref<string[]>(
   loadStringArray(LS_KEY_PINNED_WORKSPACES),
 );
-const workspaceFilter = ref<string>(loadString(LS_KEY_WORKSPACE_FILTER));
+const workspaceFilters = ref<string[]>(loadStringArray(LS_KEY_WORKSPACE_FILTERS));
+const workspaceSelect = ref<string>(loadString(LS_KEY_WORKSPACE_FILTER));
 
 {
   const v = loadString(LS_KEY_CHAT_BACKEND).trim();
@@ -372,14 +587,13 @@ const workspaceFilter = ref<string>(loadString(LS_KEY_WORKSPACE_FILTER));
   chatMaxSteps.value = Math.max(1, Math.min(32, n));
 
   const sec = loadString(LS_KEY_SECRETARY_VIEW).trim();
-  if (sec === "chat" || sec === "overview" || sec === "feed")
-    secretaryView.value = sec;
+  if (sec === "chat" || sec === "overview") secretaryView.value = sec;
 
   const fs = loadString(LS_KEY_FEED_SCOPE).trim();
-  if (fs === "current" || fs === "all") feedScope.value = fs;
+  if (fs === "current" || fs === "all") liveScope.value = fs;
   const fm = loadString(LS_KEY_FEED_MODE).trim();
-  if (fm === "milestones" || fm === "all") feedMode.value = fm;
-  feedWrap.value = loadBool(LS_KEY_FEED_WRAP, true);
+  if (fm === "milestones" || fm === "all") liveMode.value = fm;
+  liveWrap.value = loadBool(LS_KEY_FEED_WRAP, true);
 
   const t = loadString(LS_KEY_THEME).trim();
   if (t === "dark" || t === "light") {
@@ -393,23 +607,44 @@ const workspaceFilter = ref<string>(loadString(LS_KEY_WORKSPACE_FILTER));
   }
 
   feedCoachDismissed.value = loadBool(LS_KEY_COACH_FEED, false);
+
+  // Back-compat: if old single filter exists, seed multi filters.
+  if (workspaceFilters.value.length === 0 && workspaceSelect.value.trim()) {
+    workspaceFilters.value = [workspaceSelect.value.trim()];
+  }
 }
 
 watch(pinnedWorkspaces, (v) => saveStringArray(LS_KEY_PINNED_WORKSPACES, v), {
   deep: true,
 });
-watch(workspaceFilter, (v) => {
-  saveString(LS_KEY_WORKSPACE_FILTER, v);
-  if (v.trim()) newWorkdir.value = v;
+watch(
+  workspaceFilters,
+  (v) => {
+    saveStringArray(LS_KEY_WORKSPACE_FILTERS, v);
+    // Keep legacy single value as the first one (or empty).
+    saveString(LS_KEY_WORKSPACE_FILTER, v[0] ?? "");
+    if ((v[0] ?? "").trim()) newWorkdir.value = v[0]!;
+  },
+  { deep: true },
+);
+
+watch(workspaceSelect, (v) => {
+  const s = v.trim();
+  if (!s) {
+    workspaceFilters.value = [];
+    return;
+  }
+  // Selecting from dropdown sets a primary workspace.
+  workspaceFilters.value = [s];
 });
 watch(chatBackend, (v) => saveString(LS_KEY_CHAT_BACKEND, v));
 watch(chatStreamEnabled, (v) => saveBool(LS_KEY_CHAT_STREAM, v));
 watch(chatMaxSteps, (v) => saveInt(LS_KEY_CHAT_MAX_STEPS, v));
 watch(secretaryView, (v) => saveString(LS_KEY_SECRETARY_VIEW, v));
 watch(theme, (v) => saveString(LS_KEY_THEME, v));
-watch(feedScope, (v) => saveString(LS_KEY_FEED_SCOPE, v));
-watch(feedWrap, (v) => saveBool(LS_KEY_FEED_WRAP, v));
-watch(feedMode, (v) => saveString(LS_KEY_FEED_MODE, v));
+watch(liveScope, (v) => saveString(LS_KEY_FEED_SCOPE, v));
+watch(liveWrap, (v) => saveBool(LS_KEY_FEED_WRAP, v));
+watch(liveMode, (v) => saveString(LS_KEY_FEED_MODE, v));
 watch(feedCoachDismissed, (v) => saveBool(LS_KEY_COACH_FEED, v));
 
 function desiredOutputTabForTask(t: Task | null): "result" | "logs" {
@@ -428,6 +663,10 @@ watch(selectedTaskId, () => {
   logShowSystem.value = true;
   logSearch.value = "";
   resumeExpanded.value = false;
+});
+
+watch([workspaceFilters, sessionSearch], () => {
+  sessionsLimit.value = 40;
 });
 
 watch(
@@ -464,6 +703,8 @@ function sessionKeyForTask(t: Task): string {
 }
 
 let es: EventSource | null = null;
+let phoneMq: MediaQueryList | null = null;
+let phoneMqHandler: (() => void) | null = null;
 
 function upsertTask(task: Task) {
   // Ensure reactivity for Map updates (some environments don't track Map mutations reliably).
@@ -528,6 +769,8 @@ async function onCreateTask(): Promise<boolean> {
 async function onSelectTask(id: string) {
   selectedTaskId.value = id;
   if (!logsByTask.value.has(id)) await loadLogs(id);
+  if (isPhone.value) sessionsDrawerOpen.value = false;
+  runsOpen.value = false;
 }
 
 function openNewRun() {
@@ -547,18 +790,24 @@ async function onCreateTaskFromModal() {
 }
 
 function toggleSecretary() {
-  secretaryOpen.value = !secretaryOpen.value;
+  const next = !secretaryOpen.value;
+  if (next) liveOpen.value = false;
+  secretaryOpen.value = next;
 }
 
 function closeSecretary() {
   secretaryOpen.value = false;
 }
 
-function openFeed() {
+function openLive() {
   feedCoachOpen.value = false;
   feedCoachDismissed.value = true;
-  secretaryOpen.value = true;
-  secretaryView.value = "feed";
+  secretaryOpen.value = false;
+  liveOpen.value = true;
+}
+
+function openRuns() {
+  runsOpen.value = true;
 }
 
 function dismissFeedCoach() {
@@ -587,6 +836,7 @@ async function onResumeTask() {
     errorBanner.value = "该 session 还没有 session_id，无法 resume。";
     return;
   }
+  if (!resumePrompt.value.trim()) return;
   errorBanner.value = "";
   try {
     const nt = await resumeTask(sess.latest.id, resumePrompt.value);
@@ -597,6 +847,17 @@ async function onResumeTask() {
   } catch (e: any) {
     errorBanner.value = e?.message ?? String(e);
   }
+}
+
+function isImeComposing(e: KeyboardEvent): boolean {
+  // isComposing is reliable on modern browsers; keyCode=229 is a common fallback.
+  return Boolean((e as any).isComposing) || (e as any).keyCode === 229;
+}
+
+async function onResumeEnter(e: KeyboardEvent) {
+  if (isImeComposing(e)) return;
+  e.preventDefault();
+  await onResumeTask();
 }
 
 async function onSendChat() {
@@ -689,11 +950,49 @@ function selectDir(path: string) {
 }
 
 function setWorkspace(path: string) {
-  workspaceFilter.value = path;
+  workspaceSelect.value = path;
 }
 
 function clearWorkspace() {
-  workspaceFilter.value = "";
+  workspaceSelect.value = "";
+}
+
+function toggleWorkspaceFilter(path: string) {
+  const p = path.trim();
+  if (!p) return;
+  const key = normalizePathForCompare(p);
+  const next = workspaceFilters.value.slice();
+  const idx = next.findIndex((x) => normalizePathForCompare(x) === key);
+  if (idx >= 0) next.splice(idx, 1);
+  else next.unshift(p);
+  workspaceFilters.value = next.slice(0, 6);
+  if (workspaceFilters.value.length <= 1) {
+    workspaceSelect.value = workspaceFilters.value[0] ?? "";
+  } else {
+    // For multiple, clear the dropdown to avoid misleading single selection.
+    workspaceSelect.value = "";
+  }
+}
+
+function removeWorkspaceFilter(path: string) {
+  const key = normalizePathForCompare(path);
+  workspaceFilters.value = workspaceFilters.value.filter(
+    (x) => normalizePathForCompare(x) !== key,
+  );
+  if (workspaceFilters.value.length <= 1) {
+    workspaceSelect.value = workspaceFilters.value[0] ?? "";
+  }
+}
+
+function addWorkspaceFilter(path: string) {
+  const p = path.trim();
+  if (!p) return;
+  const key = normalizePathForCompare(p);
+  const next = workspaceFilters.value.slice();
+  if (next.some((x) => normalizePathForCompare(x) === key)) return;
+  next.unshift(p);
+  workspaceFilters.value = next.slice(0, 6);
+  workspaceSelect.value = "";
 }
 
 function pinWorkspace(path: string) {
@@ -710,8 +1009,9 @@ function unpinWorkspace(path: string) {
   pinnedWorkspaces.value = pinnedWorkspaces.value.filter(
     (x) => normalizePathForCompare(x) !== key,
   );
-  if (normalizePathForCompare(workspaceFilter.value) === key)
-    workspaceFilter.value = "";
+  if (workspaceFilters.value.some((x) => normalizePathForCompare(x) === key)) {
+    removeWorkspaceFilter(path);
+  }
 }
 
 function connectEvents() {
@@ -820,11 +1120,28 @@ onMounted(async () => {
   await refreshAuth();
   connectEvents();
   window.addEventListener("keydown", onGlobalKeyDown);
+
+  phoneMq = window.matchMedia("(max-width: 900px)");
+  phoneMqHandler = () => {
+    if (!phoneMq) return;
+    isPhone.value = phoneMq.matches;
+    if (isPhone.value) {
+      sessionsDrawerOpen.value = false;
+      sessionsFiltersOpen.value = false;
+    } else {
+      sessionsDrawerOpen.value = false;
+    }
+  };
+  phoneMqHandler();
+  phoneMq.addEventListener?.("change", phoneMqHandler);
 });
 
 onBeforeUnmount(() => {
   if (es) es.close();
   window.removeEventListener("keydown", onGlobalKeyDown);
+  if (phoneMq && phoneMqHandler) {
+    phoneMq.removeEventListener?.("change", phoneMqHandler);
+  }
 });
 
 const sortedTasks = computed(() => {
@@ -886,10 +1203,11 @@ const sessionsAll = computed<SessionGroup[]>(() => {
 });
 
 const filteredSessions = computed(() => {
-  const root = workspaceFilter.value.trim();
+  const roots = workspaceFilters.value.map((x) => x.trim()).filter(Boolean);
   const needle = sessionSearch.value.trim().toLowerCase();
   return sessionsAll.value.filter((s) => {
-    if (root && !isWithinWorkspace(root, s.workdir)) return false;
+    if (roots.length > 0 && !roots.some((r) => isWithinWorkspace(r, s.workdir)))
+      return false;
     if (!needle) return true;
 
     const sid = (s.session_id || s.latest.id).toLowerCase();
@@ -904,6 +1222,21 @@ const filteredSessions = computed(() => {
     );
   });
 });
+
+const pagedSessions = computed(() => {
+  return filteredSessions.value.slice(0, sessionsLimit.value);
+});
+
+const canLoadMoreSessions = computed(() => {
+  return pagedSessions.value.length < filteredSessions.value.length;
+});
+
+function loadMoreSessions() {
+  sessionsLimit.value = Math.min(
+    filteredSessions.value.length,
+    sessionsLimit.value + 40,
+  );
+}
 
 const selectedSession = computed(() => {
   const key = selectedSessionKey.value;
@@ -1036,8 +1369,8 @@ function summarizeForFeed(stream: LogEntry["stream"], message: string): string {
   return msg.slice(0, max).trimEnd() + "…";
 }
 
-const feedItemsAll = computed<FeedItem[]>(() => {
-  const scope = feedScope.value;
+const liveItemsAll = computed<FeedItem[]>(() => {
+  const scope = liveScope.value;
   const byTask: Array<{ taskId: string; logs: LogEntry[] }> = [];
 
   if (scope === "current") {
@@ -1079,25 +1412,25 @@ const feedItemsAll = computed<FeedItem[]>(() => {
   return out.length > max ? out.slice(out.length - max) : out;
 });
 
-const feedItems = computed<FeedItem[]>(() => {
-  if (feedMode.value === "all") return feedItemsAll.value;
-  const out = feedItemsAll.value.filter((f) =>
+const liveItems = computed<FeedItem[]>(() => {
+  if (liveMode.value === "all") return liveItemsAll.value;
+  const out = liveItemsAll.value.filter((f) =>
     isMilestoneMessage(f.stream, f.message),
   );
   return out.map((f) => ({ ...f, message: summarizeForFeed(f.stream, f.message) }));
 });
 
-const feedLastTimeMsAll = computed(() => {
-  const list = feedItemsAll.value;
+const liveLastTimeMsAll = computed(() => {
+  const list = liveItemsAll.value;
   if (list.length === 0) return 0;
   return list[list.length - 1].time_ms;
 });
 
 const feedIdleSeconds = computed(() => {
   // Idle should consider any output, not only milestones.
-  const last = feedLastTimeMsAll.value;
+  const last = liveLastTimeMsAll.value;
   if (!last) return 0;
-  const s = Math.floor((feedNowMs.value - last) / 1000);
+  const s = Math.floor((liveNowMs.value - last) / 1000);
   return s > 0 ? s : 0;
 });
 
@@ -1115,6 +1448,10 @@ function onGlobalKeyDown(e: KeyboardEvent) {
       dirPickerOpen.value = false;
       return;
     }
+    if (filePreviewOpen.value) {
+      closeFilePreview();
+      return;
+    }
     if (authSettingsOpen.value) {
       authSettingsOpen.value = false;
       return;
@@ -1123,8 +1460,16 @@ function onGlobalKeyDown(e: KeyboardEvent) {
       closeNewRun();
       return;
     }
+    if (runsOpen.value) {
+      runsOpen.value = false;
+      return;
+    }
     if (secretaryOpen.value) {
       closeSecretary();
+      return;
+    }
+    if (liveOpen.value) {
+      liveOpen.value = false;
       return;
     }
     return;
@@ -1140,6 +1485,11 @@ function onGlobalKeyDown(e: KeyboardEvent) {
   if (e.key === "s" || e.key === "S") {
     e.preventDefault();
     toggleSecretary();
+  }
+  if (e.key === "l" || e.key === "L") {
+    e.preventDefault();
+    if (liveOpen.value) liveOpen.value = false;
+    else openLive();
   }
 }
 
@@ -1188,6 +1538,23 @@ async function renderMermaidIfNeeded() {
   }
 }
 
+async function renderFilePreviewMermaidIfNeeded() {
+  if (!filePreviewOpen.value) return;
+  if (!filePreviewIsMarkdown.value) return;
+  const html = filePreviewMarkdownHtml.value;
+  if (!html.includes("mermaid")) return;
+  await nextTick();
+  try {
+    const root = filePreviewBoxEl.value;
+    if (!root) return;
+    const nodes = Array.from(root.querySelectorAll<HTMLElement>(".mermaid"));
+    if (nodes.length === 0) return;
+    await mermaid.run({ nodes });
+  } catch {
+    // ignore mermaid parse errors
+  }
+}
+
 watch(
   [theme, outputTab, selectedResultHtml],
   async () => {
@@ -1197,14 +1564,18 @@ watch(
   { immediate: true },
 );
 
+watch([theme, filePreviewOpen, filePreviewMarkdownHtml], async () => {
+  applyMermaidTheme();
+  await renderFilePreviewMermaidIfNeeded();
+});
+
 watch(
-  [secretaryOpen, secretaryView, feedScope],
-  async ([open, view]) => {
+  [liveOpen, liveScope],
+  async ([open]) => {
     if (!open) return;
-    if (view !== "feed") return;
     await nextTick();
-    if (!feedPaused.value) {
-      const el = feedBoxEl.value;
+    if (!livePaused.value) {
+      const el = liveBoxEl.value;
       if (el) el.scrollTop = el.scrollHeight;
     }
   },
@@ -1212,29 +1583,28 @@ watch(
 );
 
 watch(
-  () => feedItems.value.length,
+  () => liveItems.value.length,
   async () => {
-    if (!secretaryOpen.value) return;
-    if (secretaryView.value !== "feed") return;
-    if (feedPaused.value) return;
+    if (!liveOpen.value) return;
+    if (livePaused.value) return;
     await nextTick();
-    const el = feedBoxEl.value;
+    const el = liveBoxEl.value;
     if (el) el.scrollTop = el.scrollHeight;
   },
 );
 
-let feedTimer: number | null = null;
+let liveTimer: number | null = null;
 watch(
-  [secretaryOpen, secretaryView],
-  ([open, view]) => {
-    if (feedTimer != null) {
-      window.clearInterval(feedTimer);
-      feedTimer = null;
+  [liveOpen],
+  ([open]) => {
+    if (liveTimer != null) {
+      window.clearInterval(liveTimer);
+      liveTimer = null;
     }
-    if (!open || view !== "feed") return;
-    feedNowMs.value = Date.now();
-    feedTimer = window.setInterval(() => {
-      feedNowMs.value = Date.now();
+    if (!open) return;
+    liveNowMs.value = Date.now();
+    liveTimer = window.setInterval(() => {
+      liveNowMs.value = Date.now();
     }, 1000);
   },
   { immediate: true },
@@ -1242,10 +1612,10 @@ watch(
 
 let feedCoachTimer: number | null = null;
 watch(
-  [anyRunning, feedCoachDismissed, secretaryOpen],
-  ([running, dismissed, open]) => {
+  [anyRunning, feedCoachDismissed, secretaryOpen, liveOpen],
+  ([running, dismissed, secOpen, isLiveOpen]) => {
     if (dismissed) return;
-    if (open) {
+    if (secOpen || isLiveOpen) {
       feedCoachOpen.value = false;
       return;
     }
@@ -1264,7 +1634,19 @@ watch(
 <template>
   <div class="page">
     <header class="header">
-      <div class="title">ControlCCX</div>
+      <div class="headerLeft">
+        <button
+          v-if="isPhone"
+          type="button"
+          class="menuBtn"
+          @click="sessionsDrawerOpen = true"
+          title="Sessions"
+          aria-label="Open sessions"
+        >
+          <span class="menuIcon" aria-hidden="true">≡</span>
+        </button>
+        <div class="title">ControlCCX</div>
+      </div>
       <div class="headerRight">
         <div class="sub" v-if="systemInfo">
           {{ systemInfo.os }}/{{ systemInfo.arch }} ·
@@ -1276,8 +1658,8 @@ watch(
         <button
           type="button"
           class="liveBtn"
-          @click="openFeed"
-          :title="anyRunning ? 'Open Live Feed (running)' : 'Open Live Feed'"
+          @click="openLive"
+          :title="anyRunning ? 'Open Live Feed (L · running)' : 'Open Live Feed (L)'"
         >
           <span v-if="anyRunning" class="liveDot" aria-hidden="true">●</span>
           Live
@@ -1293,14 +1675,35 @@ watch(
 
     <div v-if="errorBanner" class="banner">{{ errorBanner }}</div>
 
+    <div v-if="isPhone && sessionsDrawerOpen" class="sessionsOverlay" @click.self="sessionsDrawerOpen = false"></div>
+
     <div class="grid">
-      <section class="panel">
-        <h2>Sessions</h2>
+      <section
+        v-if="!isPhone || sessionsDrawerOpen"
+        class="panel sessionsPanel"
+        :class="{ sessionsDrawerPanel: isPhone }"
+      >
+        <h2>
+          Sessions
+          <span class="h2Spacer"></span>
+          <span class="h2Meta"
+            >{{ pagedSessions.length }} / {{ filteredSessions.length }}</span
+          >
+          <button
+            v-if="isPhone"
+            type="button"
+            class="h2Btn"
+            @click="sessionsDrawerOpen = false"
+            aria-label="Close sessions"
+          >
+            ✕
+          </button>
+        </h2>
         <div class="list">
           <div class="workspaceBar">
             <div class="workspaceLeft">
               <span class="workspaceTitle">Workspace</span>
-              <select v-model="workspaceFilter">
+              <select v-model="workspaceSelect">
                 <option value="">All</option>
                 <optgroup v-if="pinnedWorkspaces.length" label="Pinned">
                   <option
@@ -1324,25 +1727,99 @@ watch(
             </div>
             <button
               type="button"
-              @click="setWorkspace(newWorkdir)"
-              :disabled="!newWorkdir.trim()"
+              @click="sessionsFiltersOpen = !sessionsFiltersOpen"
             >
-              Use Workdir
-            </button>
-            <button
-              type="button"
-              @click="pinWorkspace(workspaceFilter || newWorkdir)"
-              :disabled="!(workspaceFilter || newWorkdir).trim()"
-            >
-              Pin
+              {{ sessionsFiltersOpen ? "Less" : "Filters" }}
             </button>
             <button
               type="button"
               @click="clearWorkspace"
-              :disabled="!workspaceFilter"
+              :disabled="workspaceFilters.length === 0"
+              title="Clear workspace filters"
             >
               All
             </button>
+          </div>
+
+          <div v-if="sessionsFiltersOpen" class="filtersBlock">
+            <div class="filtersActions">
+              <button
+                type="button"
+                @click="setWorkspace(newWorkdir)"
+                :disabled="!newWorkdir.trim()"
+              >
+                Set Workdir
+              </button>
+              <button
+                type="button"
+                @click="addWorkspaceFilter(newWorkdir)"
+                :disabled="!newWorkdir.trim()"
+                title="Add workdir as an extra workspace filter"
+              >
+                Add Workdir
+              </button>
+              <button
+                type="button"
+                @click="pinWorkspace(workspaceSelect || newWorkdir)"
+                :disabled="!(workspaceSelect || newWorkdir).trim()"
+              >
+                Pin
+              </button>
+            </div>
+
+            <div v-if="workspaceFilters.length" class="activeFilters">
+              <div class="filtersTitle">Active</div>
+              <div class="pinnedWorkspaces">
+                <div v-for="p in workspaceFilters" :key="'a-' + p" class="pinnedItem">
+                  <button
+                    type="button"
+                    class="pinnedBtn active"
+                    @click="toggleWorkspaceFilter(p)"
+                    :title="p"
+                  >
+                    <span class="mono">{{ p }}</span>
+                  </button>
+                  <button
+                    type="button"
+                    class="pinnedX"
+                    @click="removeWorkspaceFilter(p)"
+                    title="Remove"
+                  >
+                    ✕
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div v-if="pinnedWorkspaces.length" class="activeFilters">
+              <div class="filtersTitle">Pinned</div>
+              <div class="pinnedWorkspaces">
+                <div v-for="p in pinnedWorkspaces" :key="p" class="pinnedItem">
+                  <button
+                    type="button"
+                    class="pinnedBtn"
+                    :class="{
+                      active: workspaceFilters.some(
+                        (x) =>
+                          normalizePathForCompare(x) === normalizePathForCompare(p),
+                      ),
+                    }"
+                    @click="toggleWorkspaceFilter(p)"
+                    :title="p"
+                  >
+                    <span class="mono">{{ p }}</span>
+                  </button>
+                  <button
+                    type="button"
+                    class="pinnedX"
+                    @click="unpinWorkspace(p)"
+                    title="Unpin"
+                  >
+                    ✕
+                  </button>
+                </div>
+              </div>
+            </div>
           </div>
 
           <div class="sessionSearchRow">
@@ -1360,35 +1837,16 @@ watch(
             </button>
           </div>
 
-          <div v-if="pinnedWorkspaces.length" class="pinnedWorkspaces">
-            <div v-for="p in pinnedWorkspaces" :key="p" class="pinnedItem">
-              <button
-                type="button"
-                class="pinnedBtn"
-                :class="{ active: workspaceFilter === p }"
-                @click="setWorkspace(p)"
-                :title="p"
-              >
-                <span class="mono">{{ p }}</span>
-              </button>
-              <button
-                type="button"
-                class="pinnedX"
-                @click="unpinWorkspace(p)"
-                title="Unpin"
-              >
-                ✕
-              </button>
-            </div>
-          </div>
-
-          <div v-if="workspaceFilter" class="listMeta">
-            Showing {{ filteredSessions.length }} /
-            {{ sessionsAll.length }} sessions
+          <div class="listMeta">
+            Showing {{ pagedSessions.length }} / {{ filteredSessions.length }}
+            sessions
+            <span v-if="workspaceFilters.length">
+              · workspaces {{ workspaceFilters.length }}
+            </span>
           </div>
 
           <button
-            v-for="s in filteredSessions"
+            v-for="s in pagedSessions"
             :key="s.key"
             class="row"
             :class="{ active: s.key === selectedSessionKey }"
@@ -1409,14 +1867,22 @@ watch(
             <div class="rowPath mono" :title="s.workdir">{{ s.workdir }}</div>
             <div class="rowBottom">{{ s.latest.prompt }}</div>
           </button>
+
+          <button
+            v-if="canLoadMoreSessions"
+            type="button"
+            class="loadMore"
+            @click="loadMoreSessions"
+          >
+            Load more
+          </button>
         </div>
       </section>
 
       <section class="panel">
-        <h2>Session Detail</h2>
         <div v-if="!selectedSession" class="empty">Select a session</div>
         <div v-else class="detail">
-          <div class="detailHeader">
+          <div class="detailHeader compact">
             <div class="detailTop">
               <div class="detailTopLeft">
                 <span
@@ -1430,10 +1896,14 @@ watch(
                   selectedSession.status
                 }}</span>
                 <span class="pill kind">{{ selectedSession.worker_type }}</span>
-                <span class="detailMini">
-                  score <span class="score">{{ selectedSession.score }}</span>
-                </span>
-                <span class="detailMini">{{ selectedSession.runs.length }} runs</span>
+                <button
+                  type="button"
+                  class="detailMini detailMiniBtn"
+                  @click="openRuns"
+                  title="Open runs"
+                >
+                  {{ selectedSession.runs.length }} runs
+                </button>
                 <span
                   v-if="selectedSession.warning"
                   class="warn"
@@ -1455,56 +1925,60 @@ watch(
                 >
                   Cancel
                 </button>
-                <button
-                  type="button"
-                  @click="setWorkspace(selectedSession.workdir)"
-                  title="Focus workspace"
-                >
-                  Focus
-                </button>
-                <button
-                  type="button"
-                  @click="copyText(selectedSession.workdir)"
-                  title="Copy workdir"
-                >
-                  Copy
-                </button>
+                <details class="detailMore compact">
+                  <summary title="More" aria-label="More">⋯</summary>
+                  <div class="detailMorePopup">
+                    <div class="detailPopupWorkdir mono" :title="selectedSession.workdir">
+                      {{ selectedSession.workdir }}
+                    </div>
+                    <div class="detailMoreActions">
+                      <button
+                        type="button"
+                        @click="setWorkspace(selectedSession.workdir)"
+                        title="Focus workspace"
+                      >
+                        Focus workspace
+                      </button>
+                      <button
+                        type="button"
+                        @click="copyText(selectedSession.workdir)"
+                        title="Copy workdir"
+                      >
+                        Copy workdir
+                      </button>
+                    </div>
+                    <div class="detailMoreGrid">
+                      <div>
+                        <span class="k">Session</span>
+                        <span class="mono">{{
+                          selectedSession.session_id || "(pending)"
+                        }}</span>
+                      </div>
+                      <div>
+                        <span class="k">Score</span> {{ selectedSession.score }} (stderr
+                        {{ selectedSession.stderr_count }})
+                      </div>
+                      <div>
+                        <span class="k">Status</span> {{ selectedSession.status }}
+                      </div>
+                      <div>
+                        <span class="k">Runs</span> {{ selectedSession.runs.length }}
+                      </div>
+                      <div v-if="selectedSession.warning" class="full">
+                        <span class="k">Warning</span> {{ selectedSession.warning }}
+                      </div>
+                      <div v-if="selectedTask?.error" class="full">
+                        <span class="k">Last Err</span> {{ selectedTask.error }}
+                      </div>
+                      <div class="full">
+                        <span class="k">Prompt</span>
+                        <span>{{ selectedSession.latest.prompt }}</span>
+                      </div>
+                    </div>
+                  </div>
+                </details>
               </div>
             </div>
-
-            <div class="detailWorkdir">
-              <span class="mono detailWorkdirText" :title="selectedSession.workdir">{{
-                selectedSession.workdir
-              }}</span>
-            </div>
-
-            <details class="detailMore">
-              <summary>More</summary>
-              <div class="detailMoreGrid">
-                <div>
-                  <span class="k">Session</span>
-                  <span class="mono">{{
-                    selectedSession.session_id || "(pending)"
-                  }}</span>
-                </div>
-                <div>
-                  <span class="k">Status</span> {{ selectedSession.status }}
-                </div>
-                <div>
-                  <span class="k">Score</span> {{ selectedSession.score }} (stderr
-                  {{ selectedSession.stderr_count }})
-                </div>
-                <div>
-                  <span class="k">Runs</span> {{ selectedSession.runs.length }}
-                </div>
-                <div v-if="selectedSession.warning" class="full">
-                  <span class="k">Warning</span> {{ selectedSession.warning }}
-                </div>
-                <div v-if="selectedTask?.error" class="full">
-                  <span class="k">Last Err</span> {{ selectedTask.error }}
-                </div>
-              </div>
-            </details>
           </div>
 
           <div class="resumeBar">
@@ -1513,7 +1987,7 @@ watch(
                 v-if="!resumeExpanded"
                 v-model="resumePrompt"
                 placeholder="Continue with..."
-                @keydown.enter.prevent="onResumeTask"
+                @keydown.enter="onResumeEnter"
               />
               <textarea
                 v-else
@@ -1531,41 +2005,15 @@ watch(
               </button>
               <button
                 type="button"
+                class="resumeToggle"
                 @click="resumeExpanded = !resumeExpanded"
                 :title="resumeExpanded ? 'Collapse' : 'Expand'"
               >
-                {{ resumeExpanded ? "Less" : "More" }}
+                {{ resumeExpanded ? "▴" : "⋯" }}
               </button>
             </div>
             <div v-if="!selectedSession.session_id" class="tinyHint">
               session_id pending：暂时无法 resume
-            </div>
-          </div>
-
-          <div class="runs">
-            <div class="runsHeader">
-              Runs <span class="runsCount">{{ selectedSession.runs.length }}</span>
-            </div>
-            <div class="runList">
-              <button
-                v-for="r in selectedSession.runs.slice().reverse()"
-                :key="r.id"
-                type="button"
-                class="runRow"
-                :class="{ active: r.id === selectedTaskId }"
-                @click="onSelectTask(r.id)"
-              >
-                <div class="runTop">
-                  <span class="mono">{{ r.id.slice(0, 8) }}</span>
-                  <span class="pill" :class="r.status">{{ r.status }}</span>
-                </div>
-                <div class="runMid">
-                  <span class="pill kind">{{ r.mode }}</span>
-                  <span class="score">score {{ r.score }}</span>
-                  <span class="mono">{{ r.created_at }}</span>
-                </div>
-                <div class="runBottom">{{ r.prompt }}</div>
-              </button>
             </div>
           </div>
 
@@ -1611,6 +2059,7 @@ watch(
                 v-else
                 class="resultBox markdown"
                 v-html="selectedResultHtml"
+                @click="onResultMarkdownClick"
               ></div>
             </div>
 
@@ -1677,11 +2126,11 @@ watch(
 
     <div v-if="feedCoachOpen" class="feedCoach" role="note">
       <div class="feedCoachText">
-        Live Feed available · press <span class="mono">S</span> or click
+        Live Feed available · press <span class="mono">L</span> or click
         <span class="mono">Live</span>
       </div>
       <div class="feedCoachActions">
-        <button type="button" class="primary" @click="openFeed">Open</button>
+        <button type="button" class="primary" @click="openLive">Open</button>
         <button type="button" @click="dismissFeedCoach">✕</button>
       </div>
     </div>
@@ -1691,12 +2140,7 @@ watch(
       class="secDrawerOverlay"
       @click.self="closeSecretary"
     >
-      <aside
-        class="secDrawer"
-        :class="{ wide: secretaryView === 'feed' }"
-        role="dialog"
-        aria-modal="true"
-      >
+      <aside class="secDrawer" role="dialog" aria-modal="true">
         <div class="secDrawerHeader">
           <div class="secDrawerTitle">Secretary</div>
           <div class="secTabs" role="tablist" aria-label="Secretary tabs">
@@ -1727,19 +2171,6 @@ watch(
                 {{ needsAttentionSessions.length }}
               </span>
             </button>
-            <button
-              type="button"
-              class="secTab"
-              :class="{ active: secretaryView === 'feed' }"
-              role="tab"
-              :aria-selected="secretaryView === 'feed'"
-              @click="secretaryView = 'feed'"
-            >
-              Feed
-              <span class="secTabBadge" :title="`Feed items: ${feedItems.length}`">
-                {{ feedItems.length }}
-              </span>
-            </button>
           </div>
           <button class="iconBtn" type="button" @click="closeSecretary">
             ✕
@@ -1747,71 +2178,7 @@ watch(
         </div>
 
         <div class="secDrawerBody">
-          <div v-if="secretaryView === 'feed'" class="secFeed">
-            <div class="feedControls">
-              <div class="feedLeft">
-                <label class="feedLabel">
-                  Scope
-                  <select v-model="feedScope">
-                    <option value="current">Current</option>
-                    <option value="all">All</option>
-                  </select>
-                </label>
-                <label class="feedLabel">
-                  View
-                  <select v-model="feedMode">
-                    <option value="milestones">Milestones</option>
-                    <option value="all">All Logs</option>
-                  </select>
-                </label>
-                <label class="feedToggle">
-                  <input type="checkbox" v-model="feedWrap" />
-                  Wrap
-                </label>
-                <button type="button" @click="feedPaused = !feedPaused">
-                  {{ feedPaused ? "Resume" : "Pause" }}
-                </button>
-              </div>
-              <div class="feedRight">
-                <span
-                  v-if="feedMode === 'milestones'"
-                  class="feedHint"
-                  title="Milestones show system run.start/run.finish, assistant output, and error-like lines."
-                >
-                  Milestones
-                </span>
-                <span
-                  v-if="selectedTask?.status === 'running' && feedIdleSeconds >= 10"
-                  class="feedIdle"
-                  :title="`No output for ${feedIdleSeconds}s`"
-                >
-                  No output {{ feedIdleSeconds }}s
-                </span>
-              </div>
-            </div>
-
-            <div
-              ref="feedBoxEl"
-              class="feedBox"
-              :class="{ wrap: feedWrap }"
-              role="log"
-              aria-label="Live feed"
-            >
-              <div v-if="feedItems.length === 0" class="empty">
-                暂无日志（仅展示本次打开页面后收到的实时日志）
-              </div>
-              <div v-else class="feedLines">
-                <div v-for="(f, idx) in feedItems" :key="f.task_id + ':' + f.time + ':' + idx" class="feedLine">
-                  <span class="feedTime mono">{{ formatLogTime(f.time) }}</span>
-                  <span class="feedTask mono" :title="f.task_id">{{ f.task_short }}</span>
-                  <span class="feedStream">{{ f.stream }}</span>
-                  <span class="feedMsg">{{ f.message }}</span>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div v-else-if="secretaryView === 'overview'" class="secOverview">
+          <div v-if="secretaryView === 'overview'" class="secOverview">
             <div class="secretaryCards">
               <div class="secCard">
                 <div class="secK">Sessions</div>
@@ -1955,9 +2322,127 @@ watch(
       </aside>
     </div>
 
-    <div
-      v-if="newRunOpen"
-      class="modalOverlay"
+	    <div v-if="liveOpen" class="secDrawerOverlay" @click.self="liveOpen = false">
+	      <aside class="secDrawer wide" role="dialog" aria-modal="true">
+        <div class="secDrawerHeader">
+          <div class="secDrawerTitle">Live</div>
+          <button class="iconBtn" type="button" @click="liveOpen = false">
+            ✕
+          </button>
+        </div>
+        <div class="secDrawerBody">
+          <div class="secFeed">
+            <div class="feedControls">
+              <div class="feedLeft">
+                <label class="feedLabel">
+                  Scope
+                  <select v-model="liveScope">
+                    <option value="current">Current</option>
+                    <option value="all">All</option>
+                  </select>
+                </label>
+                <label class="feedLabel">
+                  View
+                  <select v-model="liveMode">
+                    <option value="milestones">Milestones</option>
+                    <option value="all">All Logs</option>
+                  </select>
+                </label>
+                <label class="feedToggle">
+                  <input type="checkbox" v-model="liveWrap" />
+                  Wrap
+                </label>
+                <button type="button" @click="livePaused = !livePaused">
+                  {{ livePaused ? "Resume" : "Pause" }}
+                </button>
+              </div>
+              <div class="feedRight">
+                <span
+                  v-if="liveMode === 'milestones'"
+                  class="feedHint"
+                  title="Milestones show system run.start/run.finish, assistant output, and error-like lines."
+                >
+                  Milestones
+                </span>
+                <span
+                  v-if="selectedTask?.status === 'running' && feedIdleSeconds >= 10"
+                  class="feedIdle"
+                  :title="`No output for ${feedIdleSeconds}s`"
+                >
+                  No output {{ feedIdleSeconds }}s
+                </span>
+              </div>
+            </div>
+
+            <div
+              ref="liveBoxEl"
+              class="feedBox"
+              :class="{ wrap: liveWrap }"
+              role="log"
+              aria-label="Live feed"
+            >
+              <div v-if="liveItems.length === 0" class="empty">
+                暂无日志（仅展示本次打开页面后收到的实时日志）
+              </div>
+              <div v-else class="feedLines">
+                <div
+                  v-for="(f, idx) in liveItems"
+                  :key="f.task_id + ':' + f.time + ':' + idx"
+                  class="feedLine"
+                >
+                  <span class="feedTime mono">{{ formatLogTime(f.time) }}</span>
+                  <span class="feedTask mono" :title="f.task_id">{{ f.task_short }}</span>
+                  <span class="feedStream">{{ f.stream }}</span>
+                  <span class="feedMsg">{{ f.message }}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+	      </aside>
+	    </div>
+
+	    <div v-if="runsOpen" class="modalOverlay" @click.self="runsOpen = false">
+	      <div class="modal runsModal">
+	        <div class="modalHeader">
+	          <div class="modalTitle">
+	            Runs <span class="runsCount">{{ selectedSession?.runs.length ?? 0 }}</span>
+	          </div>
+	          <button class="iconBtn" type="button" @click="runsOpen = false">✕</button>
+	        </div>
+	        <div class="modalBody runsModalBody">
+	          <div v-if="!selectedSession" class="empty">No session selected</div>
+	          <div v-else class="runList runsModalList">
+	            <button
+	              v-for="r in selectedSession.runs.slice().reverse()"
+	              :key="r.id"
+	              type="button"
+	              class="runRow"
+	              :class="{ active: r.id === selectedTaskId }"
+	              @click="onSelectTask(r.id)"
+	            >
+	              <div class="runTop">
+	                <span class="mono">{{ r.id.slice(0, 8) }}</span>
+	                <span class="pill" :class="r.status">{{ r.status }}</span>
+	              </div>
+	              <div class="runMid">
+	                <span class="pill kind">{{ r.mode }}</span>
+	                <span class="score">score {{ r.score }}</span>
+	                <span class="mono">{{ r.created_at }}</span>
+	              </div>
+	              <div class="runBottom">{{ r.prompt }}</div>
+	            </button>
+	          </div>
+	        </div>
+	        <div class="modalFooter">
+	          <button type="button" @click="runsOpen = false">Close</button>
+	        </div>
+	      </div>
+	    </div>
+	
+	    <div
+	      v-if="newRunOpen"
+	      class="modalOverlay"
       @click.self="closeNewRun"
     >
       <div class="modal newRunModal">
@@ -2000,6 +2485,7 @@ watch(
             <div class="newRunHint full">
               Hotkeys: <span class="mono">N</span> new run ·
               <span class="mono">S</span> secretary ·
+              <span class="mono">L</span> live ·
               <span class="mono">Esc</span> close
             </div>
           </div>
@@ -2274,6 +2760,65 @@ watch(
     </div>
 
     <div
+      v-if="filePreviewOpen"
+      class="modalOverlay"
+      @click.self="closeFilePreview"
+    >
+      <div class="modal fileModal">
+        <div class="modalHeader">
+          <div class="modalTitle mono">
+            {{ filePreviewResolvedPath || filePreviewRawPath }}
+          </div>
+          <button class="iconBtn" type="button" @click="closeFilePreview">
+            ✕
+          </button>
+        </div>
+
+        <div class="modalBody fileModalBody">
+          <div v-if="filePreviewError" class="modalError">
+            {{ filePreviewError }}
+          </div>
+          <div v-else-if="filePreviewLoading" class="loading">Loading...</div>
+          <template v-else>
+            <div class="fileMetaRow">
+              <div class="fileMetaLeft">
+                <span class="tinyHint mono">{{ filePreviewSize }} bytes</span>
+                <span v-if="filePreviewTruncated" class="pill warn"
+                  >truncated</span
+                >
+              </div>
+              <div class="fileMetaActions">
+                <button
+                  type="button"
+                  @click="copyText(filePreviewContent)"
+                  :disabled="!filePreviewContent"
+                >
+                  Copy
+                </button>
+              </div>
+            </div>
+
+            <div
+              v-if="filePreviewIsMarkdown"
+              ref="filePreviewBoxEl"
+              class="resultBox markdown filePreviewBox"
+              v-html="filePreviewMarkdownHtml"
+              @click="onFilePreviewMarkdownClick"
+            ></div>
+
+            <div v-else class="resultBox fileCodeBox">
+              <pre class="hljs"><code v-html="filePreviewCodeHtml"></code></pre>
+            </div>
+          </template>
+        </div>
+
+        <div class="modalFooter">
+          <button type="button" @click="closeFilePreview">Close</button>
+        </div>
+      </div>
+    </div>
+
+    <div
       v-if="dirPickerOpen"
       class="modalOverlay"
       @click.self="dirPickerOpen = false"
@@ -2427,6 +2972,13 @@ watch(
   margin-bottom: 24px;
 }
 
+.headerLeft {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
 .headerRight {
   display: flex;
   align-items: center;
@@ -2463,6 +3015,29 @@ watch(
 }
 .settingsBtn:hover {
   color: var(--color-primary);
+}
+
+.menuBtn {
+  border: 1px solid var(--border-color);
+  background: var(--bg-panel);
+  color: var(--text-main);
+  border-radius: 12px;
+  width: 40px;
+  height: 36px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+}
+
+.menuBtn:hover {
+  background: var(--bg-subtle);
+  color: var(--color-primary);
+}
+
+.menuIcon {
+  font-weight: 900;
+  font-size: 18px;
+  line-height: 1;
 }
 
 .themeBtn {
@@ -2574,6 +3149,60 @@ h2 {
   align-items: center;
   gap: 8px;
   text-shadow: 0 1px 2px rgba(0,0,0,0.1);
+}
+
+.h2Spacer {
+  flex: 1;
+}
+
+.h2Meta {
+  font-size: 12px;
+  font-weight: 800;
+  color: rgba(255, 255, 255, 0.85);
+  background: rgba(15, 23, 42, 0.22);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  padding: 4px 8px;
+  border-radius: 999px;
+}
+
+.h2Btn {
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  background: rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.9);
+  font-weight: 800;
+  font-size: 12px;
+  border-radius: 999px;
+  padding: 6px 10px;
+}
+
+.h2Btn:hover {
+  border-color: rgba(255, 255, 255, 0.35);
+  background: rgba(255, 255, 255, 0.16);
+  color: white;
+}
+
+.sessionsOverlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(2, 6, 23, 0.55);
+  backdrop-filter: blur(2px);
+  z-index: 180;
+}
+
+.sessionsPanel.sessionsDrawerPanel {
+  position: fixed;
+  top: 76px;
+  left: 12px;
+  right: 12px;
+  bottom: 12px;
+  z-index: 190;
+  max-height: none;
+  overflow: hidden;
+  box-shadow: var(--shadow-lg);
+}
+
+.sessionsPanel.sessionsDrawerPanel .list {
+  overflow: auto;
 }
 
 .form, .list, .detail, .secretary {
@@ -2757,6 +3386,37 @@ button.primary:active:not(:disabled) {
   width: 44px;
   padding: 8px 0;
   border-radius: 12px;
+}
+
+.filtersBlock {
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--bg-subtle);
+  padding: 12px;
+  display: grid;
+  gap: 12px;
+}
+
+.filtersActions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.filtersTitle {
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--text-sub);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 6px;
+}
+
+.loadMore {
+  margin-top: 6px;
+  width: 100%;
+  padding: 10px 12px;
+  font-weight: 800;
 }
 
 .newRunBody {
@@ -3238,6 +3898,142 @@ button.primary:active:not(:disabled) {
   gap: 16px;
 }
 
+.fileModal {
+  width: min(1100px, 96vw);
+  height: min(760px, 92vh);
+}
+
+.fileModalBody {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.fileMetaRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.fileMetaLeft {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.fileMetaActions {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.filePreviewBox,
+.fileCodeBox {
+  flex: 1;
+  min-height: 0;
+}
+
+.fileCodeBox {
+  white-space: normal;
+  padding: 0;
+}
+
+.fileCodeBox pre {
+  margin: 0;
+  padding: 14px 16px;
+  min-height: 100%;
+  overflow: auto;
+  background: transparent;
+}
+
+.fileCodeBox code {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.resultBox :deep(.hljs) {
+  color: var(--text-main);
+}
+
+.resultBox :deep(.hljs-comment),
+.resultBox :deep(.hljs-quote) {
+  color: var(--text-sub);
+  font-style: italic;
+}
+
+.resultBox :deep(.hljs-keyword),
+.resultBox :deep(.hljs-selector-tag),
+.resultBox :deep(.hljs-subst) {
+  color: #2563eb;
+}
+
+.resultBox :deep(.hljs-string),
+.resultBox :deep(.hljs-title),
+.resultBox :deep(.hljs-section),
+.resultBox :deep(.hljs-attribute) {
+  color: #0f766e;
+}
+
+.resultBox :deep(.hljs-number),
+.resultBox :deep(.hljs-literal),
+.resultBox :deep(.hljs-symbol),
+.resultBox :deep(.hljs-bullet) {
+  color: #7c3aed;
+}
+
+.resultBox :deep(.hljs-meta),
+.resultBox :deep(.hljs-doctag) {
+  color: #be185d;
+}
+
+:global(:root[data-theme="dark"]) .resultBox :deep(.hljs-keyword),
+:global(:root[data-theme="dark"]) .resultBox :deep(.hljs-selector-tag),
+:global(:root[data-theme="dark"]) .resultBox :deep(.hljs-subst) {
+  color: #60a5fa;
+}
+
+:global(:root[data-theme="dark"]) .resultBox :deep(.hljs-string),
+:global(:root[data-theme="dark"]) .resultBox :deep(.hljs-title),
+:global(:root[data-theme="dark"]) .resultBox :deep(.hljs-section),
+:global(:root[data-theme="dark"]) .resultBox :deep(.hljs-attribute) {
+  color: #2dd4bf;
+}
+
+:global(:root[data-theme="dark"]) .resultBox :deep(.hljs-number),
+:global(:root[data-theme="dark"]) .resultBox :deep(.hljs-literal),
+:global(:root[data-theme="dark"]) .resultBox :deep(.hljs-symbol),
+:global(:root[data-theme="dark"]) .resultBox :deep(.hljs-bullet) {
+  color: #a78bfa;
+}
+
+:global(:root[data-theme="dark"]) .resultBox :deep(.hljs-meta),
+:global(:root[data-theme="dark"]) .resultBox :deep(.hljs-doctag) {
+  color: #f472b6;
+}
+
+.modalError {
+  border: 1px solid rgba(239, 68, 68, 0.25);
+  background: rgba(239, 68, 68, 0.08);
+  color: var(--text-main);
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+  font-size: 13px;
+  white-space: pre-wrap;
+}
+
+.pill.warn {
+  background: rgba(245, 158, 11, 0.16);
+  color: #b45309;
+  border-color: rgba(245, 158, 11, 0.25);
+}
+
+:global(:root[data-theme="dark"]) .pill.warn {
+  color: #fbbf24;
+}
+
 .settingsBody {
   display: grid;
   gap: 20px;
@@ -3606,6 +4402,13 @@ button.primary:active:not(:disabled) {
   box-shadow: var(--shadow-sm);
 }
 
+.detailHeader.compact {
+  display: flex;
+  align-items: center;
+  padding: 10px 12px;
+  margin-bottom: 10px;
+}
+
 .detailTop {
   display: flex;
   align-items: center;
@@ -3614,12 +4417,23 @@ button.primary:active:not(:disabled) {
   flex-wrap: wrap;
 }
 
+.detailHeader.compact .detailTop {
+  width: 100%;
+  flex-wrap: nowrap;
+}
+
 .detailTopLeft {
   display: flex;
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
   min-width: 0;
+}
+
+.detailHeader.compact .detailTopLeft {
+  flex-wrap: nowrap;
+  overflow: hidden;
+  white-space: nowrap;
 }
 
 .detailSid {
@@ -3635,6 +4449,21 @@ button.primary:active:not(:disabled) {
   padding: 4px 8px;
   border-radius: 999px;
   border: 1px solid rgba(148, 163, 184, 0.35);
+}
+
+.detailMiniBtn {
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.detailMiniBtn:hover {
+  border-color: rgba(20, 184, 166, 0.6);
+  box-shadow: 0 0 0 2px rgba(20, 184, 166, 0.2);
+  color: var(--color-primary);
+}
+
+.detailMiniBtn:active {
+  transform: translateY(1px);
 }
 
 .detailTopActions {
@@ -3677,6 +4506,53 @@ button.primary:active:not(:disabled) {
   display: none;
 }
 
+.detailMore.compact {
+  border-top: 0;
+  padding-top: 0;
+  position: relative;
+}
+
+.detailMore.compact summary {
+  width: 34px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  background: rgba(15, 23, 42, 0.18);
+  color: var(--text-main);
+  font-weight: 900;
+  font-size: 16px;
+}
+
+.detailMore.compact[open] summary {
+  border-color: rgba(20, 184, 166, 0.6);
+  box-shadow: 0 0 0 2px rgba(20, 184, 166, 0.2);
+}
+
+.detailMorePopup {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  width: min(560px, 86vw);
+  background: var(--bg-panel);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  padding: 12px;
+  z-index: 10;
+}
+
+.detailPopupWorkdir {
+  font-size: 12px;
+  color: var(--text-sub);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-bottom: 10px;
+}
+
 .detailMoreGrid {
   margin-top: 10px;
   display: grid;
@@ -3685,8 +4561,35 @@ button.primary:active:not(:disabled) {
   font-size: 13px;
 }
 
+.detailMoreActions {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.detailMoreActions button {
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 800;
+  border-radius: 999px;
+}
+
 .detailMoreGrid .full {
   grid-column: 1 / -1;
+}
+
+@container (max-width: 540px) {
+  .detailHeader.compact .detailTopLeft .pill.kind {
+    display: none;
+  }
+}
+
+@container (max-width: 460px) {
+  .detailHeader.compact .detailMini {
+    display: none;
+  }
 }
 
 .resumeBar {
@@ -3704,6 +4607,22 @@ button.primary:active:not(:disabled) {
 
 .resumeRow textarea {
   min-height: 0;
+}
+
+.resumeToggle {
+  padding: 0 12px;
+  height: 40px;
+  font-size: 16px;
+  font-weight: 900;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  background: rgba(15, 23, 42, 0.12);
+  color: var(--text-main);
+  opacity: 0.85;
+}
+
+.resumeToggle:hover {
+  opacity: 1;
 }
 
 .tinyHint {
@@ -3748,6 +4667,20 @@ button.primary:active:not(:disabled) {
   flex-direction: column;
   gap: 8px;
   box-shadow: inset 0 2px 4px rgba(0,0,0,0.03);
+}
+
+.runsModal {
+  width: min(920px, 95vw);
+  height: min(720px, 92vh);
+}
+
+.runsModalBody {
+  overflow: auto;
+}
+
+.runsModalList {
+  max-height: none;
+  padding: 12px;
 }
 
 .runRow {
@@ -3890,6 +4823,16 @@ button.primary:active:not(:disabled) {
   border: 1px solid rgba(148, 163, 184, 0.22);
   padding: 1px 6px;
   border-radius: 8px;
+}
+
+.resultBox.markdown :deep(code.fileRef) {
+  cursor: pointer;
+  border-color: rgba(45, 212, 191, 0.45);
+}
+
+.resultBox.markdown :deep(code.fileRef:hover) {
+  color: var(--color-primary);
+  text-decoration: underline;
 }
 
 .resultBox.markdown :deep(a) {
@@ -4228,6 +5171,10 @@ button.primary:active:not(:disabled) {
 }
 
 @media (max-width: 720px) {
+  .header {
+    padding: 12px 16px;
+  }
+
   .secOrb {
     right: 16px;
     bottom: 16px;

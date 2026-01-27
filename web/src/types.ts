@@ -68,6 +68,13 @@ export type FSListResponse = {
   entries: FSListEntry[];
 };
 
+export type FSReadResponse = {
+  path: string;
+  size: number;
+  truncated: boolean;
+  content: string;
+};
+
 export type ServerEvent = {
   type: string;
   time: string;

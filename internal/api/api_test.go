@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -217,6 +218,9 @@ func TestAPI_TasksAndChat(t *testing.T) {
 		if err := os.MkdirAll(filepath.Join(root, "b"), 0o755); err != nil {
 			t.Fatalf("mkdir: %v", err)
 		}
+		if err := os.WriteFile(filepath.Join(root, "note.md"), []byte("# Hello\n"), 0o644); err != nil {
+			t.Fatalf("write file: %v", err)
+		}
 		apiSvc.FSRoots = []FSRoot{{Name: "Root", Path: root}}
 
 		res, err := http.Get(srv.URL + "/api/fs/roots")
@@ -252,6 +256,48 @@ func TestAPI_TasksAndChat(t *testing.T) {
 		defer outRes.Body.Close()
 		if outRes.StatusCode != http.StatusForbidden {
 			t.Fatalf("outside status=%d, want 403", outRes.StatusCode)
+		}
+
+		readURL := srv.URL + "/api/fs/read?path=" + url.QueryEscape("note.md") + "&base=" + url.QueryEscape(root)
+		readRes, err := http.Get(readURL)
+		if err != nil {
+			t.Fatalf("get read: %v", err)
+		}
+		defer readRes.Body.Close()
+		if readRes.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(readRes.Body)
+			t.Fatalf("read status=%d, want 200; body=%s", readRes.StatusCode, string(body))
+		}
+		var readBody struct {
+			Path      string `json:"path"`
+			Size      int64  `json:"size"`
+			Truncated bool   `json:"truncated"`
+			Content   string `json:"content"`
+		}
+		if err := json.NewDecoder(readRes.Body).Decode(&readBody); err != nil {
+			t.Fatalf("decode read: %v", err)
+		}
+		if !strings.HasSuffix(readBody.Path, string(filepath.Separator)+"note.md") {
+			t.Fatalf("read path=%q, want suffix note.md", readBody.Path)
+		}
+		if readBody.Size <= 0 {
+			t.Fatalf("read size=%d, want >0", readBody.Size)
+		}
+		if readBody.Truncated {
+			t.Fatalf("read truncated=true, want false")
+		}
+		if readBody.Content != "# Hello\n" {
+			t.Fatalf("read content=%q, want %q", readBody.Content, "# Hello\n")
+		}
+
+		readDirRes, err := http.Get(srv.URL + "/api/fs/read?path=" + url.QueryEscape(filepath.Join(root, "a")))
+		if err != nil {
+			t.Fatalf("get read dir: %v", err)
+		}
+		defer readDirRes.Body.Close()
+		if readDirRes.StatusCode != http.StatusBadRequest {
+			body, _ := io.ReadAll(readDirRes.Body)
+			t.Fatalf("read dir status=%d, want 400; body=%s", readDirRes.StatusCode, string(body))
 		}
 	})
 

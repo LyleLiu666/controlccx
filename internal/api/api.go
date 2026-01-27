@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -37,6 +38,7 @@ func (a *API) Handler() http.Handler {
 	mux.HandleFunc("/api/tasks/", a.handleTaskByID)
 	mux.HandleFunc("/api/fs/roots", a.handleFSRoots)
 	mux.HandleFunc("/api/fs/list", a.handleFSList)
+	mux.HandleFunc("/api/fs/read", a.handleFSRead)
 	mux.HandleFunc("/api/events", a.handleEvents)
 	mux.HandleFunc("/api/chat", a.handleChat)
 	mux.HandleFunc("/api/auth", a.handleAuth)
@@ -102,6 +104,88 @@ func (a *API) handleFSList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, resp)
+}
+
+func (a *API) handleFSRead(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	raw := strings.TrimSpace(r.URL.Query().Get("path"))
+	if raw == "" {
+		http.Error(w, "path is required", http.StatusBadRequest)
+		return
+	}
+	baseRaw := strings.TrimSpace(r.URL.Query().Get("base"))
+
+	path := filepath.Clean(raw)
+	if baseRaw != "" && !filepath.IsAbs(path) {
+		base := filepath.Clean(baseRaw)
+		if !filepath.IsAbs(base) {
+			cwd, err := os.Getwd()
+			if err != nil {
+				http.Error(w, "cannot resolve cwd", http.StatusInternalServerError)
+				return
+			}
+			base = filepath.Join(cwd, base)
+		}
+		path = filepath.Join(base, path)
+	}
+	if !filepath.IsAbs(path) {
+		cwd, err := os.Getwd()
+		if err != nil {
+			http.Error(w, "cannot resolve cwd", http.StatusInternalServerError)
+			return
+		}
+		path = filepath.Join(cwd, path)
+	}
+
+	roots := a.FSRoots
+	if len(roots) == 0 {
+		roots = DefaultFSRoots()
+	}
+	if !isUnderAnyRoot(path, roots) {
+		http.Error(w, "path not allowed", http.StatusForbidden)
+		return
+	}
+
+	f, err := os.Open(path)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	defer func() { _ = f.Close() }()
+
+	info, err := f.Stat()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if info.IsDir() {
+		http.Error(w, "fs: not a file", http.StatusBadRequest)
+		return
+	}
+
+	const maxBytes = 1 << 20 // 1 MiB
+	limited := io.LimitReader(f, maxBytes+1)
+	data, err := io.ReadAll(limited)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	truncated := false
+	if int64(len(data)) > maxBytes {
+		truncated = true
+		data = data[:maxBytes]
+	}
+
+	writeJSON(w, map[string]any{
+		"path":      path,
+		"size":      info.Size(),
+		"truncated": truncated,
+		"content":   string(data),
+	})
 }
 
 func (a *API) handleTasks(w http.ResponseWriter, r *http.Request) {

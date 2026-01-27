@@ -4,6 +4,7 @@ import type {
   AuthStatus,
   ChatMessage,
   FSListResponse,
+  FSReadResponse,
   FSRoot,
   LogEntry,
   SystemInfo,
@@ -164,6 +165,12 @@ export async function fetchFSRoots(): Promise<FSRoot[]> {
 export async function fetchFSList(path: string): Promise<FSListResponse> {
   const url = `/api/fs/list?path=${encodeURIComponent(path)}`;
   return getJSON<FSListResponse>(url);
+}
+
+export async function fetchFSRead(path: string, base?: string): Promise<FSReadResponse> {
+  const qs = new URLSearchParams({ path });
+  if (base && base.trim()) qs.set("base", base);
+  return getJSON<FSReadResponse>(`/api/fs/read?${qs.toString()}`);
 }
 
 export async function fetchAuthStatus(): Promise<AuthStatus> {
