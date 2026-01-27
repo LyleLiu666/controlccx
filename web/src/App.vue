@@ -123,9 +123,33 @@ const sessionsDrawerOpen = ref(false);
 const sessionsFiltersOpen = ref(false);
 
 function formatLogTime(ts: string): string {
-  const s = ts.trim();
-  if (s.length >= 19) return s.slice(11, 19);
-  return s;
+  const s = (ts ?? "").trim();
+  if (!s) return "";
+  const ms = Date.parse(s);
+  if (!Number.isFinite(ms)) {
+    // Fallback to previous behavior if the timestamp isn't parseable.
+    return s.length >= 19 ? s.slice(11, 19) : s;
+  }
+  const d = new Date(ms);
+  return new Intl.DateTimeFormat(undefined, {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).format(d);
+}
+
+function pad2(n: number): string {
+  return n < 10 ? `0${n}` : String(n);
+}
+
+function formatLocalDateTime(ts: string): string {
+  const s = (ts ?? "").trim();
+  if (!s) return "";
+  const ms = Date.parse(s);
+  if (!Number.isFinite(ms)) return s;
+  const d = new Date(ms);
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
 }
 
 const selectedAssistantResult = computed(() => {
@@ -2096,7 +2120,9 @@ watch(
                   class="logLine"
                   :class="`s-${l.stream}`"
                 >
-                  <span class="logTime">{{ formatLogTime(l.time) }}</span>
+                  <span class="logTime" :title="formatLocalDateTime(l.time)">{{
+                    formatLogTime(l.time)
+                  }}</span>
                   <span class="logTag" :class="l.stream">{{ l.stream }}</span>
                   <span class="logMsg">{{ l.message }}</span>
                 </div>
@@ -2390,7 +2416,9 @@ watch(
                   :key="f.task_id + ':' + f.time + ':' + idx"
                   class="feedLine"
                 >
-                  <span class="feedTime mono">{{ formatLogTime(f.time) }}</span>
+                  <span class="feedTime mono" :title="formatLocalDateTime(f.time)">{{
+                    formatLogTime(f.time)
+                  }}</span>
                   <span class="feedTask mono" :title="f.task_id">{{ f.task_short }}</span>
                   <span class="feedStream">{{ f.stream }}</span>
                   <span class="feedMsg">{{ f.message }}</span>
@@ -2428,7 +2456,9 @@ watch(
 	              <div class="runMid">
 	                <span class="pill kind">{{ r.mode }}</span>
 	                <span class="score">score {{ r.score }}</span>
-	                <span class="mono">{{ r.created_at }}</span>
+	                <span class="mono" :title="r.created_at">{{
+	                  formatLocalDateTime(r.created_at)
+	                }}</span>
 	              </div>
 	              <div class="runBottom">{{ r.prompt }}</div>
 	            </button>
