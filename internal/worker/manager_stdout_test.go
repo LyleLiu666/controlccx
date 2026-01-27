@@ -12,7 +12,7 @@ import (
 	"controlccx/internal/tasks"
 )
 
-func TestManager_consumeStdout_ClaudeCode_SuppressesRawStdout(t *testing.T) {
+func TestManager_consumeStdout_ClaudeCode_StoresRawStdout(t *testing.T) {
 	ctx := context.Background()
 	dbPath := filepath.Join(t.TempDir(), "controlccx.db")
 
@@ -61,8 +61,8 @@ func TestManager_consumeStdout_ClaudeCode_SuppressesRawStdout(t *testing.T) {
 			assistantCount++
 		}
 	}
-	if stdoutCount != 0 {
-		t.Fatalf("stdout_count=%d, want 0", stdoutCount)
+	if stdoutCount != 2 {
+		t.Fatalf("stdout_count=%d, want 2", stdoutCount)
 	}
 	if assistantCount != 1 {
 		t.Fatalf("assistant_count=%d, want 1", assistantCount)
@@ -125,7 +125,7 @@ func TestManager_consumeStdout_ClaudeCode_StoresRawWhenParseFails(t *testing.T) 
 	}
 }
 
-func TestManager_consumeStdout_Codex_SuppressesRawStdout(t *testing.T) {
+func TestManager_consumeStdout_Codex_StoresRawStdout(t *testing.T) {
 	ctx := context.Background()
 	dbPath := filepath.Join(t.TempDir(), "controlccx.db")
 
@@ -174,8 +174,8 @@ func TestManager_consumeStdout_Codex_SuppressesRawStdout(t *testing.T) {
 			assistantCount++
 		}
 	}
-	if stdoutCount != 0 {
-		t.Fatalf("stdout_count=%d, want 0", stdoutCount)
+	if stdoutCount != 2 {
+		t.Fatalf("stdout_count=%d, want 2", stdoutCount)
 	}
 	if assistantCount != 1 {
 		t.Fatalf("assistant_count=%d, want 1", assistantCount)

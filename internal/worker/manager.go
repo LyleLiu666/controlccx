@@ -27,6 +27,9 @@ type Manager struct {
 
 	mu      sync.Mutex
 	cancels map[string]context.CancelFunc
+
+	updateMu       sync.Mutex
+	lastTaskUpdate map[string]time.Time
 }
 
 func NewManager(cfg config.Config, store *tasks.Store, hub *events.Hub, authStore *auth.Store) *Manager {
@@ -64,6 +67,10 @@ func (m *Manager) Start(ctx context.Context, taskID string) error {
 			m.mu.Lock()
 			delete(m.cancels, taskID)
 			m.mu.Unlock()
+
+			m.updateMu.Lock()
+			delete(m.lastTaskUpdate, taskID)
+			m.updateMu.Unlock()
 		}()
 		_ = m.run(runCtx, task)
 	}()
@@ -367,39 +374,35 @@ func (m *Manager) consumeStdout(task tasks.Task, stdout io.Reader, sidMu *sync.M
 			continue
 		}
 
+		// Persist raw stdout for debugging/details (UI can filter by stream).
+		m.appendLog(task.ID, tasks.LogStdout, string(line))
+
 		var parsed parsedLine
-		persistRaw := true
 		switch task.WorkerType {
 		case tasks.WorkerClaudeCode:
-			persistRaw = false
 			parsed, err = parseClaudeJSONLine(line)
 		case tasks.WorkerCodex:
-			persistRaw = false
 			parsed, err = parseCodexJSONLine(line)
 		default:
 			parsed, err = parsedLine{}, nil
 		}
 
-		// For LLM stream-json workers, raw stdout is extremely noisy and not pleasant to read.
-		// Keep it suppressed by default, but fall back to persisting raw lines if parsing fails.
-		if err != nil {
-			persistRaw = true
-		}
-		if persistRaw {
-			logEntry, _ := m.store.AppendLog(context.Background(), task.ID, tasks.LogStdout, string(line))
-			m.publishLog(logEntry)
-		}
-
 		if err == nil {
 			if parsed.SessionID != "" {
-				_ = m.store.SetSessionID(context.Background(), task.ID, parsed.SessionID)
+				shouldPublish := false
 				sidMu.Lock()
-				*sid = parsed.SessionID
+				if strings.TrimSpace(*sid) == "" {
+					*sid = parsed.SessionID
+					shouldPublish = true
+				}
 				sidMu.Unlock()
+				_ = m.store.SetSessionID(context.Background(), task.ID, parsed.SessionID)
+				if shouldPublish {
+					m.publishTaskUpdatedForce(task.ID)
+				}
 			}
 			if parsed.AssistantText != "" {
-				assistantEntry, _ := m.store.AppendLog(context.Background(), task.ID, tasks.LogAssistant, parsed.AssistantText)
-				m.publishLog(assistantEntry)
+				m.appendLog(task.ID, tasks.LogAssistant, parsed.AssistantText)
 			}
 		}
 	}
@@ -423,8 +426,7 @@ func (m *Manager) consumeLines(taskID string, stream tasks.LogStream, r io.Reade
 		if len(line) == 0 {
 			continue
 		}
-		entry, _ := m.store.AppendLog(context.Background(), taskID, stream, string(line))
-		m.publishLog(entry)
+		m.appendLog(taskID, stream, string(line))
 	}
 }
 
@@ -441,6 +443,43 @@ func (m *Manager) publishTaskUpdated(taskID string) {
 		Time:    time.Now().UTC(),
 		Payload: task,
 	})
+}
+
+const taskUpdateThrottle = 500 * time.Millisecond
+
+func (m *Manager) publishTaskUpdatedThrottled(taskID string) {
+	if m == nil || m.hub == nil || m.store == nil {
+		return
+	}
+	now := time.Now().UTC()
+
+	m.updateMu.Lock()
+	if m.lastTaskUpdate == nil {
+		m.lastTaskUpdate = make(map[string]time.Time)
+	}
+	last := m.lastTaskUpdate[taskID]
+	if !last.IsZero() && now.Sub(last) < taskUpdateThrottle {
+		m.updateMu.Unlock()
+		return
+	}
+	m.lastTaskUpdate[taskID] = now
+	m.updateMu.Unlock()
+
+	m.publishTaskUpdated(taskID)
+}
+
+func (m *Manager) publishTaskUpdatedForce(taskID string) {
+	if m == nil || m.hub == nil || m.store == nil {
+		return
+	}
+	now := time.Now().UTC()
+	m.updateMu.Lock()
+	if m.lastTaskUpdate == nil {
+		m.lastTaskUpdate = make(map[string]time.Time)
+	}
+	m.lastTaskUpdate[taskID] = now
+	m.updateMu.Unlock()
+	m.publishTaskUpdated(taskID)
 }
 
 func (m *Manager) publishLog(entry tasks.LogEntry) {
@@ -463,6 +502,7 @@ func (m *Manager) appendLog(taskID string, stream tasks.LogStream, message strin
 		return
 	}
 	m.publishLog(entry)
+	m.publishTaskUpdatedThrottled(taskID)
 }
 
 func (m *Manager) failTask(taskID string, err error) error {
