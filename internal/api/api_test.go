@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"controlccx/internal/auth"
@@ -17,6 +19,25 @@ import (
 	"controlccx/internal/observer"
 	"controlccx/internal/tasks"
 )
+
+type stubObserverBackend struct {
+	i       int
+	outputs []string
+}
+
+func (s *stubObserverBackend) Name() string { return "stub" }
+
+func (s *stubObserverBackend) Complete(ctx context.Context, prompt string) (string, error) {
+	if s == nil {
+		return "", nil
+	}
+	if s.i >= len(s.outputs) {
+		return `{"action":"final","message":"done"}`, nil
+	}
+	out := s.outputs[s.i]
+	s.i++
+	return out, nil
+}
 
 func TestAPI_TasksAndChat(t *testing.T) {
 	ctx := context.Background()
@@ -33,7 +54,7 @@ func TestAPI_TasksAndChat(t *testing.T) {
 	apiSvc := &API{
 		Tasks:    taskStore,
 		Workers:  nil,
-		Observer: &observer.Service{Store: taskStore},
+		Observer: &observer.Service{Store: taskStore, Chat: chatStore},
 		Chat:     chatStore,
 		Hub:      hub,
 	}
@@ -131,6 +152,60 @@ func TestAPI_TasksAndChat(t *testing.T) {
 		}
 		if reply["message"] == "" {
 			t.Fatalf("expected reply message")
+		}
+	})
+
+	t.Run("chat stream", func(t *testing.T) {
+		sb := &stubObserverBackend{
+			outputs: []string{
+				`{"action":"tool","tool":"system_info","args":{}}`,
+				`{"action":"final","message":"ok"}`,
+			},
+		}
+		var _ observer.Backend = sb
+
+		// Replace observer service with an LLM-backed agent for this test.
+		apiSvc.Observer = &observer.Service{
+			Store:      taskStore,
+			Chat:       chatStore,
+			LLM:        sb,
+			ForceAgent: true,
+		}
+
+		req := map[string]any{"message": "hello", "stream": true}
+		buf, _ := json.Marshal(req)
+		httpReq, err := http.NewRequest(http.MethodPost, srv.URL+"/api/chat?stream=1", bytes.NewReader(buf))
+		if err != nil {
+			t.Fatalf("new req: %v", err)
+		}
+		httpReq.Header.Set("Content-Type", "application/json")
+		httpReq.Header.Set("Accept", "text/event-stream")
+		res, err := http.DefaultClient.Do(httpReq)
+		if err != nil {
+			t.Fatalf("post: %v", err)
+		}
+		defer res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(res.Body)
+			t.Fatalf("status=%d, want 200; body=%s", res.StatusCode, string(body))
+		}
+		if ct := res.Header.Get("Content-Type"); !strings.HasPrefix(ct, "text/event-stream") {
+			t.Fatalf("content-type=%q, want text/event-stream", ct)
+		}
+
+		body, err := io.ReadAll(res.Body)
+		if err != nil {
+			t.Fatalf("read body: %v", err)
+		}
+		s := string(body)
+		if !strings.Contains(s, "event: tool_call") {
+			t.Fatalf("expected tool_call event, got:\n%s", s)
+		}
+		if !strings.Contains(s, "event: tool_result") {
+			t.Fatalf("expected tool_result event, got:\n%s", s)
+		}
+		if !strings.Contains(s, "event: final") {
+			t.Fatalf("expected final event, got:\n%s", s)
 		}
 	})
 

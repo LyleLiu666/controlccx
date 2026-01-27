@@ -73,8 +73,17 @@ func main() {
 
 	hub := events.NewHub()
 	workerMgr := worker.NewManager(cfg, taskStore, hub, authStore)
-	observerSvc := &observer.Service{Store: taskStore}
 	chatStore := chat.NewStore(conn)
+	claudeBackend := observer.NewClaudeCLIBackend(cfg, authStore)
+	codexBackend := observer.NewCodexCLIBackend(cfg, authStore)
+	observerSvc := &observer.Service{
+		Store:      taskStore,
+		Chat:       chatStore,
+		LLM:        observer.MultiBackend{Backends: []observer.Backend{claudeBackend, codexBackend}},
+		Claude:     claudeBackend,
+		Codex:      codexBackend,
+		ForceAgent: true,
+	}
 
 	apiSvc := &api.API{
 		Tasks:    taskStore,

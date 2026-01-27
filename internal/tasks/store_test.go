@@ -168,3 +168,41 @@ func TestStore_ListLogs(t *testing.T) {
 	}
 }
 
+func TestStore_LatestLog(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "controlccx.db")
+
+	conn, err := db.Open(ctx, db.Options{Path: dbPath})
+	if err != nil {
+		t.Fatalf("db open: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+
+	store := NewStore(conn)
+
+	task, err := store.CreateTask(ctx, CreateTaskInput{
+		WorkerType: WorkerClaudeCode,
+		Prompt:     "hello",
+		WorkDir:    ".",
+	})
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	_, _ = store.AppendLog(ctx, task.ID, LogAssistant, "a")
+	e2, err := store.AppendLog(ctx, task.ID, LogAssistant, "b")
+	if err != nil {
+		t.Fatalf("append: %v", err)
+	}
+
+	got, err := store.LatestLog(ctx, task.ID, LogAssistant)
+	if err != nil {
+		t.Fatalf("latest log: %v", err)
+	}
+	if got.ID != e2.ID {
+		t.Fatalf("id=%d, want %d", got.ID, e2.ID)
+	}
+	if got.Message != "b" {
+		t.Fatalf("message=%q, want b", got.Message)
+	}
+}

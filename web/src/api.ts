@@ -69,6 +69,93 @@ export async function sendChat(message: string): Promise<{ message: string }> {
   return postJSON<{ message: string }>("/api/chat", { message });
 }
 
+export type ChatSendOptions = {
+  backend?: "auto" | "claude" | "codex";
+  max_steps?: number;
+};
+
+export type ChatStreamEvent = {
+  event: string;
+  data: any;
+};
+
+export async function sendChatStream(
+  message: string,
+  opts: ChatSendOptions,
+  onEvent: (evt: ChatStreamEvent) => void,
+): Promise<string> {
+  const res = await fetch("/api/chat?stream=1", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "text/event-stream",
+    },
+    body: JSON.stringify({ message, stream: true, ...opts }),
+    credentials: "same-origin",
+  });
+
+  if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
+
+  const ct = (res.headers.get("Content-Type") || "").toLowerCase();
+  if (!ct.includes("text/event-stream")) {
+    const data = (await res.json()) as { message?: string };
+    const msg = data?.message ?? "";
+    onEvent({ event: "final", data: { message: msg } });
+    return msg;
+  }
+
+  if (!res.body) throw new Error("missing response body");
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let finalMessage = "";
+
+  const flush = (chunk: string) => {
+    buffer += chunk.replaceAll("\r", "");
+    while (true) {
+      const idx = buffer.indexOf("\n\n");
+      if (idx < 0) break;
+      const block = buffer.slice(0, idx);
+      buffer = buffer.slice(idx + 2);
+      const lines = block.split("\n").filter(Boolean);
+      let event = "message";
+      const dataLines: string[] = [];
+      for (const line of lines) {
+        if (line.startsWith("event:")) {
+          event = line.slice("event:".length).trim();
+          continue;
+        }
+        if (line.startsWith("data:")) {
+          dataLines.push(line.slice("data:".length).trim());
+        }
+      }
+      const dataRaw = dataLines.join("\n");
+      let data: any = dataRaw;
+      try {
+        data = JSON.parse(dataRaw);
+      } catch {
+        // ignore
+      }
+      onEvent({ event, data });
+      if (event === "final" && data && typeof data.message === "string") {
+        finalMessage = data.message;
+      }
+      if (event === "error" && data && typeof data.error === "string") {
+        throw new Error(data.error);
+      }
+    }
+  };
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (value) flush(decoder.decode(value, { stream: true }));
+  }
+  flush(decoder.decode());
+  return finalMessage;
+}
+
 export async function fetchFSRoots(): Promise<FSRoot[]> {
   const res = await getJSON<{ roots: FSRoot[] }>("/api/fs/roots");
   return res.roots;

@@ -25,8 +25,10 @@ import {
   fetchTasks,
   resumeTask,
   sendChat,
+  sendChatStream,
   updateAuth,
 } from "./api";
+import { appendChatMessageUnique, sendChatAndReload } from "./chatOps";
 
 const tasks = ref<Map<string, Task>>(new Map());
 const selectedTaskId = ref<string>("");
@@ -42,6 +44,12 @@ const newPrompt = ref<string>("");
 const resumePrompt = ref<string>("");
 const chatInput = ref<string>("");
 const errorBanner = ref<string>("");
+const chatBackend = ref<"auto" | "claude" | "codex">("auto");
+const chatStreamEnabled = ref<boolean>(true);
+const chatMaxSteps = ref<number>(8);
+const chatStreamStatus = ref<string>("");
+const chatStreamAnswer = ref<string>("");
+const chatSending = ref<boolean>(false);
 
 const authInfo = ref<AuthInfo | null>(null);
 const authStatus = computed<AuthStatus | null>(
@@ -83,6 +91,9 @@ const filteredDirEntries = computed(() => {
 
 const LS_KEY_PINNED_WORKSPACES = "controlccx.pinned_workspaces.v1";
 const LS_KEY_WORKSPACE_FILTER = "controlccx.workspace_filter.v1";
+const LS_KEY_CHAT_BACKEND = "controlccx.chat.backend.v1";
+const LS_KEY_CHAT_STREAM = "controlccx.chat.stream.v1";
+const LS_KEY_CHAT_MAX_STEPS = "controlccx.chat.max_steps.v1";
 
 function getLocalStorage(): Storage | null {
   try {
@@ -139,6 +150,28 @@ function saveString(key: string, value: string) {
   }
 }
 
+function loadBool(key: string, def: boolean): boolean {
+  const raw = loadString(key).trim().toLowerCase();
+  if (raw === "1" || raw === "true" || raw === "yes") return true;
+  if (raw === "0" || raw === "false" || raw === "no") return false;
+  return def;
+}
+
+function saveBool(key: string, value: boolean) {
+  saveString(key, value ? "1" : "0");
+}
+
+function loadInt(key: string, def: number): number {
+  const raw = loadString(key).trim();
+  const n = Number.parseInt(raw, 10);
+  return Number.isFinite(n) ? n : def;
+}
+
+function saveInt(key: string, value: number) {
+  if (!Number.isFinite(value)) return;
+  saveString(key, String(value));
+}
+
 function normalizePathForCompare(p: string): string {
   let s = p.trim();
   if (!s) return "";
@@ -162,6 +195,15 @@ const pinnedWorkspaces = ref<string[]>(
 );
 const workspaceFilter = ref<string>(loadString(LS_KEY_WORKSPACE_FILTER));
 
+{
+  const v = loadString(LS_KEY_CHAT_BACKEND).trim();
+  if (v === "auto" || v === "claude" || v === "codex")
+    chatBackend.value = v as any;
+  chatStreamEnabled.value = loadBool(LS_KEY_CHAT_STREAM, true);
+  const n = loadInt(LS_KEY_CHAT_MAX_STEPS, 8);
+  chatMaxSteps.value = Math.max(1, Math.min(32, n));
+}
+
 watch(pinnedWorkspaces, (v) => saveStringArray(LS_KEY_PINNED_WORKSPACES, v), {
   deep: true,
 });
@@ -169,6 +211,9 @@ watch(workspaceFilter, (v) => {
   saveString(LS_KEY_WORKSPACE_FILTER, v);
   if (v.trim()) newWorkdir.value = v;
 });
+watch(chatBackend, (v) => saveString(LS_KEY_CHAT_BACKEND, v));
+watch(chatStreamEnabled, (v) => saveBool(LS_KEY_CHAT_STREAM, v));
+watch(chatMaxSteps, (v) => saveInt(LS_KEY_CHAT_MAX_STEPS, v));
 
 type SessionGroup = {
   key: string;
@@ -281,12 +326,54 @@ async function onResumeTask() {
 async function onSendChat() {
   const msg = chatInput.value.trim();
   if (!msg) return;
+  if (chatSending.value) return;
   errorBanner.value = "";
+  chatSending.value = true;
   try {
-    await sendChat(msg);
+    if (!chatStreamEnabled.value) {
+      chat.value = await sendChatAndReload(msg, { sendChat, fetchChat });
+      chatInput.value = "";
+      return;
+    }
+
+    chatStreamStatus.value = "thinking";
+    chatStreamAnswer.value = "";
     chatInput.value = "";
+
+    await sendChatStream(
+      msg,
+      { backend: chatBackend.value, max_steps: chatMaxSteps.value },
+      (evt) => {
+        if (evt.event === "status") {
+          const phase = String(evt.data?.phase ?? "");
+          if (phase) chatStreamStatus.value = phase;
+          return;
+        }
+        if (evt.event === "tool_call") {
+          const tool = String(evt.data?.tool ?? "");
+          if (tool) chatStreamStatus.value = `tool: ${tool}`;
+          return;
+        }
+        if (evt.event === "tool_result") {
+          const tool = String(evt.data?.tool ?? "");
+          if (tool) chatStreamStatus.value = `tool done: ${tool}`;
+          return;
+        }
+        if (evt.event === "final") {
+          const m = String(evt.data?.message ?? "");
+          if (m) chatStreamAnswer.value = m;
+          chatStreamStatus.value = "";
+        }
+      },
+    );
+
+    chat.value = await fetchChat();
+    chatStreamStatus.value = "";
+    chatStreamAnswer.value = "";
   } catch (e: any) {
     errorBanner.value = e?.message ?? String(e);
+  } finally {
+    chatSending.value = false;
   }
 }
 
@@ -362,7 +449,7 @@ function connectEvents() {
       } else if (evt.type === "task.log") {
         appendLog(evt.payload as LogEntry);
       } else if (evt.type === "chat.message") {
-        chat.value.push(evt.payload as ChatMessage);
+        chat.value = appendChatMessageUnique(chat.value, evt.payload as ChatMessage);
       }
     } catch {
       // ignore
@@ -929,10 +1016,44 @@ const secretaryBriefing = computed(() => {
           <details class="secChat">
             <summary>Chat (optional)</summary>
             <div class="chat">
+              <div class="chatControls">
+                <label>
+                  Agent
+                  <select v-model="chatBackend" :disabled="chatSending">
+                    <option value="auto">auto</option>
+                    <option value="claude">claude</option>
+                    <option value="codex">codex</option>
+                  </select>
+                </label>
+                <label class="chatToggle">
+                  <input
+                    type="checkbox"
+                    v-model="chatStreamEnabled"
+                    :disabled="chatSending"
+                  />
+                  Stream
+                </label>
+                <label>
+                  Max steps
+                  <input
+                    type="number"
+                    min="1"
+                    max="32"
+                    v-model.number="chatMaxSteps"
+                    :disabled="chatSending"
+                  />
+                </label>
+              </div>
               <div class="msgs">
                 <div v-for="m in chat" :key="m.id" class="msg" :class="m.role">
                   <div class="role">{{ m.role }}</div>
                   <div class="content">{{ m.content }}</div>
+                </div>
+                <div v-if="chatStreamStatus || chatStreamAnswer" class="msg assistant streaming">
+                  <div class="role">assistant</div>
+                  <div class="content">
+                    {{ chatStreamAnswer || chatStreamStatus }}
+                  </div>
                 </div>
               </div>
               <div class="input">
@@ -944,7 +1065,7 @@ const secretaryBriefing = computed(() => {
                 <button
                   class="primary"
                   @click="onSendChat"
-                  :disabled="!chatInput.trim()"
+                  :disabled="chatSending || !chatInput.trim()"
                 >
                   Send
                 </button>
@@ -1661,6 +1782,11 @@ button.primary:active:not(:disabled) {
 
 .modalBody, .settingsBody, .dirModalBody {
   padding: 20px;
+  min-height: 0;
+}
+
+.settingsModal .modalBody {
+  overflow: auto;
 }
 
 .dirModalBody {
@@ -2214,6 +2340,38 @@ button.primary:active:not(:disabled) {
   cursor: pointer;
 }
 
+.chatControls {
+  display: flex;
+  gap: 12px;
+  align-items: flex-end;
+  margin: 12px 0;
+  flex-wrap: wrap;
+}
+
+.chatControls label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-sub);
+}
+
+.chatControls select,
+.chatControls input[type="number"] {
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 8px 10px;
+  background: white;
+  font-size: 13px;
+}
+
+.chatControls label.chatToggle {
+  flex-direction: row;
+  gap: 8px;
+  align-items: center;
+  padding-bottom: 8px;
+}
+
 .msgs {
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
@@ -2234,6 +2392,11 @@ button.primary:active:not(:disabled) {
 .msg.user {
   background: var(--color-primary-bg);
   color: #0f766e;
+}
+
+.msg.streaming {
+  border-style: dashed;
+  opacity: 0.9;
 }
 
 .role {

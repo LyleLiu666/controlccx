@@ -370,6 +370,28 @@ func (s *Store) ListLogs(ctx context.Context, taskID string, afterID int64, limi
 	return out, nil
 }
 
+func (s *Store) LatestLog(ctx context.Context, taskID string, stream LogStream) (LogEntry, error) {
+	row := s.db.QueryRowContext(ctx, `
+		SELECT id, task_id, ts, stream, message
+		FROM logs
+		WHERE task_id = ? AND stream = ?
+		ORDER BY id DESC
+		LIMIT 1;
+	`, taskID, string(stream))
+
+	var (
+		e         LogEntry
+		tsMillis  int64
+		streamStr string
+	)
+	if err := row.Scan(&e.ID, &e.TaskID, &tsMillis, &streamStr, &e.Message); err != nil {
+		return LogEntry{}, fmt.Errorf("tasks: latest log: %w", err)
+	}
+	e.Time = fromMillis(tsMillis)
+	e.Stream = LogStream(streamStr)
+	return e, nil
+}
+
 type rowScanner interface {
 	Scan(dest ...any) error
 }

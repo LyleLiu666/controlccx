@@ -247,7 +247,10 @@ func (a *API) handleChat(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, map[string]any{"messages": msgs})
 	case http.MethodPost:
 		var body struct {
-			Message string `json:"message"`
+			Message  string `json:"message"`
+			Stream   bool   `json:"stream,omitempty"`
+			Backend  string `json:"backend,omitempty"`
+			MaxSteps int    `json:"max_steps,omitempty"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			http.Error(w, "invalid json", http.StatusBadRequest)
@@ -259,19 +262,81 @@ func (a *API) handleChat(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		wantStream := body.Stream ||
+			strings.TrimSpace(r.URL.Query().Get("stream")) == "1" ||
+			strings.Contains(strings.ToLower(r.Header.Get("Accept")), "text/event-stream")
+
+		var (
+			flusher http.Flusher
+			send    func(event string, payload any)
+		)
+		if wantStream {
+			f, ok := w.(http.Flusher)
+			if !ok {
+				http.Error(w, "streaming not supported", http.StatusInternalServerError)
+				return
+			}
+			flusher = f
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.Header().Set("Cache-Control", "no-cache")
+			w.Header().Set("Connection", "keep-alive")
+			w.Header().Set("X-Accel-Buffering", "no")
+
+			send = func(event string, payload any) {
+				data, _ := json.Marshal(payload)
+				_, _ = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, data)
+				flusher.Flush()
+			}
+
+			send("meta", map[string]any{"ok": true})
+		}
+
 		userMsg, _ := a.Chat.Append(r.Context(), chat.RoleUser, user)
 		if a.Hub != nil {
 			a.Hub.Publish(events.Event{Type: "chat.message", Time: time.Now().UTC(), Payload: userMsg})
 		}
 
-		reply, err := a.Observer.Respond(r.Context(), user)
+		if send != nil {
+			send("status", map[string]any{"phase": "thinking"})
+		}
+
+		var (
+			reply observer.Reply
+			err   error
+		)
+		if a.Observer == nil {
+			err = errors.New("observer not configured")
+		} else {
+			reply, err = a.Observer.RespondWithOptions(r.Context(), user, observer.RespondOptions{
+				Backend:  body.Backend,
+				MaxSteps: body.MaxSteps,
+				OnToolCall: func(tool string, args map[string]any) {
+					if send != nil {
+						send("tool_call", map[string]any{"tool": tool, "args": args})
+					}
+				},
+				OnToolResult: func(tool string, result any) {
+					if send != nil {
+						send("tool_result", map[string]any{"tool": tool, "result": result})
+					}
+				},
+			})
+		}
 		if err != nil {
+			if send != nil {
+				send("error", map[string]any{"error": err.Error()})
+				return
+			}
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 		assistantMsg, _ := a.Chat.Append(r.Context(), chat.RoleAssistant, reply.Message)
 		if a.Hub != nil {
 			a.Hub.Publish(events.Event{Type: "chat.message", Time: time.Now().UTC(), Payload: assistantMsg})
+		}
+		if send != nil {
+			send("final", map[string]any{"message": reply.Message})
+			return
 		}
 		writeJSON(w, reply)
 	default:
