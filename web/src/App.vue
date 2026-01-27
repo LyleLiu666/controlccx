@@ -1939,6 +1939,8 @@ watch(
   --bg-header-border: rgba(255, 255, 255, 0.5);
   --overlay-modal: rgba(240, 253, 250, 0.6);
   --overlay-drawer: rgba(15, 23, 42, 0.35);
+  --bg-card-active-a: #f0fdfa;
+  --bg-card-active-b: #e0f2fe;
   --radius-sm: 8px;
   --radius-md: 12px;
   --radius-lg: 16px;
@@ -1963,22 +1965,28 @@ watch(
   --bg-header-border: rgba(148, 163, 184, 0.12);
   --overlay-modal: rgba(2, 6, 23, 0.55);
   --overlay-drawer: rgba(2, 6, 23, 0.55);
+  --bg-card-active-a: rgba(45, 212, 191, 0.16);
+  --bg-card-active-b: rgba(56, 189, 248, 0.12);
   --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.35);
   --shadow-md: 0 6px 10px -1px rgb(0 0 0 / 0.35), 0 2px 6px -2px rgb(0 0 0 / 0.25);
   --shadow-lg: 0 14px 22px -6px rgb(0 0 0 / 0.55), 0 10px 10px -8px rgb(0 0 0 / 0.35);
 }
 
+:global(html),
+:global(body) {
+  margin: 0;
+  padding: 0;
+  background: var(--bg-app);
+  color: var(--text-main);
+}
+
 .page {
   font-family: var(--font-main);
   color: var(--text-main);
-  background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
+  background: linear-gradient(180deg, var(--bg-subtle) 0%, var(--bg-app) 100%);
   min-height: 100vh;
   box-sizing: border-box;
   padding-bottom: 20px;
-}
-
-:global(:root[data-theme="dark"]) .page {
-  background: linear-gradient(180deg, #0b1220 0%, #08101e 100%);
 }
 
 .header {
@@ -2159,6 +2167,13 @@ h2 {
   padding: 12px;
   border-radius: var(--radius-md);
   font-size: 13px;
+}
+
+:global(:root[data-theme="dark"]) .authHint,
+:global(:root[data-theme="dark"]) .secAttentionHint {
+  background: rgba(251, 146, 60, 0.12);
+  border-color: rgba(251, 146, 60, 0.22);
+  color: #fdba74;
 }
 
 .authHint .text {
@@ -2358,7 +2373,7 @@ button.primary:active:not(:disabled) {
   border-radius: 999px;
   background: #ef4444;
   color: white;
-  border: 2px solid white;
+  border: 2px solid var(--bg-panel);
   font-size: 12px;
   font-weight: 900;
   display: grid;
@@ -2413,7 +2428,7 @@ button.primary:active:not(:disabled) {
 
 .secTab {
   border: 1px solid var(--border-color);
-  background: white;
+  background: var(--bg-panel);
   border-radius: 999px;
   padding: 6px 10px;
   font-size: 12px;
@@ -2755,8 +2770,8 @@ button.primary:active:not(:disabled) {
 
 .row {
   text-align: left;
-  background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
-  border: 1px solid #e2e8f0;
+  background: linear-gradient(135deg, var(--bg-panel) 0%, var(--bg-subtle) 100%);
+  border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
   padding: 14px;
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
@@ -2789,7 +2804,7 @@ button.primary:active:not(:disabled) {
 
 .row.active {
   border-color: var(--color-primary);
-  background: linear-gradient(135deg, #f0fdfa 0%, #e0f2fe 100%);
+  background: linear-gradient(135deg, var(--bg-card-active-a) 0%, var(--bg-card-active-b) 100%);
   box-shadow: 0 0 0 3px rgba(13, 148, 136, 0.15);
 }
 
@@ -2820,7 +2835,7 @@ button.primary:active:not(:disabled) {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  background: #f1f5f9;
+  background: var(--bg-subtle);
   padding: 4px 8px;
   border-radius: var(--radius-sm);
 }
@@ -2852,7 +2867,7 @@ button.primary:active:not(:disabled) {
 }
 
 .pill.kind {
-  background: #e2e8f0;
+  background: var(--bg-subtle);
   color: var(--text-sub);
 }
 
@@ -2914,7 +2929,7 @@ button.primary:active:not(:disabled) {
 .detailHeader {
   display: grid;
   gap: 10px;
-  background: white;
+  background: var(--bg-panel);
   padding: 12px 14px;
   border-radius: var(--radius-md);
   border: 1px solid var(--border-color);
@@ -2947,7 +2962,7 @@ button.primary:active:not(:disabled) {
   font-size: 12px;
   color: var(--text-sub);
   font-weight: 700;
-  background: var(--bg-app);
+  background: var(--bg-subtle);
   padding: 4px 8px;
   border-radius: 999px;
   border: 1px solid rgba(148, 163, 184, 0.35);
@@ -3045,7 +3060,7 @@ button.primary:active:not(:disabled) {
   border-radius: var(--radius-md);
   overflow: auto;
   padding: 8px;
-  background: #f8fafc;
+  background: var(--bg-subtle);
   max-height: 200px;
   display: flex;
   flex-direction: column;
@@ -3054,7 +3069,7 @@ button.primary:active:not(:disabled) {
 }
 
 .runRow {
-  background: white;
+  background: var(--bg-panel);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
   padding: 10px;
@@ -3112,7 +3127,7 @@ button.primary:active:not(:disabled) {
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
   padding: 16px;
-  background: white;
+  background: var(--bg-panel);
   color: var(--text-main);
   flex: 1;
   overflow: auto;
@@ -3244,7 +3259,7 @@ button.primary:active:not(:disabled) {
 .secCard {
   border: none;
   border-radius: var(--radius-md);
-  background: linear-gradient(135deg, #f0fdfa 0%, #e0f2fe 100%);
+  background: linear-gradient(135deg, var(--bg-subtle) 0%, var(--color-primary-bg) 100%);
   padding: 16px;
   box-shadow: 0 2px 8px rgba(13, 148, 136, 0.1);
   display: flex;
