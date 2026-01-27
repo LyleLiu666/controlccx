@@ -367,19 +367,29 @@ func (m *Manager) consumeStdout(task tasks.Task, stdout io.Reader, sidMu *sync.M
 			continue
 		}
 
-		// Always persist raw stdout.
-		logEntry, _ := m.store.AppendLog(context.Background(), task.ID, tasks.LogStdout, string(line))
-		m.publishLog(logEntry)
-
 		var parsed parsedLine
+		persistRaw := true
 		switch task.WorkerType {
 		case tasks.WorkerClaudeCode:
+			persistRaw = false
 			parsed, err = parseClaudeJSONLine(line)
 		case tasks.WorkerCodex:
+			persistRaw = false
 			parsed, err = parseCodexJSONLine(line)
 		default:
 			parsed, err = parsedLine{}, nil
 		}
+
+		// For LLM stream-json workers, raw stdout is extremely noisy and not pleasant to read.
+		// Keep it suppressed by default, but fall back to persisting raw lines if parsing fails.
+		if err != nil {
+			persistRaw = true
+		}
+		if persistRaw {
+			logEntry, _ := m.store.AppendLog(context.Background(), task.ID, tasks.LogStdout, string(line))
+			m.publishLog(logEntry)
+		}
+
 		if err == nil {
 			if parsed.SessionID != "" {
 				_ = m.store.SetSessionID(context.Background(), task.ID, parsed.SessionID)

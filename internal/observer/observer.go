@@ -18,9 +18,9 @@ import (
 )
 
 type Service struct {
-	Store *tasks.Store
-	Chat  *chat.Store
-	LLM   Backend
+	Store  *tasks.Store
+	Chat   *chat.Store
+	LLM    Backend
 	Claude Backend
 	Codex  Backend
 
@@ -66,6 +66,10 @@ func (s *Service) RespondWithOptions(ctx context.Context, userMessage string, op
 			SystemPrompt: `你是 ControlCCX 的秘书（一个具备 tool 调用能力的 agent）。
 
 你必须优先使用提供的 tools 获取信息来回答问题，不能编造任务/日志/系统信息。
+
+当需要引用某个任务时：
+- 优先用 tasks_list 查找候选任务，并使用返回的 id
+- 如果用户只给了“任务名称/关键词”，你也可以把该关键词直接作为 task_id 传入（系统会用 prompt/session_id/id 前缀进行匹配）；若匹配多个，请先向用户确认
 
 你必须只输出一个 JSON 对象（不要输出 Markdown / 代码块 / 解释文字）。
 

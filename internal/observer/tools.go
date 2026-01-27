@@ -29,16 +29,16 @@ func (t ToolFunc) Run(ctx context.Context, args map[string]any) (any, error) {
 }
 
 type TaskSummary struct {
-	ID         string         `json:"id"`
-	SessionID  string         `json:"session_id"`
+	ID         string           `json:"id"`
+	SessionID  string           `json:"session_id"`
 	WorkerType tasks.WorkerType `json:"worker_type"`
-	Status     tasks.Status   `json:"status"`
-	Prompt     string         `json:"prompt"`
-	WorkDir    string         `json:"workdir"`
-	Score      int            `json:"score"`
-	Stderr     int            `json:"stderr_count"`
-	UpdatedAt  time.Time      `json:"updated_at"`
-	CreatedAt  time.Time      `json:"created_at"`
+	Status     tasks.Status     `json:"status"`
+	Prompt     string           `json:"prompt"`
+	WorkDir    string           `json:"workdir"`
+	Score      int              `json:"score"`
+	Stderr     int              `json:"stderr_count"`
+	UpdatedAt  time.Time        `json:"updated_at"`
+	CreatedAt  time.Time        `json:"created_at"`
 }
 
 type toolEnv struct {
@@ -218,7 +218,7 @@ func (s *Service) agentTools() map[string]Tool {
 		},
 		"task_logs": ToolFunc{
 			ToolName:        "task_logs",
-			ToolDescription: "列出指定任务的日志。参数：{task_id: string, after?: number, limit?: number (1..2000)}",
+			ToolDescription: "列出指定任务的日志。参数：{task_id: string, after?: number, limit?: number (1..2000)}。task_id 可为：完整 id / id 前缀 / session_id / prompt 关键词",
 			Fn: func(ctx context.Context, args map[string]any) (any, error) {
 				if s.Store == nil {
 					return nil, errors.New("tasks store not configured")
@@ -246,52 +246,61 @@ func (s *Service) agentTools() map[string]Tool {
 				return map[string]any{"task_id": taskID, "logs": logs}, nil
 			},
 		},
-		"task_output_stats": ToolFunc{
-			ToolName:        "task_output_stats",
-			ToolDescription: "获取任务最新输出 + 字数统计。参数：{task_id: string, max_chars?: number}",
-			Fn: func(ctx context.Context, args map[string]any) (any, error) {
-				if s.Store == nil {
-					return nil, errors.New("tasks store not configured")
-				}
-				taskID := stringArg(args, "task_id")
-				if taskID == "" {
-					taskID = stringArg(args, "id")
-				}
-				taskID, err := s.resolveTaskID(ctx, taskID)
-				if err != nil {
-					return nil, err
-				}
-				t, err := s.Store.GetTask(ctx, taskID)
-				if err != nil {
-					return nil, err
-				}
-				out, err := s.latestTaskOutput(ctx, t)
-				if err != nil {
-					return nil, err
-				}
-				maxChars := intArg(args, "max_chars", 2000, 1, 20000)
-				preview := truncateDisplay(out, maxChars)
-				st := computeLengthStat(out)
-				return map[string]any{
-					"task": map[string]any{
-						"id":          t.ID,
-						"session_id":  strings.TrimSpace(t.SessionID),
-						"worker_type": t.WorkerType,
-						"status":      t.Status,
-						"prompt":      truncateDisplay(strings.TrimSpace(t.Prompt), 240),
-						"workdir":     t.WorkDir,
-						"score":       t.Score,
-						"stderr":      t.StderrCount,
-					},
-					"output_preview": preview,
-					"stats": map[string]any{
-						"chars_no_space": st.NonSpaceRunes,
-						"chars":          st.Runes,
-						"words":          st.Words,
-					},
-				}, nil
-			},
+	}
+
+	taskOutputStats := ToolFunc{
+		ToolName:        "task_output_stats",
+		ToolDescription: "获取任务最新输出 + 字数统计。参数：{task_id: string, max_chars?: number}。task_id 可为：完整 id / id 前缀 / session_id / prompt 关键词",
+		Fn: func(ctx context.Context, args map[string]any) (any, error) {
+			if s.Store == nil {
+				return nil, errors.New("tasks store not configured")
+			}
+			taskID := stringArg(args, "task_id")
+			if taskID == "" {
+				taskID = stringArg(args, "id")
+			}
+			taskID, err := s.resolveTaskID(ctx, taskID)
+			if err != nil {
+				return nil, err
+			}
+			t, err := s.Store.GetTask(ctx, taskID)
+			if err != nil {
+				return nil, err
+			}
+			out, err := s.latestTaskOutput(ctx, t)
+			if err != nil {
+				return nil, err
+			}
+			maxChars := intArg(args, "max_chars", 2000, 1, 20000)
+			preview := truncateDisplay(out, maxChars)
+			st := computeLengthStat(out)
+			return map[string]any{
+				"task": map[string]any{
+					"id":          t.ID,
+					"session_id":  strings.TrimSpace(t.SessionID),
+					"worker_type": t.WorkerType,
+					"status":      t.Status,
+					"prompt":      truncateDisplay(strings.TrimSpace(t.Prompt), 240),
+					"workdir":     t.WorkDir,
+					"score":       t.Score,
+					"stderr":      t.StderrCount,
+				},
+				"output_preview": preview,
+				"stats": map[string]any{
+					"chars_no_space": st.NonSpaceRunes,
+					"chars":          st.Runes,
+					"words":          st.Words,
+				},
+			}, nil
 		},
+	}
+
+	tools["task_output_stats"] = taskOutputStats
+	// Backward-compatible alias (LLM may guess names).
+	tools["task_output_status"] = ToolFunc{
+		ToolName:        "task_output_status",
+		ToolDescription: "（别名）同 task_output_stats。参数：{task_id: string, max_chars?: number}。task_id 可为：完整 id / id 前缀 / session_id / prompt 关键词",
+		Fn:              taskOutputStats.Fn,
 	}
 
 	if s.Chat != nil {
@@ -335,16 +344,71 @@ func (s *Service) resolveTaskID(ctx context.Context, idOrPrefix string) (string,
 	}
 	prefix := strings.ToLower(idOrPrefix)
 	var match string
+	var ambiguous bool
 	for _, t := range all {
 		if strings.HasPrefix(strings.ToLower(t.ID), prefix) || strings.HasPrefix(strings.ToLower(strings.TrimSpace(t.SessionID)), prefix) {
 			if match != "" && match != t.ID {
-				return "", fmt.Errorf("ambiguous task_id prefix: %s", idOrPrefix)
+				ambiguous = true
+				break
 			}
 			match = t.ID
 		}
 	}
-	if match == "" {
-		return "", fmt.Errorf("task_id not found: %s", idOrPrefix)
+	if ambiguous {
+		return "", fmt.Errorf("ambiguous task_id prefix: %s", idOrPrefix)
 	}
-	return match, nil
+	if match != "" {
+		return match, nil
+	}
+
+	// Best-effort: treat input as a keyword in prompt (useful when users refer to a task by name).
+	query := strings.ToLower(strings.TrimSpace(idOrPrefix))
+	type candidate struct {
+		id     string
+		prompt string
+	}
+	var cands []candidate
+	for _, t := range all {
+		p := strings.ToLower(strings.TrimSpace(t.Prompt))
+		if p == "" {
+			continue
+		}
+		if strings.Contains(p, query) {
+			cands = append(cands, candidate{
+				id:     t.ID,
+				prompt: truncateDisplay(strings.ReplaceAll(strings.TrimSpace(t.Prompt), "\n", " "), 80),
+			})
+		}
+	}
+	if len(cands) == 1 {
+		return cands[0].id, nil
+	}
+	if len(cands) > 1 {
+		parts := make([]string, 0, minInt(len(cands), 5))
+		for i := 0; i < len(cands) && i < 5; i++ {
+			id := cands[i].id
+			if len(id) > 8 {
+				id = id[:8]
+			}
+			if cands[i].prompt != "" {
+				parts = append(parts, fmt.Sprintf("%s(%s)", id, cands[i].prompt))
+			} else {
+				parts = append(parts, id)
+			}
+		}
+		more := ""
+		if len(cands) > 5 {
+			more = fmt.Sprintf(" (+%d more)", len(cands)-5)
+		}
+		return "", fmt.Errorf("ambiguous task reference: %s; candidates: %s%s", idOrPrefix, strings.Join(parts, ", "), more)
+	}
+
+	return "", fmt.Errorf("task_id not found: %s", idOrPrefix)
+}
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }

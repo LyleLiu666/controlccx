@@ -74,6 +74,88 @@ const selectedLogs = computed(
   () => logsByTask.value.get(selectedTaskId.value) ?? [],
 );
 
+const outputTab = ref<"result" | "logs">("result");
+const logShowAssistant = ref(true);
+const logShowStdout = ref(true);
+const logShowStderr = ref(true);
+const logShowSystem = ref(true);
+const logSearch = ref("");
+
+function formatLogTime(ts: string): string {
+  const s = ts.trim();
+  if (s.length >= 19) return s.slice(11, 19);
+  return s;
+}
+
+const selectedAssistantResult = computed(() => {
+  let best = "";
+  for (const l of selectedLogs.value) {
+    if (l.stream !== "assistant") continue;
+    const msg = l.message ?? "";
+    if (msg.length > best.length) best = msg;
+  }
+  return best.trim();
+});
+
+const selectedStdoutText = computed(() => {
+  return selectedLogs.value
+    .filter((l) => l.stream === "stdout" && l.message)
+    .map((l) => l.message)
+    .join("\n");
+});
+
+const selectedStderrText = computed(() => {
+  return selectedLogs.value
+    .filter((l) => l.stream === "stderr" && l.message)
+    .map((l) => l.message)
+    .join("\n");
+});
+
+const selectedResultText = computed(() => {
+  if (selectedAssistantResult.value) return selectedAssistantResult.value;
+  const out = selectedStdoutText.value.trim();
+  const err = selectedStderrText.value.trim();
+  if (out && err) return `${out}\n\n[stderr]\n${err}`;
+  return out || err;
+});
+
+const filteredLogs = computed(() => {
+  const q = logSearch.value.trim().toLowerCase();
+  return selectedLogs.value.filter((l) => {
+    if (l.stream === "assistant" && !logShowAssistant.value) return false;
+    if (l.stream === "stdout" && !logShowStdout.value) return false;
+    if (l.stream === "stderr" && !logShowStderr.value) return false;
+    if (l.stream === "system" && !logShowSystem.value) return false;
+    if (!q) return true;
+    return (
+      l.stream.toLowerCase().includes(q) ||
+      (l.message ?? "").toLowerCase().includes(q)
+    );
+  });
+});
+
+async function copySelectedResult() {
+  const text = selectedResultText.value;
+  if (!text) return;
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    // Fallback for older browsers.
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.position = "fixed";
+    ta.style.left = "-9999px";
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.select();
+    try {
+      document.execCommand("copy");
+    } finally {
+      document.body.removeChild(ta);
+    }
+  }
+}
+
 const dirPickerOpen = ref(false);
 const dirRoots = ref<FSRoot[]>([]);
 const dirPath = ref<string>("");
@@ -215,6 +297,18 @@ watch(chatBackend, (v) => saveString(LS_KEY_CHAT_BACKEND, v));
 watch(chatStreamEnabled, (v) => saveBool(LS_KEY_CHAT_STREAM, v));
 watch(chatMaxSteps, (v) => saveInt(LS_KEY_CHAT_MAX_STEPS, v));
 
+watch(selectedTaskId, () => {
+  const t = selectedTask.value;
+  if (!t) return;
+  const isLLM = t.worker_type === "claude-code" || t.worker_type === "codex";
+  outputTab.value = isLLM ? "result" : "logs";
+  logShowAssistant.value = true;
+  logShowStdout.value = !isLLM;
+  logShowStderr.value = true;
+  logShowSystem.value = true;
+  logSearch.value = "";
+});
+
 type SessionGroup = {
   key: string;
   session_id: string;
@@ -238,14 +332,18 @@ function sessionKeyForTask(t: Task): string {
 let es: EventSource | null = null;
 
 function upsertTask(task: Task) {
-  tasks.value.set(task.id, task);
+  // Ensure reactivity for Map updates (some environments don't track Map mutations reliably).
+  const next = new Map(tasks.value);
+  next.set(task.id, task);
+  tasks.value = next;
   if (!selectedTaskId.value) selectedTaskId.value = task.id;
 }
 
 function appendLog(entry: LogEntry) {
   const list = logsByTask.value.get(entry.task_id) ?? [];
-  list.push(entry);
-  logsByTask.value.set(entry.task_id, list);
+  const next = new Map(logsByTask.value);
+  next.set(entry.task_id, [...list, entry]);
+  logsByTask.value = next;
 }
 
 async function refresh() {
@@ -269,7 +367,9 @@ async function refreshAuth() {
 
 async function loadLogs(taskId: string) {
   const logs = await fetchLogs(taskId, 0, 500);
-  logsByTask.value.set(taskId, logs);
+  const next = new Map(logsByTask.value);
+  next.set(taskId, logs);
+  logsByTask.value = next;
 }
 
 async function onCreateTask() {
@@ -951,11 +1051,85 @@ const secretaryBriefing = computed(() => {
           </div>
 
           <div class="logs">
-            <div class="logsHeader">Logs</div>
-            <pre
-              class="logbox"
-            ><template v-for="l in selectedLogs" :key="l.id">[{{ l.stream }}] {{ l.message }}
-</template></pre>
+            <div class="outputTabs">
+              <button
+                type="button"
+                class="tabBtn"
+                :class="{ active: outputTab === 'result' }"
+                @click="outputTab = 'result'"
+              >
+                Result
+              </button>
+              <button
+                type="button"
+                class="tabBtn"
+                :class="{ active: outputTab === 'logs' }"
+                @click="outputTab = 'logs'"
+              >
+                Logs
+              </button>
+              <div class="tabSpacer"></div>
+              <button
+                v-if="outputTab === 'result'"
+                type="button"
+                @click="copySelectedResult"
+                :disabled="!selectedResultText"
+              >
+                Copy
+              </button>
+            </div>
+
+            <div v-if="outputTab === 'result'" class="resultPanel">
+              <div v-if="!selectedResultText" class="empty">
+                {{
+                  selectedTask?.status === "running" ||
+                  selectedTask?.status === "queued"
+                    ? "Task is running…"
+                    : "No result yet."
+                }}
+              </div>
+              <pre v-else class="resultBox">{{ selectedResultText }}</pre>
+            </div>
+
+            <div v-else class="logsPanel">
+              <div class="logControls">
+                <div class="logFilters">
+                  <label class="logFilter">
+                    <input type="checkbox" v-model="logShowAssistant" />
+                    assistant
+                  </label>
+                  <label class="logFilter">
+                    <input type="checkbox" v-model="logShowStdout" />
+                    stdout
+                  </label>
+                  <label class="logFilter">
+                    <input type="checkbox" v-model="logShowStderr" />
+                    stderr
+                  </label>
+                  <label class="logFilter">
+                    <input type="checkbox" v-model="logShowSystem" />
+                    system
+                  </label>
+                </div>
+                <div class="logMeta">
+                  {{ filteredLogs.length }} / {{ selectedLogs.length }}
+                </div>
+                <input v-model="logSearch" placeholder="Filter logs..." />
+              </div>
+
+              <div class="logbox">
+                <div
+                  v-for="l in filteredLogs"
+                  :key="l.id"
+                  class="logLine"
+                  :class="`s-${l.stream}`"
+                >
+                  <span class="logTime">{{ formatLogTime(l.time) }}</span>
+                  <span class="logTag" :class="l.stream">{{ l.stream }}</span>
+                  <span class="logMsg">{{ l.message }}</span>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </section>
@@ -2218,26 +2392,155 @@ button.primary:active:not(:disabled) {
   min-height: 400px; /* Ensure reasonable height */
 }
 
-.logsHeader {
-  font-size: 14px;
-  font-weight: 700;
-  color: var(--text-main);
+.outputTabs {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   margin-bottom: 8px;
+  flex: 0 0 auto;
+}
+
+.tabBtn {
+  padding: 6px 12px;
+  border-radius: 999px;
+}
+
+.tabBtn.active {
+  border-color: var(--color-primary);
+  background: var(--color-primary-bg);
+  color: var(--color-primary);
+}
+
+.tabSpacer {
+  flex: 1;
+}
+
+.resultPanel, .logsPanel {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.resultBox {
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 16px;
+  background: white;
+  color: var(--text-main);
+  flex: 1;
+  overflow: auto;
+  font-size: 13px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  font-family: var(--font-main);
+  box-shadow: inset 0 2px 4px rgba(0,0,0,0.03);
+}
+
+.logControls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  flex: 0 0 auto;
+}
+
+.logFilters {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.logFilter {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-sub);
+  user-select: none;
+}
+
+.logMeta {
+  font-size: 12px;
+  color: var(--text-sub);
 }
 
 .logbox {
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
-  padding: 14px;
-  background: #1e293b; /* Dark Slate Blue for logs */
+  padding: 10px 12px;
+  background: #0f172a;
   color: #e2e8f0;
   flex: 1;
+  min-height: 0;
   overflow: auto;
   font-size: 12px;
   line-height: 1.5;
-  white-space: pre-wrap;
   font-family: var(--font-mono);
   box-shadow: inset 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.logLine {
+  display: grid;
+  grid-template-columns: 64px 74px 1fr;
+  gap: 10px;
+  padding: 6px 0;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.14);
+  align-items: start;
+}
+
+.logLine:last-child {
+  border-bottom: none;
+}
+
+.logTime {
+  font-size: 11px;
+  color: #94a3b8;
+}
+
+.logTag {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 18px;
+  padding: 0 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+  border: 1px solid rgba(226, 232, 240, 0.16);
+  text-transform: lowercase;
+}
+
+.logTag.stdout {
+  background: rgba(56, 189, 248, 0.15);
+  border-color: rgba(56, 189, 248, 0.25);
+  color: #7dd3fc;
+}
+
+.logTag.stderr {
+  background: rgba(248, 113, 113, 0.15);
+  border-color: rgba(248, 113, 113, 0.25);
+  color: #fca5a5;
+}
+
+.logTag.system {
+  background: rgba(148, 163, 184, 0.15);
+  border-color: rgba(148, 163, 184, 0.25);
+  color: #cbd5e1;
+}
+
+.logTag.assistant {
+  background: rgba(34, 197, 94, 0.15);
+  border-color: rgba(34, 197, 94, 0.25);
+  color: #86efac;
+}
+
+.logMsg {
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .secretary {
