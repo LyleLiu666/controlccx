@@ -89,7 +89,12 @@ const logSearch = ref("");
 const sessionSearch = ref("");
 
 const secretaryOpen = ref(false);
-const secretaryView = ref<"chat" | "overview">("chat");
+const secretaryView = ref<"chat" | "overview" | "feed">("chat");
+const feedScope = ref<"current" | "all">("current");
+const feedPaused = ref(false);
+const feedWrap = ref(true);
+const feedBoxEl = ref<HTMLDivElement | null>(null);
+const feedNowMs = ref(Date.now());
 
 function formatLogTime(ts: string): string {
   const s = ts.trim();
@@ -193,6 +198,8 @@ const LS_KEY_CHAT_STREAM = "controlccx.chat.stream.v1";
 const LS_KEY_CHAT_MAX_STEPS = "controlccx.chat.max_steps.v1";
 const LS_KEY_SECRETARY_VIEW = "controlccx.secretary.view.v1";
 const LS_KEY_THEME = "controlccx.theme.v1";
+const LS_KEY_FEED_SCOPE = "controlccx.feed.scope.v1";
+const LS_KEY_FEED_WRAP = "controlccx.feed.wrap.v1";
 
 function getLocalStorage(): Storage | null {
   try {
@@ -280,6 +287,12 @@ function applyTheme(t: "light" | "dark") {
   }
 }
 
+function parseLogTimeMs(ts: string): number {
+  const s = (ts ?? "").trim();
+  const n = Date.parse(s);
+  return Number.isFinite(n) ? n : 0;
+}
+
 function normalizePathForCompare(p: string): string {
   let s = p.trim();
   if (!s) return "";
@@ -312,7 +325,12 @@ const workspaceFilter = ref<string>(loadString(LS_KEY_WORKSPACE_FILTER));
   chatMaxSteps.value = Math.max(1, Math.min(32, n));
 
   const sec = loadString(LS_KEY_SECRETARY_VIEW).trim();
-  if (sec === "chat" || sec === "overview") secretaryView.value = sec;
+  if (sec === "chat" || sec === "overview" || sec === "feed")
+    secretaryView.value = sec;
+
+  const fs = loadString(LS_KEY_FEED_SCOPE).trim();
+  if (fs === "current" || fs === "all") feedScope.value = fs;
+  feedWrap.value = loadBool(LS_KEY_FEED_WRAP, true);
 
   const t = loadString(LS_KEY_THEME).trim();
   if (t === "dark" || t === "light") {
@@ -338,6 +356,8 @@ watch(chatStreamEnabled, (v) => saveBool(LS_KEY_CHAT_STREAM, v));
 watch(chatMaxSteps, (v) => saveInt(LS_KEY_CHAT_MAX_STEPS, v));
 watch(secretaryView, (v) => saveString(LS_KEY_SECRETARY_VIEW, v));
 watch(theme, (v) => saveString(LS_KEY_THEME, v));
+watch(feedScope, (v) => saveString(LS_KEY_FEED_SCOPE, v));
+watch(feedWrap, (v) => saveBool(LS_KEY_FEED_WRAP, v));
 
 watch(selectedTaskId, () => {
   const t = selectedTask.value;
@@ -886,6 +906,71 @@ const secretaryBriefing = computed(() => {
   return lines.join("\n");
 });
 
+type FeedItem = {
+  task_id: string;
+  task_short: string;
+  time: string;
+  time_ms: number;
+  stream: LogEntry["stream"];
+  message: string;
+};
+
+const feedItems = computed<FeedItem[]>(() => {
+  const scope = feedScope.value;
+  const byTask: Array<{ taskId: string; logs: LogEntry[] }> = [];
+
+  if (scope === "current") {
+    const sess = selectedSession.value;
+    if (!sess) return [];
+    for (const r of sess.runs) {
+      const logs = logsByTask.value.get(r.id);
+      if (!logs || logs.length === 0) continue;
+      byTask.push({ taskId: r.id, logs });
+    }
+  } else {
+    for (const [taskId, logs] of logsByTask.value.entries()) {
+      if (!logs || logs.length === 0) continue;
+      byTask.push({ taskId, logs });
+    }
+  }
+
+  const out: FeedItem[] = [];
+  for (const { taskId, logs } of byTask) {
+    for (const l of logs) {
+      out.push({
+        task_id: taskId,
+        task_short: taskId.slice(0, 8),
+        time: l.time,
+        time_ms: parseLogTimeMs(l.time),
+        stream: l.stream,
+        message: l.message ?? "",
+      });
+    }
+  }
+
+  out.sort((a, b) => {
+    const dm = a.time_ms - b.time_ms;
+    if (dm !== 0) return dm;
+    return a.time.localeCompare(b.time);
+  });
+
+  const max = 240;
+  return out.length > max ? out.slice(out.length - max) : out;
+});
+
+const feedLastTimeMs = computed(() => {
+  const list = feedItems.value;
+  if (list.length === 0) return 0;
+  return list[list.length - 1].time_ms;
+});
+
+const feedIdleSeconds = computed(() => {
+  const last = feedLastTimeMs.value;
+  if (!last) return 0;
+  const s = Math.floor((feedNowMs.value - last) / 1000);
+  return s > 0 ? s : 0;
+});
+
 function shouldIgnoreGlobalHotkey(e: KeyboardEvent): boolean {
   const t = e.target as any;
   if (!t) return false;
@@ -943,6 +1028,49 @@ watch(
     chatInputEl.value?.focus();
   },
   { immediate: false },
+);
+
+watch(
+  [secretaryOpen, secretaryView, feedScope],
+  async ([open, view]) => {
+    if (!open) return;
+    if (view !== "feed") return;
+    await nextTick();
+    if (!feedPaused.value) {
+      const el = feedBoxEl.value;
+      if (el) el.scrollTop = el.scrollHeight;
+    }
+  },
+  { immediate: false },
+);
+
+watch(
+  () => feedItems.value.length,
+  async () => {
+    if (!secretaryOpen.value) return;
+    if (secretaryView.value !== "feed") return;
+    if (feedPaused.value) return;
+    await nextTick();
+    const el = feedBoxEl.value;
+    if (el) el.scrollTop = el.scrollHeight;
+  },
+);
+
+let feedTimer: number | null = null;
+watch(
+  [secretaryOpen, secretaryView],
+  ([open, view]) => {
+    if (feedTimer != null) {
+      window.clearInterval(feedTimer);
+      feedTimer = null;
+    }
+    if (!open || view !== "feed") return;
+    feedNowMs.value = Date.now();
+    feedTimer = window.setInterval(() => {
+      feedNowMs.value = Date.now();
+    }, 1000);
+  },
+  { immediate: true },
 );
 </script>
 
@@ -1383,6 +1511,19 @@ watch(
                 {{ needsAttentionSessions.length }}
               </span>
             </button>
+            <button
+              type="button"
+              class="secTab"
+              :class="{ active: secretaryView === 'feed' }"
+              role="tab"
+              :aria-selected="secretaryView === 'feed'"
+              @click="secretaryView = 'feed'"
+            >
+              Feed
+              <span class="secTabBadge" :title="`Feed items: ${feedItems.length}`">
+                {{ feedItems.length }}
+              </span>
+            </button>
           </div>
           <button class="iconBtn" type="button" @click="closeSecretary">
             ✕
@@ -1390,7 +1531,57 @@ watch(
         </div>
 
         <div class="secDrawerBody">
-          <div v-if="secretaryView === 'overview'" class="secOverview">
+          <div v-if="secretaryView === 'feed'" class="secFeed">
+            <div class="feedControls">
+              <div class="feedLeft">
+                <label class="feedLabel">
+                  Scope
+                  <select v-model="feedScope">
+                    <option value="current">Current</option>
+                    <option value="all">All</option>
+                  </select>
+                </label>
+                <label class="feedToggle">
+                  <input type="checkbox" v-model="feedWrap" />
+                  Wrap
+                </label>
+                <button type="button" @click="feedPaused = !feedPaused">
+                  {{ feedPaused ? "Resume" : "Pause" }}
+                </button>
+              </div>
+              <div class="feedRight">
+                <span
+                  v-if="selectedTask?.status === 'running' && feedIdleSeconds >= 10"
+                  class="feedIdle"
+                  :title="`No output for ${feedIdleSeconds}s`"
+                >
+                  No output {{ feedIdleSeconds }}s
+                </span>
+              </div>
+            </div>
+
+            <div
+              ref="feedBoxEl"
+              class="feedBox"
+              :class="{ wrap: feedWrap }"
+              role="log"
+              aria-label="Live feed"
+            >
+              <div v-if="feedItems.length === 0" class="empty">
+                暂无日志（仅展示本次打开页面后收到的实时日志）
+              </div>
+              <div v-else class="feedLines">
+                <div v-for="(f, idx) in feedItems" :key="f.task_id + ':' + f.time + ':' + idx" class="feedLine">
+                  <span class="feedTime mono">{{ formatLogTime(f.time) }}</span>
+                  <span class="feedTask mono" :title="f.task_id">{{ f.task_short }}</span>
+                  <span class="feedStream">{{ f.stream }}</span>
+                  <span class="feedMsg">{{ f.message }}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div v-else-if="secretaryView === 'overview'" class="secOverview">
             <div class="secretaryCards">
               <div class="secCard">
                 <div class="secK">Sessions</div>
@@ -2489,6 +2680,126 @@ button.primary:active:not(:disabled) {
 
 .secAttentionHint .text {
   flex: 1;
+}
+
+.secFeed {
+  display: grid;
+  gap: 12px;
+  height: calc(100vh - 170px);
+  max-height: 900px;
+}
+
+.feedControls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.feedLeft {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.feedLabel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-sub);
+}
+
+.feedLabel select {
+  padding: 8px 10px;
+  font-size: 13px;
+}
+
+.feedToggle {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding-bottom: 8px;
+  font-size: 12px;
+  color: var(--text-sub);
+}
+
+.feedRight {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.feedIdle {
+  font-size: 12px;
+  font-weight: 900;
+  color: #fdba74;
+  background: rgba(251, 146, 60, 0.12);
+  border: 1px solid rgba(251, 146, 60, 0.22);
+  padding: 6px 10px;
+  border-radius: 999px;
+}
+
+.feedBox {
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--bg-panel);
+  overflow: auto;
+  padding: 10px;
+  min-height: 0;
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.08);
+}
+
+.feedLines {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.feedLine {
+  display: grid;
+  grid-template-columns: 60px 64px 70px 1fr;
+  gap: 10px;
+  align-items: start;
+  padding: 6px 6px;
+  border-radius: 10px;
+}
+
+.feedLine:hover {
+  background: rgba(148, 163, 184, 0.08);
+}
+
+.feedTime {
+  font-size: 11px;
+  color: var(--text-sub);
+}
+
+.feedTask {
+  font-size: 11px;
+  color: var(--text-sub);
+}
+
+.feedStream {
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--color-primary);
+  text-transform: lowercase;
+}
+
+.feedMsg {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-main);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.feedBox:not(.wrap) .feedMsg {
+  white-space: pre;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .modalOverlay {
