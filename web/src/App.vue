@@ -1305,7 +1305,7 @@ const secretaryBriefing = computed(() => {
 .page {
   font-family: var(--font-main);
   color: var(--text-main);
-  background: var(--bg-app);
+  background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
   min-height: 100vh;
   box-sizing: border-box;
   padding-bottom: 20px;
@@ -1420,12 +1420,12 @@ h2 {
   padding: 16px 20px;
   font-size: 15px;
   font-weight: 700;
-  color: var(--text-main);
-  background: #f8fafc;
-  border-bottom: 1px solid var(--border-color);
+  color: white;
+  background: linear-gradient(135deg, #0d9488 0%, #0891b2 100%);
   display: flex;
   align-items: center;
   gap: 8px;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.1);
 }
 
 .form, .list, .detail, .secretary {
@@ -1816,27 +1816,46 @@ button.primary:active:not(:disabled) {
 
 .row {
   text-align: left;
-  background: white;
-  border: 1px solid transparent;
+  background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
+  border: 1px solid #e2e8f0;
   border-radius: var(--radius-md);
   padding: 14px;
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-  box-shadow: var(--shadow-sm);
+  box-shadow: 0 2px 4px rgba(0,0,0,0.03);
   cursor: pointer;
   position: relative;
   overflow: hidden;
 }
 
+.row::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: transparent;
+  transition: background 0.2s;
+}
+
 .row:hover {
   transform: translateY(-2px);
-  box-shadow: 0 8px 12px -3px rgba(0,0,0,0.05);
+  box-shadow: 0 8px 16px -4px rgba(0,0,0,0.1);
   border-color: var(--color-primary-bg);
+}
+
+.row:hover::before {
+  background: linear-gradient(180deg, #0d9488 0%, #0891b2 100%);
 }
 
 .row.active {
   border-color: var(--color-primary);
-  background: #f0fdfa;
-  box-shadow: 0 0 0 2px var(--color-primary-bg);
+  background: linear-gradient(135deg, #f0fdfa 0%, #e0f2fe 100%);
+  box-shadow: 0 0 0 3px rgba(13, 148, 136, 0.15);
+}
+
+.row.active::before {
+  background: linear-gradient(180deg, #0d9488 0%, #0891b2 100%);
 }
 
 .rowTop {
@@ -1899,26 +1918,40 @@ button.primary:active:not(:disabled) {
 }
 
 .pill.running {
-  background: #dbeafe;
-  color: #1e40af;
+  background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+  color: white;
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.8; }
 }
 
 .pill.succeeded {
-  background: #d1fae5;
-  color: #065f46;
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  color: white;
 }
 
 .pill.failed {
-  background: #fee2e2;
-  color: #991b1b;
+  background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+  color: white;
 }
 
 .pill.canceled,
-.pill.interrupted,
-.pill.queued,
+.pill.interrupted {
+  background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+  color: white;
+}
+
+.pill.queued {
+  background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%);
+  color: white;
+}
+
 .pill.blocked {
-  background: #f1f5f9;
-  color: #64748b;
+  background: linear-gradient(135deg, #f97316 0%, #ea580c 100%);
+  color: white;
 }
 
 .score {
@@ -2049,16 +2082,22 @@ button.primary:active:not(:disabled) {
 }
 
 .secCard {
-  border: 1px solid white;
+  border: none;
   border-radius: var(--radius-md);
-  background: #f8fafc;
+  background: linear-gradient(135deg, #f0fdfa 0%, #e0f2fe 100%);
   padding: 16px;
-  box-shadow: var(--shadow-sm);
+  box-shadow: 0 2px 8px rgba(13, 148, 136, 0.1);
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   text-align: center;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.secCard:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(13, 148, 136, 0.15);
 }
 
 .secK {

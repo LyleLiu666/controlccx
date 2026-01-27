@@ -89,7 +89,7 @@ func (m *Manager) run(ctx context.Context, task tasks.Task) error {
 
 	tool, err := m.buildToolCommand(task)
 	if err != nil {
-		_, _ = m.store.AppendLog(context.Background(), task.ID, tasks.LogSystem, fmt.Sprintf("worker setup error: %v", err))
+		m.appendLog(task.ID, tasks.LogSystem, fmt.Sprintf("worker setup error: %v", err))
 		_ = m.store.FinishTask(context.Background(), task.ID, tasks.FinishTaskInput{
 			Status:     tasks.StatusFailed,
 			ExitCode:   nil,
@@ -103,13 +103,16 @@ func (m *Manager) run(ctx context.Context, task tasks.Task) error {
 
 	if tool.Warning != "" {
 		_ = m.store.SetWarning(context.Background(), task.ID, tool.Warning)
-		_, _ = m.store.AppendLog(context.Background(), task.ID, tasks.LogSystem, tool.Warning)
+		m.appendLog(task.ID, tasks.LogSystem, tool.Warning)
 		m.publishTaskUpdated(task.ID)
 	}
 
 	cmd := exec.CommandContext(ctx, tool.Command, tool.Args...)
 	cmd.Dir = tool.Dir
-	cmd.Env = m.envForWorker(task.WorkerType)
+	env, injectedEnvKeys := m.envForWorkerWithReport(task.WorkerType)
+	cmd.Env = env
+
+	m.appendLog(task.ID, tasks.LogSystem, formatRunStartLog(task.WorkerType, tool, injectedEnvKeys))
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -157,6 +160,8 @@ func (m *Manager) run(ctx context.Context, task tasks.Task) error {
 		status = tasks.StatusFailed
 		errText = waitErr.Error()
 	}
+
+	m.appendLog(task.ID, tasks.LogSystem, formatRunFinishLog(status, exitCode, errText))
 
 	lastSessionIDMu.Lock()
 	sid := lastSessionID
@@ -351,11 +356,11 @@ func (m *Manager) consumeStdout(task tasks.Task, stdout io.Reader, sidMu *sync.M
 			if isEOF(err) {
 				return
 			}
-			_, _ = m.store.AppendLog(context.Background(), task.ID, tasks.LogSystem, formatReadError(err).Error())
+			m.appendLog(task.ID, tasks.LogSystem, formatReadError(err).Error())
 			return
 		}
 		if tooLong {
-			_, _ = m.store.AppendLog(context.Background(), task.ID, tasks.LogSystem, "skipped overlong output line")
+			m.appendLog(task.ID, tasks.LogSystem, "skipped overlong output line")
 			continue
 		}
 		if len(line) == 0 {
@@ -398,11 +403,11 @@ func (m *Manager) consumeLines(taskID string, stream tasks.LogStream, r io.Reade
 			if isEOF(err) {
 				return
 			}
-			_, _ = m.store.AppendLog(context.Background(), taskID, tasks.LogSystem, formatReadError(err).Error())
+			m.appendLog(taskID, tasks.LogSystem, formatReadError(err).Error())
 			return
 		}
 		if tooLong {
-			_, _ = m.store.AppendLog(context.Background(), taskID, tasks.LogSystem, "skipped overlong output line")
+			m.appendLog(taskID, tasks.LogSystem, "skipped overlong output line")
 			continue
 		}
 		if len(line) == 0 {
@@ -439,8 +444,19 @@ func (m *Manager) publishLog(entry tasks.LogEntry) {
 	})
 }
 
+func (m *Manager) appendLog(taskID string, stream tasks.LogStream, message string) {
+	if m == nil || m.store == nil {
+		return
+	}
+	entry, err := m.store.AppendLog(context.Background(), taskID, stream, message)
+	if err != nil {
+		return
+	}
+	m.publishLog(entry)
+}
+
 func (m *Manager) failTask(taskID string, err error) error {
-	_, _ = m.store.AppendLog(context.Background(), taskID, tasks.LogSystem, err.Error())
+	m.appendLog(taskID, tasks.LogSystem, err.Error())
 	_ = m.store.FinishTask(context.Background(), taskID, tasks.FinishTaskInput{
 		Status:     tasks.StatusFailed,
 		ExitCode:   nil,
@@ -450,4 +466,35 @@ func (m *Manager) failTask(taskID string, err error) error {
 	})
 	m.publishTaskUpdated(taskID)
 	return err
+}
+
+func formatRunStartLog(workerType tasks.WorkerType, tool ToolCommand, injectedEnvKeys []string) string {
+	env := formatQuotedList(injectedEnvKeys)
+	return fmt.Sprintf("run.start worker=%s dir=%q cmd=%q args=%s env_injected=%s", workerType, tool.Dir, tool.Command, formatQuotedList(tool.Args), env)
+}
+
+func formatRunFinishLog(status tasks.Status, exitCode *int, errText string) string {
+	msg := fmt.Sprintf("run.finish status=%s exit_code=%s", status, formatExitCode(exitCode))
+	if strings.TrimSpace(errText) != "" {
+		msg += fmt.Sprintf(" err=%q", errText)
+	}
+	return msg
+}
+
+func formatExitCode(exitCode *int) string {
+	if exitCode == nil {
+		return "null"
+	}
+	return fmt.Sprintf("%d", *exitCode)
+}
+
+func formatQuotedList(items []string) string {
+	if len(items) == 0 {
+		return "[]"
+	}
+	quoted := make([]string, 0, len(items))
+	for _, item := range items {
+		quoted = append(quoted, fmt.Sprintf("%q", item))
+	}
+	return "[" + strings.Join(quoted, ", ") + "]"
 }
