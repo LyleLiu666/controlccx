@@ -303,7 +303,7 @@ watch(selectedTaskId, () => {
   const isLLM = t.worker_type === "claude-code" || t.worker_type === "codex";
   outputTab.value = isLLM ? "result" : "logs";
   logShowAssistant.value = true;
-  logShowStdout.value = !isLLM;
+  logShowStdout.value = true;
   logShowStderr.value = true;
   logShowSystem.value = true;
   logSearch.value = "";
