@@ -1,6 +1,6 @@
 ## 1. Spec
-- [ ] 1.1 定义 session 重命名/删除的数据模型与 API
-- [ ] 1.2 定义软删除的展示/过滤行为
+- [x] 1.1 定义 session 重命名/删除的数据模型与 API
+- [x] 1.2 定义软删除的展示/过滤行为
 - [ ] 1.3 `openspec validate add-session-management --strict --no-interactive`
 
 ## 2. Backend (TDD)

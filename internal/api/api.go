@@ -36,6 +36,7 @@ func (a *API) Handler() http.Handler {
 	mux.HandleFunc("/api/system", a.handleSystem)
 	mux.HandleFunc("/api/tasks", a.handleTasks)
 	mux.HandleFunc("/api/tasks/", a.handleTaskByID)
+	mux.HandleFunc("/api/sessions/", a.handleSessionByKey)
 	mux.HandleFunc("/api/fs/roots", a.handleFSRoots)
 	mux.HandleFunc("/api/fs/list", a.handleFSList)
 	mux.HandleFunc("/api/fs/read", a.handleFSRead)
@@ -196,7 +197,10 @@ func (a *API) handleTasks(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		limit := parseInt(r.URL.Query().Get("limit"), 100)
-		items, err := a.Tasks.ListTasks(r.Context(), limit)
+		includeDeleted := strings.TrimSpace(r.URL.Query().Get("include_deleted")) == "1"
+		items, err := a.Tasks.ListTasksWithOptions(r.Context(), limit, tasks.ListTasksOptions{
+			IncludeDeleted: includeDeleted,
+		})
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -222,6 +226,57 @@ func (a *API) handleTasks(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, task)
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func (a *API) handleSessionByKey(w http.ResponseWriter, r *http.Request) {
+	path := strings.TrimPrefix(r.URL.Path, "/api/sessions/")
+	if path == "" {
+		http.NotFound(w, r)
+		return
+	}
+
+	parts := strings.Split(path, "/")
+	key := parts[0]
+	if key == "" {
+		http.NotFound(w, r)
+		return
+	}
+	if len(parts) < 2 {
+		http.NotFound(w, r)
+		return
+	}
+
+	switch parts[1] {
+	case "rename":
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var body struct {
+			Title string `json:"title"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, "invalid json", http.StatusBadRequest)
+			return
+		}
+		if err := a.Tasks.RenameSession(r.Context(), key, body.Title); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		writeJSON(w, map[string]any{"ok": true})
+	case "delete":
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if err := a.Tasks.DeleteSession(r.Context(), key); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		writeJSON(w, map[string]any{"ok": true})
+	default:
+		http.NotFound(w, r)
 	}
 }
 

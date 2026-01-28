@@ -19,6 +19,7 @@ import type {
 import {
   cancelTask,
   createTask,
+  deleteSession,
   fetchAuthInfo,
   fetchChat,
   fetchFSEntries,
@@ -31,6 +32,7 @@ import {
   fsDelete,
   fsMkdir,
   fsWrite,
+  renameSession,
   resumeTaskWithOptions,
   sendChat,
   sendChatStream,
@@ -103,6 +105,7 @@ const logShowSystem = ref(true);
 const logSearch = ref("");
 const sessionSearch = ref("");
 const sessionsLimit = ref(40);
+const sessionsShowDeleted = ref(false);
 
 const filePreviewOpen = ref(false);
 const filePreviewRawPath = ref("");
@@ -678,6 +681,7 @@ const LS_KEY_FEED_SCOPE = "controlccx.feed.scope.v1";
 const LS_KEY_FEED_WRAP = "controlccx.feed.wrap.v1";
 const LS_KEY_FEED_MODE = "controlccx.feed.mode.v1";
 const LS_KEY_COACH_FEED = "controlccx.coach.feed.v1";
+const LS_KEY_SHOW_DELETED_SESSIONS = "controlccx.sessions.show_deleted.v1";
 
 function getLocalStorage(): Storage | null {
   try {
@@ -816,6 +820,8 @@ const workspaceSelect = ref<string>(loadString(LS_KEY_WORKSPACE_FILTER));
   if (fm === "milestones" || fm === "all") liveMode.value = fm;
   liveWrap.value = loadBool(LS_KEY_FEED_WRAP, true);
 
+  sessionsShowDeleted.value = loadBool(LS_KEY_SHOW_DELETED_SESSIONS, false);
+
   const t = loadString(LS_KEY_THEME).trim();
   if (t === "dark" || t === "light") {
     applyTheme(t);
@@ -857,6 +863,11 @@ watch(workspaceSelect, (v) => {
   }
   // Selecting from dropdown sets a primary workspace.
   workspaceFilters.value = [s];
+});
+
+watch(sessionsShowDeleted, (v) => {
+  saveBool(LS_KEY_SHOW_DELETED_SESSIONS, v);
+  void refresh();
 });
 watch(chatBackend, (v) => saveString(LS_KEY_CHAT_BACKEND, v));
 watch(chatStreamEnabled, (v) => saveBool(LS_KEY_CHAT_STREAM, v));
@@ -908,6 +919,8 @@ watch(
 type SessionGroup = {
   key: string;
   session_id: string;
+  title: string;
+  deleted_at: string;
   worker_type: WorkerType;
   workdir: string;
   status: Task["status"];
@@ -942,6 +955,15 @@ function scrollFocusedIntoView(el: HTMLElement) {
 }
 
 function upsertTask(task: Task) {
+  if (!sessionsShowDeleted.value && task.session_deleted_at) {
+    const next = new Map(tasks.value);
+    next.delete(task.id);
+    tasks.value = next;
+    if (selectedTaskId.value === task.id) {
+      selectedTaskId.value = Array.from(next.keys())[0] ?? "";
+    }
+    return;
+  }
   // Ensure reactivity for Map updates (some environments don't track Map mutations reliably).
   const next = new Map(tasks.value);
   next.set(task.id, task);
@@ -959,11 +981,18 @@ function appendLog(entry: LogEntry) {
 async function refresh() {
   const [sys, taskList, chatList] = await Promise.all([
     fetchSystemInfo(),
-    fetchTasks(),
+    fetchTasks(200, sessionsShowDeleted.value),
     fetchChat(),
   ]);
   systemInfo.value = sys;
-  taskList.forEach((t) => upsertTask(t));
+  const next = new Map<string, Task>();
+  for (const t of taskList) next.set(t.id, t);
+  tasks.value = next;
+  if (selectedTaskId.value && !tasks.value.has(selectedTaskId.value)) {
+    selectedTaskId.value = taskList[0]?.id ?? "";
+  } else if (!selectedTaskId.value) {
+    selectedTaskId.value = taskList[0]?.id ?? "";
+  }
   chat.value = chatList;
 }
 
@@ -1889,15 +1918,21 @@ const sessionsAll = computed<SessionGroup[]>(() => {
     let score = 0;
     let stderrCount = 0;
     let warning = "";
+    let title = "";
+    let deletedAt = "";
     for (const r of runs) {
       score = Math.max(score, r.score);
       stderrCount = Math.max(stderrCount, r.stderr_count);
       if (!warning && r.warning) warning = r.warning;
+      if (!title && (r.session_title ?? "").trim()) title = (r.session_title ?? "").trim();
+      if (!deletedAt && (r.session_deleted_at ?? "").trim()) deletedAt = (r.session_deleted_at ?? "").trim();
     }
 
     out.push({
       key,
       session_id: latest.session_id?.trim() ?? "",
+      title,
+      deleted_at: deletedAt,
       worker_type: latest.worker_type,
       workdir: latest.workdir,
       status: latest.status,

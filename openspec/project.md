@@ -38,6 +38,37 @@ Every iteration in this repo MUST follow the same closed loop:
 5) **Fix**: iterate until validations pass.
 6) **Docs again**: update documentation and mark completed tasks (`- [x]`) to reflect reality.
 
+### Roadmap (Foundation → Upper Layers)
+This ordering is driven by `docs/compare_webcode.md` (gap list + dependency reasoning). The goal is to build a “cockpit”
+with strong foundations first, then add higher-level productivity layers.
+
+0) **Foundation (baseline reliability)**
+   - `add-controlccx-foundation` (done)
+
+1) **Safety & Governance (must precede powerful capabilities)**
+   - `add-approval-blocked-mvp` (done)
+   - `add-claude-auto-approve-toggle` (done)
+   - `add-delivery-foreman-check` (in progress)
+   - `add-approval-trilogy` (planned; implement after docs/spec are finalized)
+
+2) **Mobile Shell (interaction foundation)**
+   - `add-mobile-shell` (done)
+
+3) **Workspace File Ops (close the loop; allow safe writes)**
+   - `add-workspace-file-ops` (done)
+
+4) **Preview Tabs (Markdown/Raw/HTML preview)**
+   - `add-preview-tabs` (done)
+
+5) **Session Management (lower priority, but must exist)**
+   - `add-session-management` (planned)
+
+6) **Tooling Extensibility (multi-tool adapters + tool-level env)**
+   - `add-tooling-extensibility` (planned)
+
+7) **Foreman Dashboard (operational overview)**
+   - `add-foreman-dashboard` (planned)
+
 ### Git Workflow
 - Small, focused changes.
 - Commit messages should describe the user-visible effect.

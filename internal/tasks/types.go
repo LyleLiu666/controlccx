@@ -38,9 +38,13 @@ type Task struct {
 	Prompt       string     `json:"prompt"`
 	WorkDir      string     `json:"workdir"`
 	SessionID    string     `json:"session_id"`
+	SessionTitle string     `json:"session_title,omitempty"`
+	SessionDeletedAt *time.Time `json:"session_deleted_at,omitempty"`
 	Warning      string     `json:"warning"`
 	Error        string     `json:"error"`
 	ExitCode     *int       `json:"exit_code,omitempty"`
+	FinishReason string     `json:"finish_reason,omitempty"`
+	SuggestedTests []string `json:"suggested_tests,omitempty"`
 	StderrCount  int        `json:"stderr_count"`
 	KeywordCount int        `json:"keyword_count"`
 	Score        int        `json:"score"`

@@ -37,8 +37,10 @@ export async function fetchSystemInfo(): Promise<SystemInfo> {
   return getJSON<SystemInfo>("/api/system");
 }
 
-export async function fetchTasks(limit = 200): Promise<Task[]> {
-  const res = await getJSON<{ tasks: Task[] }>(`/api/tasks?limit=${limit}`);
+export async function fetchTasks(limit = 200, includeDeleted = false): Promise<Task[]> {
+  const qs = new URLSearchParams({ limit: String(limit) });
+  if (includeDeleted) qs.set("include_deleted", "1");
+  const res = await getJSON<{ tasks: Task[] }>(`/api/tasks?${qs.toString()}`);
   return res.tasks;
 }
 
@@ -64,6 +66,14 @@ export async function resumeTaskWithOptions(
   input: { prompt: string; unsafe_automation?: boolean },
 ): Promise<Task> {
   return postJSON<Task>(`/api/tasks/${id}/resume`, input);
+}
+
+export async function renameSession(key: string, title: string): Promise<{ ok: boolean }> {
+  return postJSON(`/api/sessions/${encodeURIComponent(key)}/rename`, { title });
+}
+
+export async function deleteSession(key: string): Promise<{ ok: boolean }> {
+  return postJSON(`/api/sessions/${encodeURIComponent(key)}/delete`, {});
 }
 
 export async function fetchLogs(taskId: string, after = 0, limit = 500): Promise<LogEntry[]> {

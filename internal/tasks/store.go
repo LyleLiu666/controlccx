@@ -95,31 +95,59 @@ func (s *Store) GetTask(ctx context.Context, id string) (Task, error) {
 	row := s.db.QueryRowContext(ctx, `
 		SELECT
 			t.id, t.worker_type, t.mode, t.status, COALESCE(o.unsafe_automation, 0),
-			t.prompt, t.workdir, t.session_id, t.warning, t.error, t.exit_code,
+			t.prompt, t.workdir, t.session_id, COALESCE(sm.title, ''), sm.deleted_at,
+			t.warning, t.error, t.exit_code,
 			stderr_count, keyword_count, score,
-			created_at, updated_at, started_at, finished_at
+			t.created_at, t.updated_at, t.started_at, t.finished_at
 		FROM tasks t
 		LEFT JOIN task_run_options o ON o.task_id = t.id
+		LEFT JOIN session_meta sm ON sm.key = (
+			CASE
+				WHEN t.session_id IS NOT NULL AND t.session_id != '' THEN 's:' || t.session_id
+				ELSE 't:' || t.id
+			END
+		)
 		WHERE t.id = ?;
 	`, id)
-	return scanTask(row)
+	task, err := scanTask(row)
+	if err != nil {
+		return Task{}, err
+	}
+	PopulateHints(&task)
+	return task, nil
 }
 
 func (s *Store) ListTasks(ctx context.Context, limit int) ([]Task, error) {
+	return s.ListTasksWithOptions(ctx, limit, ListTasksOptions{})
+}
+
+func (s *Store) ListTasksWithOptions(ctx context.Context, limit int, opts ListTasksOptions) ([]Task, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 100
+	}
+	includeDeleted := 0
+	if opts.IncludeDeleted {
+		includeDeleted = 1
 	}
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT
 			t.id, t.worker_type, t.mode, t.status, COALESCE(o.unsafe_automation, 0),
-			t.prompt, t.workdir, t.session_id, t.warning, t.error, t.exit_code,
+			t.prompt, t.workdir, t.session_id, COALESCE(sm.title, ''), sm.deleted_at,
+			t.warning, t.error, t.exit_code,
 			t.stderr_count, t.keyword_count, t.score,
 			t.created_at, t.updated_at, t.started_at, t.finished_at
 		FROM tasks t
 		LEFT JOIN task_run_options o ON o.task_id = t.id
+		LEFT JOIN session_meta sm ON sm.key = (
+			CASE
+				WHEN t.session_id IS NOT NULL AND t.session_id != '' THEN 's:' || t.session_id
+				ELSE 't:' || t.id
+			END
+		)
+		WHERE (? = 1 OR sm.deleted_at IS NULL)
 		ORDER BY t.created_at DESC
 		LIMIT ?;
-	`, limit)
+	`, includeDeleted, limit)
 	if err != nil {
 		return nil, fmt.Errorf("tasks: list: %w", err)
 	}
@@ -131,6 +159,7 @@ func (s *Store) ListTasks(ctx context.Context, limit int) ([]Task, error) {
 		if err != nil {
 			return nil, err
 		}
+		PopulateHints(&task)
 		out = append(out, task)
 	}
 	if err := rows.Err(); err != nil {
@@ -227,12 +256,13 @@ func (s *Store) FinishTask(ctx context.Context, id string, in FinishTaskInput) e
 	var (
 		stderrCount  int
 		keywordCount int
+		prevSessionID string
 	)
 	err = tx.QueryRowContext(ctx, `
-		SELECT stderr_count, keyword_count
+		SELECT stderr_count, keyword_count, session_id
 		FROM tasks
 		WHERE id = ?;
-	`, id).Scan(&stderrCount, &keywordCount)
+	`, id).Scan(&stderrCount, &keywordCount, &prevSessionID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return fmt.Errorf("tasks: not found")
@@ -251,6 +281,12 @@ func (s *Store) FinishTask(ctx context.Context, id string, in FinishTaskInput) e
 		return fmt.Errorf("tasks: finish update: %w", err)
 	}
 
+	if strings.TrimSpace(prevSessionID) == "" && strings.TrimSpace(in.SessionID) != "" {
+		if err := migrateSessionMetaKeyTx(tx, SessionKey(id, ""), SessionKey(id, in.SessionID), toMillis(now)); err != nil {
+			return err
+		}
+	}
+
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("tasks: finish commit: %w", err)
 	}
@@ -262,14 +298,40 @@ func (s *Store) SetSessionID(ctx context.Context, id, sessionID string) error {
 	if sessionID == "" {
 		return nil
 	}
-	now := toMillis(s.now().UTC())
-	_, err := s.db.ExecContext(ctx, `
+	now := s.now().UTC()
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("tasks: begin set session_id: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var prev string
+	if err := tx.QueryRowContext(ctx, `SELECT session_id FROM tasks WHERE id = ?;`, id).Scan(&prev); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("tasks: not found")
+		}
+		return fmt.Errorf("tasks: read session_id: %w", err)
+	}
+	if strings.TrimSpace(prev) != "" {
+		return nil
+	}
+
+	_, err = tx.ExecContext(ctx, `
 		UPDATE tasks
 		SET session_id = ?, updated_at = ?
 		WHERE id = ? AND (session_id IS NULL OR session_id = '');
-	`, sessionID, now, id)
+	`, sessionID, toMillis(now), id)
 	if err != nil {
 		return fmt.Errorf("tasks: set session_id: %w", err)
+	}
+
+	if err := migrateSessionMetaKeyTx(tx, SessionKey(id, ""), SessionKey(id, sessionID), toMillis(now)); err != nil {
+		return err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("tasks: commit set session_id: %w", err)
 	}
 	return nil
 }
@@ -427,13 +489,16 @@ func scanTask(row rowScanner) (Task, error) {
 		t                         Task
 		workerType, mode, status  string
 		unsafeAutomation          int
+		sessionTitle              string
+		sessionDeletedAt          sql.NullInt64
 		createdAt, updatedAt      int64
 		startedAt, finishedAt     sql.NullInt64
 		exitCode                  sql.NullInt64
 	)
 	err := row.Scan(
 		&t.ID, &workerType, &mode, &status, &unsafeAutomation,
-		&t.Prompt, &t.WorkDir, &t.SessionID, &t.Warning, &t.Error, &exitCode,
+		&t.Prompt, &t.WorkDir, &t.SessionID, &sessionTitle, &sessionDeletedAt,
+		&t.Warning, &t.Error, &exitCode,
 		&t.StderrCount, &t.KeywordCount, &t.Score,
 		&createdAt, &updatedAt, &startedAt, &finishedAt,
 	)
@@ -448,9 +513,14 @@ func scanTask(row rowScanner) (Task, error) {
 	t.Mode = Mode(mode)
 	t.Status = Status(status)
 	t.UnsafeAutomation = unsafeAutomation != 0
+	t.SessionTitle = strings.TrimSpace(sessionTitle)
 	t.CreatedAt = fromMillis(createdAt)
 	t.UpdatedAt = fromMillis(updatedAt)
 
+	if sessionDeletedAt.Valid {
+		v := fromMillis(sessionDeletedAt.Int64)
+		t.SessionDeletedAt = &v
+	}
 	if startedAt.Valid {
 		v := fromMillis(startedAt.Int64)
 		t.StartedAt = &v

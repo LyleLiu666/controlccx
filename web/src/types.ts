@@ -18,9 +18,13 @@ export type Task = {
   prompt: string;
   workdir: string;
   session_id: string;
+  session_title?: string;
+  session_deleted_at?: string;
   warning: string;
   error: string;
   exit_code?: number;
+  finish_reason?: string;
+  suggested_tests?: string[];
   stderr_count: number;
   keyword_count: number;
   score: number;
