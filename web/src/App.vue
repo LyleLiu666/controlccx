@@ -31,7 +31,7 @@ import {
   fsDelete,
   fsMkdir,
   fsWrite,
-  resumeTask,
+  resumeTaskWithOptions,
   sendChat,
   sendChatStream,
   updateAuth,
@@ -55,6 +55,7 @@ const newWorkdir = ref<string>(".");
 const newPrompt = ref<string>("");
 const newRunOpen = ref(false);
 const newRunPromptEl = ref<HTMLTextAreaElement | null>(null);
+const claudeAutoApprove = ref<boolean>(false);
 
 const resumePrompt = ref<string>("");
 const resumeExpanded = ref(true);
@@ -170,6 +171,7 @@ const sessionsFiltersOpen = ref(false);
 
 const LS_KEY_AUTO_DELIVERY_FOREMAN = "controlccx.auto_delivery_foreman.v1";
 const LS_KEY_DELIVERY_FOREMAN_SEEN = "controlccx.delivery_foreman.seen_runs.v1";
+const LS_KEY_CLAUDE_AUTO_APPROVE = "controlccx.claude.auto_approve.v1";
 
 const autoDeliveryForeman = ref<boolean>(true);
 const deliveryForemanSeenRuns = ref<Set<string>>(new Set());
@@ -806,6 +808,7 @@ const workspaceSelect = ref<string>(loadString(LS_KEY_WORKSPACE_FILTER));
 
   autoDeliveryForeman.value = loadBool(LS_KEY_AUTO_DELIVERY_FOREMAN, true);
   deliveryForemanSeenRuns.value = new Set(loadStringArray(LS_KEY_DELIVERY_FOREMAN_SEEN));
+  claudeAutoApprove.value = loadBool(LS_KEY_CLAUDE_AUTO_APPROVE, false);
 
   const fs = loadString(LS_KEY_FEED_SCOPE).trim();
   if (fs === "current" || fs === "all") liveScope.value = fs;
@@ -860,6 +863,7 @@ watch(chatStreamEnabled, (v) => saveBool(LS_KEY_CHAT_STREAM, v));
 watch(chatMaxSteps, (v) => saveInt(LS_KEY_CHAT_MAX_STEPS, v));
 watch(secretaryView, (v) => saveString(LS_KEY_SECRETARY_VIEW, v));
 watch(autoDeliveryForeman, (v) => saveBool(LS_KEY_AUTO_DELIVERY_FOREMAN, Boolean(v)));
+watch(claudeAutoApprove, (v) => saveBool(LS_KEY_CLAUDE_AUTO_APPROVE, Boolean(v)));
 watch(theme, (v) => saveString(LS_KEY_THEME, v));
 watch(liveScope, (v) => saveString(LS_KEY_FEED_SCOPE, v));
 watch(liveWrap, (v) => saveBool(LS_KEY_FEED_WRAP, v));
@@ -981,10 +985,13 @@ async function loadLogs(taskId: string) {
 async function onCreateTask(): Promise<boolean> {
   errorBanner.value = "";
   try {
+    const unsafe =
+      newWorkerType.value === "claude-code" ? Boolean(claudeAutoApprove.value) : false;
     const t = await createTask({
       worker_type: newWorkerType.value,
       prompt: newPrompt.value,
       workdir: newWorkdir.value,
+      unsafe_automation: unsafe || undefined,
     });
     upsertTask(t);
     selectedTaskId.value = t.id;
@@ -1197,7 +1204,12 @@ async function onResumeTask() {
   if (!resumePrompt.value.trim()) return;
   errorBanner.value = "";
   try {
-    const nt = await resumeTask(sess.latest.id, resumePrompt.value);
+    const unsafe =
+      sess.worker_type === "claude-code" ? Boolean(claudeAutoApprove.value) : false;
+    const nt = await resumeTaskWithOptions(sess.latest.id, {
+      prompt: resumePrompt.value,
+      unsafe_automation: unsafe || undefined,
+    });
     upsertTask(nt);
     selectedTaskId.value = nt.id;
     resumePrompt.value = "";
@@ -2759,6 +2771,14 @@ watch(
                 rows="3"
                 placeholder="Continue with..."
               ></textarea>
+              <label
+                v-if="selectedSession?.worker_type === 'claude-code'"
+                class="resumeAutoApprove"
+                :title="'Adds --dangerously-skip-permissions (dangerous)'"
+              >
+                <input type="checkbox" v-model="claudeAutoApprove" />
+                <span>Auto-approve</span>
+              </label>
               <button
                 type="button"
                 class="primary"
@@ -3309,6 +3329,15 @@ watch(
                 <option value="codex">codex</option>
               </select>
             </label>
+            <div v-if="newWorkerType === 'claude-code'" class="newRunAutoApprove full">
+              <label class="settingsToggleRow">
+                <input type="checkbox" v-model="claudeAutoApprove" />
+                <span>Auto-approve tools (dangerous)</span>
+              </label>
+              <div class="tinyHint">
+                Enables <span class="mono">--dangerously-skip-permissions</span>. Use only if you accept the risk.
+              </div>
+            </div>
             <label>
               Workdir
               <div class="workdirRow">
@@ -5967,13 +5996,36 @@ button.primary:active:not(:disabled) {
 
 .resumeRow {
   display: grid;
-  grid-template-columns: 1fr auto auto;
+  grid-template-columns: 1fr auto auto auto;
   gap: 10px;
   align-items: start;
 }
 
 .resumeRow textarea {
   min-height: 0;
+}
+
+.resumeAutoApprove {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 40px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  background: rgba(15, 23, 42, 0.12);
+  color: var(--text-main);
+  opacity: 0.9;
+  user-select: none;
+}
+
+.resumeAutoApprove input {
+  width: 18px;
+  height: 18px;
+}
+
+.resumeAutoApprove:hover {
+  opacity: 1;
 }
 
 .resumeToggle {

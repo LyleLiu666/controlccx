@@ -14,6 +14,7 @@ export type Task = {
   worker_type: WorkerType;
   mode: "new" | "resume";
   status: TaskStatus;
+  unsafe_automation?: boolean;
   prompt: string;
   workdir: string;
   session_id: string;

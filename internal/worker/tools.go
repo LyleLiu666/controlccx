@@ -46,7 +46,7 @@ func buildClaude(cfg config.Config, task tasks.Task) (ToolCommand, error) {
 	workdir := filepath.Clean(task.WorkDir)
 
 	args := []string{"-p"}
-	if cfg.Workers.UnsafeAutomation {
+	if cfg.Workers.UnsafeAutomation || task.UnsafeAutomation {
 		args = append(args, "--dangerously-skip-permissions")
 	}
 	// Note: do not force --setting-sources. Users often rely on their normal Claude settings/auth.
@@ -93,7 +93,7 @@ func buildCodex(cfg config.Config, task tasks.Task) (ToolCommand, error) {
 	workdir := filepath.Clean(task.WorkDir)
 
 	args := []string{"e"}
-	if cfg.Workers.UnsafeAutomation {
+	if cfg.Workers.UnsafeAutomation || task.UnsafeAutomation {
 		args = append(args, "--dangerously-bypass-approvals-and-sandbox")
 	}
 	args = append(args, "--skip-git-repo-check")

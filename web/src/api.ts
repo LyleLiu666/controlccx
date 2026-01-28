@@ -46,6 +46,7 @@ export async function createTask(input: {
   worker_type: WorkerType;
   prompt: string;
   workdir: string;
+  unsafe_automation?: boolean;
 }): Promise<Task> {
   return postJSON<Task>("/api/tasks", { ...input, mode: "new" });
 }
@@ -56,6 +57,13 @@ export async function cancelTask(id: string): Promise<{ ok: boolean }> {
 
 export async function resumeTask(id: string, prompt: string): Promise<Task> {
   return postJSON<Task>(`/api/tasks/${id}/resume`, { prompt });
+}
+
+export async function resumeTaskWithOptions(
+  id: string,
+  input: { prompt: string; unsafe_automation?: boolean },
+): Promise<Task> {
+  return postJSON<Task>(`/api/tasks/${id}/resume`, input);
 }
 
 export async function fetchLogs(taskId: string, after = 0, limit = 500): Promise<LogEntry[]> {

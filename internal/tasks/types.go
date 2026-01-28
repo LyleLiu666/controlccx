@@ -34,6 +34,7 @@ type Task struct {
 	WorkerType   WorkerType `json:"worker_type"`
 	Mode         Mode       `json:"mode"`
 	Status       Status     `json:"status"`
+	UnsafeAutomation bool   `json:"unsafe_automation,omitempty"`
 	Prompt       string     `json:"prompt"`
 	WorkDir      string     `json:"workdir"`
 	SessionID    string     `json:"session_id"`
@@ -69,6 +70,7 @@ type LogEntry struct {
 type CreateTaskInput struct {
 	WorkerType WorkerType `json:"worker_type"`
 	Mode       Mode       `json:"mode"`
+	UnsafeAutomation bool `json:"unsafe_automation,omitempty"`
 	Prompt     string     `json:"prompt"`
 	WorkDir    string     `json:"workdir"`
 	SessionID  string     `json:"session_id,omitempty"`
@@ -82,4 +84,3 @@ type FinishTaskInput struct {
 	SessionID  string
 	FinishedAt time.Time
 }
-

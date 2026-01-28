@@ -283,7 +283,8 @@ func (a *API) handleTaskByID(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		var body struct {
-			Prompt string `json:"prompt"`
+			Prompt           string `json:"prompt"`
+			UnsafeAutomation bool   `json:"unsafe_automation,omitempty"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			http.Error(w, "invalid json", http.StatusBadRequest)
@@ -301,6 +302,7 @@ func (a *API) handleTaskByID(w http.ResponseWriter, r *http.Request) {
 		newTask, err := a.Tasks.CreateTask(r.Context(), tasks.CreateTaskInput{
 			WorkerType: prev.WorkerType,
 			Mode:       tasks.ModeResume,
+			UnsafeAutomation: body.UnsafeAutomation,
 			Prompt:     body.Prompt,
 			WorkDir:    prev.WorkDir,
 			SessionID:  prev.SessionID,

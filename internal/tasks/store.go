@@ -56,7 +56,13 @@ func (s *Store) CreateTask(ctx context.Context, in CreateTaskInput) (Task, error
 	id := uuid.NewString()
 
 	createdAt := toMillis(now)
-	_, err := s.db.ExecContext(ctx, `
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return Task{}, fmt.Errorf("tasks: begin create: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	_, err = tx.ExecContext(ctx, `
 		INSERT INTO tasks (
 			id, worker_type, mode, status, prompt, workdir, session_id, warning,
 			created_at, updated_at, stderr_count, keyword_count, score
@@ -66,17 +72,35 @@ func (s *Store) CreateTask(ctx context.Context, in CreateTaskInput) (Task, error
 		return Task{}, fmt.Errorf("tasks: insert: %w", err)
 	}
 
+	unsafeInt := 0
+	if in.UnsafeAutomation {
+		unsafeInt = 1
+	}
+	_, err = tx.ExecContext(ctx, `
+		INSERT OR REPLACE INTO task_run_options (task_id, unsafe_automation)
+		VALUES (?, ?);
+	`, id, unsafeInt)
+	if err != nil {
+		return Task{}, fmt.Errorf("tasks: insert run options: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return Task{}, fmt.Errorf("tasks: commit create: %w", err)
+	}
+
 	return s.GetTask(ctx, id)
 }
 
 func (s *Store) GetTask(ctx context.Context, id string) (Task, error) {
 	row := s.db.QueryRowContext(ctx, `
 		SELECT
-			id, worker_type, mode, status, prompt, workdir, session_id, warning, error, exit_code,
+			t.id, t.worker_type, t.mode, t.status, COALESCE(o.unsafe_automation, 0),
+			t.prompt, t.workdir, t.session_id, t.warning, t.error, t.exit_code,
 			stderr_count, keyword_count, score,
 			created_at, updated_at, started_at, finished_at
-		FROM tasks
-		WHERE id = ?;
+		FROM tasks t
+		LEFT JOIN task_run_options o ON o.task_id = t.id
+		WHERE t.id = ?;
 	`, id)
 	return scanTask(row)
 }
@@ -87,11 +111,13 @@ func (s *Store) ListTasks(ctx context.Context, limit int) ([]Task, error) {
 	}
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT
-			id, worker_type, mode, status, prompt, workdir, session_id, warning, error, exit_code,
-			stderr_count, keyword_count, score,
-			created_at, updated_at, started_at, finished_at
-		FROM tasks
-		ORDER BY created_at DESC
+			t.id, t.worker_type, t.mode, t.status, COALESCE(o.unsafe_automation, 0),
+			t.prompt, t.workdir, t.session_id, t.warning, t.error, t.exit_code,
+			t.stderr_count, t.keyword_count, t.score,
+			t.created_at, t.updated_at, t.started_at, t.finished_at
+		FROM tasks t
+		LEFT JOIN task_run_options o ON o.task_id = t.id
+		ORDER BY t.created_at DESC
 		LIMIT ?;
 	`, limit)
 	if err != nil {
@@ -400,12 +426,13 @@ func scanTask(row rowScanner) (Task, error) {
 	var (
 		t                         Task
 		workerType, mode, status  string
+		unsafeAutomation          int
 		createdAt, updatedAt      int64
 		startedAt, finishedAt     sql.NullInt64
 		exitCode                  sql.NullInt64
 	)
 	err := row.Scan(
-		&t.ID, &workerType, &mode, &status,
+		&t.ID, &workerType, &mode, &status, &unsafeAutomation,
 		&t.Prompt, &t.WorkDir, &t.SessionID, &t.Warning, &t.Error, &exitCode,
 		&t.StderrCount, &t.KeywordCount, &t.Score,
 		&createdAt, &updatedAt, &startedAt, &finishedAt,
@@ -420,6 +447,7 @@ func scanTask(row rowScanner) (Task, error) {
 	t.WorkerType = WorkerType(workerType)
 	t.Mode = Mode(mode)
 	t.Status = Status(status)
+	t.UnsafeAutomation = unsafeAutomation != 0
 	t.CreatedAt = fromMillis(createdAt)
 	t.UpdatedAt = fromMillis(updatedAt)
 

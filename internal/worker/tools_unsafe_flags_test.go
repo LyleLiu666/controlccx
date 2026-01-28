@@ -52,6 +52,28 @@ func TestBuildToolCommand_UnsafeAutomation_UsesDangerousFlags(t *testing.T) {
 	}
 }
 
+func TestBuildToolCommand_PerRunUnsafeAutomation_UsesDangerousFlags(t *testing.T) {
+	cfg := config.Default()
+
+	claudeTask := tasks.Task{WorkerType: tasks.WorkerClaudeCode, Mode: tasks.ModeNew, Prompt: "hi", WorkDir: ".", UnsafeAutomation: true}
+	claudeTool, err := BuildToolCommand(cfg, claudeTask)
+	if err != nil {
+		t.Fatalf("BuildToolCommand claude: %v", err)
+	}
+	if !hasArg(claudeTool.Args, "--dangerously-skip-permissions") {
+		t.Fatalf("expected claude dangerous flag in args=%v", claudeTool.Args)
+	}
+
+	codexTask := tasks.Task{WorkerType: tasks.WorkerCodex, Mode: tasks.ModeNew, Prompt: "hi", WorkDir: ".", UnsafeAutomation: true}
+	codexTool, err := BuildToolCommand(cfg, codexTask)
+	if err != nil {
+		t.Fatalf("BuildToolCommand codex: %v", err)
+	}
+	if !hasArg(codexTool.Args, "--dangerously-bypass-approvals-and-sandbox") {
+		t.Fatalf("expected codex dangerous flag in args=%v", codexTool.Args)
+	}
+}
+
 func hasArg(args []string, want string) bool {
 	for _, a := range args {
 		if a == want {
