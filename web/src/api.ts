@@ -11,9 +11,11 @@ import type {
   FSMkdirResponse,
   FSWriteResponse,
   LogEntry,
+  ToolsListResponse,
   SkillsListResponse,
   SystemInfo,
   Task,
+  Tool,
   WorkerType,
 } from "./types";
 
@@ -236,6 +238,18 @@ export async function fetchAuthInfo(): Promise<AuthInfo> {
 
 export async function updateAuth(patch: AuthPatch): Promise<AuthInfo> {
   return postJSON<AuthInfo>("/api/auth", patch);
+}
+
+export async function fetchTools(): Promise<ToolsListResponse> {
+  return getJSON<ToolsListResponse>("/api/tools");
+}
+
+export async function upsertTool(input: { tool: Tool }): Promise<{ ok: boolean }> {
+  return postJSON<{ ok: boolean }>("/api/tools/upsert", input);
+}
+
+export async function deleteTool(input: { id: string }): Promise<{ ok: boolean }> {
+  return postJSON<{ ok: boolean }>("/api/tools/delete", input);
 }
 
 export async function fetchSkills(): Promise<SkillsListResponse> {

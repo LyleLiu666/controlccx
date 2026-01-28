@@ -18,7 +18,7 @@ func TestManager_buildToolCommand_CodexDefaults(t *testing.T) {
 		Prompt:     "hi",
 	}
 
-	tool, err := m.buildToolCommand(task)
+	tool, _, err := m.buildToolCommand(task)
 	if err != nil {
 		t.Fatalf("buildToolCommand: %v", err)
 	}
@@ -52,7 +52,7 @@ func TestManager_buildToolCommand_CodexUsesStoredModelAndEffort(t *testing.T) {
 		Prompt:     "hi",
 	}
 
-	tool, err := m.buildToolCommand(task)
+	tool, _, err := m.buildToolCommand(task)
 	if err != nil {
 		t.Fatalf("buildToolCommand: %v", err)
 	}
@@ -72,4 +72,3 @@ func min(a, b int) int {
 	}
 	return b
 }
-

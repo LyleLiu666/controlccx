@@ -34,7 +34,7 @@ func TestManager_appendLog_PublishesTaskUpdated(t *testing.T) {
 	}
 
 	hub := events.NewHub()
-	m := NewManager(config.Default(), store, hub, nil)
+	m := NewManager(config.Default(), store, hub, nil, nil)
 
 	ch, unsub := hub.Subscribe(16)
 	t.Cleanup(unsub)

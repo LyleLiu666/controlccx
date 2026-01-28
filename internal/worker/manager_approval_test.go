@@ -91,6 +91,13 @@ func TestManager_run_ClaudeCode_RequiresApproval_BecomesBlocked(t *testing.T) {
 	}
 }
 
+func TestIsApprovalRequiredLine(t *testing.T) {
+	line := []byte(`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","content":"Error: This command requires approval","is_error":true}]},"session_id":"sess-1"}`)
+	if !isApprovalRequiredLine(line) {
+		t.Fatalf("expected approval line to be detected")
+	}
+}
+
 func TestManager_run_ClaudeCode_NormalFailure_RemainsFailed(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("claude-code tests use unix shell scripts")

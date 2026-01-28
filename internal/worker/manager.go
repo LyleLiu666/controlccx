@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"sort"
 	"strings"
@@ -18,6 +19,7 @@ import (
 	"controlccx/internal/events"
 	"controlccx/internal/execenv"
 	"controlccx/internal/tasks"
+	"controlccx/internal/tooling"
 )
 
 type Manager struct {
@@ -25,6 +27,7 @@ type Manager struct {
 	store *tasks.Store
 	hub   *events.Hub
 	auth  *auth.Store
+	tools *tooling.Service
 
 	mu      sync.Mutex
 	cancels map[string]context.CancelFunc
@@ -33,12 +36,13 @@ type Manager struct {
 	lastTaskUpdate map[string]time.Time
 }
 
-func NewManager(cfg config.Config, store *tasks.Store, hub *events.Hub, authStore *auth.Store) *Manager {
+func NewManager(cfg config.Config, store *tasks.Store, hub *events.Hub, authStore *auth.Store, tools *tooling.Service) *Manager {
 	return &Manager{
 		cfg:     cfg,
 		store:   store,
 		hub:     hub,
 		auth:    authStore,
+		tools:   tools,
 		cancels: make(map[string]context.CancelFunc),
 	}
 }
@@ -97,7 +101,7 @@ func (m *Manager) run(ctx context.Context, task tasks.Task) error {
 	}
 	m.publishTaskUpdated(task.ID)
 
-	tool, err := m.buildToolCommand(task)
+	tool, driver, err := m.buildToolCommand(task)
 	if err != nil {
 		m.appendLog(task.ID, tasks.LogSystem, fmt.Sprintf("worker setup error: %v", err))
 		_ = m.store.FinishTask(context.Background(), task.ID, tasks.FinishTaskInput{
@@ -119,10 +123,10 @@ func (m *Manager) run(ctx context.Context, task tasks.Task) error {
 
 	cmd := exec.CommandContext(ctx, tool.Command, tool.Args...)
 	cmd.Dir = tool.Dir
-	env, injectedEnvKeys := m.envForWorkerWithReport(task.WorkerType)
+	env, injectedEnvKeys := m.envForToolWithReport(task.WorkerType, driver)
 	cmd.Env = env
 
-	m.appendLog(task.ID, tasks.LogSystem, formatRunStartLog(task.WorkerType, tool, injectedEnvKeys))
+	m.appendLog(task.ID, tasks.LogSystem, formatRunStartLog(task.WorkerType, driver, tool, injectedEnvKeys))
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -138,7 +142,7 @@ func (m *Manager) run(ctx context.Context, task tasks.Task) error {
 
 	if err := cmd.Start(); err != nil {
 		if isExecutableNotFound(err) {
-			m.appendLog(task.ID, tasks.LogSystem, missingExecutableHint(tool.Command, task.WorkerType))
+			m.appendLog(task.ID, tasks.LogSystem, missingExecutableHint(tool.Command, driver))
 		}
 		return m.failTask(task.ID, fmt.Errorf("start: %w", err))
 	}
@@ -155,12 +159,12 @@ func (m *Manager) run(ctx context.Context, task tasks.Task) error {
 
 	go func() {
 		defer wg.Done()
-		m.consumeStdout(task, stdout, &lastSessionIDMu, &lastSessionID, cancel, resumeFailure, blockedState)
+		m.consumeStdout(task, driver, stdout, &lastSessionIDMu, &lastSessionID, cancel, resumeFailure, blockedState)
 	}()
 
 	go func() {
 		defer wg.Done()
-		m.consumeLines(task, tasks.LogStderr, stderr, cancel, resumeFailure, blockedState)
+		m.consumeLines(task, driver, tasks.LogStderr, stderr, cancel, resumeFailure, blockedState)
 	}()
 
 	waitErr := cmd.Wait()
@@ -236,15 +240,84 @@ func sessionIDToPersist(task tasks.Task, observed string) (string, string) {
 	return observed, ""
 }
 
-func (m *Manager) buildToolCommand(task tasks.Task) (ToolCommand, error) {
-	tool, err := BuildToolCommand(m.cfg, task)
-	if err != nil {
-		return ToolCommand{}, err
+func (m *Manager) buildToolCommand(task tasks.Task) (ToolCommand, tasks.WorkerType, error) {
+	driver := task.WorkerType
+	cfg := m.cfg
+	extraArgs := []string(nil)
+
+	if m != nil && m.tools != nil {
+		toolID := strings.TrimSpace(string(task.WorkerType))
+		if toolID != "" {
+			profile, ok := m.tools.Resolve(toolID)
+			if !ok {
+				return ToolCommand{}, "", fmt.Errorf("unknown tool id: %s", toolID)
+			}
+			driver = tasks.WorkerType(profile.Driver)
+			extraArgs = append([]string{}, profile.Args...)
+			switch driver {
+			case tasks.WorkerClaudeCode:
+				if strings.TrimSpace(profile.Command) != "" {
+					cfg.Paths.Claude = strings.TrimSpace(profile.Command)
+				}
+			case tasks.WorkerCodex:
+				if strings.TrimSpace(profile.Command) != "" {
+					cfg.Paths.Codex = strings.TrimSpace(profile.Command)
+				}
+			case tasks.WorkerExec:
+				// handled below
+			default:
+				return ToolCommand{}, "", ErrUnsupportedWorkerType{WorkerType: driver}
+			}
+		}
 	}
-	if task.WorkerType == tasks.WorkerCodex {
+
+	if driver == tasks.WorkerExec && m != nil && m.tools != nil {
+		toolID := strings.TrimSpace(string(task.WorkerType))
+		profile, ok := m.tools.Resolve(toolID)
+		if !ok {
+			return ToolCommand{}, "", fmt.Errorf("unknown tool id: %s", toolID)
+		}
+		if task.Mode == tasks.ModeResume {
+			return ToolCommand{}, "", fmt.Errorf("tool %q does not support resume mode", toolID)
+		}
+		return ToolCommand{
+			Command: profile.Command,
+			Args:    append([]string{}, profile.Args...),
+			Dir:     filepath.Clean(task.WorkDir),
+			Stdin:   task.Prompt,
+		}, driver, nil
+	}
+
+	inner := task
+	inner.WorkerType = driver
+	tool, err := BuildToolCommand(cfg, inner)
+	if err != nil {
+		return ToolCommand{}, "", err
+	}
+	if driver == tasks.WorkerCodex {
 		tool.Args = m.withCodexDefaults(tool.Args)
 	}
-	return tool, nil
+	if len(extraArgs) > 0 && (driver == tasks.WorkerClaudeCode || driver == tasks.WorkerCodex) {
+		tool.Args = insertArgsBeforeStdinMarker(tool.Args, extraArgs)
+	}
+	return tool, driver, nil
+}
+
+func insertArgsBeforeStdinMarker(args []string, extra []string) []string {
+	if len(extra) == 0 {
+		return args
+	}
+	if len(args) == 0 {
+		return append([]string{}, extra...)
+	}
+	if args[len(args)-1] == "-" {
+		out := make([]string, 0, len(args)+len(extra))
+		out = append(out, args[:len(args)-1]...)
+		out = append(out, extra...)
+		out = append(out, "-")
+		return out
+	}
+	return append(args, extra...)
 }
 
 func (m *Manager) withCodexDefaults(args []string) []string {
@@ -349,6 +422,24 @@ func (m *Manager) envForWorker(workerType tasks.WorkerType) []string {
 	return env
 }
 
+func (m *Manager) envForToolWithReport(toolID tasks.WorkerType, driver tasks.WorkerType) ([]string, []string) {
+	env, applied := m.envForWorkerWithReport(driver)
+	if m == nil || m.tools == nil {
+		return env, applied
+	}
+	id := strings.TrimSpace(string(toolID))
+	if id == "" {
+		return env, applied
+	}
+	profile, ok := m.tools.Resolve(id)
+	if !ok || len(profile.Env) == 0 {
+		return env, applied
+	}
+	env2, extra := mergeEnvWithReport(env, profile.Env)
+	applied = append(applied, extra...)
+	return env2, applied
+}
+
 func (m *Manager) envForWorkerWithReport(workerType tasks.WorkerType) ([]string, []string) {
 	base := os.Environ()
 	if m == nil || m.auth == nil {
@@ -445,7 +536,7 @@ func mergeEnvWithReport(base []string, additions map[string]string) ([]string, [
 	return out, applied
 }
 
-func (m *Manager) consumeStdout(task tasks.Task, stdout io.Reader, sidMu *sync.Mutex, sid *string, cancel context.CancelFunc, resumeFailure *resumeFailureState, blocked *blockedState) {
+func (m *Manager) consumeStdout(task tasks.Task, driver tasks.WorkerType, stdout io.Reader, sidMu *sync.Mutex, sid *string, cancel context.CancelFunc, resumeFailure *resumeFailureState, blocked *blockedState) {
 	reader := newLineReader(stdout)
 	for {
 		line, tooLong, err := readLineWithLimit(reader, defaultJSONLineMaxBytes)
@@ -467,12 +558,12 @@ func (m *Manager) consumeStdout(task tasks.Task, stdout io.Reader, sidMu *sync.M
 		// Persist raw stdout for debugging/details (UI can filter by stream).
 		m.appendLog(task.ID, tasks.LogStdout, string(line))
 
-		m.handleResumeNotFound(task, string(line), cancel, resumeFailure)
+		m.handleResumeNotFound(task, driver, string(line), cancel, resumeFailure)
 
-		m.handleApprovalRequired(task, string(line), line, blocked)
+		m.handleApprovalRequired(task, driver, string(line), line, blocked)
 
 		var parsed parsedLine
-		switch task.WorkerType {
+		switch driver {
 		case tasks.WorkerClaudeCode:
 			parsed, err = parseClaudeJSONLine(line)
 		case tasks.WorkerCodex:
@@ -565,8 +656,8 @@ func (s *blockedState) get() (bool, string) {
 	return s.seen, s.reason
 }
 
-func (m *Manager) handleApprovalRequired(task tasks.Task, message string, raw []byte, blocked *blockedState) {
-	if task.WorkerType != tasks.WorkerClaudeCode {
+func (m *Manager) handleApprovalRequired(task tasks.Task, driver tasks.WorkerType, message string, raw []byte, blocked *blockedState) {
+	if driver != tasks.WorkerClaudeCode {
 		return
 	}
 	if raw != nil {
@@ -589,8 +680,8 @@ func (m *Manager) handleApprovalRequired(task tasks.Task, message string, raw []
 	}
 }
 
-func (m *Manager) handleResumeNotFound(task tasks.Task, message string, cancel context.CancelFunc, resumeFailure *resumeFailureState) {
-	if task.Mode != tasks.ModeResume || task.WorkerType != tasks.WorkerClaudeCode {
+func (m *Manager) handleResumeNotFound(task tasks.Task, driver tasks.WorkerType, message string, cancel context.CancelFunc, resumeFailure *resumeFailureState) {
+	if task.Mode != tasks.ModeResume || driver != tasks.WorkerClaudeCode {
 		return
 	}
 	if !isResumeConversationNotFound(message) {
@@ -630,7 +721,7 @@ func extractResumeNotFoundMessage(message string) string {
 	return strings.TrimSpace(msg[idx:])
 }
 
-func (m *Manager) consumeLines(task tasks.Task, stream tasks.LogStream, r io.Reader, cancel context.CancelFunc, resumeFailure *resumeFailureState, blocked *blockedState) {
+func (m *Manager) consumeLines(task tasks.Task, driver tasks.WorkerType, stream tasks.LogStream, r io.Reader, cancel context.CancelFunc, resumeFailure *resumeFailureState, blocked *blockedState) {
 	reader := newLineReader(r)
 	for {
 		line, tooLong, err := readLineWithLimit(reader, 1024*1024)
@@ -650,8 +741,8 @@ func (m *Manager) consumeLines(task tasks.Task, stream tasks.LogStream, r io.Rea
 		}
 		msg := string(line)
 		m.appendLog(task.ID, stream, msg)
-		m.handleResumeNotFound(task, msg, cancel, resumeFailure)
-		m.handleApprovalRequired(task, msg, nil, blocked)
+		m.handleResumeNotFound(task, driver, msg, cancel, resumeFailure)
+		m.handleApprovalRequired(task, driver, msg, nil, blocked)
 	}
 }
 
@@ -743,9 +834,13 @@ func (m *Manager) failTask(taskID string, err error) error {
 	return err
 }
 
-func formatRunStartLog(workerType tasks.WorkerType, tool ToolCommand, injectedEnvKeys []string) string {
+func formatRunStartLog(toolID tasks.WorkerType, driver tasks.WorkerType, tool ToolCommand, injectedEnvKeys []string) string {
 	env := formatQuotedList(injectedEnvKeys)
-	return fmt.Sprintf("run.start worker=%s dir=%q cmd=%q args=%s env_injected=%s", workerType, tool.Dir, tool.Command, formatQuotedList(tool.Args), env)
+	driverPart := ""
+	if strings.TrimSpace(string(driver)) != "" && driver != toolID {
+		driverPart = fmt.Sprintf(" driver=%s", driver)
+	}
+	return fmt.Sprintf("run.start worker=%s%s dir=%q cmd=%q args=%s env_injected=%s", toolID, driverPart, tool.Dir, tool.Command, formatQuotedList(tool.Args), env)
 }
 
 func formatRunFinishLog(status tasks.Status, exitCode *int, errText string) string {

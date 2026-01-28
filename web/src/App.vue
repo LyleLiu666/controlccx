@@ -14,6 +14,9 @@ import type {
   ServerEvent,
   Skill,
   SkillsListResponse,
+  Tool,
+  ToolDriver,
+  ToolsListResponse,
   SystemInfo,
   Task,
   WorkerType,
@@ -30,16 +33,19 @@ import {
   fetchFSRoots,
   fetchLogs,
   fetchSkills,
+  fetchTools,
   fetchSystemInfo,
   fetchTasks,
   fsDelete,
   fsMkdir,
   fsWrite,
+  deleteTool,
   linkSkill,
   renameSession,
   resumeTaskWithOptions,
   sendChat,
   sendChatStream,
+  upsertTool,
   unlinkSkill,
   updateAuth,
 } from "./api";
@@ -93,6 +99,18 @@ const authAnthropicSmallFastModel = ref("");
 const authOpenAIApiKey = ref("");
 const authCodexModel = ref("");
 const authCodexReasoningEffort = ref("");
+
+const toolsLoading = ref(false);
+const toolsError = ref("");
+const toolsList = ref<Tool[]>([]);
+const toolsSettingsOpen = ref(false);
+const toolsSaving = ref(false);
+const toolsSelectedID = ref<string>("");
+const toolEditID = ref("");
+const toolEditDriver = ref<ToolDriver>("claude-code");
+const toolEditCommand = ref("");
+const toolEditArgs = ref("");
+const toolEditEnv = ref("");
 
 const skillsOpen = ref(false);
 const skillsLoading = ref(false);
@@ -1026,8 +1044,12 @@ async function loadLogs(taskId: string) {
 async function onCreateTask(): Promise<boolean> {
   errorBanner.value = "";
   try {
-    const unsafe =
-      newWorkerType.value === "claude-code" ? Boolean(claudeAutoApprove.value) : false;
+    const driver =
+      newTool.value?.driver ??
+      (newWorkerType.value === "claude-code" || newWorkerType.value === "codex"
+        ? (newWorkerType.value as ToolDriver)
+        : "");
+    const unsafe = driver === "claude-code" ? Boolean(claudeAutoApprove.value) : false;
     const t = await createTask({
       worker_type: newWorkerType.value,
       prompt: newPrompt.value,
@@ -1132,6 +1154,7 @@ async function confirmSessionDelete() {
 
 function openNewRun() {
   newRunOpen.value = true;
+  if (!toolsList.value.length) void refreshTools();
 }
 
 function closeNewRun() {
@@ -1874,6 +1897,137 @@ function openAuthSettings() {
   refreshAuth();
 }
 
+async function refreshTools() {
+  toolsError.value = "";
+  toolsLoading.value = true;
+  try {
+    const res = await fetchTools();
+    toolsList.value = res.tools ?? [];
+    if (!toolsSelectedID.value && toolsList.value.length) {
+      toolsSelectedID.value = toolsList.value[0].id;
+    }
+    if (!newWorkerType.value && toolsList.value.length) {
+      newWorkerType.value = toolsList.value[0].id;
+    }
+    if (newWorkerType.value && toolsList.value.length) {
+      const ok = toolsList.value.some((t) => t.id === newWorkerType.value);
+      if (!ok) newWorkerType.value = toolsList.value[0].id;
+    }
+  } catch (e: any) {
+    toolsError.value = e?.message ?? String(e);
+  } finally {
+    toolsLoading.value = false;
+  }
+}
+
+function toolForID(id: string): Tool | null {
+  const v = String(id ?? "").trim();
+  if (!v) return null;
+  return toolsList.value.find((t) => t.id === v) ?? null;
+}
+
+const newTool = computed(() => toolForID(newWorkerType.value));
+
+function formatArgsForEdit(args?: string[]) {
+  return (args ?? []).join(" ");
+}
+
+function formatEnvForEdit(env?: Record<string, string>) {
+  const entries = Object.entries(env ?? {}).sort((a, b) => a[0].localeCompare(b[0]));
+  return entries.map(([k, v]) => `${k}=${v}`).join("\n");
+}
+
+function loadToolIntoEditor(t: Tool) {
+  toolsSelectedID.value = t.id;
+  toolEditID.value = t.id;
+  toolEditDriver.value = t.driver;
+  toolEditCommand.value = t.command;
+  toolEditArgs.value = formatArgsForEdit(t.args);
+  toolEditEnv.value = formatEnvForEdit(t.env);
+}
+
+function openToolsSettings() {
+  toolsError.value = "";
+  toolsSettingsOpen.value = true;
+  if (!toolsList.value.length) void refreshTools();
+  const selected = toolForID(toolsSelectedID.value) ?? toolsList.value[0] ?? null;
+  if (selected) loadToolIntoEditor(selected);
+}
+
+function startNewTool() {
+  toolsSelectedID.value = "";
+  toolEditID.value = "";
+  toolEditDriver.value = "claude-code";
+  toolEditCommand.value = "";
+  toolEditArgs.value = "";
+  toolEditEnv.value = "";
+}
+
+function parseArgsText(s: string): string[] {
+  const parts = String(s ?? "")
+    .trim()
+    .split(/\s+/)
+    .map((x) => x.trim())
+    .filter(Boolean);
+  return parts;
+}
+
+function parseEnvText(s: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  const lines = String(s ?? "")
+    .split("\n")
+    .map((x) => x.trim())
+    .filter(Boolean);
+  for (const line of lines) {
+    const idx = line.indexOf("=");
+    if (idx <= 0) continue;
+    const k = line.slice(0, idx).trim();
+    const v = line.slice(idx + 1).trim();
+    if (!k) continue;
+    out[k] = v;
+  }
+  return out;
+}
+
+async function saveTool() {
+  toolsError.value = "";
+  toolsSaving.value = true;
+  try {
+    const tool: Tool = {
+      id: toolEditID.value.trim(),
+      driver: toolEditDriver.value,
+      command: toolEditCommand.value.trim(),
+      args: parseArgsText(toolEditArgs.value),
+      env: parseEnvText(toolEditEnv.value),
+    };
+    await upsertTool({ tool });
+    await refreshTools();
+    const saved = toolForID(tool.id);
+    if (saved) loadToolIntoEditor(saved);
+  } catch (e: any) {
+    toolsError.value = e?.message ?? String(e);
+  } finally {
+    toolsSaving.value = false;
+  }
+}
+
+async function deleteToolOverride() {
+  const id = toolEditID.value.trim();
+  if (!id) return;
+  toolsError.value = "";
+  toolsSaving.value = true;
+  try {
+    await deleteTool({ id });
+    await refreshTools();
+    const next = toolForID("claude-code") ?? toolsList.value[0] ?? null;
+    if (next) loadToolIntoEditor(next);
+  } catch (e: any) {
+    toolsError.value = e?.message ?? String(e);
+  } finally {
+    toolsSaving.value = false;
+  }
+}
+
 async function openSkills() {
   skillsError.value = "";
   skillsOpen.value = true;
@@ -2050,10 +2204,15 @@ async function clearStoredAuth(field: keyof AuthPatch) {
 const missingAuthText = computed(() => {
   const st = authStatus.value;
   if (!st) return "";
-  if (newWorkerType.value === "claude-code" && !st.claude.available) {
+  const driver =
+    newTool.value?.driver ??
+    (newWorkerType.value === "claude-code" || newWorkerType.value === "codex"
+      ? (newWorkerType.value as ToolDriver)
+      : "");
+  if (driver === "claude-code" && !st.claude.available) {
     return "claude-code 未检测到可用鉴权：请设置 ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN，或在终端运行一次 `claude /login`。";
   }
-  if (newWorkerType.value === "codex" && !st.codex.available) {
+  if (driver === "codex" && !st.codex.available) {
     return "codex 未检测到可用鉴权：请设置 OPENAI_API_KEY。";
   }
   return "";
@@ -2063,6 +2222,7 @@ onMounted(async () => {
   await refresh();
   if (selectedTaskId.value) await loadLogs(selectedTaskId.value);
   await refreshAuth();
+  await refreshTools();
   connectEvents();
   window.addEventListener("keydown", onGlobalKeyDown);
   focusInHandler = (e: FocusEvent) => {
@@ -3731,13 +3891,23 @@ watch(
         <div class="modalBody newRunBody">
           <div class="form newRunForm">
             <label>
-              Worker
+              Tool
               <select v-model="newWorkerType">
-                <option value="claude-code">claude-code</option>
-                <option value="codex">codex</option>
+                <option v-for="t in toolsList" :key="t.id" :value="t.id">
+                  {{ t.id }}
+                </option>
               </select>
             </label>
-            <div v-if="newWorkerType === 'claude-code'" class="newRunAutoApprove full">
+            <div v-if="toolsError" class="tinyHint warn full">{{ toolsError }}</div>
+            <div v-else-if="toolsLoading" class="tinyHint full">Loading tools…</div>
+            <div v-else-if="newTool" class="tinyHint full">
+              driver: <span class="mono">{{ newTool.driver }}</span> · cmd:
+              <span class="mono">{{ newTool.command }}</span>
+            </div>
+            <div
+              v-if="(newTool?.driver ?? newWorkerType) === 'claude-code'"
+              class="newRunAutoApprove full"
+            >
               <label class="settingsToggleRow">
                 <input type="checkbox" v-model="claudeAutoApprove" />
                 <span>Auto-approve tools (dangerous)</span>
@@ -3801,6 +3971,9 @@ watch(
       <div class="modal settingsModal">
         <div class="modalHeader">
           <div class="modalTitle">Auth Settings</div>
+          <button type="button" class="headerMiniBtn" @click="openToolsSettings">
+            Tools
+          </button>
           <button type="button" class="headerMiniBtn" @click="openSkills">
             Skills
           </button>
@@ -4055,6 +4228,103 @@ watch(
             :disabled="authSaving"
           >
             {{ authSaving ? "Saving..." : "Save" }}
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div
+      v-if="toolsSettingsOpen"
+      class="modalOverlay"
+      @click.self="toolsSettingsOpen = false"
+    >
+      <div class="modal toolsModal">
+        <div class="modalHeader">
+          <div class="modalTitle">Tools</div>
+          <button type="button" class="headerMiniBtn" @click="startNewTool">
+            New
+          </button>
+          <button
+            type="button"
+            class="headerMiniBtn"
+            @click="refreshTools"
+            :disabled="toolsLoading || toolsSaving"
+          >
+            Refresh
+          </button>
+          <button class="iconBtn" type="button" @click="toolsSettingsOpen = false">
+            ✕
+          </button>
+        </div>
+
+        <div class="modalBody toolsBody">
+          <div v-if="toolsError" class="modalError">{{ toolsError }}</div>
+          <div v-else-if="toolsLoading" class="loading">Loading...</div>
+          <template v-else>
+            <div class="toolsSplit">
+              <div class="toolsList">
+                <button
+                  v-for="t in toolsList"
+                  :key="t.id"
+                  type="button"
+                  class="toolsItem"
+                  :class="{ active: t.id === toolEditID }"
+                  @click="loadToolIntoEditor(t)"
+                  :title="t.command"
+                >
+                  <div class="mono">{{ t.id }}</div>
+                  <div class="tinyHint mono">{{ t.driver }}</div>
+                </button>
+              </div>
+
+              <div class="toolsEditor">
+                <div class="toolsEditorGrid">
+                  <label class="full">
+                    id
+                    <input v-model="toolEditID" placeholder="my-tool" autocomplete="off" />
+                  </label>
+                  <label>
+                    driver
+                    <select v-model="toolEditDriver">
+                      <option value="claude-code">claude-code</option>
+                      <option value="codex">codex</option>
+                      <option value="exec">exec</option>
+                    </select>
+                  </label>
+                  <label class="full">
+                    command
+                    <input v-model="toolEditCommand" placeholder="claude" autocomplete="off" />
+                  </label>
+                  <label class="full">
+                    args (space separated)
+                    <textarea v-model="toolEditArgs" rows="2" placeholder="--foo --bar"></textarea>
+                  </label>
+                  <label class="full">
+                    env (KEY=VALUE per line)
+                    <textarea v-model="toolEditEnv" rows="6" placeholder="ANTHROPIC_BASE_URL=https://..."></textarea>
+                  </label>
+                </div>
+              </div>
+            </div>
+          </template>
+        </div>
+
+        <div class="modalFooter">
+          <button type="button" @click="toolsSettingsOpen = false">Close</button>
+          <button
+            type="button"
+            @click="deleteToolOverride"
+            :disabled="toolsSaving || !toolEditID.trim()"
+          >
+            Delete
+          </button>
+          <button
+            type="button"
+            class="primary"
+            @click="saveTool"
+            :disabled="toolsSaving || !toolEditID.trim() || !toolEditCommand.trim()"
+          >
+            {{ toolsSaving ? "Saving..." : "Save" }}
           </button>
         </div>
       </div>
@@ -5634,6 +5904,68 @@ button.dangerBtn:disabled {
 .skillsModal {
   width: min(980px, 95vw);
   height: min(660px, 90vh);
+}
+
+.toolsModal {
+  width: min(980px, 95vw);
+  height: min(660px, 90vh);
+}
+
+.toolsBody {
+  padding-top: 12px;
+}
+
+.toolsSplit {
+  display: grid;
+  grid-template-columns: 240px 1fr;
+  gap: 14px;
+  height: 100%;
+  min-height: 0;
+}
+
+.toolsList {
+  border: 1px solid var(--border-color);
+  border-radius: 14px;
+  overflow: auto;
+  padding: 8px;
+  min-height: 0;
+}
+
+.toolsItem {
+  width: 100%;
+  text-align: left;
+  padding: 10px 10px;
+  border-radius: 12px;
+  border: 1px solid transparent;
+  background: transparent;
+}
+
+.toolsItem:hover {
+  background: var(--bg-subtle);
+}
+
+.toolsItem.active {
+  border-color: rgba(20, 184, 166, 0.35);
+  background: rgba(20, 184, 166, 0.08);
+}
+
+.toolsEditor {
+  border: 1px solid var(--border-color);
+  border-radius: 14px;
+  overflow: auto;
+  padding: 12px;
+  min-height: 0;
+}
+
+.toolsEditorGrid {
+  display: grid;
+  gap: 12px;
+}
+
+.toolsEditorGrid input,
+.toolsEditorGrid textarea,
+.toolsEditorGrid select {
+  width: 100%;
 }
 
 .skillsBody {

@@ -25,6 +25,7 @@ import (
 	"controlccx/internal/observer"
 	"controlccx/internal/skills"
 	"controlccx/internal/tasks"
+	"controlccx/internal/tooling"
 	"controlccx/internal/worker"
 )
 
@@ -72,8 +73,16 @@ func main() {
 		log.Fatal(err)
 	}
 
+	toolsSvc, err := tooling.NewService(tooling.Options{
+		DataDir:  cfg.Paths.DataDir,
+		Defaults: tooling.DefaultsFromConfig(cfg),
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	hub := events.NewHub()
-	workerMgr := worker.NewManager(cfg, taskStore, hub, authStore)
+	workerMgr := worker.NewManager(cfg, taskStore, hub, authStore, toolsSvc)
 	chatStore := chat.NewStore(conn)
 	claudeBackend := observer.NewClaudeCLIBackend(cfg, authStore)
 	codexBackend := observer.NewCodexCLIBackend(cfg, authStore)
@@ -99,6 +108,7 @@ func main() {
 		Hub:      hub,
 		Auth:     authStore,
 		Skills:   skillsSvc,
+		Tools:    toolsSvc,
 	}
 
 	mux := http.NewServeMux()

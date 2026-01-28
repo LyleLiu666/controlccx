@@ -7,7 +7,21 @@ export type TaskStatus =
   | "interrupted"
   | "blocked";
 
-export type WorkerType = "claude-code" | "codex";
+export type WorkerType = string;
+
+export type ToolDriver = "claude-code" | "codex" | "exec";
+
+export type Tool = {
+  id: string;
+  driver: ToolDriver;
+  command: string;
+  args?: string[];
+  env?: Record<string, string>;
+};
+
+export type ToolsListResponse = {
+  tools: Tool[];
+};
 
 export type Task = {
   id: string;

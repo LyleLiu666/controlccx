@@ -19,6 +19,7 @@ import (
 	"controlccx/internal/skills"
 	"controlccx/internal/systeminfo"
 	"controlccx/internal/tasks"
+	"controlccx/internal/tooling"
 	"controlccx/internal/worker"
 )
 
@@ -31,6 +32,7 @@ type API struct {
 	FSRoots  []FSRoot
 	Auth     *auth.Store
 	Skills   *skills.Service
+	Tools    *tooling.Service
 }
 
 func (a *API) Handler() http.Handler {
@@ -39,6 +41,9 @@ func (a *API) Handler() http.Handler {
 	mux.HandleFunc("/api/tasks", a.handleTasks)
 	mux.HandleFunc("/api/tasks/", a.handleTaskByID)
 	mux.HandleFunc("/api/sessions/", a.handleSessionByKey)
+	mux.HandleFunc("/api/tools", a.handleTools)
+	mux.HandleFunc("/api/tools/upsert", a.handleToolsUpsert)
+	mux.HandleFunc("/api/tools/delete", a.handleToolsDelete)
 	mux.HandleFunc("/api/skills", a.handleSkills)
 	mux.HandleFunc("/api/skills/link", a.handleSkillsLink)
 	mux.HandleFunc("/api/skills/unlink", a.handleSkillsUnlink)
@@ -217,6 +222,12 @@ func (a *API) handleTasks(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "invalid json", http.StatusBadRequest)
 			return
 		}
+		if a.Tools != nil {
+			if _, ok := a.Tools.Resolve(string(in.WorkerType)); !ok {
+				http.Error(w, "unknown tool id: "+string(in.WorkerType), http.StatusBadRequest)
+				return
+			}
+		}
 		task, err := a.Tasks.CreateTask(r.Context(), in)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
@@ -354,6 +365,12 @@ func (a *API) handleTaskByID(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusNotFound)
 			return
+		}
+		if a.Tools != nil {
+			if _, ok := a.Tools.Resolve(string(prev.WorkerType)); !ok {
+				http.Error(w, "unknown tool id: "+string(prev.WorkerType), http.StatusBadRequest)
+				return
+			}
 		}
 		if strings.TrimSpace(prev.SessionID) == "" {
 			http.Error(w, "task has no session_id to resume", http.StatusBadRequest)

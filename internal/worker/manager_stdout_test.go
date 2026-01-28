@@ -44,7 +44,7 @@ func TestManager_consumeStdout_ClaudeCode_StoresRawStdout(t *testing.T) {
 		`{"type":"assistant","session_id":"sess-1","result":"final answer"}`,
 	}, "\n")
 
-	m.consumeStdout(task, strings.NewReader(out), &sidMu, &sid, func() {}, &resumeFailureState{}, &blockedState{})
+	m.consumeStdout(task, tasks.WorkerClaudeCode, strings.NewReader(out), &sidMu, &sid, func() {}, &resumeFailureState{}, &blockedState{})
 
 	logs, err := store.ListLogs(ctx, task.ID, 0, 2000)
 	if err != nil {
@@ -107,7 +107,7 @@ func TestManager_consumeStdout_ClaudeCode_StoresRawWhenParseFails(t *testing.T) 
 		sidMu sync.Mutex
 		sid   string
 	)
-	m.consumeStdout(task, strings.NewReader("not-json\n"), &sidMu, &sid, func() {}, &resumeFailureState{}, &blockedState{})
+	m.consumeStdout(task, tasks.WorkerClaudeCode, strings.NewReader("not-json\n"), &sidMu, &sid, func() {}, &resumeFailureState{}, &blockedState{})
 
 	logs, err := store.ListLogs(ctx, task.ID, 0, 2000)
 	if err != nil {
@@ -157,7 +157,7 @@ func TestManager_consumeStdout_Codex_StoresRawStdout(t *testing.T) {
 		`{"type":"item.completed","thread_id":"thr-1","item":{"type":"agent_message","text":"hello"}}`,
 	}, "\n")
 
-	m.consumeStdout(task, strings.NewReader(out), &sidMu, &sid, func() {}, &resumeFailureState{}, &blockedState{})
+	m.consumeStdout(task, tasks.WorkerCodex, strings.NewReader(out), &sidMu, &sid, func() {}, &resumeFailureState{}, &blockedState{})
 
 	logs, err := store.ListLogs(ctx, task.ID, 0, 2000)
 	if err != nil {
