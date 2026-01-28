@@ -20,6 +20,7 @@ import (
 type Service struct {
 	Store  *tasks.Store
 	Chat   *chat.Store
+	Runner TaskRunner
 	LLM    Backend
 	Claude Backend
 	Codex  Backend
@@ -37,6 +38,11 @@ type RespondOptions struct {
 
 	OnToolCall   func(tool string, args map[string]any)
 	OnToolResult func(tool string, result any)
+}
+
+type TaskRunner interface {
+	Start(ctx context.Context, taskID string) error
+	Cancel(taskID string) bool
 }
 
 type Reply struct {
@@ -70,6 +76,10 @@ func (s *Service) RespondWithOptions(ctx context.Context, userMessage string, op
 当需要引用某个任务时：
 - 优先用 tasks_list 查找候选任务，并使用返回的 id
 - 如果用户只给了“任务名称/关键词”，你也可以把该关键词直接作为 task_id 传入（系统会用 prompt/session_id/id 前缀进行匹配）；若匹配多个，请先向用户确认
+
+当用户要求“继续/恢复/重试”某个已中断/失败/阻塞的任务时：
+- 你 SHOULD 尽量直接调用 task_resume / task_cancel 等操作工具来帮用户推进（除非你需要用户确认某个高风险选择）
+- 你 MUST 在最终回复里说明你做了什么（例如：已创建新的 resume run / 已取消任务 / 为什么没法继续）
 
 你必须只输出一个 JSON 对象（不要输出 Markdown / 代码块 / 解释文字）。
 

@@ -191,6 +191,7 @@ const filesDirty = computed(
 
 const secretaryOpen = ref(false);
 const secretaryView = ref<"chat" | "overview">("chat");
+const secretaryScope = ref<"current" | "all">("current");
 
 const liveOpen = ref(false);
 const liveScope = ref<"current" | "all">("current");
@@ -761,6 +762,7 @@ const LS_KEY_CHAT_BACKEND = "controlccx.chat.backend.v1";
 const LS_KEY_CHAT_STREAM = "controlccx.chat.stream.v1";
 const LS_KEY_CHAT_MAX_STEPS = "controlccx.chat.max_steps.v1";
 const LS_KEY_SECRETARY_VIEW = "controlccx.secretary.view.v1";
+const LS_KEY_SECRETARY_SCOPE = "controlccx.secretary.scope.v1";
 const LS_KEY_THEME = "controlccx.theme.v1";
 const LS_KEY_FEED_SCOPE = "controlccx.feed.scope.v1";
 const LS_KEY_FEED_WRAP = "controlccx.feed.wrap.v1";
@@ -797,6 +799,39 @@ function saveStringArray(key: string, items: string[]) {
   if (!st) return;
   try {
     st.setItem(key, JSON.stringify(items));
+  } catch {
+    // ignore
+  }
+}
+
+function loadStringMap(key: string): Record<string, string> {
+  const st = getLocalStorage();
+  if (!st) return {};
+  try {
+    const raw = st.getItem(key);
+    if (!raw) return {};
+    const v = JSON.parse(raw);
+    if (!v || typeof v !== "object" || Array.isArray(v)) return {};
+    const out: Record<string, string> = {};
+    for (const [k, val] of Object.entries(v as Record<string, any>)) {
+      if (typeof k !== "string") continue;
+      if (typeof val !== "string") continue;
+      const kk = k.trim();
+      const vv = val.trim();
+      if (!kk || !vv) continue;
+      out[kk] = vv;
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+function saveStringMap(key: string, value: Record<string, string>) {
+  const st = getLocalStorage();
+  if (!st) return;
+  try {
+    st.setItem(key, JSON.stringify(value ?? {}));
   } catch {
     // ignore
   }
@@ -881,6 +916,9 @@ function isWithinWorkspace(root: string, path: string): boolean {
 const pinnedWorkspaces = ref<string[]>(
   loadStringArray(LS_KEY_PINNED_WORKSPACES),
 );
+const pinnedWorkspaceNames = ref<Record<string, string>>(
+  loadStringMap(LS_KEY_PINNED_WORKSPACE_NAMES),
+);
 const workspaceFilters = ref<string[]>(loadStringArray(LS_KEY_WORKSPACE_FILTERS));
 const workspaceSelect = ref<string>(loadString(LS_KEY_WORKSPACE_FILTER));
 
@@ -894,6 +932,9 @@ const workspaceSelect = ref<string>(loadString(LS_KEY_WORKSPACE_FILTER));
 
   const sec = loadString(LS_KEY_SECRETARY_VIEW).trim();
   if (sec === "chat" || sec === "overview") secretaryView.value = sec;
+
+  const sc = loadString(LS_KEY_SECRETARY_SCOPE).trim();
+  if (sc === "current" || sc === "all") secretaryScope.value = sc as any;
 
   autoDeliveryForeman.value = loadBool(LS_KEY_AUTO_DELIVERY_FOREMAN, true);
   deliveryForemanSeenRuns.value = new Set(loadStringArray(LS_KEY_DELIVERY_FOREMAN_SEEN));
@@ -926,9 +967,31 @@ const workspaceSelect = ref<string>(loadString(LS_KEY_WORKSPACE_FILTER));
   }
 }
 
-watch(pinnedWorkspaces, (v) => saveStringArray(LS_KEY_PINNED_WORKSPACES, v), {
-  deep: true,
-});
+watch(
+  pinnedWorkspaces,
+  (v) => {
+    saveStringArray(LS_KEY_PINNED_WORKSPACES, v);
+    const pinnedKeys = new Set(v.map((p) => normalizePathForCompare(p)));
+    const next: Record<string, string> = {};
+    for (const [k, name] of Object.entries(pinnedWorkspaceNames.value)) {
+      const key = normalizePathForCompare(k);
+      if (!key) continue;
+      if (!pinnedKeys.has(key)) continue;
+      if (!name.trim()) continue;
+      next[key] = name.trim();
+    }
+    // Keep storage small and avoid stale entries.
+    if (JSON.stringify(next) !== JSON.stringify(pinnedWorkspaceNames.value)) {
+      pinnedWorkspaceNames.value = next;
+    }
+  },
+  { deep: true },
+);
+watch(
+  pinnedWorkspaceNames,
+  (v) => saveStringMap(LS_KEY_PINNED_WORKSPACE_NAMES, v),
+  { deep: true },
+);
 watch(
   workspaceFilters,
   (v) => {
@@ -958,6 +1021,7 @@ watch(chatBackend, (v) => saveString(LS_KEY_CHAT_BACKEND, v));
 watch(chatStreamEnabled, (v) => saveBool(LS_KEY_CHAT_STREAM, v));
 watch(chatMaxSteps, (v) => saveInt(LS_KEY_CHAT_MAX_STEPS, v));
 watch(secretaryView, (v) => saveString(LS_KEY_SECRETARY_VIEW, v));
+watch(secretaryScope, (v) => saveString(LS_KEY_SECRETARY_SCOPE, v));
 watch(autoDeliveryForeman, (v) => saveBool(LS_KEY_AUTO_DELIVERY_FOREMAN, Boolean(v)));
 watch(claudeAutoApprove, (v) => saveBool(LS_KEY_CLAUDE_AUTO_APPROVE, Boolean(v)));
 watch(theme, (v) => saveString(LS_KEY_THEME, v));
@@ -1165,6 +1229,11 @@ const sessionRenameError = ref("");
 const sessionRenameSaving = ref(false);
 const sessionRenameInputEl = ref<HTMLInputElement | null>(null);
 
+const workspaceRenameOpen = ref(false);
+const workspaceRenamePath = ref("");
+const workspaceRenameValue = ref("");
+const workspaceRenameInputEl = ref<HTMLInputElement | null>(null);
+
 const sessionDeleteOpen = ref(false);
 const sessionDeleteKey = ref("");
 const sessionDeleteLabel = ref("");
@@ -1343,7 +1412,8 @@ async function buildDeliveryForemanPrompt(t: Task): Promise<string> {
   parts.push("【Delivery Foreman / 交付前哨】");
   parts.push("");
   parts.push("请你作为系统秘书/观察者，判断该 run 是否真的完成，以及是否需要工业级交付检查。");
-  parts.push("如果未完成：给出用户下一步最小 resume prompt（用户要输入的那句话），并列出需要补齐的关键点。");
+  parts.push("如果未完成：你 SHOULD 直接调用 task_resume 工具创建新的 resume run（尽量不要让用户手动操作），并在回复里说明你做了什么；同时列出需要补齐的关键点。");
+  parts.push("如果你判断不适合自动 resume（例如需要用户选择/高风险/信息不足），才给出用户下一步最小 resume prompt（用户要输入的那句话）。");
   parts.push("如果已完成且属于复杂任务：给出工业级交付 checklist（以可执行步骤/命令为主，不默认执行）。");
   parts.push("如果是简单任务：一句话说明无需工业级交付检查并结束。");
   parts.push("");
@@ -1415,6 +1485,47 @@ async function onCancelTask() {
   errorBanner.value = "";
   try {
     await cancelTask(selectedTaskId.value);
+  } catch (e: any) {
+    errorBanner.value = e?.message ?? String(e);
+  }
+}
+
+async function secretaryCancelSessionRun(s: SessionGroup) {
+  if (!s?.latest?.id) return;
+  errorBanner.value = "";
+  try {
+    await cancelTask(s.latest.id);
+  } catch (e: any) {
+    errorBanner.value = e?.message ?? String(e);
+  }
+}
+
+async function secretaryResumeSessionRun(s: SessionGroup) {
+  if (!s?.latest?.id) return;
+  if (s.deleted_at) {
+    errorBanner.value = "该 session 已删除（软删除），无法 resume。";
+    return;
+  }
+  if (!s.session_id) {
+    errorBanner.value = "该 session 还没有 session_id，无法 resume。";
+    return;
+  }
+  if (s.latest.status === "running" || s.latest.status === "queued") {
+    errorBanner.value = "该 session 仍在运行中，暂不需要 resume。";
+    return;
+  }
+  errorBanner.value = "";
+  try {
+    const unsafe = s.worker_type === "claude-code" ? Boolean(claudeAutoApprove.value) : false;
+    const nt = await resumeTaskWithOptions(s.latest.id, {
+      prompt: "continue",
+      unsafe_automation: unsafe || undefined,
+    });
+    upsertTask(nt);
+    selectedTaskId.value = nt.id;
+    await loadLogs(nt.id);
+    outputTab.value = "logs";
+    closeSecretary();
   } catch (e: any) {
     errorBanner.value = e?.message ?? String(e);
   }
@@ -1844,6 +1955,44 @@ async function filesDeleteSelected() {
   } catch (e: any) {
     filesError.value = e?.message ?? String(e);
   }
+}
+
+function pinnedWorkspaceName(path: string): string {
+  const key = normalizePathForCompare(path);
+  if (!key) return "";
+  return (pinnedWorkspaceNames.value[key] ?? "").trim();
+}
+
+function workspaceOptionLabel(path: string): string {
+  const name = pinnedWorkspaceName(path);
+  if (!name) return path;
+  return `${name} · ${path}`;
+}
+
+function openWorkspaceRename(path: string) {
+  const p = path.trim();
+  if (!p) return;
+  workspaceRenamePath.value = p;
+  workspaceRenameValue.value = pinnedWorkspaceName(p);
+  workspaceRenameOpen.value = true;
+  void nextTick(() => workspaceRenameInputEl.value?.focus());
+}
+
+function closeWorkspaceRename() {
+  workspaceRenameOpen.value = false;
+}
+
+function saveWorkspaceRename() {
+  const p = workspaceRenamePath.value.trim();
+  if (!p) return;
+  const key = normalizePathForCompare(p);
+  if (!key) return;
+  const name = workspaceRenameValue.value.trim();
+  const next = { ...pinnedWorkspaceNames.value };
+  if (name) next[key] = name;
+  else delete next[key];
+  pinnedWorkspaceNames.value = next;
+  workspaceRenameOpen.value = false;
 }
 
 function setWorkspace(path: string) {
@@ -2474,9 +2623,20 @@ const recentWorkspacesUnpinned = computed(() => {
   );
 });
 
+const secretarySessionsAll = computed(() => {
+  const scope = secretaryScope.value;
+  if (scope === "all") return sessionsAll.value;
+  const filters = workspaceFilters.value;
+  if (!filters.length) return sessionsAll.value;
+  return sessionsAll.value.filter((s) =>
+    filters.some((w) => isWithinWorkspace(w, s.workdir)),
+  );
+});
+
 const secretaryCounts = computed(() => {
+  const sess = secretarySessionsAll.value;
   const out: Record<string, number> = {
-    total: sessionsAll.value.length,
+    total: sess.length,
     running: 0,
     queued: 0,
     blocked: 0,
@@ -2485,16 +2645,18 @@ const secretaryCounts = computed(() => {
     succeeded: 0,
     canceled: 0,
   };
-  for (const s of sessionsAll.value) {
+  for (const s of sess) {
     out[s.status] = (out[s.status] ?? 0) + 1;
   }
   return out;
 });
 
-const anyRunning = computed(() => secretaryCounts.value.running > 0);
+const anyRunning = computed(() =>
+  Array.from(tasks.value.values()).some((t) => t.status === "running"),
+);
 
 const needsAttentionSessions = computed(() => {
-  return sessionsAll.value
+  return secretarySessionsAll.value
     .filter(
       (s) =>
         s.status !== "succeeded" &&
@@ -2508,6 +2670,13 @@ const secretaryBriefing = computed(() => {
   if (c.total === 0) return "当前还没有 session。";
 
   const lines: string[] = [];
+  if (secretaryScope.value === "all") {
+    lines.push("scope: all");
+  } else if (workspaceFilters.value.length) {
+    lines.push(`scope: current · workspaces ${workspaceFilters.value.length}`);
+  } else {
+    lines.push("scope: current · no workspace filters");
+  }
   lines.push(`Session 总数：${c.total}`);
   lines.push(
     `running ${c.running} · blocked ${c.blocked} · failed ${c.failed} · interrupted ${c.interrupted} · queued ${c.queued} · succeeded ${c.succeeded}`,
@@ -2946,7 +3115,7 @@ watch(
                     :key="'p-' + p"
                     :value="p"
                   >
-                    {{ p }}
+                    {{ workspaceOptionLabel(p) }}
                   </option>
                 </optgroup>
                 <optgroup v-if="recentWorkspacesUnpinned.length" label="Recent">
@@ -2964,7 +3133,13 @@ watch(
               type="button"
               @click="sessionsFiltersOpen = !sessionsFiltersOpen"
             >
-              {{ sessionsFiltersOpen ? "Less" : "Filters" }}
+              {{
+                sessionsFiltersOpen
+                  ? "Less"
+                  : workspaceFilters.length
+                    ? `Filters (${workspaceFilters.length})`
+                    : "Filters"
+              }}
             </button>
             <button
               type="button"
@@ -3002,7 +3177,7 @@ watch(
               </button>
             </div>
 
-            <div v-if="workspaceFilters.length" class="activeFilters">
+              <div v-if="workspaceFilters.length" class="activeFilters">
               <div class="filtersTitle">Active</div>
               <div class="pinnedWorkspaces">
                 <div v-for="p in workspaceFilters" :key="'a-' + p" class="pinnedItem">
@@ -3012,7 +3187,11 @@ watch(
                     @click="toggleWorkspaceFilter(p)"
                     :title="p"
                   >
-                    <span class="mono">{{ p }}</span>
+                    <template v-if="pinnedWorkspaceName(p)">
+                      <span class="pinName">{{ pinnedWorkspaceName(p) }}</span>
+                      <span class="pinSub mono">{{ p }}</span>
+                    </template>
+                    <span v-else class="mono">{{ p }}</span>
                   </button>
                   <button
                     type="button"
@@ -3042,7 +3221,19 @@ watch(
                     @click="toggleWorkspaceFilter(p)"
                     :title="p"
                   >
-                    <span class="mono">{{ p }}</span>
+                    <template v-if="pinnedWorkspaceName(p)">
+                      <span class="pinName">{{ pinnedWorkspaceName(p) }}</span>
+                      <span class="pinSub mono">{{ p }}</span>
+                    </template>
+                    <span v-else class="mono">{{ p }}</span>
+                  </button>
+                  <button
+                    type="button"
+                    class="pinnedEdit"
+                    @click="openWorkspaceRename(p)"
+                    title="Rename"
+                  >
+                    ✎
                   </button>
                   <button
                     type="button"
@@ -3674,32 +3865,69 @@ watch(
             </div>
 
             <div class="secSection">
-              <div class="secSectionTitle">Needs Attention</div>
+              <div class="secSectionTitleRow">
+                <div class="secSectionTitle">Needs Attention</div>
+                <select v-model="secretaryScope" class="secScopeSelect" title="Scope">
+                  <option value="current">Current</option>
+                  <option value="all">All</option>
+                </select>
+              </div>
               <div v-if="needsAttentionSessions.length === 0" class="empty">
                 暂无需要关注的 session
               </div>
-              <button
+              <div
                 v-for="s in needsAttentionSessions"
                 :key="s.key"
-                type="button"
                 class="secRow"
-                @click="
-                  onSelectTask(s.latest.id);
-                  closeSecretary();
-                "
               >
-                <div class="rowTop">
-                  <span class="mono">{{
-                    (s.session_id || s.latest.id).slice(0, 8)
-                  }}</span>
-                  <span class="pill" :class="s.status">{{ s.status }}</span>
+                <button
+                  type="button"
+                  class="secRowMain"
+                  @click="
+                    onSelectTask(s.latest.id);
+                    closeSecretary();
+                  "
+                >
+                  <div class="rowTop">
+                    <span class="mono">{{
+                      (s.session_id || s.latest.id).slice(0, 8)
+                    }}</span>
+                    <span class="pill" :class="s.status">{{ s.status }}</span>
+                  </div>
+                  <div class="rowMid">
+                    <span class="pill kind">{{ s.worker_type }}</span>
+                    <span class="score">score {{ s.score }}</span>
+                  </div>
+                  <div class="rowPath mono">{{ s.workdir }}</div>
+                </button>
+                <div class="secRowActions">
+                  <button
+                    type="button"
+                    class="secAction"
+                    @click="secretaryResumeSessionRun(s)"
+                    :disabled="
+                      !s.session_id ||
+                      !!s.deleted_at ||
+                      s.latest.status === 'running' ||
+                      s.latest.status === 'queued'
+                    "
+                    title="Resume session"
+                  >
+                    Resume
+                  </button>
+                  <button
+                    type="button"
+                    class="secAction"
+                    @click="secretaryCancelSessionRun(s)"
+                    :disabled="
+                      !(s.latest.status === 'running' || s.latest.status === 'queued')
+                    "
+                    title="Cancel run"
+                  >
+                    Cancel
+                  </button>
                 </div>
-                <div class="rowMid">
-                  <span class="pill kind">{{ s.worker_type }}</span>
-                  <span class="score">score {{ s.score }}</span>
-                </div>
-                <div class="rowPath mono">{{ s.workdir }}</div>
-              </button>
+              </div>
             </div>
 
             <div class="secSection">
@@ -3943,6 +4171,43 @@ watch(
 	        </div>
 	      </div>
 	    </div>
+
+      <div
+        v-if="workspaceRenameOpen"
+        class="modalOverlay"
+        @click.self="closeWorkspaceRename"
+      >
+        <div class="modal smallModal">
+          <div class="modalHeader">
+            <div class="modalTitle">Rename Workspace</div>
+            <button class="iconBtn" type="button" @click="closeWorkspaceRename">
+              ✕
+            </button>
+          </div>
+          <div class="modalBody">
+            <div class="tinyHint">
+              Workspace: <span class="mono">{{ workspaceRenamePath }}</span>
+            </div>
+            <label class="full">
+              Name
+              <input
+                ref="workspaceRenameInputEl"
+                v-model="workspaceRenameValue"
+                placeholder="(optional)"
+              />
+            </label>
+            <div class="tinyHint">
+              Name is stored locally and shown in the workspace selector / pinned list.
+            </div>
+          </div>
+          <div class="modalFooter">
+            <button type="button" @click="closeWorkspaceRename">Cancel</button>
+            <button type="button" class="primary" @click="saveWorkspaceRename">
+              Save
+            </button>
+          </div>
+        </div>
+      </div>
 
       <div
         v-if="sessionRenameOpen"
@@ -5988,6 +6253,12 @@ button.dangerBtn:disabled {
     padding-left: 0;
     padding-right: 0;
   }
+
+  .pinnedEdit {
+    width: 44px;
+    padding-left: 0;
+    padding-right: 0;
+  }
 }
 
 .modalOverlay {
@@ -6791,12 +7062,41 @@ button.dangerBtn:disabled {
   color: white;
 }
 
-.pinnedBtn .mono {
+.pinnedBtn .mono,
+.pinnedBtn .pinName,
+.pinnedBtn .pinSub {
   display: block;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.pinnedBtn .pinName {
+  font-weight: 800;
+}
+
+.pinnedBtn .pinSub {
+  font-size: 11px;
+  opacity: 0.75;
+}
+
+.pinnedBtn.active .pinSub {
+  opacity: 0.9;
+}
+
+.pinnedEdit {
+  border: none;
+  border-left: 1px solid var(--border-color);
+  background: transparent;
+  padding: 6px 10px;
+  cursor: pointer;
+  color: var(--text-sub);
+}
+
+.pinnedEdit:hover {
+  color: var(--color-primary);
+  background: var(--bg-subtle);
 }
 
 .pinnedX {
@@ -7819,20 +8119,58 @@ button.dangerBtn:disabled {
   color: var(--text-main);
 }
 
+.secSectionTitleRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.secScopeSelect {
+  padding: 6px 10px;
+  font-size: 12px;
+  border-radius: 999px;
+}
+
 .secRow {
-  text-align: left;
   background: var(--bg-panel);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
-  padding: 12px;
+  padding: 0;
   transition: all 0.2s;
-  cursor: pointer;
+  display: flex;
+  align-items: stretch;
+  gap: 10px;
+  overflow: hidden;
 }
 
 .secRow:hover {
   transform: translateY(-2px);
   box-shadow: var(--shadow-md);
   border-color: var(--color-primary-bg);
+}
+
+.secRowMain {
+  flex: 1;
+  border: none;
+  background: transparent;
+  padding: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.secRowActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px;
+}
+
+.secAction {
+  padding: 6px 10px;
+  font-size: 12px;
+  border-radius: 999px;
+  white-space: nowrap;
 }
 
 .briefing {

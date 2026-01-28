@@ -92,20 +92,30 @@ if (!html.includes("ControlCCX")) {
   process.exit(1);
 }
 
-const match = html.match(/\/assets\/[^"']+\.(?:js|css)/);
-if (!match) {
+const jsCandidates = Array.from(html.matchAll(/\/assets\/[^"']+\.js/g)).map((m) => m[0]);
+if (!jsCandidates.length) {
   child.kill();
   restoreDiskAssets();
-  console.error("Smoke failed: could not find asset reference in HTML");
+  console.error("Smoke failed: could not find JS asset reference in HTML");
   process.exit(1);
 }
-const assetPath = match[0];
-const assetRes = await fetch(`${base}${assetPath}`);
-if (!assetRes.ok) {
+const jsPath =
+  jsCandidates.find((p) => /\/assets\/index-/.test(p)) ?? jsCandidates[0];
+const jsRes = await fetch(`${base}${jsPath}`);
+if (!jsRes.ok) {
   child.kill();
   restoreDiskAssets();
-  console.error(`Smoke failed: asset not served: ${assetPath}`);
+  console.error(`Smoke failed: JS asset not served: ${jsPath}`);
   process.exit(1);
+}
+const jsText = await jsRes.text();
+for (const needle of ["Trace", "Download", "Filter logs...", "logs/export"]) {
+  if (!jsText.includes(needle)) {
+    child.kill();
+    restoreDiskAssets();
+    console.error(`Smoke failed: UI missing marker string: ${needle}`);
+    process.exit(1);
+  }
 }
 
 child.kill();

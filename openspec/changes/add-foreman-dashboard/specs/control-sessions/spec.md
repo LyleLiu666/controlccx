@@ -36,3 +36,15 @@ The system SHALL provide a single “Secretary” overview that observes all ses
 #### Scenario: Navigate from secretary to a session
 - **WHEN** the user clicks an entry in the Secretary “needs attention” list
 - **THEN** the UI SHALL navigate to that session/run context
+
+#### Scenario: Secretary scope toggle
+- **GIVEN** the Sessions list is filtered by one or more workspace paths
+- **WHEN** the user switches Secretary scope between “Current” and “All”
+- **THEN** the “needs attention” list and briefing counts SHALL reflect the selected scope
+
+#### Scenario: Quick actions for attention queue
+- **GIVEN** a session is listed in “needs attention”
+- **WHEN** the user clicks “Resume”
+- **THEN** the UI SHALL start a new resume run for that session (using the existing `session_id`)
+- **AND** **WHEN** the user clicks “Cancel”
+- **THEN** the UI SHALL cancel the currently running/queued run (if any)

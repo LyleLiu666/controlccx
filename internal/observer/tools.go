@@ -117,6 +117,37 @@ func stringArg(args map[string]any, key string) string {
 	return ""
 }
 
+func boolArg(args map[string]any, key string, def bool) bool {
+	if args == nil {
+		return def
+	}
+	v, ok := args[key]
+	if !ok || v == nil {
+		return def
+	}
+	switch b := v.(type) {
+	case bool:
+		return b
+	case string:
+		s := strings.TrimSpace(strings.ToLower(b))
+		if s == "1" || s == "true" || s == "yes" {
+			return true
+		}
+		if s == "0" || s == "false" || s == "no" {
+			return false
+		}
+		return def
+	case float64:
+		return b != 0
+	case int:
+		return b != 0
+	case int64:
+		return b != 0
+	default:
+		return def
+	}
+}
+
 func clamp(v, min, max int) int {
 	if max > 0 && v > max {
 		v = max
@@ -244,6 +275,117 @@ func (s *Service) agentTools() map[string]Tool {
 					logs[i].Message = truncateDisplay(logs[i].Message, maxLine)
 				}
 				return map[string]any{"task_id": taskID, "logs": logs}, nil
+			},
+		},
+		"task_resume": ToolFunc{
+			ToolName:        "task_resume",
+			ToolDescription: "恢复/继续某个任务所属的会话：创建一个新的 resume run 并启动。参数：{task_id: string, prompt?: string, unsafe_automation?: boolean}。task_id 可为：完整 id / id 前缀 / session_id / prompt 关键词",
+			Fn: func(ctx context.Context, args map[string]any) (any, error) {
+				if s.Store == nil {
+					return nil, errors.New("tasks store not configured")
+				}
+				if s.Runner == nil {
+					return nil, errors.New("task runner not configured")
+				}
+
+				taskID := stringArg(args, "task_id")
+				if taskID == "" {
+					taskID = stringArg(args, "id")
+				}
+				taskID, err := s.resolveTaskID(ctx, taskID)
+				if err != nil {
+					return nil, err
+				}
+
+				prev, err := s.Store.GetTask(ctx, taskID)
+				if err != nil {
+					return nil, err
+				}
+
+				if prev.SessionDeletedAt != nil {
+					return nil, fmt.Errorf("session is deleted; cannot resume (task_id=%s)", prev.ID)
+				}
+
+				sid := strings.TrimSpace(prev.SessionID)
+				if sid == "" {
+					return nil, fmt.Errorf("task has no session_id to resume (task_id=%s)", prev.ID)
+				}
+
+				// Avoid overlapping runs for the same session.
+				all, err := s.Store.ListTasks(ctx, 500)
+				if err != nil {
+					return nil, err
+				}
+				for _, t := range all {
+					if strings.TrimSpace(t.SessionID) != sid {
+						continue
+					}
+					if t.Status == tasks.StatusRunning || t.Status == tasks.StatusQueued {
+						return nil, fmt.Errorf("session already has a running task (task_id=%s status=%s)", t.ID, t.Status)
+					}
+				}
+
+				prompt := stringArg(args, "prompt")
+				if prompt == "" {
+					prompt = "continue"
+				}
+				unsafe := boolArg(args, "unsafe_automation", prev.UnsafeAutomation)
+
+				next, err := s.Store.CreateTask(ctx, tasks.CreateTaskInput{
+					WorkerType:        prev.WorkerType,
+					Mode:              tasks.ModeResume,
+					UnsafeAutomation:  unsafe,
+					Prompt:            prompt,
+					WorkDir:           prev.WorkDir,
+					SessionID:         sid,
+					Warning:           prev.Warning,
+				})
+				if err != nil {
+					return nil, err
+				}
+
+				if err := s.Runner.Start(ctx, next.ID); err != nil {
+					_ = s.Store.FinishTask(context.Background(), next.ID, tasks.FinishTaskInput{
+						Status:     tasks.StatusFailed,
+						ExitCode:   nil,
+						Error:      err.Error(),
+						SessionID:  "",
+						FinishedAt: time.Now().UTC(),
+					})
+					return nil, err
+				}
+
+				return map[string]any{
+					"ok": true,
+					"task": map[string]any{
+						"id":          next.ID,
+						"session_id":  strings.TrimSpace(next.SessionID),
+						"worker_type": next.WorkerType,
+						"status":      next.Status,
+						"prompt":      truncateDisplay(strings.TrimSpace(next.Prompt), 240),
+						"workdir":     next.WorkDir,
+						"unsafe":      next.UnsafeAutomation,
+					},
+				}, nil
+			},
+		},
+		"task_cancel": ToolFunc{
+			ToolName:        "task_cancel",
+			ToolDescription: "取消一个正在执行的任务。参数：{task_id: string}。task_id 可为：完整 id / id 前缀 / session_id / prompt 关键词",
+			Fn: func(ctx context.Context, args map[string]any) (any, error) {
+				if s.Runner == nil {
+					return nil, errors.New("task runner not configured")
+				}
+				taskID := stringArg(args, "task_id")
+				if taskID == "" {
+					taskID = stringArg(args, "id")
+				}
+				taskID, err := s.resolveTaskID(ctx, taskID)
+				if err != nil {
+					return nil, err
+				}
+				ok := s.Runner.Cancel(taskID)
+				return map[string]any{"ok": ok, "task_id": taskID}, nil
 			},
 		},
 	}

@@ -89,6 +89,7 @@ func main() {
 	observerSvc := &observer.Service{
 		Store:      taskStore,
 		Chat:       chatStore,
+		Runner:     workerMgr,
 		LLM:        observer.MultiBackend{Backends: []observer.Backend{claudeBackend, codexBackend}},
 		Claude:     claudeBackend,
 		Codex:      codexBackend,
