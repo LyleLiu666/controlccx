@@ -34,6 +34,39 @@ export type Task = {
   finished_at?: string;
 };
 
+export type SkillTargetRoot = {
+  target: "claude" | "codex";
+  root: string;
+};
+
+export type SkillTargetState = {
+  target: "claude" | "codex";
+  root: string;
+  status:
+    | "missing"
+    | "linked"
+    | "broken"
+    | "present"
+    | "copied"
+    | "conflict"
+    | "external";
+  link_target?: string;
+  note?: string;
+};
+
+export type Skill = {
+  name: string;
+  sources?: string[];
+  source?: string;
+  targets?: SkillTargetState[];
+};
+
+export type SkillsListResponse = {
+  source_roots: string[];
+  targets: SkillTargetRoot[];
+  skills: Skill[];
+};
+
 export type LogEntry = {
   id: number;
   task_id: string;

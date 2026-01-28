@@ -23,6 +23,7 @@ import (
 	"controlccx/internal/db"
 	"controlccx/internal/events"
 	"controlccx/internal/observer"
+	"controlccx/internal/skills"
 	"controlccx/internal/tasks"
 	"controlccx/internal/worker"
 )
@@ -85,6 +86,11 @@ func main() {
 		ForceAgent: true,
 	}
 
+	skillsSvc, err := skills.NewService(skills.Options{})
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	apiSvc := &api.API{
 		Tasks:    taskStore,
 		Workers:  workerMgr,
@@ -92,6 +98,7 @@ func main() {
 		Chat:     chatStore,
 		Hub:      hub,
 		Auth:     authStore,
+		Skills:   skillsSvc,
 	}
 
 	mux := http.NewServeMux()

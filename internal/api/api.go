@@ -16,6 +16,7 @@ import (
 	"controlccx/internal/chat"
 	"controlccx/internal/events"
 	"controlccx/internal/observer"
+	"controlccx/internal/skills"
 	"controlccx/internal/systeminfo"
 	"controlccx/internal/tasks"
 	"controlccx/internal/worker"
@@ -29,6 +30,7 @@ type API struct {
 	Hub      *events.Hub
 	FSRoots  []FSRoot
 	Auth     *auth.Store
+	Skills   *skills.Service
 }
 
 func (a *API) Handler() http.Handler {
@@ -37,6 +39,9 @@ func (a *API) Handler() http.Handler {
 	mux.HandleFunc("/api/tasks", a.handleTasks)
 	mux.HandleFunc("/api/tasks/", a.handleTaskByID)
 	mux.HandleFunc("/api/sessions/", a.handleSessionByKey)
+	mux.HandleFunc("/api/skills", a.handleSkills)
+	mux.HandleFunc("/api/skills/link", a.handleSkillsLink)
+	mux.HandleFunc("/api/skills/unlink", a.handleSkillsUnlink)
 	mux.HandleFunc("/api/fs/roots", a.handleFSRoots)
 	mux.HandleFunc("/api/fs/list", a.handleFSList)
 	mux.HandleFunc("/api/fs/read", a.handleFSRead)

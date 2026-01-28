@@ -11,6 +11,7 @@ import type {
   FSMkdirResponse,
   FSWriteResponse,
   LogEntry,
+  SkillsListResponse,
   SystemInfo,
   Task,
   WorkerType,
@@ -235,4 +236,22 @@ export async function fetchAuthInfo(): Promise<AuthInfo> {
 
 export async function updateAuth(patch: AuthPatch): Promise<AuthInfo> {
   return postJSON<AuthInfo>("/api/auth", patch);
+}
+
+export async function fetchSkills(): Promise<SkillsListResponse> {
+  return getJSON<SkillsListResponse>("/api/skills");
+}
+
+export async function linkSkill(input: {
+  name: string;
+  target: "claude" | "codex";
+}): Promise<{ ok: boolean }> {
+  return postJSON<{ ok: boolean }>("/api/skills/link", input);
+}
+
+export async function unlinkSkill(input: {
+  name: string;
+  target: "claude" | "codex";
+}): Promise<{ ok: boolean }> {
+  return postJSON<{ ok: boolean }>("/api/skills/unlink", input);
 }

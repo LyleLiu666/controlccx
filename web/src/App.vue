@@ -12,6 +12,8 @@ import type {
   FSRoot,
   LogEntry,
   ServerEvent,
+  Skill,
+  SkillsListResponse,
   SystemInfo,
   Task,
   WorkerType,
@@ -27,15 +29,18 @@ import {
   fetchFSRead,
   fetchFSRoots,
   fetchLogs,
+  fetchSkills,
   fetchSystemInfo,
   fetchTasks,
   fsDelete,
   fsMkdir,
   fsWrite,
+  linkSkill,
   renameSession,
   resumeTaskWithOptions,
   sendChat,
   sendChatStream,
+  unlinkSkill,
   updateAuth,
 } from "./api";
 import { appendChatMessageUnique, sendChatAndReload } from "./chatOps";
@@ -88,6 +93,13 @@ const authAnthropicSmallFastModel = ref("");
 const authOpenAIApiKey = ref("");
 const authCodexModel = ref("");
 const authCodexReasoningEffort = ref("");
+
+const skillsOpen = ref(false);
+const skillsLoading = ref(false);
+const skillsError = ref("");
+const skillsFilter = ref("");
+const skillsData = ref<SkillsListResponse | null>(null);
+const skillsActionBusy = ref<Map<string, boolean>>(new Map());
 
 const selectedTask = computed(
   () => tasks.value.get(selectedTaskId.value) ?? null,
@@ -1860,6 +1872,123 @@ function openAuthSettings() {
   authSettingsError.value = "";
   authSettingsOpen.value = true;
   refreshAuth();
+}
+
+async function openSkills() {
+  skillsError.value = "";
+  skillsOpen.value = true;
+  await refreshSkills();
+}
+
+async function refreshSkills() {
+  skillsError.value = "";
+  skillsLoading.value = true;
+  try {
+    skillsData.value = await fetchSkills();
+  } catch (e: any) {
+    skillsError.value = e?.message ?? String(e);
+  } finally {
+    skillsLoading.value = false;
+  }
+}
+
+function skillsKey(name: string, target: "claude" | "codex") {
+  return `${target}:${name}`;
+}
+
+async function onSkillsToggle(
+  name: string,
+  target: "claude" | "codex",
+  enable: boolean,
+) {
+  const key = skillsKey(name, target);
+  skillsActionBusy.value.set(key, true);
+  skillsActionBusy.value = new Map(skillsActionBusy.value);
+  skillsError.value = "";
+  try {
+    if (enable) {
+      await linkSkill({ name, target });
+    } else {
+      await unlinkSkill({ name, target });
+    }
+    await refreshSkills();
+  } catch (e: any) {
+    skillsError.value = e?.message ?? String(e);
+  } finally {
+    skillsActionBusy.value.delete(key);
+    skillsActionBusy.value = new Map(skillsActionBusy.value);
+  }
+}
+
+type SkillsSummary = {
+  target: "claude" | "codex";
+  status:
+    | "missing"
+    | "linked"
+    | "broken"
+    | "present"
+    | "copied"
+    | "conflict"
+    | "external"
+    | "partial";
+  canEnable: boolean;
+  canDisable: boolean;
+  enabled: boolean;
+  detail: string;
+};
+
+function summarizeSkillTarget(skill: Skill, target: "claude" | "codex"): SkillsSummary {
+  const states = (skill.targets ?? []).filter((s) => s.target === target);
+  const detail = states
+    .map((s) => `${s.root}: ${s.status}${s.note ? ` (${s.note})` : ""}`)
+    .join("\n");
+
+  const hasSource = !!(skill.source && skill.source.trim());
+  const statuses = states.map((s) => s.status);
+  const unique = Array.from(new Set(statuses));
+
+  const status =
+    unique.length === 1 && unique[0] ? (unique[0] as SkillsSummary["status"]) : "partial";
+
+  const anyManagedEnabled = statuses.some((s) => s === "linked" || s === "copied");
+  const anyBroken = statuses.some((s) => s === "broken");
+  const enabled = anyManagedEnabled;
+
+  const hasUnmanagedBlocker = statuses.some(
+    (s) => s === "present" || s === "conflict" || s === "external",
+  );
+  const canEnable = hasSource && !hasUnmanagedBlocker;
+  const canDisable = !hasUnmanagedBlocker && (anyManagedEnabled || anyBroken);
+
+  return { target, status, canEnable, canDisable, enabled, detail };
+}
+
+const skillsVisible = computed(() => {
+  const data = skillsData.value;
+  if (!data) return [];
+  const q = skillsFilter.value.trim().toLowerCase();
+  if (!q) return data.skills;
+  return data.skills.filter((s) => s.name.toLowerCase().includes(q));
+});
+
+function skillBadgeClass(status: string) {
+  switch (status) {
+    case "linked":
+    case "copied":
+      return "ok";
+    case "broken":
+    case "conflict":
+      return "warn";
+    case "external":
+    case "present":
+      return "muted";
+    case "missing":
+      return "dim";
+    case "partial":
+      return "partial";
+    default:
+      return "dim";
+  }
 }
 
 async function saveAuthSettings() {
@@ -3672,6 +3801,9 @@ watch(
       <div class="modal settingsModal">
         <div class="modalHeader">
           <div class="modalTitle">Auth Settings</div>
+          <button type="button" class="headerMiniBtn" @click="openSkills">
+            Skills
+          </button>
           <button
             class="iconBtn"
             type="button"
@@ -3924,6 +4056,188 @@ watch(
           >
             {{ authSaving ? "Saving..." : "Save" }}
           </button>
+        </div>
+      </div>
+    </div>
+
+    <div
+      v-if="skillsOpen"
+      class="modalOverlay"
+      @click.self="skillsOpen = false"
+    >
+      <div class="modal skillsModal">
+        <div class="modalHeader">
+          <div class="modalTitle">Skills</div>
+          <button
+            type="button"
+            class="headerMiniBtn"
+            @click="refreshSkills"
+            :disabled="skillsLoading"
+          >
+            Refresh
+          </button>
+          <button class="iconBtn" type="button" @click="skillsOpen = false">
+            ✕
+          </button>
+        </div>
+
+        <div class="modalBody skillsBody">
+          <div v-if="skillsError" class="modalError">{{ skillsError }}</div>
+          <div v-else-if="skillsLoading" class="loading">Loading...</div>
+          <template v-else>
+            <div class="skillsMeta">
+              <div class="tinyHint">
+                Sources:
+                <span class="mono">{{
+                  (skillsData?.source_roots ?? []).join(" · ")
+                }}</span>
+              </div>
+              <div class="tinyHint">
+                Targets:
+                <span class="mono">{{
+                  (skillsData?.targets ?? [])
+                    .map((t) => `${t.target}:${t.root}`)
+                    .join(" · ")
+                }}</span>
+              </div>
+            </div>
+
+            <div class="skillsToolbar">
+              <input v-model="skillsFilter" placeholder="Filter skills..." />
+            </div>
+
+            <div class="skillsTable">
+              <div class="skillsHead">
+                <div>Skill</div>
+                <div>Claude</div>
+                <div>Codex</div>
+              </div>
+
+              <div
+                v-for="s in skillsVisible"
+                :key="s.name"
+                class="skillsRow"
+              >
+                <div class="skillsName">
+                  <div class="mono">{{ s.name }}</div>
+                  <div class="tinyHint mono" v-if="s.source" :title="s.source">
+                    {{ s.source }}
+                  </div>
+                  <div class="tinyHint warn" v-else>missing source</div>
+                </div>
+
+                <div class="skillsCell">
+                  <template v-for="t in [summarizeSkillTarget(s, 'claude')]" :key="t.target">
+                    <span
+                      class="pill skillStatus"
+                      :class="skillBadgeClass(t.status)"
+                      :title="t.detail"
+                      >{{ t.status }}</span
+                    >
+                    <button
+                      type="button"
+                      class="primary"
+                      v-if="!t.enabled"
+                      @click="onSkillsToggle(s.name, 'claude', true)"
+                      :disabled="
+                        !t.canEnable ||
+                        !!skillsActionBusy.get(skillsKey(s.name, 'claude'))
+                      "
+                      :title="
+                        t.canEnable
+                          ? 'Enable for Claude'
+                          : 'Cannot enable: unmanaged entry exists in target root'
+                      "
+                    >
+                      {{
+                        skillsActionBusy.get(skillsKey(s.name, "claude"))
+                          ? "..."
+                          : "Enable"
+                      }}
+                    </button>
+                    <button
+                      type="button"
+                      v-else
+                      @click="onSkillsToggle(s.name, 'claude', false)"
+                      :disabled="
+                        !t.canDisable ||
+                        !!skillsActionBusy.get(skillsKey(s.name, 'claude'))
+                      "
+                      :title="
+                        t.canDisable
+                          ? 'Disable for Claude'
+                          : 'Cannot disable: unmanaged entry exists in target root'
+                      "
+                    >
+                      {{
+                        skillsActionBusy.get(skillsKey(s.name, "claude"))
+                          ? "..."
+                          : "Disable"
+                      }}
+                    </button>
+                  </template>
+                </div>
+
+                <div class="skillsCell">
+                  <template v-for="t in [summarizeSkillTarget(s, 'codex')]" :key="t.target">
+                    <span
+                      class="pill skillStatus"
+                      :class="skillBadgeClass(t.status)"
+                      :title="t.detail"
+                      >{{ t.status }}</span
+                    >
+                    <button
+                      type="button"
+                      class="primary"
+                      v-if="!t.enabled"
+                      @click="onSkillsToggle(s.name, 'codex', true)"
+                      :disabled="
+                        !t.canEnable ||
+                        !!skillsActionBusy.get(skillsKey(s.name, 'codex'))
+                      "
+                      :title="
+                        t.canEnable
+                          ? 'Enable for Codex'
+                          : 'Cannot enable: unmanaged entry exists in a Codex root'
+                      "
+                    >
+                      {{
+                        skillsActionBusy.get(skillsKey(s.name, "codex"))
+                          ? "..."
+                          : "Enable"
+                      }}
+                    </button>
+                    <button
+                      type="button"
+                      v-else
+                      @click="onSkillsToggle(s.name, 'codex', false)"
+                      :disabled="
+                        !t.canDisable ||
+                        !!skillsActionBusy.get(skillsKey(s.name, 'codex'))
+                      "
+                      :title="
+                        t.canDisable
+                          ? 'Disable for Codex'
+                          : 'Cannot disable: unmanaged entry exists in a Codex root'
+                      "
+                    >
+                      {{
+                        skillsActionBusy.get(skillsKey(s.name, "codex"))
+                          ? "..."
+                          : "Disable"
+                      }}
+                    </button>
+                  </template>
+                </div>
+              </div>
+
+              <div v-if="!skillsVisible.length" class="empty">No skills</div>
+            </div>
+          </template>
+        </div>
+
+        <div class="modalFooter">
+          <button type="button" @click="skillsOpen = false">Close</button>
         </div>
       </div>
     </div>
@@ -5300,6 +5614,115 @@ button.dangerBtn:disabled {
 .settingsModal {
   width: min(760px, 95vw);
   height: min(600px, 90vh);
+}
+
+.headerMiniBtn {
+  margin-left: 10px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border-color);
+  background: transparent;
+  color: var(--text);
+  font-weight: 700;
+}
+
+.headerMiniBtn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.skillsModal {
+  width: min(980px, 95vw);
+  height: min(660px, 90vh);
+}
+
+.skillsBody {
+  padding-top: 12px;
+}
+
+.skillsMeta {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.skillsToolbar {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin: 10px 0 14px;
+}
+
+.skillsToolbar input {
+  width: 100%;
+}
+
+.skillsTable {
+  border: 1px solid var(--border-color);
+  border-radius: 14px;
+  overflow: hidden;
+}
+
+.skillsHead {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr 1fr;
+  gap: 12px;
+  padding: 10px 12px;
+  background: var(--bg-subtle);
+  font-weight: 800;
+}
+
+.skillsRow {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr 1fr;
+  gap: 12px;
+  padding: 12px;
+  border-top: 1px solid var(--border-color);
+  align-items: center;
+}
+
+.skillsName {
+  min-width: 0;
+}
+
+.skillsName .mono {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.skillsCell {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.skillStatus {
+  min-width: 72px;
+  text-align: center;
+}
+
+.pill.skillStatus.ok {
+  border-color: rgba(16, 185, 129, 0.45);
+  color: rgb(16, 185, 129);
+}
+
+.pill.skillStatus.warn {
+  border-color: rgba(245, 158, 11, 0.45);
+  color: rgb(245, 158, 11);
+}
+
+.pill.skillStatus.partial {
+  border-color: rgba(59, 130, 246, 0.45);
+  color: rgb(59, 130, 246);
+}
+
+.pill.skillStatus.muted {
+  opacity: 0.75;
+}
+
+.pill.skillStatus.dim {
+  opacity: 0.6;
 }
 
 @keyframes popIn {
