@@ -1,6 +1,6 @@
 ## 1. Spec
-- [ ] 1.1 补齐 spec deltas（observer-assistant / web-ui）
-- [ ] 1.2 跑 openspec validate（若 CLI 可用）
+- [x] 1.1 补齐 spec deltas（observer-assistant / web-ui）
+- [x] 1.2 跑 openspec validate（若 CLI 可用）
 
 ## 2. Backend (optional / minimal)
 - [ ] 2.1 不改变默认安全边界：不自动执行危险操作
@@ -15,4 +15,3 @@
 ## 4. Validation
 - [ ] 4.1 `pnpm -C web build` + `pnpm smoke`
 - [ ] 4.2 `go test ./...`
-
