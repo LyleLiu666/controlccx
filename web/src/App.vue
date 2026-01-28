@@ -3508,6 +3508,85 @@ watch(
 	        </div>
 	      </div>
 	    </div>
+
+      <div
+        v-if="sessionRenameOpen"
+        class="modalOverlay"
+        @click.self="closeSessionRename"
+      >
+        <div class="modal smallModal">
+          <div class="modalHeader">
+            <div class="modalTitle">Rename Session</div>
+            <button class="iconBtn" type="button" @click="closeSessionRename">
+              ✕
+            </button>
+          </div>
+          <div class="modalBody">
+            <div v-if="sessionRenameError" class="modalError">
+              {{ sessionRenameError }}
+            </div>
+            <label class="full">
+              Title
+              <input
+                ref="sessionRenameInputEl"
+                v-model="sessionRenameTitle"
+                placeholder="(optional)"
+              />
+            </label>
+            <div class="tinyHint">
+              Title is stored locally (soft) and shown in Sessions list/detail.
+            </div>
+          </div>
+          <div class="modalFooter">
+            <button type="button" @click="closeSessionRename">Cancel</button>
+            <button
+              type="button"
+              class="primary"
+              @click="saveSessionRename"
+              :disabled="sessionRenameSaving"
+            >
+              Save
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div
+        v-if="sessionDeleteOpen"
+        class="modalOverlay"
+        @click.self="closeSessionDelete"
+      >
+        <div class="modal smallModal">
+          <div class="modalHeader">
+            <div class="modalTitle">Delete Session</div>
+            <button class="iconBtn" type="button" @click="closeSessionDelete">
+              ✕
+            </button>
+          </div>
+          <div class="modalBody">
+            <div v-if="sessionDeleteError" class="modalError">
+              {{ sessionDeleteError }}
+            </div>
+            <div class="confirmText">
+              Delete <span class="mono">{{ sessionDeleteLabel }}</span> ? (soft delete)
+            </div>
+            <div class="tinyHint">
+              Deleted sessions are hidden by default. You can enable “Show deleted” to view them.
+            </div>
+          </div>
+          <div class="modalFooter">
+            <button type="button" @click="closeSessionDelete">Cancel</button>
+            <button
+              type="button"
+              class="dangerBtn"
+              @click="confirmSessionDelete"
+              :disabled="sessionDeleteSaving"
+            >
+              Delete
+            </button>
+          </div>
+        </div>
+      </div>
 	
 	    <div
 	      v-if="newRunOpen"
@@ -4692,6 +4771,32 @@ button.primary:active:not(:disabled) {
   transform: translateY(0);
 }
 
+button.dangerBtn {
+  background: #ef4444;
+  color: white;
+  border-color: #ef4444;
+  box-shadow: 0 2px 4px rgba(239, 68, 68, 0.2);
+}
+
+button.dangerBtn:hover:not(:disabled) {
+  background: #dc2626;
+  border-color: #dc2626;
+  box-shadow: 0 4px 6px rgba(220, 38, 38, 0.3);
+  color: white;
+  transform: translateY(-1px);
+}
+
+button.dangerBtn:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+button.dangerBtn:disabled {
+  background: #94a3b8;
+  border-color: #94a3b8;
+  opacity: 1;
+  box-shadow: none;
+}
+
 .workdirRow {
   display: grid;
   grid-template-columns: 1fr auto;
@@ -5180,6 +5285,16 @@ button.primary:active:not(:disabled) {
   height: min(600px, 90vh);
   display: grid;
   grid-template-rows: auto 1fr auto;
+}
+
+.smallModal {
+  width: min(520px, 95vw);
+  height: auto;
+  max-height: 90vh;
+}
+
+.smallModal .modalBody {
+  overflow: auto;
 }
 
 .settingsModal {
@@ -5816,6 +5931,15 @@ button.primary:active:not(:disabled) {
   overflow: hidden;
 }
 
+.row:focus-visible {
+  outline: 2px solid rgba(20, 184, 166, 0.8);
+  outline-offset: 2px;
+}
+
+.row.deleted {
+  opacity: 0.7;
+}
+
 .row::before {
   content: '';
   position: absolute;
@@ -5852,6 +5976,79 @@ button.primary:active:not(:disabled) {
   justify-content: space-between;
   gap: 10px;
   margin-bottom: 6px;
+}
+
+.rowTopLeft {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.rowTopRight {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.rowName {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-main);
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rowMore {
+  position: relative;
+}
+
+.rowMore summary {
+  width: 30px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  background: rgba(15, 23, 42, 0.12);
+  color: var(--text-main);
+  font-weight: 900;
+  font-size: 16px;
+  list-style: none;
+  cursor: pointer;
+}
+
+.rowMore summary::-webkit-details-marker {
+  display: none;
+}
+
+.rowMore[open] summary {
+  border-color: rgba(20, 184, 166, 0.6);
+  box-shadow: 0 0 0 2px rgba(20, 184, 166, 0.2);
+}
+
+.rowMorePopup {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  width: 180px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  padding: 8px;
+  display: grid;
+  gap: 8px;
+  z-index: 20;
+}
+
+.rowMorePopup button {
+  width: 100%;
+  text-align: left;
 }
 
 .rowMid {
@@ -5943,6 +6140,14 @@ button.primary:active:not(:disabled) {
   color: white;
 }
 
+.pill.deleted {
+  background: rgba(148, 163, 184, 0.14);
+  color: var(--text-sub);
+  border-color: rgba(148, 163, 184, 0.25);
+  text-transform: none;
+  letter-spacing: 0;
+}
+
 .score {
   font-weight: 700;
   color: var(--color-primary);
@@ -6009,6 +6214,16 @@ button.primary:active:not(:disabled) {
 .detailSid {
   font-weight: 900;
   font-size: 14px;
+}
+
+.detailName {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-main);
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .detailMini {
@@ -6252,6 +6467,11 @@ button.primary:active:not(:disabled) {
 .tinyHint {
   font-size: 12px;
   color: var(--text-sub);
+}
+
+.confirmText {
+  font-size: 14px;
+  color: var(--text-main);
 }
 
 .runs {

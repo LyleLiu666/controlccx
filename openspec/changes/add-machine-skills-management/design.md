@@ -20,6 +20,9 @@
 - 目录模型
   - `source roots`: 默认扫描 `~/.agents/skills`（可配置扩展为多源）
   - `targets`: 至少支持 `claude`（`~/.claude/skills`）与 `codex`（`~/.codex/skills` 或 `$CODEX_HOME/skills`）
+- `codex` 目标目录（都要）
+  - 同时管理 `~/.codex/skills` 与 `$CODEX_HOME/skills`（当 `$CODEX_HOME` 设置时）
+  - 若两者解析为同一路径（例如 `$CODEX_HOME=~/.codex`），需去重避免重复操作
 - Link 语义
   - link: 在目标目录创建 `skill-name` → `source/skill-name` 的 symlink（尽量用相对链接，行为对齐 `npx skills add`）
   - unlink: 删除目标目录中的该条目（仅当其为 link 或指向受控 source 时允许）
@@ -41,7 +44,5 @@
 2) 对已有的目标目录条目：仅识别状态，不做破坏性变更
 
 ## Open Questions
-- Codex 的默认 skills 目录是否统一为 `~/.codex/skills`？是否需要读取 `$CODEX_HOME`？
 - 是否需要支持多 source roots（例如 `~/.agents/skills` + `~/.claude/skills` 本地目录）以及优先级？
 - Windows 降级策略选择：copy vs junction，是否要做“只读拷贝”防止漂移？
-

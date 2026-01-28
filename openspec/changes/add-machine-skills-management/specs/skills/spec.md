@@ -9,12 +9,16 @@ their skill entries as a list with a stable `name`.
 - **THEN** the system lists each directory name as a skill `name`
 
 ### Requirement: Link-Based Enablement Per Target
-The system SHALL allow enabling a skill for a target tool by creating a filesystem link in the target tool’s skills
-directory that points to the skill’s source directory.
+The system SHALL allow enabling a skill for a target tool by creating a filesystem link in one or more target tool skills
+directories that points to the skill’s source directory.
 
 #### Scenario: Enable a skill for Claude by symlink
 - **WHEN** the user enables skill `skill-creator` for target `claude`
 - **THEN** the system creates a symlink at `~/.claude/skills/skill-creator` pointing to the configured source entry
+
+#### Scenario: Enable a skill for Codex into both roots
+- **WHEN** the user enables skill `skill-creator` for target `codex`
+- **THEN** the system creates symlinks in `~/.codex/skills/skill-creator` and `$CODEX_HOME/skills/skill-creator` (when `$CODEX_HOME` is set)
 
 ### Requirement: Unlink Without Data Loss
 The system SHALL allow disabling a skill for a target tool by removing the corresponding link entry without deleting the
@@ -30,4 +34,3 @@ The system SHALL detect and surface broken link entries in target skills directo
 #### Scenario: Detect broken symlink
 - **WHEN** a target skills directory contains a symlink pointing to a missing path
 - **THEN** the system reports the entry as `broken`
-
