@@ -75,6 +75,37 @@ export type FSReadResponse = {
   content: string;
 };
 
+export type FSEntryKind = "dir" | "file";
+
+export type FSEntry = {
+  name: string;
+  path: string;
+  kind: FSEntryKind;
+  size?: number;
+};
+
+export type FSEntriesResponse = {
+  path: string;
+  parent?: string;
+  entries: FSEntry[];
+};
+
+export type FSWriteResponse = {
+  ok: boolean;
+  path: string;
+  bytes: number;
+};
+
+export type FSMkdirResponse = {
+  ok: boolean;
+  path: string;
+};
+
+export type FSDeleteResponse = {
+  ok: boolean;
+  path: string;
+};
+
 export type ServerEvent = {
   type: string;
   time: string;

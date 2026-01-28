@@ -90,6 +90,8 @@ func (m *Manager) Cancel(taskID string) bool {
 }
 
 func (m *Manager) run(ctx context.Context, task tasks.Task) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	if err := m.store.SetRunning(context.Background(), task.ID); err != nil {
 		return err
 	}
@@ -145,18 +147,19 @@ func (m *Manager) run(ctx context.Context, task tasks.Task) error {
 		lastSessionIDMu sync.Mutex
 		lastSessionID   string
 	)
+	resumeFailure := &resumeFailureState{}
 
 	wg := sync.WaitGroup{}
 	wg.Add(2)
 
 	go func() {
 		defer wg.Done()
-		m.consumeStdout(task, stdout, &lastSessionIDMu, &lastSessionID)
+		m.consumeStdout(task, stdout, &lastSessionIDMu, &lastSessionID, cancel, resumeFailure)
 	}()
 
 	go func() {
 		defer wg.Done()
-		m.consumeLines(task.ID, tasks.LogStderr, stderr)
+		m.consumeLines(task, tasks.LogStderr, stderr, cancel, resumeFailure)
 	}()
 
 	waitErr := cmd.Wait()
@@ -172,12 +175,17 @@ func (m *Manager) run(ctx context.Context, task tasks.Task) error {
 		errText = waitErr.Error()
 	}
 
-	// If stdout parsing already marked this run as blocked, preserve that status even if
-	// the underlying process exited non-zero (common for non-interactive approval prompts).
-	if status != tasks.StatusCanceled {
-		if latest, err := m.store.GetTask(context.Background(), task.ID); err == nil && latest.Status == tasks.StatusBlocked {
-			status = tasks.StatusBlocked
-			errText = ""
+	if failed, resumeMsg := resumeFailure.get(); failed {
+		status = tasks.StatusFailed
+		errText = resumeMsg
+	} else {
+		// If stdout parsing already marked this run as blocked, preserve that status even if
+		// the underlying process exited non-zero (common for non-interactive approval prompts).
+		if status != tasks.StatusCanceled {
+			if latest, err := m.store.GetTask(context.Background(), task.ID); err == nil && latest.Status == tasks.StatusBlocked {
+				status = tasks.StatusBlocked
+				errText = ""
+			}
 		}
 	}
 
@@ -426,7 +434,7 @@ func mergeEnvWithReport(base []string, additions map[string]string) ([]string, [
 	return out, applied
 }
 
-func (m *Manager) consumeStdout(task tasks.Task, stdout io.Reader, sidMu *sync.Mutex, sid *string) {
+func (m *Manager) consumeStdout(task tasks.Task, stdout io.Reader, sidMu *sync.Mutex, sid *string, cancel context.CancelFunc, resumeFailure *resumeFailureState) {
 	reader := newLineReader(stdout)
 	blockedMarked := false
 	for {
@@ -448,6 +456,8 @@ func (m *Manager) consumeStdout(task tasks.Task, stdout io.Reader, sidMu *sync.M
 
 		// Persist raw stdout for debugging/details (UI can filter by stream).
 		m.appendLog(task.ID, tasks.LogStdout, string(line))
+
+		m.handleResumeNotFound(task, string(line), cancel, resumeFailure)
 
 		if task.WorkerType == tasks.WorkerClaudeCode && !blockedMarked && isApprovalRequiredLine(line) {
 			blockedMarked = true
@@ -496,7 +506,77 @@ func isApprovalRequiredLine(line []byte) bool {
 	return strings.Contains(s, "requires approval")
 }
 
-func (m *Manager) consumeLines(taskID string, stream tasks.LogStream, r io.Reader) {
+type resumeFailureState struct {
+	mu      sync.Mutex
+	seen    bool
+	message string
+}
+
+func (s *resumeFailureState) setOnce(message string) bool {
+	if s == nil {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.seen {
+		return false
+	}
+	s.seen = true
+	s.message = strings.TrimSpace(message)
+	return true
+}
+
+func (s *resumeFailureState) get() (bool, string) {
+	if s == nil {
+		return false, ""
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.seen, s.message
+}
+
+func (m *Manager) handleResumeNotFound(task tasks.Task, message string, cancel context.CancelFunc, resumeFailure *resumeFailureState) {
+	if task.Mode != tasks.ModeResume || task.WorkerType != tasks.WorkerClaudeCode {
+		return
+	}
+	if !isResumeConversationNotFound(message) {
+		return
+	}
+	msg := extractResumeNotFoundMessage(message)
+	if msg == "" {
+		msg = "No conversation found for requested session."
+	}
+	if resumeFailure.setOnce(msg) {
+		m.appendLog(task.ID, tasks.LogSystem, "resume failed: "+msg)
+		_ = m.store.SetWarning(context.Background(), task.ID, "resume failed: "+msg)
+		if cancel != nil {
+			cancel()
+		}
+	}
+}
+
+func isResumeConversationNotFound(message string) bool {
+	lower := strings.ToLower(message)
+	if !strings.Contains(lower, "no conversation found") {
+		return false
+	}
+	return strings.Contains(lower, "session")
+}
+
+func extractResumeNotFoundMessage(message string) string {
+	msg := strings.TrimSpace(message)
+	if msg == "" {
+		return ""
+	}
+	lower := strings.ToLower(msg)
+	idx := strings.Index(lower, "no conversation found")
+	if idx < 0 {
+		return msg
+	}
+	return strings.TrimSpace(msg[idx:])
+}
+
+func (m *Manager) consumeLines(task tasks.Task, stream tasks.LogStream, r io.Reader, cancel context.CancelFunc, resumeFailure *resumeFailureState) {
 	reader := newLineReader(r)
 	for {
 		line, tooLong, err := readLineWithLimit(reader, 1024*1024)
@@ -504,17 +584,19 @@ func (m *Manager) consumeLines(taskID string, stream tasks.LogStream, r io.Reade
 			if isEOF(err) {
 				return
 			}
-			m.appendLog(taskID, tasks.LogSystem, formatReadError(err).Error())
+			m.appendLog(task.ID, tasks.LogSystem, formatReadError(err).Error())
 			return
 		}
 		if tooLong {
-			m.appendLog(taskID, tasks.LogSystem, "skipped overlong output line")
+			m.appendLog(task.ID, tasks.LogSystem, "skipped overlong output line")
 			continue
 		}
 		if len(line) == 0 {
 			continue
 		}
-		m.appendLog(taskID, stream, string(line))
+		msg := string(line)
+		m.appendLog(task.ID, stream, msg)
+		m.handleResumeNotFound(task, msg, cancel, resumeFailure)
 	}
 }
 

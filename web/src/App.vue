@@ -7,6 +7,7 @@ import type {
   AuthPatch,
   AuthStatus,
   ChatMessage,
+  FSEntry,
   FSListEntry,
   FSRoot,
   LogEntry,
@@ -20,12 +21,16 @@ import {
   createTask,
   fetchAuthInfo,
   fetchChat,
+  fetchFSEntries,
   fetchFSList,
   fetchFSRead,
   fetchFSRoots,
   fetchLogs,
   fetchSystemInfo,
   fetchTasks,
+  fsDelete,
+  fsMkdir,
+  fsWrite,
   resumeTask,
   sendChat,
   sendChatStream,
@@ -89,6 +94,7 @@ const selectedLogs = computed(
 );
 
 const outputTab = ref<"result" | "logs">("result");
+const resultPreviewTab = ref<"markdown" | "raw" | "html">("markdown");
 const logShowAssistant = ref(true);
 const logShowStdout = ref(true);
 const logShowStderr = ref(true);
@@ -107,6 +113,41 @@ const filePreviewContent = ref("");
 const filePreviewLoading = ref(false);
 const filePreviewError = ref("");
 const filePreviewBoxEl = ref<HTMLDivElement | null>(null);
+const filePreviewTab = ref<"preview" | "raw" | "html">("preview");
+
+type FileNode = {
+  name: string;
+  path: string;
+  kind: "dir" | "file";
+  size?: number;
+  parentPath?: string;
+  expanded: boolean;
+  loading: boolean;
+  children: FileNode[];
+};
+
+const filesOpen = ref(false);
+const filesBase = ref("");
+const filesRoot = ref<FileNode | null>(null);
+const filesLoading = ref(false);
+const filesError = ref("");
+const filesNotice = ref("");
+
+const filesSelectedPath = ref("");
+const filesSelectedKind = ref<"" | "dir" | "file">("");
+const filesView = ref<"preview" | "edit">("preview");
+
+const filesFileSize = ref<number>(0);
+const filesFileTruncated = ref(false);
+const filesFileContent = ref("");
+const filesFileOriginal = ref("");
+const filesFileLoading = ref(false);
+const filesFileError = ref("");
+const filesSaving = ref(false);
+
+const filesDirty = computed(
+  () => filesFileContent.value !== filesFileOriginal.value,
+);
 
 const secretaryOpen = ref(false);
 const secretaryView = ref<"chat" | "overview">("chat");
@@ -308,6 +349,44 @@ const selectedResultHtml = computed(() => {
   }
 });
 
+function wrapHtmlForPreview(html: string): string {
+  const raw = (html ?? "").trim();
+  if (!raw) return "";
+  const lower = raw.toLowerCase();
+  if (lower.includes("<html") || lower.includes("<!doctype")) return raw;
+  const bg = theme.value === "dark" ? "#0f172a" : "#ffffff";
+  const fg = theme.value === "dark" ? "#e5e7eb" : "#0f172a";
+  const a = theme.value === "dark" ? "#2dd4bf" : "#0d9488";
+  return `<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      :root { color-scheme: ${theme.value === "dark" ? "dark" : "light"}; }
+      body { margin: 16px; font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; background: ${bg}; color: ${fg}; }
+      a { color: ${a}; }
+      pre, code { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+      pre { white-space: pre-wrap; }
+      img { max-width: 100%; height: auto; }
+      table { border-collapse: collapse; }
+      th, td { border: 1px solid rgba(148, 163, 184, 0.35); padding: 6px 10px; }
+    </style>
+  </head>
+  <body>${raw}</body>
+</html>`;
+}
+
+const selectedResultRawHtml = computed(() => {
+  const text = selectedResultText.value ?? "";
+  return escapeHtml(text);
+});
+
+const selectedResultHtmlSrcDoc = computed(() => {
+  const text = selectedResultText.value ?? "";
+  return wrapHtmlForPreview(text);
+});
+
 const filePreviewIsMarkdown = computed(() => {
   const p = (filePreviewResolvedPath.value || filePreviewRawPath.value).trim().toLowerCase();
   return p.endsWith(".md") || p.endsWith(".markdown");
@@ -363,6 +442,48 @@ const filePreviewCodeHtml = computed(() => {
   }
 });
 
+const filePreviewRawHtml = computed(() => {
+  const text = filePreviewContent.value ?? "";
+  return escapeHtml(text);
+});
+
+const filePreviewHtmlSrcDoc = computed(() => {
+  const text = filePreviewContent.value ?? "";
+  return wrapHtmlForPreview(text);
+});
+
+const filesIsMarkdown = computed(() => {
+  if (filesSelectedKind.value !== "file") return false;
+  const p = (filesSelectedPath.value ?? "").trim().toLowerCase();
+  return p.endsWith(".md") || p.endsWith(".markdown");
+});
+
+const filesPreviewHtml = computed(() => {
+  const text = filesFileContent.value ?? "";
+  if (!text.trim()) return "";
+  try {
+    return md.render(text);
+  } catch {
+    return `<pre>${escapeHtml(text)}</pre>`;
+  }
+});
+
+const filesCodeHtml = computed(() => {
+  const text = filesFileContent.value ?? "";
+  if (!text) return "";
+  const path = filesSelectedPath.value;
+  const lang = highlightLangFromPath(path);
+  try {
+    if (lang === "plaintext") return escapeHtml(text);
+    if (lang && hljs.getLanguage(lang)) {
+      return hljs.highlight(text, { language: lang, ignoreIllegals: true }).value;
+    }
+    return hljs.highlightAuto(text).value;
+  } catch {
+    return escapeHtml(text);
+  }
+});
+
 const filteredLogs = computed(() => {
   const q = logSearch.value.trim().toLowerCase();
   const list = selectedLogs.value.filter((l) => {
@@ -378,6 +499,22 @@ const filteredLogs = computed(() => {
   });
   // Newest first for easier scanning.
   return list.slice().reverse();
+});
+
+const filesVisibleNodes = computed(() => {
+  const root = filesRoot.value;
+  if (!root) return [] as Array<{ node: FileNode; depth: number }>;
+  const out: Array<{ node: FileNode; depth: number }> = [];
+  const walk = (nodes: FileNode[], depth: number) => {
+    for (const n of nodes) {
+      out.push({ node: n, depth });
+      if (n.kind === "dir" && n.expanded && n.children.length) {
+        walk(n.children, depth + 1);
+      }
+    }
+  };
+  walk(root.children, 0);
+  return out;
 });
 
 async function copySelectedResult() {
@@ -417,6 +554,7 @@ function closeFilePreview() {
   filePreviewResolvedPath.value = "";
   filePreviewSize.value = 0;
   filePreviewTruncated.value = false;
+  filePreviewTab.value = "preview";
 }
 
 function dirnameForBase(path: string): string {
@@ -489,6 +627,16 @@ async function onFilePreviewMarkdownClick(e: MouseEvent) {
   const current = filePreviewResolvedPath.value || filePreviewRawPath.value;
   const base = dirnameForBase(current);
   await openFilePreview(normalizeFilePathRef(path), base);
+}
+
+async function onFilesPreviewMarkdownClick(e: MouseEvent) {
+  const path = filePathFromClickTarget(e.target);
+  if (!path) return;
+  e.preventDefault();
+  e.stopPropagation();
+  const current = filesSelectedPath.value || ".";
+  const base = dirnameForBase(current);
+  await openFilesFile(normalizeFilePathRef(path), base);
 }
 
 const dirPickerOpen = ref(false);
@@ -762,6 +910,18 @@ function sessionKeyForTask(t: Task): string {
 let es: EventSource | null = null;
 let phoneMq: MediaQueryList | null = null;
 let phoneMqHandler: (() => void) | null = null;
+let focusInHandler: ((e: FocusEvent) => void) | null = null;
+
+function scrollFocusedIntoView(el: HTMLElement) {
+  if (!isPhone.value) return;
+  window.setTimeout(() => {
+    try {
+      el.scrollIntoView({ block: "center" });
+    } catch {
+      // ignore
+    }
+  }, 50);
+}
 
 function upsertTask(task: Task) {
   // Ensure reactivity for Map updates (some environments don't track Map mutations reliably).
@@ -1006,6 +1166,303 @@ function selectDir(path: string) {
   dirPickerOpen.value = false;
 }
 
+function resetFilesEditor() {
+  filesSelectedPath.value = "";
+  filesSelectedKind.value = "";
+  filesView.value = "preview";
+  filesFileSize.value = 0;
+  filesFileTruncated.value = false;
+  filesFileContent.value = "";
+  filesFileOriginal.value = "";
+  filesFileLoading.value = false;
+  filesFileError.value = "";
+  filesSaving.value = false;
+}
+
+function resetFilesState() {
+  filesBase.value = "";
+  filesRoot.value = null;
+  filesLoading.value = false;
+  filesError.value = "";
+  filesNotice.value = "";
+  resetFilesEditor();
+}
+
+function closeFiles() {
+  if (filesDirty.value && !window.confirm("Discard unsaved changes?")) return;
+  filesOpen.value = false;
+  resetFilesState();
+}
+
+function fsEntryToNode(entry: FSEntry, parentPath: string): FileNode {
+  return {
+    name: entry.name,
+    path: entry.path,
+    kind: entry.kind,
+    size: typeof entry.size === "number" ? entry.size : undefined,
+    parentPath,
+    expanded: false,
+    loading: false,
+    children: [],
+  };
+}
+
+function findFilesNode(root: FileNode | null, path: string): FileNode | null {
+  if (!root) return null;
+  if (root.path === path) return root;
+  for (const c of root.children) {
+    const found = findFilesNode(c, path);
+    if (found) return found;
+  }
+  return null;
+}
+
+async function loadFilesDir(node: FileNode, force = false) {
+  if (node.kind !== "dir") return;
+  if (!force && node.children.length) return;
+  node.loading = true;
+  filesError.value = "";
+  try {
+    const res = await fetchFSEntries(node.path);
+    node.children = (res.entries ?? []).map((e) => fsEntryToNode(e, node.path));
+    node.expanded = true;
+  } catch (e: any) {
+    filesError.value = e?.message ?? String(e);
+    node.expanded = false;
+  } finally {
+    node.loading = false;
+  }
+}
+
+async function refreshFilesDir(path: string) {
+  const root = filesRoot.value;
+  if (!root) return;
+  const node = findFilesNode(root, path);
+  if (!node || node.kind !== "dir") return;
+  await loadFilesDir(node, true);
+}
+
+async function toggleFilesDir(node: FileNode) {
+  if (node.kind !== "dir") return;
+  if (node.expanded) {
+    node.expanded = false;
+    return;
+  }
+  node.expanded = true;
+  if (!node.children.length) await loadFilesDir(node);
+}
+
+function joinPath(dir: string, name: string): string {
+  const base = (dir ?? "").trim().replaceAll("\\", "/").replace(/\/+$/, "");
+  const next = (name ?? "").trim().replaceAll("\\", "/").replace(/^\/+/, "");
+  if (!base) return next;
+  if (!next) return base;
+  return `${base}/${next}`;
+}
+
+function targetDirForFilesOps(): string {
+  const root = filesRoot.value;
+  if (!root) return "";
+  if (filesSelectedKind.value === "dir" && filesSelectedPath.value) {
+    return filesSelectedPath.value;
+  }
+  if (filesSelectedKind.value === "file" && filesSelectedPath.value) {
+    return dirnameForBase(filesSelectedPath.value);
+  }
+  return root.path;
+}
+
+async function openFilesFile(path: string, base?: string) {
+  const p = (path ?? "").trim();
+  if (!p) return;
+  filesFileLoading.value = true;
+  filesFileError.value = "";
+  filesNotice.value = "";
+  try {
+    const res = await fetchFSRead(p, base);
+    filesSelectedPath.value = res.path || p;
+    filesSelectedKind.value = "file";
+    filesFileSize.value = res.size ?? 0;
+    filesFileTruncated.value = Boolean(res.truncated);
+    filesFileContent.value = res.content ?? "";
+    filesFileOriginal.value = res.content ?? "";
+    filesView.value = "preview";
+    if (filesFileTruncated.value) {
+      filesNotice.value = "File truncated (edit disabled to avoid data loss).";
+    }
+  } catch (e: any) {
+    filesFileError.value = e?.message ?? String(e);
+  } finally {
+    filesFileLoading.value = false;
+  }
+}
+
+async function onFilesNodeClick(node: FileNode) {
+  if (!node) return;
+  if (
+    filesDirty.value &&
+    filesSelectedKind.value === "file" &&
+    node.path !== filesSelectedPath.value &&
+    !window.confirm("Discard unsaved changes?")
+  ) {
+    return;
+  }
+
+  filesNotice.value = "";
+  filesFileError.value = "";
+
+  if (node.kind === "dir") {
+    filesSelectedPath.value = node.path;
+    filesSelectedKind.value = "dir";
+    filesFileSize.value = 0;
+    filesFileTruncated.value = false;
+    filesFileContent.value = "";
+    filesFileOriginal.value = "";
+    filesView.value = "preview";
+    await toggleFilesDir(node);
+    return;
+  }
+
+  await openFilesFile(node.path);
+}
+
+async function openWorkspaceFiles() {
+  const sess = selectedSession.value;
+  if (!sess) return;
+  const base = (sess.workdir ?? "").trim() || ".";
+  if (filesDirty.value && !window.confirm("Discard unsaved changes?")) return;
+
+  filesOpen.value = true;
+  filesLoading.value = true;
+  filesError.value = "";
+  filesNotice.value = "";
+  filesBase.value = base;
+  filesRoot.value = null;
+  resetFilesEditor();
+
+  try {
+    const res = await fetchFSEntries(".", base);
+    filesBase.value = res.path;
+    filesRoot.value = {
+      name: res.path,
+      path: res.path,
+      kind: "dir",
+      expanded: true,
+      loading: false,
+      children: (res.entries ?? []).map((e) => fsEntryToNode(e, res.path)),
+    };
+  } catch (e: any) {
+    filesError.value = e?.message ?? String(e);
+  } finally {
+    filesLoading.value = false;
+  }
+}
+
+async function filesSave() {
+  if (filesSaving.value) return;
+  if (filesSelectedKind.value !== "file") return;
+  if (!filesSelectedPath.value) return;
+  if (!filesDirty.value) return;
+  if (filesFileTruncated.value) {
+    filesNotice.value = "Cannot save: file was truncated during read.";
+    return;
+  }
+  filesSaving.value = true;
+  filesFileError.value = "";
+  filesNotice.value = "";
+  try {
+    await fsWrite({ path: filesSelectedPath.value, content: filesFileContent.value });
+    filesFileOriginal.value = filesFileContent.value;
+    filesNotice.value = "Saved.";
+    await refreshFilesDir(dirnameForBase(filesSelectedPath.value));
+  } catch (e: any) {
+    filesFileError.value = e?.message ?? String(e);
+  } finally {
+    filesSaving.value = false;
+  }
+}
+
+async function filesNewFile() {
+  const root = filesRoot.value;
+  if (!root) return;
+  if (filesDirty.value && !window.confirm("Discard unsaved changes?")) return;
+  const dir = targetDirForFilesOps();
+  const name = (window.prompt("New file name") ?? "").trim();
+  if (!name) return;
+  const path = joinPath(dir, name);
+
+  const parent = findFilesNode(root, dir);
+  if (parent && parent.kind === "dir") {
+    const exists = parent.children.some((c) => c.name === name);
+    if (exists && !window.confirm("File exists. Overwrite?")) return;
+  }
+
+  filesNotice.value = "";
+  filesError.value = "";
+  try {
+    await fsWrite({ path, content: "" });
+    await refreshFilesDir(dir);
+    await openFilesFile(path);
+    filesNotice.value = "Created.";
+  } catch (e: any) {
+    filesError.value = e?.message ?? String(e);
+  }
+}
+
+async function filesNewFolder() {
+  const root = filesRoot.value;
+  if (!root) return;
+  const dir = targetDirForFilesOps();
+  const name = (window.prompt("New folder name") ?? "").trim();
+  if (!name) return;
+  const path = joinPath(dir, name);
+
+  filesNotice.value = "";
+  filesError.value = "";
+  try {
+    await fsMkdir({ path, recursive: true });
+    await refreshFilesDir(dir);
+    filesNotice.value = "Created.";
+  } catch (e: any) {
+    filesError.value = e?.message ?? String(e);
+  }
+}
+
+async function filesDeleteSelected() {
+  const root = filesRoot.value;
+  if (!root) return;
+  const path = filesSelectedPath.value;
+  const kind = filesSelectedKind.value;
+  if (!path || !kind) return;
+  if (path === root.path) return;
+  if (filesDirty.value && !window.confirm("Discard unsaved changes?")) return;
+
+  const label = kind === "dir" ? "folder" : "file";
+  const recursive = kind === "dir";
+  const ok = window.confirm(
+    `Delete ${label}?\n${path}${recursive ? "\n(recursive)" : ""}`,
+  );
+  if (!ok) return;
+
+  filesError.value = "";
+  filesNotice.value = "";
+  try {
+    await fsDelete({ path, recursive });
+    filesNotice.value = "Deleted.";
+    const parent = dirnameForBase(path);
+    await refreshFilesDir(parent);
+    filesSelectedPath.value = parent;
+    filesSelectedKind.value = "dir";
+    filesFileSize.value = 0;
+    filesFileTruncated.value = false;
+    filesFileContent.value = "";
+    filesFileOriginal.value = "";
+    filesView.value = "preview";
+  } catch (e: any) {
+    filesError.value = e?.message ?? String(e);
+  }
+}
+
 function setWorkspace(path: string) {
   workspaceSelect.value = path;
 }
@@ -1211,6 +1668,15 @@ onMounted(async () => {
   await refreshAuth();
   connectEvents();
   window.addEventListener("keydown", onGlobalKeyDown);
+  focusInHandler = (e: FocusEvent) => {
+    if (!isPhone.value) return;
+    const t = e.target as any;
+    if (!t) return;
+    const tag = String(t.tagName ?? "").toLowerCase();
+    if (tag !== "input" && tag !== "textarea" && tag !== "select") return;
+    scrollFocusedIntoView(t as HTMLElement);
+  };
+  window.addEventListener("focusin", focusInHandler);
 
   phoneMq = window.matchMedia("(max-width: 900px)");
   phoneMqHandler = () => {
@@ -1230,6 +1696,7 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   if (es) es.close();
   window.removeEventListener("keydown", onGlobalKeyDown);
+  if (focusInHandler) window.removeEventListener("focusin", focusInHandler);
   if (phoneMq && phoneMqHandler) {
     phoneMq.removeEventListener?.("change", phoneMqHandler);
   }
@@ -1623,6 +2090,7 @@ function applyMermaidTheme() {
 
 async function renderMermaidIfNeeded() {
   if (outputTab.value !== "result") return;
+  if (resultPreviewTab.value !== "markdown") return;
   const html = selectedResultHtml.value;
   if (!html.includes("mermaid")) return;
   await nextTick();
@@ -1639,6 +2107,7 @@ async function renderMermaidIfNeeded() {
 
 async function renderFilePreviewMermaidIfNeeded() {
   if (!filePreviewOpen.value) return;
+  if (filePreviewTab.value !== "preview") return;
   if (!filePreviewIsMarkdown.value) return;
   const html = filePreviewMarkdownHtml.value;
   if (!html.includes("mermaid")) return;
@@ -1655,7 +2124,7 @@ async function renderFilePreviewMermaidIfNeeded() {
 }
 
 watch(
-  [theme, outputTab, selectedResultHtml],
+  [theme, outputTab, resultPreviewTab, selectedResultHtml],
   async () => {
     applyMermaidTheme();
     await renderMermaidIfNeeded();
@@ -1663,7 +2132,7 @@ watch(
   { immediate: true },
 );
 
-watch([theme, filePreviewOpen, filePreviewMarkdownHtml], async () => {
+watch([theme, filePreviewOpen, filePreviewTab, filePreviewMarkdownHtml], async () => {
   applyMermaidTheme();
   await renderFilePreviewMermaidIfNeeded();
 });
@@ -2064,6 +2533,13 @@ watch(
                       </button>
                       <button
                         type="button"
+                        @click="openWorkspaceFiles"
+                        title="Browse workspace files"
+                      >
+                        Files
+                      </button>
+                      <button
+                        type="button"
                         @click="copyText(selectedSession.workdir)"
                         title="Copy workdir"
                       >
@@ -2178,6 +2654,36 @@ watch(
               >
                 Logs
               </button>
+              <template v-if="outputTab === 'result'">
+                <span class="tabDivider"></span>
+                <button
+                  type="button"
+                  class="tabBtn"
+                  :class="{ active: resultPreviewTab === 'markdown' }"
+                  @click="resultPreviewTab = 'markdown'"
+                  title="Markdown preview"
+                >
+                  Markdown
+                </button>
+                <button
+                  type="button"
+                  class="tabBtn"
+                  :class="{ active: resultPreviewTab === 'raw' }"
+                  @click="resultPreviewTab = 'raw'"
+                  title="Raw text"
+                >
+                  Raw
+                </button>
+                <button
+                  type="button"
+                  class="tabBtn"
+                  :class="{ active: resultPreviewTab === 'html' }"
+                  @click="resultPreviewTab = 'html'"
+                  title="HTML preview (sandboxed)"
+                >
+                  HTML
+                </button>
+              </template>
               <div class="tabSpacer"></div>
               <button
                 v-if="outputTab === 'result'"
@@ -2198,12 +2704,26 @@ watch(
                     : "No result yet."
                 }}
               </div>
-              <div
-                v-else
-                class="resultBox markdown"
-                v-html="selectedResultHtml"
-                @click="onResultMarkdownClick"
-              ></div>
+              <template v-else>
+                <div
+                  v-if="resultPreviewTab === 'markdown'"
+                  class="resultBox markdown"
+                  v-html="selectedResultHtml"
+                  @click="onResultMarkdownClick"
+                ></div>
+                <div v-else-if="resultPreviewTab === 'raw'" class="resultBox">
+                  <pre class="rawBox">{{ selectedResultText }}</pre>
+                </div>
+                <div v-else class="resultBox">
+                  <iframe
+                    class="htmlPreviewFrame"
+                    sandbox
+                    referrerpolicy="no-referrer"
+                    :srcdoc="selectedResultHtmlSrcDoc"
+                    title="HTML preview"
+                  ></iframe>
+                </div>
+              </template>
             </div>
 
             <div v-else class="logsPanel">
@@ -2934,6 +3454,186 @@ watch(
     </div>
 
     <div
+      v-if="filesOpen"
+      class="modalOverlay"
+      @click.self="closeFiles"
+    >
+      <div class="modal filesModal">
+        <div class="modalHeader">
+          <div class="modalTitle">Files</div>
+          <button class="iconBtn" type="button" @click="closeFiles">✕</button>
+        </div>
+
+        <div class="modalBody filesModalBody">
+          <div v-if="filesError" class="modalError">
+            {{ filesError }}
+          </div>
+          <div v-else-if="filesLoading" class="loading">Loading...</div>
+          <template v-else>
+            <div class="filesTopRow">
+              <div class="mono filesRootPath" :title="filesRoot?.path">
+                {{ filesRoot?.path }}
+              </div>
+              <div v-if="filesNotice" class="tinyHint">{{ filesNotice }}</div>
+            </div>
+
+            <div class="filesSplit">
+              <div class="filesTreePane">
+                <div class="filesTreeActions">
+                  <button type="button" @click="filesNewFile" :disabled="!filesRoot">
+                    New file
+                  </button>
+                  <button type="button" @click="filesNewFolder" :disabled="!filesRoot">
+                    New folder
+                  </button>
+                  <button
+                    type="button"
+                    @click="filesDeleteSelected"
+                    :disabled="
+                      !filesSelectedPath || filesSelectedPath === filesRoot?.path
+                    "
+                  >
+                    Delete
+                  </button>
+                  <button
+                    type="button"
+                    @click="filesRoot && refreshFilesDir(filesRoot.path)"
+                    :disabled="!filesRoot"
+                  >
+                    Refresh
+                  </button>
+                </div>
+
+                <div class="filesTreeList">
+                  <button
+                    v-for="v in filesVisibleNodes"
+                    :key="v.node.path"
+                    type="button"
+                    class="filesNode"
+                    :class="{
+                      active:
+                        normalizePathForCompare(v.node.path) ===
+                        normalizePathForCompare(filesSelectedPath),
+                    }"
+                    :style="{ paddingLeft: `${12 + v.depth * 14}px` }"
+                    @click="onFilesNodeClick(v.node)"
+                  >
+                    <span class="filesNodeTwisty">{{
+                      v.node.kind === "dir" ? (v.node.expanded ? "▾" : "▸") : ""
+                    }}</span>
+                    <span class="filesNodeIcon">{{
+                      v.node.kind === "dir" ? "📁" : "📄"
+                    }}</span>
+                    <span class="filesNodeName">{{ v.node.name }}</span>
+                    <span
+                      v-if="v.node.kind === 'file'"
+                      class="filesNodeMeta mono"
+                      >{{ v.node.size ?? 0 }}</span
+                    >
+                    <span v-if="v.node.loading" class="filesNodeMeta tinyHint"
+                      >…</span
+                    >
+                  </button>
+                  <div v-if="!filesVisibleNodes.length" class="empty">
+                    Empty folder
+                  </div>
+                </div>
+              </div>
+
+              <div class="filesEditorPane">
+                <div v-if="filesSelectedKind !== 'file'" class="empty">
+                  {{
+                    filesSelectedKind === "dir"
+                      ? "Select a file to preview/edit."
+                      : "Select a file."
+                  }}
+                </div>
+                <template v-else>
+                  <div class="filesEditorHeader">
+                    <div class="mono filesEditorPath" :title="filesSelectedPath">
+                      {{ filesSelectedPath }}
+                    </div>
+                    <span class="tinyHint mono">{{ filesFileSize }} bytes</span>
+                    <span v-if="filesFileTruncated" class="pill warn"
+                      >truncated</span
+                    >
+                    <div class="tabSpacer"></div>
+                    <button
+                      type="button"
+                      @click="copyText(filesFileContent)"
+                      :disabled="!filesFileContent"
+                    >
+                      Copy
+                    </button>
+                    <button
+                      type="button"
+                      class="primary"
+                      @click="filesSave"
+                      :disabled="filesSaving || !filesDirty || filesFileTruncated"
+                    >
+                      {{ filesSaving ? "Saving..." : "Save" }}
+                    </button>
+                  </div>
+
+                  <div class="outputTabs">
+                    <button
+                      type="button"
+                      class="tabBtn"
+                      :class="{ active: filesView === 'preview' }"
+                      @click="filesView = 'preview'"
+                    >
+                      Preview
+                    </button>
+                    <button
+                      type="button"
+                      class="tabBtn"
+                      :class="{ active: filesView === 'edit' }"
+                      @click="filesView = 'edit'"
+                    >
+                      Edit
+                    </button>
+                    <div class="tabSpacer"></div>
+                    <div v-if="filesDirty" class="tinyHint">unsaved</div>
+                  </div>
+
+                  <div v-if="filesFileError" class="modalError">
+                    {{ filesFileError }}
+                  </div>
+                  <div v-else-if="filesFileLoading" class="loading">Loading...</div>
+                  <template v-else>
+                    <div v-if="filesView === 'edit'" class="filesEditorEdit">
+                      <textarea
+                        v-model="filesFileContent"
+                        rows="18"
+                        spellcheck="false"
+                      ></textarea>
+                    </div>
+                    <template v-else>
+                      <div
+                        v-if="filesIsMarkdown"
+                        class="resultBox markdown filePreviewBox"
+                        v-html="filesPreviewHtml"
+                        @click="onFilesPreviewMarkdownClick"
+                      ></div>
+
+                      <div v-else class="resultBox fileCodeBox">
+                        <pre class="hljs"><code v-html="filesCodeHtml"></code></pre>
+                      </div>
+                    </template>
+                  </template>
+                </template>
+              </div>
+            </div>
+          </template>
+        </div>
+
+        <div class="modalFooter">
+          <button type="button" @click="closeFiles">Close</button>
+        </div>
+      </div>
+    </div>
+
+    <div
       v-if="filePreviewOpen"
       class="modalOverlay"
       @click.self="closeFilePreview"
@@ -2972,17 +3672,64 @@ watch(
               </div>
             </div>
 
-            <div
-              v-if="filePreviewIsMarkdown"
-              ref="filePreviewBoxEl"
-              class="resultBox markdown filePreviewBox"
-              v-html="filePreviewMarkdownHtml"
-              @click="onFilePreviewMarkdownClick"
-            ></div>
-
-            <div v-else class="resultBox fileCodeBox">
-              <pre class="hljs"><code v-html="filePreviewCodeHtml"></code></pre>
+            <div class="outputTabs">
+              <button
+                type="button"
+                class="tabBtn"
+                :class="{ active: filePreviewTab === 'preview' }"
+                @click="filePreviewTab = 'preview'"
+              >
+                Preview
+              </button>
+              <button
+                type="button"
+                class="tabBtn"
+                :class="{ active: filePreviewTab === 'raw' }"
+                @click="filePreviewTab = 'raw'"
+              >
+                Raw
+              </button>
+              <button
+                type="button"
+                class="tabBtn"
+                :class="{ active: filePreviewTab === 'html' }"
+                @click="filePreviewTab = 'html'"
+                title="HTML preview (sandboxed)"
+              >
+                HTML
+              </button>
+              <div class="tabSpacer"></div>
             </div>
+
+            <template v-if="filePreviewTab === 'raw'">
+              <div class="resultBox">
+                <pre class="rawBox">{{ filePreviewContent }}</pre>
+              </div>
+            </template>
+            <template v-else-if="filePreviewTab === 'html'">
+              <div class="resultBox">
+                <iframe
+                  class="htmlPreviewFrame"
+                  sandbox
+                  referrerpolicy="no-referrer"
+                  :srcdoc="filePreviewHtmlSrcDoc"
+                  title="HTML preview"
+                ></iframe>
+              </div>
+            </template>
+            <template v-else>
+              <div
+                v-if="filePreviewIsMarkdown"
+                ref="filePreviewBoxEl"
+                class="resultBox markdown filePreviewBox"
+                v-html="filePreviewMarkdownHtml"
+                @click="onFilePreviewMarkdownClick"
+              ></div>
+
+              <div v-else class="resultBox fileCodeBox">
+                <pre class="hljs"><code v-html="filePreviewCodeHtml"></code></pre>
+              </div>
+            </template>
           </template>
         </div>
 
@@ -3197,7 +3944,7 @@ watch(
   color: var(--text-main);
   border-radius: 12px;
   width: 40px;
-  height: 36px;
+  height: 40px;
   padding: 0;
   display: grid;
   place-items: center;
@@ -3365,10 +4112,10 @@ h2 {
 
 .sessionsPanel.sessionsDrawerPanel {
   position: fixed;
-  top: 76px;
+  top: calc(76px + env(safe-area-inset-top));
   left: 12px;
   right: 12px;
-  bottom: 12px;
+  bottom: max(12px, env(safe-area-inset-bottom));
   z-index: 190;
   max-height: none;
   overflow: hidden;
@@ -3676,9 +4423,9 @@ button.primary:active:not(:disabled) {
 
 .secDrawer {
   position: fixed;
-  top: 90px;
+  top: calc(90px + env(safe-area-inset-top));
   right: 16px;
-  bottom: 16px;
+  bottom: max(16px, env(safe-area-inset-bottom));
   width: min(440px, calc(100vw - 32px));
   background: var(--bg-panel);
   border-radius: var(--radius-lg);
@@ -4068,6 +4815,32 @@ button.primary:active:not(:disabled) {
   color: var(--text-main);
 }
 
+.tabDivider {
+  width: 1px;
+  height: 24px;
+  background: var(--border-color);
+  margin: 0 6px;
+  opacity: 0.8;
+}
+
+.rawBox {
+  margin: 0;
+  padding: 14px 16px;
+  overflow: auto;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+.htmlPreviewFrame {
+  width: 100%;
+  height: 100%;
+  border: 1px solid var(--border-color);
+  border-radius: 14px;
+  background: var(--bg-panel);
+}
+
 .iconBtn {
   border: none;
   background: transparent;
@@ -4100,10 +4873,164 @@ button.primary:active:not(:disabled) {
   height: min(760px, 92vh);
 }
 
+.filesModal {
+  width: min(1180px, 96vw);
+  height: min(780px, 92vh);
+}
+
 .fileModalBody {
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+.filesModalBody {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.filesTopRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.filesRootPath {
+  font-size: 12px;
+  color: var(--text-sub);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.filesSplit {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 340px 1fr;
+  gap: 12px;
+}
+
+.filesTreePane,
+.filesEditorPane {
+  border: 1px solid var(--border-color);
+  border-radius: 14px;
+  background: rgba(0, 0, 0, 0.02);
+  padding: 10px;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+:global(:root[data-theme="dark"]) .filesTreePane,
+:global(:root[data-theme="dark"]) .filesEditorPane {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.filesTreeActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.filesTreeList {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 4px 2px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.filesNode {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  text-align: left;
+  border-radius: 10px;
+  padding: 8px 10px;
+}
+
+.filesNode:hover {
+  background: rgba(13, 148, 136, 0.08);
+}
+
+.filesNode.active {
+  background: var(--color-primary-bg);
+  border: 1px solid rgba(13, 148, 136, 0.35);
+}
+
+.filesNodeTwisty {
+  width: 14px;
+  color: var(--text-sub);
+  flex: 0 0 auto;
+}
+
+.filesNodeIcon {
+  width: 18px;
+  flex: 0 0 auto;
+}
+
+.filesNodeName {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.filesNodeMeta {
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: var(--text-sub);
+}
+
+.filesEditorHeader {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.filesEditorPath {
+  font-size: 12px;
+  font-family: var(--font-mono);
+  color: var(--text-sub);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.filesEditorEdit {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.filesEditorEdit textarea {
+  flex: 1;
+  min-height: 0;
+  resize: none;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+@media (max-width: 860px) {
+  .filesSplit {
+    grid-template-columns: 1fr;
+  }
+  .filesTreePane {
+    max-height: 240px;
+  }
 }
 
 .fileMetaRow {
@@ -5395,6 +6322,33 @@ button.primary:active:not(:disabled) {
   .grid > section:first-child {
     position: static;
     max-height: none;
+  }
+}
+
+@media (max-width: 900px) {
+  .sub {
+    display: none;
+  }
+
+  button {
+    min-height: 40px;
+    padding-top: 10px;
+    padding-bottom: 10px;
+  }
+
+  input,
+  select {
+    min-height: 40px;
+  }
+
+  .secTab,
+  .feedConn,
+  .feedReconnect,
+  .feedHint,
+  .pill {
+    min-height: 40px;
+    display: inline-flex;
+    align-items: center;
   }
 }
 

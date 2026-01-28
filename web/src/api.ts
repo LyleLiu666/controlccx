@@ -3,9 +3,13 @@ import type {
   AuthPatch,
   AuthStatus,
   ChatMessage,
+  FSDeleteResponse,
+  FSEntriesResponse,
   FSListResponse,
   FSReadResponse,
   FSRoot,
+  FSMkdirResponse,
+  FSWriteResponse,
   LogEntry,
   SystemInfo,
   Task,
@@ -171,6 +175,36 @@ export async function fetchFSRead(path: string, base?: string): Promise<FSReadRe
   const qs = new URLSearchParams({ path });
   if (base && base.trim()) qs.set("base", base);
   return getJSON<FSReadResponse>(`/api/fs/read?${qs.toString()}`);
+}
+
+export async function fetchFSEntries(path: string, base?: string): Promise<FSEntriesResponse> {
+  const qs = new URLSearchParams({ path });
+  if (base && base.trim()) qs.set("base", base);
+  return getJSON<FSEntriesResponse>(`/api/fs/entries?${qs.toString()}`);
+}
+
+export async function fsWrite(input: {
+  path: string;
+  base?: string;
+  content: string;
+}): Promise<FSWriteResponse> {
+  return postJSON<FSWriteResponse>("/api/fs/write", input);
+}
+
+export async function fsMkdir(input: {
+  path: string;
+  base?: string;
+  recursive?: boolean;
+}): Promise<FSMkdirResponse> {
+  return postJSON<FSMkdirResponse>("/api/fs/mkdir", input);
+}
+
+export async function fsDelete(input: {
+  path: string;
+  base?: string;
+  recursive?: boolean;
+}): Promise<FSDeleteResponse> {
+  return postJSON<FSDeleteResponse>("/api/fs/delete", input);
 }
 
 export async function fetchAuthStatus(): Promise<AuthStatus> {

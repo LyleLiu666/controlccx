@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -91,17 +92,63 @@ func isUnderAnyRoot(path string, roots []FSRoot) bool {
 	if err != nil {
 		return false
 	}
+	pathAbs = evalSymlinksBestEffort(pathAbs)
 
 	for _, r := range roots {
 		rootAbs, err := filepath.Abs(r.Path)
 		if err != nil {
 			continue
 		}
+		rootAbs = evalSymlinksBestEffort(rootAbs)
 		if isWithin(rootAbs, pathAbs) {
 			return true
 		}
 	}
 	return false
+}
+
+func evalSymlinksBestEffort(pathAbs string) string {
+	pathAbs = filepath.Clean(pathAbs)
+	p := pathAbs
+	suffix := ""
+	for {
+		resolved, err := filepath.EvalSymlinks(p)
+		if err == nil {
+			if suffix != "" {
+				resolved = filepath.Join(resolved, suffix)
+			}
+			return filepath.Clean(resolved)
+		}
+
+		if os.IsNotExist(err) {
+			parent := filepath.Dir(p)
+			if parent == p {
+				if suffix != "" {
+					return filepath.Join(p, suffix)
+				}
+				return pathAbs
+			}
+			base := filepath.Base(p)
+			if suffix == "" {
+				suffix = base
+			} else {
+				suffix = filepath.Join(base, suffix)
+			}
+			p = parent
+			continue
+		}
+
+		if errors.Is(err, os.ErrPermission) {
+			if suffix != "" {
+				return filepath.Join(p, suffix)
+			}
+			return pathAbs
+		}
+		if suffix != "" {
+			return filepath.Join(p, suffix)
+		}
+		return pathAbs
+	}
 }
 
 func isWithin(rootAbs, pathAbs string) bool {
@@ -158,4 +205,3 @@ func listWindowsDrives() []string {
 	}
 	return out
 }
-

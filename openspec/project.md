@@ -28,6 +28,16 @@ while an observer assistant monitors execution using task/log/system context and
 - HTTP tests for API surface.
 - Cross-compile checks for Windows build tags where runtime testing is unavailable.
 
+### Iteration Loop (Required)
+Every iteration in this repo MUST follow the same closed loop:
+
+1) **Docs first**: write/update OpenSpec change docs (`proposal.md`, `tasks.md`, and delta `spec.md`).
+2) **Order by foundations**: arrange development order based on dependencies (foundation → upper layers).
+3) **Implement**: execute tasks sequentially.
+4) **Test**: run the smallest relevant validations first, then broader checks.
+5) **Fix**: iterate until validations pass.
+6) **Docs again**: update documentation and mark completed tasks (`- [x]`) to reflect reality.
+
 ### Git Workflow
 - Small, focused changes.
 - Commit messages should describe the user-visible effect.
