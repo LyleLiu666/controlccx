@@ -48,8 +48,8 @@ with strong foundations first, then add higher-level productivity layers.
 1) **Safety & Governance (must precede powerful capabilities)**
    - `add-approval-blocked-mvp` (done)
    - `add-claude-auto-approve-toggle` (done)
-   - `add-delivery-foreman-check` (in progress)
-   - `add-approval-trilogy` (planned; implement after docs/spec are finalized)
+   - `add-delivery-foreman-check` (done)
+   - `add-approval-trilogy` (done)
 
 2) **Mobile Shell (interaction foundation)**
    - `add-mobile-shell` (done)
@@ -61,12 +61,15 @@ with strong foundations first, then add higher-level productivity layers.
    - `add-preview-tabs` (done)
 
 5) **Session Management (lower priority, but must exist)**
-   - `add-session-management` (planned)
+   - `add-session-management` (done)
 
-6) **Tooling Extensibility (multi-tool adapters + tool-level env)**
+6) **Machine Skills Management (tooling foundation)**
+   - `add-machine-skills-management` (in progress)
+
+7) **Tooling Extensibility (multi-tool adapters + tool-level env)**
    - `add-tooling-extensibility` (planned)
 
-7) **Foreman Dashboard (operational overview)**
+8) **Foreman Dashboard (operational overview)**
    - `add-foreman-dashboard` (planned)
 
 ### Git Workflow

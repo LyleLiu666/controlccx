@@ -62,10 +62,28 @@ Workers inherit environment variables from the ControlCCX server process. You ca
 部分 worker（尤其是 Claude Code）在调用工具/执行敏感动作时会要求 approval。ControlCCX 计划使用“驾驶室 + 秘书（Secretary）”的三档审批策略：
 
 1) Level 1（直通）：完全不需要审批，全部自动通过（效率最高、风险最高）。
+   - 适用：你明确接受风险，希望不中断。
+   - 风险：可能在未提示的情况下执行危险命令（例如删除文件、远端 push、安装脚本）。
+
 2) Level 2（秘书全审）：所有审批都交给秘书自动决策（用户不被频繁打断）。
+   - 适用：你信任秘书，追求不中断，同时希望避免明显危险操作。
+   - 约束：秘书的自动决策必须可追溯（system log 可回看）。
+
 3) Level 3（秘书优先 + 升级）：秘书先决策；遇到高风险/不确定时再升级给用户确认。
+   - 适用：默认安全、只在关键时刻打断你。
+
+“升级给用户”常见触发示例（2～4 条）：
+- 大范围删除/破坏性改动（例如 `rm -rf`、删除大量文件、清空目录）
+- 远端/网络敏感操作（例如 `git push/pull/fetch/remote`、`curl/wget` 到陌生域名）
+- 可能泄露 secrets 的操作（例如打印 env、读取 secrets 文件、上传日志到远端）
+- 执行未知脚本/安装依赖链（例如运行安装脚本、执行未知二进制）
 
 注意：不提供“所有决策都必须用户审批”的模式；New Run 与 Resume 使用同一策略。
+
+当前状态（2026-01-28）：
+- 已实现 blocked 基础能力：当 CLI 要求 approval 时，任务会进入 `blocked`（避免被误判为 failed）。
+- 已提供 Level 1 相关开关：全局 `workers.unsafe_automation` + UI 的 Auto-approve（危险）。
+- Level 2/3 的完整链路（秘书全审/升级面板）按 OpenSpec 分阶段实现中。
 
 ## Resume (断点接续)
 
