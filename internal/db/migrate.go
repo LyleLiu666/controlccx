@@ -71,6 +71,15 @@ func Migrate(ctx context.Context, conn *sql.DB) error {
 			unsafe_automation INTEGER NOT NULL DEFAULT 0,
 			FOREIGN KEY(task_id) REFERENCES tasks(id) ON DELETE CASCADE
 		);`,
+		`CREATE TABLE IF NOT EXISTS task_invocations (
+			task_id TEXT PRIMARY KEY,
+			cmd TEXT NOT NULL,
+			args_json TEXT NOT NULL,
+			dir TEXT NOT NULL,
+			env_keys_json TEXT NOT NULL,
+			created_at INTEGER NOT NULL,
+			FOREIGN KEY(task_id) REFERENCES tasks(id) ON DELETE CASCADE
+		);`,
 		`CREATE TABLE IF NOT EXISTS session_meta (
 			key TEXT PRIMARY KEY,
 			title TEXT NOT NULL DEFAULT '',

@@ -3,6 +3,7 @@ package tasks
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -422,17 +423,141 @@ func (s *Store) AppendLog(ctx context.Context, taskID string, stream LogStream, 
 	}, nil
 }
 
+func (s *Store) SetInvocation(ctx context.Context, taskID string, cmd string, args []string, dir string, envKeys []string) error {
+	if s == nil || s.db == nil {
+		return errors.New("tasks: store not initialized")
+	}
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" {
+		return errors.New("tasks: task_id is required")
+	}
+	cmd = strings.TrimSpace(cmd)
+	if cmd == "" {
+		return errors.New("tasks: cmd is required")
+	}
+	dir = filepath.Clean(strings.TrimSpace(dir))
+
+	argsJSON, err := json.Marshal(args)
+	if err != nil {
+		return fmt.Errorf("tasks: marshal args: %w", err)
+	}
+	envJSON, err := json.Marshal(envKeys)
+	if err != nil {
+		return fmt.Errorf("tasks: marshal env keys: %w", err)
+	}
+
+	now := toMillis(s.now().UTC())
+	_, err = s.db.ExecContext(ctx, `
+		INSERT OR REPLACE INTO task_invocations (task_id, cmd, args_json, dir, env_keys_json, created_at)
+		VALUES (?, ?, ?, ?, ?, ?);
+	`, taskID, cmd, string(argsJSON), dir, string(envJSON), now)
+	if err != nil {
+		return fmt.Errorf("tasks: set invocation: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) GetInvocation(ctx context.Context, taskID string) (Invocation, bool, error) {
+	if s == nil || s.db == nil {
+		return Invocation{}, false, errors.New("tasks: store not initialized")
+	}
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" {
+		return Invocation{}, false, errors.New("tasks: task_id is required")
+	}
+
+	row := s.db.QueryRowContext(ctx, `
+		SELECT task_id, cmd, args_json, dir, env_keys_json, created_at
+		FROM task_invocations
+		WHERE task_id = ?;
+	`, taskID)
+
+	var (
+		out       Invocation
+		argsRaw   string
+		envRaw    string
+		createdMs int64
+	)
+	if err := row.Scan(&out.TaskID, &out.Cmd, &argsRaw, &out.Dir, &envRaw, &createdMs); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return Invocation{}, false, nil
+		}
+		return Invocation{}, false, fmt.Errorf("tasks: get invocation: %w", err)
+	}
+
+	_ = json.Unmarshal([]byte(argsRaw), &out.Args)
+	_ = json.Unmarshal([]byte(envRaw), &out.EnvInjectedKeys)
+	out.CreatedAt = fromMillis(createdMs)
+	return out, true, nil
+}
+
+type ListLogsFilter struct {
+	Streams []LogStream
+	Query   string
+}
+
 func (s *Store) ListLogs(ctx context.Context, taskID string, afterID int64, limit int) ([]LogEntry, error) {
+	return s.ListLogsFiltered(ctx, taskID, afterID, limit, ListLogsFilter{})
+}
+
+func (s *Store) ListLogsFiltered(ctx context.Context, taskID string, afterID int64, limit int, filter ListLogsFilter) ([]LogEntry, error) {
 	if limit <= 0 || limit > 2000 {
 		limit = 500
 	}
-	rows, err := s.db.QueryContext(ctx, `
+	return s.listLogsFiltered(ctx, taskID, afterID, limit, filter)
+}
+
+func (s *Store) ListAllLogsFiltered(ctx context.Context, taskID string, filter ListLogsFilter) ([]LogEntry, error) {
+	// For exports: allow large responses (still bounded to avoid pathological memory use).
+	return s.listLogsFiltered(ctx, taskID, 0, 200000, filter)
+}
+
+func (s *Store) listLogsFiltered(ctx context.Context, taskID string, afterID int64, limit int, filter ListLogsFilter) ([]LogEntry, error) {
+	if limit <= 0 {
+		limit = 500
+	}
+	if limit > 200000 {
+		limit = 200000
+	}
+	query := strings.TrimSpace(filter.Query)
+	var streams []string
+	for _, s := range filter.Streams {
+		if strings.TrimSpace(string(s)) == "" {
+			continue
+		}
+		streams = append(streams, string(s))
+	}
+
+	var (
+		sb   strings.Builder
+		args []any
+	)
+	sb.WriteString(`
 		SELECT id, task_id, ts, stream, message
 		FROM logs
 		WHERE task_id = ? AND id > ?
-		ORDER BY id ASC
-		LIMIT ?;
-	`, taskID, afterID, limit)
+	`)
+	args = append(args, taskID, afterID)
+
+	if len(streams) > 0 {
+		sb.WriteString(" AND stream IN (")
+		for i, v := range streams {
+			if i > 0 {
+				sb.WriteString(",")
+			}
+			sb.WriteString("?")
+			args = append(args, v)
+		}
+		sb.WriteString(")")
+	}
+	if query != "" {
+		sb.WriteString(" AND instr(lower(message), lower(?)) > 0")
+		args = append(args, query)
+	}
+	sb.WriteString(" ORDER BY id ASC LIMIT ?;")
+	args = append(args, limit)
+
+	rows, err := s.db.QueryContext(ctx, sb.String(), args...)
 	if err != nil {
 		return nil, fmt.Errorf("tasks: list logs: %w", err)
 	}

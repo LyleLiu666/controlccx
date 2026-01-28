@@ -336,18 +336,65 @@ func (a *API) handleTaskByID(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, map[string]any{"ok": ok})
 	case "logs":
+		if len(parts) >= 3 && parts[2] == "export" {
+			if r.Method != http.MethodGet {
+				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+				return
+			}
+			streams := parseStreams(r.URL.Query().Get("streams"))
+			q := strings.TrimSpace(r.URL.Query().Get("q"))
+			logs, err := a.Tasks.ListAllLogsFiltered(r.Context(), id, tasks.ListLogsFilter{
+				Streams: streams,
+				Query:   q,
+			})
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+			w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", "logs-"+id+".txt"))
+			for _, l := range logs {
+				_, _ = fmt.Fprintf(w, "%s\t%s\t%s\n", l.Time.Format(time.RFC3339), l.Stream, l.Message)
+			}
+			return
+		}
 		if r.Method != http.MethodGet {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
 		after := parseInt64(r.URL.Query().Get("after"), 0)
 		limit := parseInt(r.URL.Query().Get("limit"), 500)
-		logs, err := a.Tasks.ListLogs(r.Context(), id, after, limit)
+		streams := parseStreams(r.URL.Query().Get("streams"))
+		q := strings.TrimSpace(r.URL.Query().Get("q"))
+		logs, err := a.Tasks.ListLogsFiltered(r.Context(), id, after, limit, tasks.ListLogsFilter{
+			Streams: streams,
+			Query:   q,
+		})
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 		writeJSON(w, map[string]any{"logs": logs})
+	case "trace":
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		task, err := a.Tasks.GetTask(r.Context(), id)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+		inv, ok, err := a.Tasks.GetInvocation(r.Context(), id)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if !ok {
+			writeJSON(w, map[string]any{"task": task, "invocation": nil})
+			return
+		}
+		writeJSON(w, map[string]any{"task": task, "invocation": inv})
 	case "resume":
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -582,6 +629,34 @@ func parseInt64(s string, def int64) int64 {
 		return def
 	}
 	return v
+}
+
+func parseStreams(raw string) []tasks.LogStream {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	allowed := map[string]tasks.LogStream{
+		"stdout":    tasks.LogStdout,
+		"stderr":    tasks.LogStderr,
+		"system":    tasks.LogSystem,
+		"assistant": tasks.LogAssistant,
+	}
+	var out []tasks.LogStream
+	seen := map[tasks.LogStream]bool{}
+	for _, part := range strings.Split(raw, ",") {
+		key := strings.ToLower(strings.TrimSpace(part))
+		if key == "" {
+			continue
+		}
+		st, ok := allowed[key]
+		if !ok || seen[st] {
+			continue
+		}
+		seen[st] = true
+		out = append(out, st)
+	}
+	return out
 }
 
 func (a *API) validate() error {

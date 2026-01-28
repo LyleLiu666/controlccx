@@ -15,6 +15,7 @@ import type {
   SkillsListResponse,
   SystemInfo,
   Task,
+  TaskTraceResponse,
   Tool,
   WorkerType,
 } from "./types";
@@ -84,6 +85,10 @@ export async function fetchLogs(taskId: string, after = 0, limit = 500): Promise
     `/api/tasks/${taskId}/logs?after=${after}&limit=${limit}`
   );
   return res.logs;
+}
+
+export async function fetchTaskTrace(taskId: string): Promise<TaskTraceResponse> {
+  return getJSON<TaskTraceResponse>(`/api/tasks/${taskId}/trace`);
 }
 
 export async function fetchChat(after = 0, limit = 200): Promise<ChatMessage[]> {

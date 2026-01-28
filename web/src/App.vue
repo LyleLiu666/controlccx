@@ -14,6 +14,7 @@ import type {
   ServerEvent,
   Skill,
   SkillsListResponse,
+  TaskTraceResponse,
   Tool,
   ToolDriver,
   ToolsListResponse,
@@ -34,6 +35,7 @@ import {
   fetchLogs,
   fetchSkills,
   fetchTools,
+  fetchTaskTrace,
   fetchSystemInfo,
   fetchTasks,
   fsDelete,
@@ -126,7 +128,7 @@ const selectedLogs = computed(
   () => logsByTask.value.get(selectedTaskId.value) ?? [],
 );
 
-const outputTab = ref<"result" | "logs">("result");
+const outputTab = ref<"result" | "logs" | "trace">("result");
 const resultPreviewTab = ref<"markdown" | "raw" | "html">("markdown");
 const logShowAssistant = ref(true);
 const logShowStdout = ref(true);
@@ -148,6 +150,10 @@ const filePreviewLoading = ref(false);
 const filePreviewError = ref("");
 const filePreviewBoxEl = ref<HTMLDivElement | null>(null);
 const filePreviewTab = ref<"preview" | "raw" | "html">("preview");
+
+const traceByTask = ref<Map<string, TaskTraceResponse>>(new Map());
+const traceLoading = ref(false);
+const traceError = ref("");
 
 type FileNode = {
   name: string;
@@ -568,6 +574,54 @@ async function copySelectedResult() {
   await copyText(text);
 }
 
+function selectedLogStreams(): string[] {
+  const out: string[] = [];
+  if (logShowStdout.value) out.push("stdout");
+  if (logShowStderr.value) out.push("stderr");
+  if (logShowSystem.value) out.push("system");
+  if (logShowAssistant.value) out.push("assistant");
+  return out;
+}
+
+function downloadSelectedLogs() {
+  const t = selectedTask.value;
+  if (!t) return;
+  const qs = new URLSearchParams();
+  const streams = selectedLogStreams();
+  if (streams.length && streams.length < 4) qs.set("streams", streams.join(","));
+  if (logSearch.value.trim()) qs.set("q", logSearch.value.trim());
+  const url = `/api/tasks/${encodeURIComponent(t.id)}/logs/export?${qs.toString()}`;
+  window.open(url, "_blank", "noopener,noreferrer");
+}
+
+async function copyFilteredLogs() {
+  if (!filteredLogs.value.length) return;
+  const text = filteredLogs.value
+    .map((l) => `${formatLocalDateTime(l.time)}\t${l.stream}\t${l.message}`)
+    .join("\n");
+  await copyText(text);
+}
+
+async function replaySelectedRun() {
+  const t = selectedTask.value;
+  if (!t) return;
+  if (!confirm("Replay this run (create a new task with the same tool/workdir/prompt)?")) return;
+  errorBanner.value = "";
+  try {
+    const next = await createTask({
+      worker_type: t.worker_type,
+      prompt: t.prompt,
+      workdir: t.workdir,
+      unsafe_automation: t.unsafe_automation || undefined,
+    });
+    upsertTask(next);
+    selectedTaskId.value = next.id;
+    await loadLogs(next.id);
+  } catch (e: any) {
+    errorBanner.value = e?.message ?? String(e);
+  }
+}
+
 async function copyText(text: string) {
   if (!text) return;
   try {
@@ -700,6 +754,7 @@ const filteredDirEntries = computed(() => {
 });
 
 const LS_KEY_PINNED_WORKSPACES = "controlccx.pinned_workspaces.v1";
+const LS_KEY_PINNED_WORKSPACE_NAMES = "controlccx.pinned_workspace_names.v1";
 const LS_KEY_WORKSPACE_FILTER = "controlccx.workspace_filter.v1";
 const LS_KEY_WORKSPACE_FILTERS = "controlccx.workspace_filters.v1";
 const LS_KEY_CHAT_BACKEND = "controlccx.chat.backend.v1";
@@ -929,6 +984,12 @@ watch(selectedTaskId, () => {
   resumeExpanded.value = false;
 });
 
+watch(outputTab, (v) => {
+  if (v !== "trace") return;
+  if (!selectedTaskId.value) return;
+  void loadTrace(selectedTaskId.value);
+});
+
 watch([workspaceFilters, sessionSearch], () => {
   sessionsLimit.value = 40;
 });
@@ -1040,6 +1101,29 @@ async function loadLogs(taskId: string) {
   next.set(taskId, logs);
   logsByTask.value = next;
 }
+
+async function loadTrace(taskId: string) {
+  if (!taskId) return;
+  if (traceByTask.value.has(taskId)) return;
+  traceError.value = "";
+  traceLoading.value = true;
+  try {
+    const trace = await fetchTaskTrace(taskId);
+    const next = new Map(traceByTask.value);
+    next.set(taskId, trace);
+    traceByTask.value = next;
+  } catch (e: any) {
+    traceError.value = e?.message ?? String(e);
+  } finally {
+    traceLoading.value = false;
+  }
+}
+
+const selectedTrace = computed(() => {
+  const id = selectedTaskId.value;
+  if (!id) return null;
+  return traceByTask.value.get(id) ?? null;
+});
 
 async function onCreateTask(): Promise<boolean> {
   errorBanner.value = "";
@@ -3308,6 +3392,14 @@ watch(
               >
                 Logs
               </button>
+              <button
+                type="button"
+                class="tabBtn"
+                :class="{ active: outputTab === 'trace' }"
+                @click="outputTab = 'trace'"
+              >
+                Trace
+              </button>
               <template v-if="outputTab === 'result'">
                 <span class="tabDivider"></span>
                 <button
@@ -3347,6 +3439,22 @@ watch(
               >
                 Copy
               </button>
+              <template v-else-if="outputTab === 'logs'">
+                <button type="button" @click="copyFilteredLogs" :disabled="!filteredLogs.length">
+                  Copy
+                </button>
+                <button type="button" @click="downloadSelectedLogs" :disabled="!selectedTask">
+                  Download
+                </button>
+              </template>
+              <button
+                v-if="selectedTask"
+                type="button"
+                @click="replaySelectedRun"
+                title="Replay run"
+              >
+                Replay
+              </button>
             </div>
 
             <div v-if="outputTab === 'result'" class="resultPanel">
@@ -3376,6 +3484,44 @@ watch(
                     :srcdoc="selectedResultHtmlSrcDoc"
                     title="HTML preview"
                   ></iframe>
+                </div>
+              </template>
+            </div>
+
+            <div v-else-if="outputTab === 'trace'" class="tracePanel">
+              <div v-if="traceError" class="modalError">{{ traceError }}</div>
+              <div v-else-if="traceLoading" class="loading">Loading...</div>
+              <template v-else>
+                <div v-if="!selectedTrace?.invocation" class="empty">
+                  No trace yet.
+                </div>
+                <div v-else class="traceBox">
+                  <div class="traceRow">
+                    <span class="k">cmd</span>
+                    <span class="mono">{{ selectedTrace.invocation.cmd }}</span>
+                  </div>
+                  <div class="traceRow">
+                    <span class="k">dir</span>
+                    <span class="mono">{{ selectedTrace.invocation.dir }}</span>
+                  </div>
+                  <div class="traceRow">
+                    <span class="k">args</span>
+                    <span class="mono">{{ (selectedTrace.invocation.args ?? []).join(" ") }}</span>
+                  </div>
+                  <div class="traceRow">
+                    <span class="k">env</span>
+                    <div class="traceEnv">
+                      <span
+                        v-for="k in selectedTrace.invocation.env_injected_keys ?? []"
+                        :key="k"
+                        class="pill mono"
+                        >{{ k }}</span
+                      >
+                      <span v-if="!(selectedTrace.invocation.env_injected_keys ?? []).length" class="tinyHint"
+                        >none</span
+                      >
+                    </div>
+                  </div>
                 </div>
               </template>
             </div>
@@ -7360,12 +7506,41 @@ button.dangerBtn:disabled {
   flex: 1;
 }
 
-.resultPanel, .logsPanel {
+.resultPanel, .logsPanel, .tracePanel {
   flex: 1;
   min-height: 0;
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+
+.traceBox {
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 14px 16px;
+  background: var(--bg-panel);
+  flex: 1;
+  overflow: auto;
+  display: grid;
+  gap: 10px;
+}
+
+.traceRow {
+  display: grid;
+  grid-template-columns: 54px 1fr;
+  gap: 12px;
+  align-items: start;
+}
+
+.traceRow .k {
+  opacity: 0.7;
+  font-weight: 700;
+}
+
+.traceEnv {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .resultBox {

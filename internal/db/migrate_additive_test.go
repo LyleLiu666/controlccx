@@ -69,4 +69,11 @@ func TestMigrate_AdditiveTables_AllowedAtSchemaVersion(t *testing.T) {
 	`).Scan(&name); err != nil {
 		t.Fatalf("expected session_meta table: %v", err)
 	}
+
+	if err := conn.QueryRowContext(ctx, `
+		SELECT name FROM sqlite_master
+		WHERE type='table' AND name='task_invocations';
+	`).Scan(&name); err != nil {
+		t.Fatalf("expected task_invocations table: %v", err)
+	}
 }

@@ -126,6 +126,13 @@ func (m *Manager) run(ctx context.Context, task tasks.Task) error {
 	env, injectedEnvKeys := m.envForToolWithReport(task.WorkerType, driver)
 	cmd.Env = env
 
+	// Persist trace metadata (best-effort; should not block execution).
+	if m != nil && m.store != nil {
+		if err := m.store.SetInvocation(context.Background(), task.ID, tool.Command, tool.Args, tool.Dir, injectedEnvKeys); err != nil {
+			m.appendLog(task.ID, tasks.LogSystem, fmt.Sprintf("trace warning: failed to persist invocation: %v", err))
+		}
+	}
+
 	m.appendLog(task.ID, tasks.LogSystem, formatRunStartLog(task.WorkerType, driver, tool, injectedEnvKeys))
 
 	stdout, err := cmd.StdoutPipe()

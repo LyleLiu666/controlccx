@@ -89,6 +89,20 @@ export type LogEntry = {
   message: string;
 };
 
+export type TaskInvocation = {
+  task_id: string;
+  cmd: string;
+  args: string[];
+  dir: string;
+  env_injected_keys: string[];
+  created_at: string;
+};
+
+export type TaskTraceResponse = {
+  task: Task;
+  invocation?: TaskInvocation | null;
+};
+
 export type ChatMessage = {
   id: number;
   time: string;
