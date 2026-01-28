@@ -1040,6 +1040,84 @@ async function onSelectTask(id: string) {
   runsOpen.value = false;
 }
 
+const sessionRenameOpen = ref(false);
+const sessionRenameKey = ref("");
+const sessionRenameTitle = ref("");
+const sessionRenameError = ref("");
+const sessionRenameSaving = ref(false);
+const sessionRenameInputEl = ref<HTMLInputElement | null>(null);
+
+const sessionDeleteOpen = ref(false);
+const sessionDeleteKey = ref("");
+const sessionDeleteLabel = ref("");
+const sessionDeleteError = ref("");
+const sessionDeleteSaving = ref(false);
+
+function sessionShortID(s: SessionGroup): string {
+  return (s.session_id || s.latest.id).slice(0, 8);
+}
+
+function sessionDisplayLabel(s: SessionGroup): string {
+  const t = (s.title ?? "").trim();
+  if (t) return t;
+  return sessionShortID(s);
+}
+
+function openSessionRename(s: SessionGroup) {
+  sessionRenameError.value = "";
+  sessionRenameKey.value = s.key;
+  sessionRenameTitle.value = (s.title ?? "").trim();
+  sessionRenameOpen.value = true;
+  void nextTick(() => sessionRenameInputEl.value?.focus());
+}
+
+function closeSessionRename() {
+  sessionRenameOpen.value = false;
+}
+
+async function saveSessionRename() {
+  const key = sessionRenameKey.value.trim();
+  if (!key) return;
+  sessionRenameSaving.value = true;
+  sessionRenameError.value = "";
+  try {
+    await renameSession(key, sessionRenameTitle.value);
+    sessionRenameOpen.value = false;
+    await refresh();
+  } catch (e: any) {
+    sessionRenameError.value = e?.message ?? String(e);
+  } finally {
+    sessionRenameSaving.value = false;
+  }
+}
+
+function openSessionDelete(s: SessionGroup) {
+  sessionDeleteError.value = "";
+  sessionDeleteKey.value = s.key;
+  sessionDeleteLabel.value = sessionDisplayLabel(s);
+  sessionDeleteOpen.value = true;
+}
+
+function closeSessionDelete() {
+  sessionDeleteOpen.value = false;
+}
+
+async function confirmSessionDelete() {
+  const key = sessionDeleteKey.value.trim();
+  if (!key) return;
+  sessionDeleteSaving.value = true;
+  sessionDeleteError.value = "";
+  try {
+    await deleteSession(key);
+    sessionDeleteOpen.value = false;
+    await refresh();
+  } catch (e: any) {
+    sessionDeleteError.value = e?.message ?? String(e);
+  } finally {
+    sessionDeleteSaving.value = false;
+  }
+}
+
 function openNewRun() {
   newRunOpen.value = true;
 }
@@ -1226,6 +1304,10 @@ async function onCancelTask() {
 async function onResumeTask() {
   const sess = selectedSession.value;
   if (!sess) return;
+  if (sess.deleted_at) {
+    errorBanner.value = "该 session 已删除（软删除），无法 resume。";
+    return;
+  }
   if (!sess.session_id) {
     errorBanner.value = "该 session 还没有 session_id，无法 resume。";
     return;
@@ -1961,10 +2043,12 @@ const filteredSessions = computed(() => {
     if (!needle) return true;
 
     const sid = (s.session_id || s.latest.id).toLowerCase();
+    const title = (s.title ?? "").toLowerCase();
     const prompt = (s.latest.prompt ?? "").toLowerCase();
     const workdir = (s.workdir ?? "").toLowerCase();
     return (
       sid.includes(needle) ||
+      title.includes(needle) ||
       prompt.includes(needle) ||
       workdir.includes(needle) ||
       s.worker_type.toLowerCase().includes(needle) ||
@@ -2598,6 +2682,15 @@ watch(
                 </div>
               </div>
             </div>
+
+            <div class="activeFilters">
+              <div class="filtersTitle">Sessions</div>
+              <label class="settingsToggleRow">
+                <input type="checkbox" v-model="sessionsShowDeleted" />
+                <span>Show deleted</span>
+              </label>
+              <div class="tinyHint">Soft-deleted sessions are hidden by default.</div>
+            </div>
           </div>
 
           <div class="sessionSearchRow">
@@ -2623,19 +2716,52 @@ watch(
             </span>
           </div>
 
-          <button
+          <div
             v-for="s in pagedSessions"
             :key="s.key"
             class="row"
-            :class="{ active: s.key === selectedSessionKey }"
+            :class="{ active: s.key === selectedSessionKey, deleted: !!s.deleted_at }"
             :title="s.latest.warning || s.warning || undefined"
+            role="button"
+            tabindex="0"
             @click="onSelectTask(s.latest.id)"
+            @keydown.enter.prevent="onSelectTask(s.latest.id)"
+            @keydown.space.prevent="onSelectTask(s.latest.id)"
           >
             <div class="rowTop">
-              <span class="mono" :title="s.session_id || s.latest.id">{{
-                (s.session_id || s.latest.id).slice(0, 8)
-              }}</span>
-              <span class="pill" :class="s.status">{{ s.status }}</span>
+              <div class="rowTopLeft">
+                <span class="mono" :title="s.session_id || s.latest.id">{{
+                  sessionShortID(s)
+                }}</span>
+                <span v-if="s.title" class="rowName" :title="s.title">{{
+                  s.title
+                }}</span>
+                <span v-if="s.deleted_at" class="pill deleted">deleted</span>
+              </div>
+              <div class="rowTopRight">
+                <span class="pill" :class="s.status">{{ s.status }}</span>
+                <details class="rowMore" @click.stop>
+                  <summary
+                    title="More"
+                    aria-label="Session actions"
+                    @click.stop
+                  >
+                    ⋯
+                  </summary>
+                  <div class="rowMorePopup" @click.stop>
+                    <button type="button" @click="openSessionRename(s)">
+                      Rename
+                    </button>
+                    <button
+                      type="button"
+                      class="dangerBtn"
+                      @click="openSessionDelete(s)"
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </details>
+              </div>
             </div>
             <div class="rowMid">
               <span class="pill kind">{{ s.worker_type }}</span>
@@ -2650,7 +2776,7 @@ watch(
             </div>
             <div class="rowPath mono" :title="s.workdir">{{ s.workdir }}</div>
             <div class="rowBottom">{{ s.latest.prompt }}</div>
-          </button>
+          </div>
 
           <button
             v-if="canLoadMoreSessions"
@@ -2676,6 +2802,13 @@ watch(
                     (selectedSession.session_id || selectedSession.latest.id).slice(0, 8)
                   }}</span
                 >
+                <span
+                  v-if="selectedSession.title"
+                  class="detailName"
+                  :title="selectedSession.title"
+                  >{{ selectedSession.title }}</span
+                >
+                <span v-if="selectedSession.deleted_at" class="pill deleted">deleted</span>
                 <span class="pill" :class="selectedSession.status">{{
                   selectedSession.status
                 }}</span>
@@ -2737,6 +2870,21 @@ watch(
                       >
                         Copy workdir
                       </button>
+                      <button
+                        type="button"
+                        @click="openSessionRename(selectedSession)"
+                        title="Rename session"
+                      >
+                        Rename session
+                      </button>
+                      <button
+                        type="button"
+                        class="dangerBtn"
+                        @click="openSessionDelete(selectedSession)"
+                        title="Delete session (soft)"
+                      >
+                        Delete session
+                      </button>
                     </div>
                     <div class="detailMoreGrid">
                       <div>
@@ -2754,6 +2902,16 @@ watch(
                       </div>
                       <div>
                         <span class="k">Runs</span> {{ selectedSession.runs.length }}
+                      </div>
+                      <div v-if="selectedSession.title" class="full">
+                        <span class="k">Title</span>
+                        <span>{{ selectedSession.title }}</span>
+                      </div>
+                      <div v-if="selectedSession.deleted_at" class="full">
+                        <span class="k">Deleted</span>
+                        <span class="mono">{{
+                          formatLocalDateTime(selectedSession.deleted_at)
+                        }}</span>
                       </div>
                       <div
                         v-if="selectedTask?.warning || selectedSession.warning"
@@ -2818,7 +2976,11 @@ watch(
                 type="button"
                 class="primary"
                 @click="onResumeTask"
-                :disabled="!resumePrompt.trim() || !selectedSession.session_id"
+                :disabled="
+                  !resumePrompt.trim() ||
+                  !selectedSession.session_id ||
+                  !!selectedSession.deleted_at
+                "
               >
                 Resume
               </button>
@@ -2831,7 +2993,10 @@ watch(
                 {{ resumeExpanded ? "▴" : "⋯" }}
               </button>
             </div>
-            <div v-if="!selectedSession.session_id" class="tinyHint">
+            <div v-if="selectedSession.deleted_at" class="tinyHint">
+              session deleted：resume disabled
+            </div>
+            <div v-else-if="!selectedSession.session_id" class="tinyHint">
               session_id pending：暂时无法 resume
             </div>
           </div>
@@ -4414,7 +4579,7 @@ h2 {
   overflow-wrap: anywhere;
 }
 
-input,
+input:not([type="checkbox"]):not([type="radio"]),
 select,
 textarea {
   border: 1px solid var(--border-color);
@@ -4430,12 +4595,17 @@ textarea {
   box-sizing: border-box;
 }
 
-input:focus,
+input:not([type="checkbox"]):not([type="radio"]):focus,
 select:focus,
 textarea:focus {
   border-color: var(--color-primary);
   background: var(--bg-panel);
   box-shadow: 0 0 0 3px var(--color-primary-bg);
+}
+
+input[type="checkbox"],
+input[type="radio"] {
+  accent-color: var(--color-primary);
 }
 
 textarea {
