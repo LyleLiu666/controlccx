@@ -172,6 +172,15 @@ func (m *Manager) run(ctx context.Context, task tasks.Task) error {
 		errText = waitErr.Error()
 	}
 
+	// If stdout parsing already marked this run as blocked, preserve that status even if
+	// the underlying process exited non-zero (common for non-interactive approval prompts).
+	if status != tasks.StatusCanceled {
+		if latest, err := m.store.GetTask(context.Background(), task.ID); err == nil && latest.Status == tasks.StatusBlocked {
+			status = tasks.StatusBlocked
+			errText = ""
+		}
+	}
+
 	m.appendLog(task.ID, tasks.LogSystem, formatRunFinishLog(status, exitCode, errText))
 
 	lastSessionIDMu.Lock()
@@ -419,6 +428,7 @@ func mergeEnvWithReport(base []string, additions map[string]string) ([]string, [
 
 func (m *Manager) consumeStdout(task tasks.Task, stdout io.Reader, sidMu *sync.Mutex, sid *string) {
 	reader := newLineReader(stdout)
+	blockedMarked := false
 	for {
 		line, tooLong, err := readLineWithLimit(reader, defaultJSONLineMaxBytes)
 		if err != nil {
@@ -438,6 +448,17 @@ func (m *Manager) consumeStdout(task tasks.Task, stdout io.Reader, sidMu *sync.M
 
 		// Persist raw stdout for debugging/details (UI can filter by stream).
 		m.appendLog(task.ID, tasks.LogStdout, string(line))
+
+		if task.WorkerType == tasks.WorkerClaudeCode && !blockedMarked && isApprovalRequiredLine(line) {
+			blockedMarked = true
+
+			const reason = "Blocked: requires approval (non-interactive run cannot proceed). Next: enable workers.unsafe_automation (dangerous) and retry, or implement approval workflow."
+
+			_ = m.store.SetBlocked(context.Background(), task.ID)
+			_ = m.store.SetWarning(context.Background(), task.ID, reason)
+			m.appendLog(task.ID, tasks.LogSystem, reason)
+			m.publishTaskUpdatedForce(task.ID)
+		}
 
 		var parsed parsedLine
 		switch task.WorkerType {
@@ -468,6 +489,11 @@ func (m *Manager) consumeStdout(task tasks.Task, stdout io.Reader, sidMu *sync.M
 			}
 		}
 	}
+}
+
+func isApprovalRequiredLine(line []byte) bool {
+	s := strings.ToLower(string(line))
+	return strings.Contains(s, "requires approval")
 }
 
 func (m *Manager) consumeLines(taskID string, stream tasks.LogStream, r io.Reader) {

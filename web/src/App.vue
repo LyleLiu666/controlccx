@@ -1434,6 +1434,7 @@ function isMilestoneMessage(stream: LogEntry["stream"], message: string): boolea
   if (stream === "system") {
     if (lower.startsWith("run.start")) return true;
     if (lower.startsWith("run.finish")) return true;
+    if (lower.includes("blocked") || lower.includes("requires approval")) return true;
     if (lower.includes("error") || lower.includes("panic") || lower.includes("failed"))
       return true;
     if (lower.includes("skipped overlong") || lower.includes("read error"))
@@ -1966,6 +1967,7 @@ watch(
             :key="s.key"
             class="row"
             :class="{ active: s.key === selectedSessionKey }"
+            :title="s.latest.warning || s.warning || undefined"
             @click="onSelectTask(s.latest.id)"
           >
             <div class="rowTop">
@@ -1978,7 +1980,12 @@ watch(
               <span class="pill kind">{{ s.worker_type }}</span>
               <span class="score">score {{ s.score }}</span>
               <span class="pill kind">{{ s.runs.length }} runs</span>
-              <span v-if="s.warning" class="warn">⚠</span>
+              <span
+                v-if="s.latest.warning || s.warning"
+                class="warn"
+                :title="s.latest.warning || s.warning"
+                >⚠</span
+              >
             </div>
             <div class="rowPath mono" :title="s.workdir">{{ s.workdir }}</div>
             <div class="rowBottom">{{ s.latest.prompt }}</div>
@@ -2021,9 +2028,9 @@ watch(
                   {{ selectedSession.runs.length }} runs
                 </button>
                 <span
-                  v-if="selectedSession.warning"
+                  v-if="selectedTask?.warning || selectedSession.warning"
                   class="warn"
-                  :title="selectedSession.warning"
+                  :title="selectedTask?.warning || selectedSession.warning"
                   >⚠</span
                 >
                 <span
@@ -2080,8 +2087,12 @@ watch(
                       <div>
                         <span class="k">Runs</span> {{ selectedSession.runs.length }}
                       </div>
-                      <div v-if="selectedSession.warning" class="full">
-                        <span class="k">Warning</span> {{ selectedSession.warning }}
+                      <div
+                        v-if="selectedTask?.warning || selectedSession.warning"
+                        class="full"
+                      >
+                        <span class="k">Warning</span>
+                        {{ selectedTask?.warning || selectedSession.warning }}
                       </div>
                       <div v-if="selectedTask?.error" class="full">
                         <span class="k">Last Err</span> {{ selectedTask.error }}
@@ -2094,6 +2105,22 @@ watch(
                   </div>
                 </details>
               </div>
+            </div>
+          </div>
+
+          <div v-if="selectedTask?.status === 'blocked'" class="blockedHint">
+            <div class="text">
+              Blocked: requires approval · 可尝试开启
+              <span class="mono">workers.unsafe_automation</span> 后重试（危险）
+            </div>
+            <div class="actions">
+              <button
+                type="button"
+                @click="copyText('workers:\\n  unsafe_automation: true\\n')"
+                title="Copy config snippet"
+              >
+                Copy snippet
+              </button>
             </div>
           </div>
 
@@ -4748,6 +4775,37 @@ button.primary:active:not(:disabled) {
 
 .detailMoreGrid .full {
   grid-column: 1 / -1;
+}
+
+.blockedHint {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  border: 1px solid rgba(249, 115, 22, 0.35);
+  background: rgba(249, 115, 22, 0.08);
+  color: var(--text-main);
+  margin-bottom: 12px;
+}
+
+.blockedHint .text {
+  font-size: 13px;
+  color: var(--text-main);
+}
+
+.blockedHint .actions {
+  display: flex;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.blockedHint .actions button {
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 800;
+  border-radius: 999px;
 }
 
 @container (max-width: 540px) {
