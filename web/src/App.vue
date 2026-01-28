@@ -168,6 +168,16 @@ const isPhone = ref(false);
 const sessionsDrawerOpen = ref(false);
 const sessionsFiltersOpen = ref(false);
 
+const LS_KEY_AUTO_DELIVERY_FOREMAN = "controlccx.auto_delivery_foreman.v1";
+const LS_KEY_DELIVERY_FOREMAN_SEEN = "controlccx.delivery_foreman.seen_runs.v1";
+
+const autoDeliveryForeman = ref<boolean>(true);
+const deliveryForemanSeenRuns = ref<Set<string>>(new Set());
+const deliveryForemanRunning = ref(false);
+const deliveryForemanQueue = ref<Task[]>([]);
+const deliveryForemanToast = ref("");
+const deliveryForemanToastOpen = ref(false);
+
 function formatLogTime(ts: string): string {
   const s = (ts ?? "").trim();
   if (!s) return "";
@@ -794,6 +804,9 @@ const workspaceSelect = ref<string>(loadString(LS_KEY_WORKSPACE_FILTER));
   const sec = loadString(LS_KEY_SECRETARY_VIEW).trim();
   if (sec === "chat" || sec === "overview") secretaryView.value = sec;
 
+  autoDeliveryForeman.value = loadBool(LS_KEY_AUTO_DELIVERY_FOREMAN, true);
+  deliveryForemanSeenRuns.value = new Set(loadStringArray(LS_KEY_DELIVERY_FOREMAN_SEEN));
+
   const fs = loadString(LS_KEY_FEED_SCOPE).trim();
   if (fs === "current" || fs === "all") liveScope.value = fs;
   const fm = loadString(LS_KEY_FEED_MODE).trim();
@@ -846,6 +859,7 @@ watch(chatBackend, (v) => saveString(LS_KEY_CHAT_BACKEND, v));
 watch(chatStreamEnabled, (v) => saveBool(LS_KEY_CHAT_STREAM, v));
 watch(chatMaxSteps, (v) => saveInt(LS_KEY_CHAT_MAX_STEPS, v));
 watch(secretaryView, (v) => saveString(LS_KEY_SECRETARY_VIEW, v));
+watch(autoDeliveryForeman, (v) => saveBool(LS_KEY_AUTO_DELIVERY_FOREMAN, Boolean(v)));
 watch(theme, (v) => saveString(LS_KEY_THEME, v));
 watch(liveScope, (v) => saveString(LS_KEY_FEED_SCOPE, v));
 watch(liveWrap, (v) => saveBool(LS_KEY_FEED_WRAP, v));
@@ -1034,6 +1048,133 @@ function dismissFeedCoach() {
 
 function toggleTheme() {
   applyTheme(theme.value === "dark" ? "light" : "dark");
+}
+
+function openSecretaryForForeman() {
+  liveOpen.value = false;
+  secretaryOpen.value = true;
+  secretaryView.value = "chat";
+  deliveryForemanToastOpen.value = false;
+}
+
+function isTerminalStatus(s: string): boolean {
+  return (
+    s === "succeeded" ||
+    s === "failed" ||
+    s === "canceled" ||
+    s === "interrupted" ||
+    s === "blocked"
+  );
+}
+
+function persistDeliveryForemanSeen(runID: string) {
+  const id = (runID ?? "").trim();
+  if (!id) return;
+  if (deliveryForemanSeenRuns.value.has(id)) return;
+  const next = new Set(deliveryForemanSeenRuns.value);
+  next.add(id);
+  // Limit growth to keep localStorage small.
+  const arr = Array.from(next).slice(-400);
+  deliveryForemanSeenRuns.value = new Set(arr);
+  saveStringArray(LS_KEY_DELIVERY_FOREMAN_SEEN, arr);
+}
+
+function showDeliveryForemanToast(message: string) {
+  deliveryForemanToast.value = message;
+  deliveryForemanToastOpen.value = true;
+  window.setTimeout(() => {
+    if (deliveryForemanToast.value === message) deliveryForemanToastOpen.value = false;
+  }, 10_000);
+}
+
+async function buildDeliveryForemanPrompt(t: Task): Promise<string> {
+  const runID = t.id;
+  const sessionID = t.session_id?.trim() || "";
+  const sessKey = sessionKeyForTask(t);
+  const sess = sessionsAll.value.find((s) => s.key === sessKey);
+  const runsCount = sess?.runs.length ?? 1;
+
+  let tail = "";
+  try {
+    const logs = await fetchLogs(runID, 0, 200);
+    const filtered = logs.filter((l) => l.stream !== "stdout");
+    const last = filtered.slice(-40);
+    tail = last
+      .map((l) => `[${formatLogTime(l.time)} ${l.stream}] ${String(l.message ?? "").slice(0, 600)}`)
+      .join("\n");
+  } catch {
+    // ignore logs fetch failures
+  }
+
+  const parts: string[] = [];
+  parts.push("【Delivery Foreman / 交付前哨】");
+  parts.push("");
+  parts.push("请你作为系统秘书/观察者，判断该 run 是否真的完成，以及是否需要工业级交付检查。");
+  parts.push("如果未完成：给出用户下一步最小 resume prompt（用户要输入的那句话），并列出需要补齐的关键点。");
+  parts.push("如果已完成且属于复杂任务：给出工业级交付 checklist（以可执行步骤/命令为主，不默认执行）。");
+  parts.push("如果是简单任务：一句话说明无需工业级交付检查并结束。");
+  parts.push("");
+  parts.push("【上下文】");
+  parts.push(`run_id: ${runID}`);
+  if (sessionID) parts.push(`session_id: ${sessionID}`);
+  parts.push(`worker: ${t.worker_type}`);
+  parts.push(`status: ${t.status}`);
+  parts.push(`workdir: ${t.workdir}`);
+  parts.push(`runs_in_session: ${runsCount}`);
+  if (t.warning) parts.push(`warning: ${t.warning}`);
+  if (t.error) parts.push(`error: ${t.error}`);
+  parts.push("");
+  parts.push("prompt:");
+  parts.push(t.prompt || "");
+  if (tail) {
+    parts.push("");
+    parts.push("recent_logs_tail:");
+    parts.push(tail);
+  }
+  return parts.join("\n");
+}
+
+async function runDeliveryForemanOnce(t: Task) {
+  showDeliveryForemanToast("Delivery Foreman: analyzing completed run…");
+  const prompt = await buildDeliveryForemanPrompt(t);
+  chat.value = await sendChatAndReload(prompt, { sendChat, fetchChat });
+  showDeliveryForemanToast("Delivery Foreman: suggestion ready (open Secretary to view).");
+}
+
+async function maybeTriggerDeliveryForeman(prev: Task | undefined, next: Task) {
+  if (!autoDeliveryForeman.value) return;
+  if (!next?.id) return;
+  if (!prev) return;
+  const runID = next.id;
+  if (deliveryForemanSeenRuns.value.has(runID)) return;
+  const prevStatus = prev?.status ?? "";
+  const nextStatus = next.status ?? "";
+
+  // Only auto-trigger on transitions into terminal states.
+  if (isTerminalStatus(prevStatus) || !isTerminalStatus(nextStatus)) return;
+  if (!(prevStatus === "running" || prevStatus === "queued" || prevStatus === "")) return;
+
+  persistDeliveryForemanSeen(runID);
+
+  // Non-disruptive: do not auto-open secretary or steal focus.
+  if (deliveryForemanRunning.value) {
+    deliveryForemanQueue.value = [...deliveryForemanQueue.value, next];
+    showDeliveryForemanToast("Delivery Foreman: queued (multiple runs finished).");
+    return;
+  }
+  deliveryForemanRunning.value = true;
+  try {
+    await runDeliveryForemanOnce(next);
+    while (deliveryForemanQueue.value.length) {
+      const [head, ...rest] = deliveryForemanQueue.value;
+      deliveryForemanQueue.value = rest;
+      if (head?.id) await runDeliveryForemanOnce(head);
+    }
+  } catch (e: any) {
+    showDeliveryForemanToast(`Delivery Foreman failed: ${e?.message ?? String(e)}`);
+  } finally {
+    deliveryForemanRunning.value = false;
+  }
 }
 
 async function onCancelTask() {
@@ -1561,7 +1702,11 @@ function connectEvents() {
       eventsConnected.value = true;
       eventsLastEventMs.value = Date.now();
       if (evt.type === "task.created" || evt.type === "task.updated") {
-        upsertTask(evt.payload as Task);
+        const nextTask = evt.payload as Task;
+        const prevTask = tasks.value.get(nextTask.id);
+        upsertTask(nextTask);
+        // Fire-and-forget; avoid blocking SSE handling.
+        void maybeTriggerDeliveryForeman(prevTask, nextTask);
       } else if (evt.type === "task.log") {
         appendLog(evt.payload as LogEntry);
       } else if (evt.type === "chat.message") {
@@ -2800,6 +2945,16 @@ watch(
       </div>
     </div>
 
+    <div v-if="deliveryForemanToastOpen" class="foremanToast" role="status">
+      <div class="foremanText">{{ deliveryForemanToast }}</div>
+      <div class="foremanActions">
+        <button type="button" class="primary" @click="openSecretaryForForeman">
+          Open
+        </button>
+        <button type="button" @click="deliveryForemanToastOpen = false">✕</button>
+      </div>
+    </div>
+
     <div
       v-if="secretaryOpen"
       class="secDrawerOverlay"
@@ -3225,6 +3380,18 @@ watch(
 
           <div v-if="authSettingsError" class="modalError">
             {{ authSettingsError }}
+          </div>
+
+          <div class="settingsSection">
+            <div class="settingsSectionTitle">Automation</div>
+            <label class="settingsToggleRow">
+              <input type="checkbox" v-model="autoDeliveryForeman" />
+              <span>Auto Delivery Foreman</span>
+            </label>
+            <div class="tinyHint">
+              When a run finishes, send an automatic “delivery check” message to
+              the Secretary (no auto focus).
+            </div>
           </div>
 
           <div class="settingsSection">
@@ -5176,6 +5343,51 @@ button.primary:active:not(:disabled) {
   font-weight: 700;
   font-size: 14px;
   color: var(--color-primary);
+}
+
+.settingsToggleRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  color: var(--text-main);
+}
+
+.foremanToast {
+  position: fixed;
+  right: 18px;
+  bottom: 92px;
+  z-index: 999;
+  max-width: min(520px, calc(100vw - 36px));
+  background: var(--bg-panel);
+  border: 1px solid var(--border-color);
+  box-shadow: var(--shadow-lg);
+  border-radius: 14px;
+  padding: 12px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.foremanText {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 13px;
+  color: var(--text-main);
+}
+
+.foremanActions {
+  flex: 0 0 auto;
+  display: inline-flex;
+  gap: 8px;
+}
+
+@media (max-width: 520px) {
+  .foremanToast {
+    left: 18px;
+    right: 18px;
+    bottom: 86px;
+  }
 }
 
 .kv {

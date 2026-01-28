@@ -148,18 +148,19 @@ func (m *Manager) run(ctx context.Context, task tasks.Task) error {
 		lastSessionID   string
 	)
 	resumeFailure := &resumeFailureState{}
+	blockedState := &blockedState{}
 
 	wg := sync.WaitGroup{}
 	wg.Add(2)
 
 	go func() {
 		defer wg.Done()
-		m.consumeStdout(task, stdout, &lastSessionIDMu, &lastSessionID, cancel, resumeFailure)
+		m.consumeStdout(task, stdout, &lastSessionIDMu, &lastSessionID, cancel, resumeFailure, blockedState)
 	}()
 
 	go func() {
 		defer wg.Done()
-		m.consumeLines(task, tasks.LogStderr, stderr, cancel, resumeFailure)
+		m.consumeLines(task, tasks.LogStderr, stderr, cancel, resumeFailure, blockedState)
 	}()
 
 	waitErr := cmd.Wait()
@@ -178,6 +179,16 @@ func (m *Manager) run(ctx context.Context, task tasks.Task) error {
 	if failed, resumeMsg := resumeFailure.get(); failed {
 		status = tasks.StatusFailed
 		errText = resumeMsg
+	} else if blocked, reason := blockedState.get(); blocked {
+		// If we detected an approval-required prompt, treat this run as blocked even if
+		// the underlying process exits non-zero.
+		if status != tasks.StatusCanceled {
+			status = tasks.StatusBlocked
+			errText = ""
+			if strings.TrimSpace(reason) != "" {
+				_ = m.store.SetWarning(context.Background(), task.ID, reason)
+			}
+		}
 	} else {
 		// If stdout parsing already marked this run as blocked, preserve that status even if
 		// the underlying process exited non-zero (common for non-interactive approval prompts).
@@ -434,9 +445,8 @@ func mergeEnvWithReport(base []string, additions map[string]string) ([]string, [
 	return out, applied
 }
 
-func (m *Manager) consumeStdout(task tasks.Task, stdout io.Reader, sidMu *sync.Mutex, sid *string, cancel context.CancelFunc, resumeFailure *resumeFailureState) {
+func (m *Manager) consumeStdout(task tasks.Task, stdout io.Reader, sidMu *sync.Mutex, sid *string, cancel context.CancelFunc, resumeFailure *resumeFailureState, blocked *blockedState) {
 	reader := newLineReader(stdout)
-	blockedMarked := false
 	for {
 		line, tooLong, err := readLineWithLimit(reader, defaultJSONLineMaxBytes)
 		if err != nil {
@@ -459,16 +469,7 @@ func (m *Manager) consumeStdout(task tasks.Task, stdout io.Reader, sidMu *sync.M
 
 		m.handleResumeNotFound(task, string(line), cancel, resumeFailure)
 
-		if task.WorkerType == tasks.WorkerClaudeCode && !blockedMarked && isApprovalRequiredLine(line) {
-			blockedMarked = true
-
-			const reason = "Blocked: requires approval (non-interactive run cannot proceed). Next: enable workers.unsafe_automation (dangerous) and retry, or implement approval workflow."
-
-			_ = m.store.SetBlocked(context.Background(), task.ID)
-			_ = m.store.SetWarning(context.Background(), task.ID, reason)
-			m.appendLog(task.ID, tasks.LogSystem, reason)
-			m.publishTaskUpdatedForce(task.ID)
-		}
+		m.handleApprovalRequired(task, string(line), line, blocked)
 
 		var parsed parsedLine
 		switch task.WorkerType {
@@ -535,6 +536,59 @@ func (s *resumeFailureState) get() (bool, string) {
 	return s.seen, s.message
 }
 
+type blockedState struct {
+	mu     sync.Mutex
+	seen   bool
+	reason string
+}
+
+func (s *blockedState) setOnce(reason string) bool {
+	if s == nil {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.seen {
+		return false
+	}
+	s.seen = true
+	s.reason = strings.TrimSpace(reason)
+	return true
+}
+
+func (s *blockedState) get() (bool, string) {
+	if s == nil {
+		return false, ""
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.seen, s.reason
+}
+
+func (m *Manager) handleApprovalRequired(task tasks.Task, message string, raw []byte, blocked *blockedState) {
+	if task.WorkerType != tasks.WorkerClaudeCode {
+		return
+	}
+	if raw != nil {
+		if !isApprovalRequiredLine(raw) {
+			return
+		}
+	} else {
+		if !isApprovalRequiredLine([]byte(message)) {
+			return
+		}
+	}
+
+	const reason = "Blocked: requires approval (non-interactive run cannot proceed). Next: enable workers.unsafe_automation (dangerous) and retry, or implement approval workflow."
+	if blocked != nil && blocked.setOnce(reason) {
+		// Best-effort persist for UI; final run status is handled in run() even if these writes fail.
+		_ = m.store.SetBlocked(context.Background(), task.ID)
+		_ = m.store.SetWarning(context.Background(), task.ID, reason)
+		m.appendLog(task.ID, tasks.LogSystem, reason)
+		m.publishTaskUpdatedForce(task.ID)
+	}
+}
+
 func (m *Manager) handleResumeNotFound(task tasks.Task, message string, cancel context.CancelFunc, resumeFailure *resumeFailureState) {
 	if task.Mode != tasks.ModeResume || task.WorkerType != tasks.WorkerClaudeCode {
 		return
@@ -576,7 +630,7 @@ func extractResumeNotFoundMessage(message string) string {
 	return strings.TrimSpace(msg[idx:])
 }
 
-func (m *Manager) consumeLines(task tasks.Task, stream tasks.LogStream, r io.Reader, cancel context.CancelFunc, resumeFailure *resumeFailureState) {
+func (m *Manager) consumeLines(task tasks.Task, stream tasks.LogStream, r io.Reader, cancel context.CancelFunc, resumeFailure *resumeFailureState, blocked *blockedState) {
 	reader := newLineReader(r)
 	for {
 		line, tooLong, err := readLineWithLimit(reader, 1024*1024)
@@ -597,6 +651,7 @@ func (m *Manager) consumeLines(task tasks.Task, stream tasks.LogStream, r io.Rea
 		msg := string(line)
 		m.appendLog(task.ID, stream, msg)
 		m.handleResumeNotFound(task, msg, cancel, resumeFailure)
+		m.handleApprovalRequired(task, msg, nil, blocked)
 	}
 }
 
