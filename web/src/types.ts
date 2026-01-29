@@ -79,6 +79,9 @@ export type SkillsListResponse = {
   source_roots: string[];
   targets: SkillTargetRoot[];
   skills: Skill[];
+  total?: number;
+  offset?: number;
+  limit?: number;
 };
 
 export type LogEntry = {

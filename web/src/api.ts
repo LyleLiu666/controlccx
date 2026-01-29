@@ -257,8 +257,18 @@ export async function deleteTool(input: { id: string }): Promise<{ ok: boolean }
   return postJSON<{ ok: boolean }>("/api/tools/delete", input);
 }
 
-export async function fetchSkills(): Promise<SkillsListResponse> {
-  return getJSON<SkillsListResponse>("/api/skills");
+export async function fetchSkills(opts?: {
+  q?: string;
+  offset?: number;
+  limit?: number;
+}): Promise<SkillsListResponse> {
+  const qs = new URLSearchParams();
+  const q = (opts?.q ?? "").trim();
+  if (q) qs.set("q", q);
+  if (Number.isFinite(opts?.offset)) qs.set("offset", String(opts?.offset));
+  if (Number.isFinite(opts?.limit)) qs.set("limit", String(opts?.limit));
+  const url = qs.toString() ? `/api/skills?${qs.toString()}` : "/api/skills";
+  return getJSON<SkillsListResponse>(url);
 }
 
 export async function linkSkill(input: {

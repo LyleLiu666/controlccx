@@ -22,7 +22,61 @@ func (a *API) handleSkills(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, out)
+
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	limit := parseInt(strings.TrimSpace(r.URL.Query().Get("limit")), 0)
+	offset := parseInt(strings.TrimSpace(r.URL.Query().Get("offset")), 0)
+	if limit < 0 {
+		limit = 0
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	if limit > 500 {
+		limit = 500
+	}
+
+	items := out.Skills
+	if q != "" {
+		needle := strings.ToLower(q)
+		filtered := make([]skills.Skill, 0, len(items))
+		for _, s := range items {
+			if strings.Contains(strings.ToLower(s.Name), needle) {
+				filtered = append(filtered, s)
+			}
+		}
+		items = filtered
+	}
+
+	total := len(items)
+	if limit > 0 {
+		if offset > total {
+			offset = total
+		}
+		end := offset + limit
+		if end > total {
+			end = total
+		}
+		items = items[offset:end]
+	}
+
+	type skillsPage struct {
+		SourceRoots []string            `json:"source_roots"`
+		Targets     []skills.TargetRoot `json:"targets"`
+		Skills      []skills.Skill      `json:"skills"`
+		Total       int                 `json:"total"`
+		Offset      int                 `json:"offset"`
+		Limit       int                 `json:"limit"`
+	}
+
+	writeJSON(w, skillsPage{
+		SourceRoots: out.SourceRoots,
+		Targets:     out.Targets,
+		Skills:      items,
+		Total:       total,
+		Offset:      offset,
+		Limit:       limit,
+	})
 }
 
 func (a *API) handleSkillsLink(w http.ResponseWriter, r *http.Request) {
@@ -84,4 +138,3 @@ func (a *API) handleSkillsUnlink(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, map[string]any{"ok": true})
 }
-

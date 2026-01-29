@@ -131,8 +131,29 @@ const skillsOpen = ref(false);
 const skillsLoading = ref(false);
 const skillsError = ref("");
 const skillsFilter = ref("");
+const skillsLimit = ref(200);
+const skillsOffset = ref(0);
 const skillsData = ref<SkillsListResponse | null>(null);
 const skillsActionBusy = ref<Map<string, boolean>>(new Map());
+
+const skillsTotal = computed(
+  () => skillsData.value?.total ?? (skillsData.value?.skills.length ?? 0),
+);
+const skillsRangeLabel = computed(() => {
+  const total = skillsTotal.value;
+  if (!total) return "0";
+  const pageLen = skillsData.value?.skills.length ?? 0;
+  const from = Math.min(total, skillsOffset.value + 1);
+  const to = Math.min(total, skillsOffset.value + pageLen);
+  return `${from}-${to} / ${total}`;
+});
+const skillsCanPrev = computed(() => skillsOffset.value > 0);
+const skillsCanNext = computed(() => {
+  const total = skillsTotal.value;
+  if (!total) return false;
+  const pageLen = skillsData.value?.skills.length ?? 0;
+  return skillsOffset.value + pageLen < total;
+});
 
 const selectedTask = computed(
   () => tasks.value.get(selectedTaskId.value) ?? null,
@@ -250,16 +271,84 @@ const filesDirty = computed(
 const secretaryOpen = ref(false);
 const secretaryView = ref<"chat" | "overview">("chat");
 const secretaryScope = ref<"current" | "all">("current");
+const secretaryFull = ref(false);
+const secretaryWidth = ref(1100);
+const secretaryResizing = ref(false);
+
+function startSecretaryResize(e: MouseEvent) {
+  if (secretaryFull.value) return;
+  secretaryResizing.value = true;
+  document.body.style.cursor = "col-resize";
+  document.body.style.userSelect = "none";
+
+  const startX = e.clientX;
+  const startWidth = secretaryWidth.value;
+
+  const onMove = (tm: MouseEvent) => {
+    const diff = startX - tm.clientX;
+    let newW = startWidth + diff;
+    const maxW = Math.min(1600, window.innerWidth - 32);
+    if (newW < 520) newW = 520;
+    if (newW > maxW) newW = maxW;
+    secretaryWidth.value = newW;
+  };
+
+  const onUp = () => {
+    secretaryResizing.value = false;
+    document.body.style.cursor = "";
+    document.body.style.userSelect = "";
+    window.removeEventListener("mousemove", onMove);
+    window.removeEventListener("mouseup", onUp);
+    saveInt(LS_KEY_SECRETARY_WIDTH, secretaryWidth.value);
+  };
+
+  window.addEventListener("mousemove", onMove);
+  window.addEventListener("mouseup", onUp);
+}
 
 const liveOpen = ref(false);
 const liveScope = ref<"current" | "all">("current");
 const liveMode = ref<"milestones" | "all">("milestones");
 const livePaused = ref(false);
 const liveWrap = ref(true);
+const liveFull = ref(false);
+const liveWidth = ref(980);
+const liveResizing = ref(false);
 const liveBoxEl = ref<HTMLDivElement | null>(null);
 const liveNowMs = ref(Date.now());
 const feedCoachDismissed = ref(false);
 const feedCoachOpen = ref(false);
+
+function startLiveResize(e: MouseEvent) {
+  if (liveFull.value) return;
+  liveResizing.value = true;
+  document.body.style.cursor = "col-resize";
+  document.body.style.userSelect = "none";
+
+  const startX = e.clientX;
+  const startWidth = liveWidth.value;
+
+  const onMove = (tm: MouseEvent) => {
+    const diff = startX - tm.clientX;
+    let newW = startWidth + diff;
+    const maxW = Math.min(1600, window.innerWidth - 32);
+    if (newW < 520) newW = 520;
+    if (newW > maxW) newW = maxW;
+    liveWidth.value = newW;
+  };
+
+  const onUp = () => {
+    liveResizing.value = false;
+    document.body.style.cursor = "";
+    document.body.style.userSelect = "";
+    window.removeEventListener("mousemove", onMove);
+    window.removeEventListener("mouseup", onUp);
+    saveInt(LS_KEY_LIVE_WIDTH, liveWidth.value);
+  };
+
+  window.addEventListener("mousemove", onMove);
+  window.addEventListener("mouseup", onUp);
+}
 
 const runsOpen = ref(false);
 
@@ -872,10 +961,14 @@ const LS_KEY_CHAT_STREAM = "controlccx.chat.stream.v1";
 const LS_KEY_CHAT_MAX_STEPS = "controlccx.chat.max_steps.v1";
 const LS_KEY_SECRETARY_VIEW = "controlccx.secretary.view.v1";
 const LS_KEY_SECRETARY_SCOPE = "controlccx.secretary.scope.v1";
+const LS_KEY_SECRETARY_FULL = "controlccx.secretary.full.v1";
+const LS_KEY_SECRETARY_WIDTH = "controlccx.secretary.width.v1";
 const LS_KEY_THEME = "controlccx.theme.v1";
 const LS_KEY_FEED_SCOPE = "controlccx.feed.scope.v1";
 const LS_KEY_FEED_WRAP = "controlccx.feed.wrap.v1";
 const LS_KEY_FEED_MODE = "controlccx.feed.mode.v1";
+const LS_KEY_LIVE_FULL = "controlccx.live.full.v1";
+const LS_KEY_LIVE_WIDTH = "controlccx.live.width.v1";
 const LS_KEY_COACH_FEED = "controlccx.coach.feed.v1";
 const LS_KEY_SHOW_DELETED_SESSIONS = "controlccx.sessions.show_deleted.v1";
 
@@ -1042,22 +1135,36 @@ const workspaceSelect = ref<string>(loadString(LS_KEY_WORKSPACE_FILTER));
   const sec = loadString(LS_KEY_SECRETARY_VIEW).trim();
   if (sec === "chat" || sec === "overview") secretaryView.value = sec;
 
-  const sc = loadString(LS_KEY_SECRETARY_SCOPE).trim();
-  if (sc === "current" || sc === "all") secretaryScope.value = sc as any;
+	  const sc = loadString(LS_KEY_SECRETARY_SCOPE).trim();
+	  if (sc === "current" || sc === "all") secretaryScope.value = sc as any;
 
-  autoDeliveryForeman.value = loadBool(LS_KEY_AUTO_DELIVERY_FOREMAN, true);
-  deliveryForemanSeenRuns.value = new Set(loadStringArray(LS_KEY_DELIVERY_FOREMAN_SEEN));
-  claudeAutoApprove.value = loadBool(LS_KEY_CLAUDE_AUTO_APPROVE, false);
-  attentionAutopilotEnabled.value = loadBool(LS_KEY_ATTENTION_AUTOPILOT, true);
+	  secretaryFull.value = loadBool(LS_KEY_SECRETARY_FULL, false);
+	  {
+	    const maxW = typeof window !== "undefined" ? Math.max(520, window.innerWidth - 32) : 1600;
+	    const sw = loadInt(LS_KEY_SECRETARY_WIDTH, 1100);
+	    secretaryWidth.value = Math.max(520, Math.min(maxW, Math.min(1600, sw)));
+	  }
+
+	  autoDeliveryForeman.value = loadBool(LS_KEY_AUTO_DELIVERY_FOREMAN, true);
+	  deliveryForemanSeenRuns.value = new Set(loadStringArray(LS_KEY_DELIVERY_FOREMAN_SEEN));
+	  claudeAutoApprove.value = loadBool(LS_KEY_CLAUDE_AUTO_APPROVE, false);
+	  attentionAutopilotEnabled.value = loadBool(LS_KEY_ATTENTION_AUTOPILOT, true);
   attentionAutopilotSeen.value = loadStringMap(LS_KEY_ATTENTION_AUTOPILOT_SEEN);
 
   const fs = loadString(LS_KEY_FEED_SCOPE).trim();
   if (fs === "current" || fs === "all") liveScope.value = fs;
   const fm = loadString(LS_KEY_FEED_MODE).trim();
-  if (fm === "milestones" || fm === "all") liveMode.value = fm;
-  liveWrap.value = loadBool(LS_KEY_FEED_WRAP, true);
+	  if (fm === "milestones" || fm === "all") liveMode.value = fm;
+	  liveWrap.value = loadBool(LS_KEY_FEED_WRAP, true);
 
-  sessionsShowDeleted.value = loadBool(LS_KEY_SHOW_DELETED_SESSIONS, false);
+	  liveFull.value = loadBool(LS_KEY_LIVE_FULL, false);
+	  {
+	    const maxW = typeof window !== "undefined" ? Math.max(520, window.innerWidth - 32) : 1600;
+	    const lw = loadInt(LS_KEY_LIVE_WIDTH, 980);
+	    liveWidth.value = Math.max(520, Math.min(maxW, Math.min(1600, lw)));
+	  }
+
+	  sessionsShowDeleted.value = loadBool(LS_KEY_SHOW_DELETED_SESSIONS, false);
 
   const t = loadString(LS_KEY_THEME).trim();
   if (t === "dark" || t === "light") {
@@ -1133,6 +1240,7 @@ watch(chatStreamEnabled, (v) => saveBool(LS_KEY_CHAT_STREAM, v));
 watch(chatMaxSteps, (v) => saveInt(LS_KEY_CHAT_MAX_STEPS, v));
 watch(secretaryView, (v) => saveString(LS_KEY_SECRETARY_VIEW, v));
 watch(secretaryScope, (v) => saveString(LS_KEY_SECRETARY_SCOPE, v));
+watch(secretaryFull, (v) => saveBool(LS_KEY_SECRETARY_FULL, Boolean(v)));
 watch(autoDeliveryForeman, (v) => saveBool(LS_KEY_AUTO_DELIVERY_FOREMAN, Boolean(v)));
 watch(claudeAutoApprove, (v) => saveBool(LS_KEY_CLAUDE_AUTO_APPROVE, Boolean(v)));
 watch(attentionAutopilotEnabled, (v) => saveBool(LS_KEY_ATTENTION_AUTOPILOT, Boolean(v)));
@@ -1140,6 +1248,7 @@ watch(theme, (v) => saveString(LS_KEY_THEME, v));
 watch(liveScope, (v) => saveString(LS_KEY_FEED_SCOPE, v));
 watch(liveWrap, (v) => saveBool(LS_KEY_FEED_WRAP, v));
 watch(liveMode, (v) => saveString(LS_KEY_FEED_MODE, v));
+watch(liveFull, (v) => saveBool(LS_KEY_LIVE_FULL, Boolean(v)));
 watch(feedCoachDismissed, (v) => saveBool(LS_KEY_COACH_FEED, v));
 
 function desiredOutputTabForTask(t: Task | null): "result" | "logs" {
@@ -2658,12 +2767,42 @@ async function refreshSkills() {
   skillsError.value = "";
   skillsLoading.value = true;
   try {
-    skillsData.value = await fetchSkills();
+    skillsData.value = await fetchSkills({
+      q: skillsFilter.value,
+      limit: skillsLimit.value,
+      offset: skillsOffset.value,
+    });
   } catch (e: any) {
     skillsError.value = e?.message ?? String(e);
   } finally {
     skillsLoading.value = false;
   }
+}
+
+let skillsRefreshTimer: number | null = null;
+watch([skillsFilter, skillsLimit], () => {
+  skillsOffset.value = 0;
+  if (!skillsOpen.value) return;
+  if (skillsRefreshTimer) window.clearTimeout(skillsRefreshTimer);
+  skillsRefreshTimer = window.setTimeout(() => void refreshSkills(), 250);
+});
+watch(skillsOpen, (open) => {
+  if (!open && skillsRefreshTimer) {
+    window.clearTimeout(skillsRefreshTimer);
+    skillsRefreshTimer = null;
+  }
+});
+
+async function skillsPrevPage() {
+  if (skillsLoading.value) return;
+  skillsOffset.value = Math.max(0, skillsOffset.value - skillsLimit.value);
+  await refreshSkills();
+}
+
+async function skillsNextPage() {
+  if (skillsLoading.value) return;
+  skillsOffset.value = skillsOffset.value + skillsLimit.value;
+  await refreshSkills();
 }
 
 function skillsKey(name: string, target: "claude" | "codex") {
@@ -2737,13 +2876,7 @@ function summarizeSkillTarget(skill: Skill, target: "claude" | "codex"): SkillsS
   return { target, status, canEnable, canDisable, enabled, detail };
 }
 
-const skillsVisible = computed(() => {
-  const data = skillsData.value;
-  if (!data) return [];
-  const q = skillsFilter.value.trim().toLowerCase();
-  if (!q) return data.skills;
-  return data.skills.filter((s) => s.name.toLowerCase().includes(q));
-});
+const skillsVisible = computed(() => skillsData.value?.skills ?? []);
 
 function skillBadgeClass(status: string) {
   switch (status) {
@@ -3496,14 +3629,17 @@ watch(
           <span v-if="anyRunning" class="liveDot" aria-hidden="true">●</span>
           Live
         </button>
-        <button type="button" class="primary" @click="openNewRun">
-          New Run
-        </button>
-        <button type="button" class="settingsBtn" @click="openAuthSettings">
-          Settings
-        </button>
-      </div>
-    </header>
+	        <button type="button" class="primary" @click="openNewRun">
+	          New Run
+	        </button>
+	        <button type="button" class="settingsBtn" @click="openSkills">
+	          Skills
+	        </button>
+	        <button type="button" class="settingsBtn" @click="openAuthSettings">
+	          Settings
+	        </button>
+	      </div>
+	    </header>
 
     <div v-if="errorBanner" class="banner">{{ errorBanner }}</div>
 
@@ -4277,15 +4413,29 @@ watch(
       </div>
     </div>
 
-    <div
-      v-if="secretaryOpen"
-      class="secDrawerOverlay"
-      @click.self="closeSecretary"
-    >
-      <aside class="secDrawer secDrawerSecretary" role="dialog" aria-modal="true">
-        <div class="secDrawerHeader">
-          <div class="secDrawerTitle">Secretary</div>
-          <div class="secTabs" role="tablist" aria-label="Secretary tabs">
+	    <div
+	      v-if="secretaryOpen"
+	      class="secDrawerOverlay"
+	      @click.self="closeSecretary"
+	    >
+	      <aside
+	        class="secDrawer secDrawerSecretary"
+	        :class="{ full: secretaryFull }"
+	        :style="{
+	          width: secretaryFull ? 'calc(100vw - 32px)' : secretaryWidth + 'px',
+	        }"
+	        role="dialog"
+	        aria-modal="true"
+	      >
+	        <div
+	          class="secResizeHandle"
+	          :class="{ active: secretaryResizing }"
+	          @mousedown="startSecretaryResize"
+	          title="Resize"
+	        ></div>
+	        <div class="secDrawerHeader">
+	          <div class="secDrawerTitle">Secretary</div>
+	          <div class="secTabs" role="tablist" aria-label="Secretary tabs">
             <button
               type="button"
               class="secTab"
@@ -4311,13 +4461,21 @@ watch(
                 :title="`Needs attention: ${needsAttentionSessions.length}`"
               >
                 {{ needsAttentionSessions.length }}
-              </span>
-            </button>
-          </div>
-          <button class="iconBtn" type="button" @click="closeSecretary">
-            ✕
-          </button>
-        </div>
+	              </span>
+	            </button>
+	          </div>
+	          <button
+	            class="iconBtn"
+	            type="button"
+	            @click="secretaryFull = !secretaryFull"
+	            :title="secretaryFull ? 'Exit full screen' : 'Full screen'"
+	          >
+	            {{ secretaryFull ? "⤡" : "⤢" }}
+	          </button>
+	          <button class="iconBtn" type="button" @click="closeSecretary">
+	            ✕
+	          </button>
+	        </div>
 
         <div class="secDrawerBody">
           <div v-if="secretaryView === 'overview'" class="secOverview">
@@ -4438,39 +4596,42 @@ watch(
               </button>
             </div>
 
-            <div class="secChat">
-              <div class="chat">
-                <div class="chatControls">
-                  <label>
-                    Agent
-                    <select v-model="chatBackend" :disabled="chatSending">
-                      <option value="auto">auto</option>
-                      <option value="claude">claude</option>
-                      <option value="codex">codex</option>
-                    </select>
-                  </label>
-                  <label class="chatToggle">
-                    <input
-                      type="checkbox"
-                      v-model="chatStreamEnabled"
-                      :disabled="chatSending"
-                    />
-                    Stream
-                  </label>
-                  <label>
-                    Max steps
-                    <input
-                      type="number"
-                      min="1"
-                      max="32"
-                      v-model.number="chatMaxSteps"
-                      :disabled="chatSending"
-                    />
-                  </label>
-                </div>
-                <div class="msgs" ref="chatMsgsEl">
-                  <div
-                    v-for="m in chat"
+	            <div class="secChat">
+	              <div class="chat">
+	                <details class="chatControlsDetails">
+	                  <summary>Chat settings</summary>
+	                  <div class="chatControls">
+	                    <label>
+	                      Agent
+	                      <select v-model="chatBackend" :disabled="chatSending">
+	                        <option value="auto">auto</option>
+	                        <option value="claude">claude</option>
+	                        <option value="codex">codex</option>
+	                      </select>
+	                    </label>
+	                    <label class="chatToggle">
+	                      <input
+	                        type="checkbox"
+	                        v-model="chatStreamEnabled"
+	                        :disabled="chatSending"
+	                      />
+	                      Stream
+	                    </label>
+	                    <label>
+	                      Max steps
+	                      <input
+	                        type="number"
+	                        min="1"
+	                        max="32"
+	                        v-model.number="chatMaxSteps"
+	                        :disabled="chatSending"
+	                      />
+	                    </label>
+	                  </div>
+	                </details>
+	                <div class="msgs" ref="chatMsgsEl">
+	                  <div
+	                    v-for="m in chat"
                     :key="m.id"
                     class="msg"
                     :class="m.role"
@@ -4519,14 +4680,36 @@ watch(
       </aside>
     </div>
 
-	    <div v-if="liveOpen" class="secDrawerOverlay" @click.self="liveOpen = false">
-	      <aside class="secDrawer wide" role="dialog" aria-modal="true">
-        <div class="secDrawerHeader">
-          <div class="secDrawerTitle">Live</div>
-          <button class="iconBtn" type="button" @click="liveOpen = false">
-            ✕
-          </button>
-        </div>
+		    <div v-if="liveOpen" class="secDrawerOverlay" @click.self="liveOpen = false">
+		      <aside
+		        class="secDrawer wide"
+		        :class="{ full: liveFull }"
+		        :style="{
+		          width: liveFull ? 'calc(100vw - 32px)' : liveWidth + 'px',
+		        }"
+		        role="dialog"
+		        aria-modal="true"
+		      >
+		        <div
+		          class="secResizeHandle"
+		          :class="{ active: liveResizing }"
+		          @mousedown="startLiveResize"
+		          title="Resize"
+		        ></div>
+	        <div class="secDrawerHeader">
+	          <div class="secDrawerTitle">Live</div>
+	          <button
+	            class="iconBtn"
+	            type="button"
+	            @click="liveFull = !liveFull"
+	            :title="liveFull ? 'Exit full screen' : 'Full screen'"
+	          >
+	            {{ liveFull ? "⤡" : "⤢" }}
+	          </button>
+	          <button class="iconBtn" type="button" @click="liveOpen = false">
+	            ✕
+	          </button>
+	        </div>
         <div class="secDrawerBody">
           <div class="secFeed">
             <div class="feedControls">
@@ -4880,20 +5063,17 @@ watch(
       class="modalOverlay"
       @click.self="authSettingsOpen = false"
     >
-      <div class="modal settingsModal">
-        <div class="modalHeader">
-          <div class="modalTitle">Auth Settings</div>
-          <button type="button" class="headerMiniBtn" @click="openToolsSettings">
-            Tools
-          </button>
-          <button type="button" class="headerMiniBtn" @click="openSkills">
-            Skills
-          </button>
-          <button
-            class="iconBtn"
-            type="button"
-            @click="authSettingsOpen = false"
-          >
+	      <div class="modal settingsModal">
+	        <div class="modalHeader">
+	          <div class="modalTitle">Auth Settings</div>
+	          <button type="button" class="headerMiniBtn" @click="openToolsSettings">
+	            Tools
+	          </button>
+	          <button
+	            class="iconBtn"
+	            type="button"
+	            @click="authSettingsOpen = false"
+	          >
             ✕
           </button>
         </div>
@@ -5284,29 +5464,58 @@ watch(
               </div>
             </div>
 
-            <div class="skillsToolbar">
-              <input v-model="skillsFilter" placeholder="Filter skills..." />
-            </div>
+	            <div class="skillsToolbar">
+	              <input v-model="skillsFilter" placeholder="Filter skills..." />
+	              <label class="skillsLimit">
+	                <span class="tinyHint">Page</span>
+	                <select v-model.number="skillsLimit" :disabled="skillsLoading">
+	                  <option :value="50">50</option>
+	                  <option :value="100">100</option>
+	                  <option :value="200">200</option>
+	                  <option :value="500">500</option>
+	                </select>
+	              </label>
+	              <div class="skillsPager">
+	                <span class="tinyHint mono">{{ skillsRangeLabel }}</span>
+	                <button
+	                  type="button"
+	                  @click="skillsPrevPage"
+	                  :disabled="skillsLoading || !skillsCanPrev"
+	                  title="Previous page"
+	                >
+	                  Prev
+	                </button>
+	                <button
+	                  type="button"
+	                  @click="skillsNextPage"
+	                  :disabled="skillsLoading || !skillsCanNext"
+	                  title="Next page"
+	                >
+	                  Next
+	                </button>
+	              </div>
+	            </div>
 
-            <div class="skillsTable">
-              <div class="skillsHead">
-                <div>Skill</div>
-                <div>Claude</div>
-                <div>Codex</div>
-              </div>
+	            <div class="skillsTable">
+	              <div class="skillsHead">
+	                <div>Skill</div>
+	                <div>Claude</div>
+	                <div>Codex</div>
+	              </div>
 
-              <div
-                v-for="s in skillsVisible"
-                :key="s.name"
-                class="skillsRow"
-              >
-                <div class="skillsName">
-                  <div class="mono">{{ s.name }}</div>
-                  <div class="tinyHint mono" v-if="s.source" :title="s.source">
-                    {{ s.source }}
-                  </div>
-                  <div class="tinyHint warn" v-else>missing source</div>
-                </div>
+	              <div class="skillsRows">
+	                <div
+	                  v-for="s in skillsVisible"
+	                  :key="s.name"
+	                  class="skillsRow"
+	                >
+	                <div class="skillsName">
+	                  <div class="mono">{{ s.name }}</div>
+	                  <div class="tinyHint mono" v-if="s.source" :title="s.source">
+	                    {{ s.source }}
+	                  </div>
+	                  <div class="tinyHint warn" v-else>missing source</div>
+	                </div>
 
                 <div class="skillsCell">
                   <template v-for="t in [summarizeSkillTarget(s, 'claude')]" :key="t.target">
@@ -5409,12 +5618,13 @@ watch(
                           : "Disable"
                       }}
                     </button>
-                  </template>
-                </div>
-              </div>
+	                  </template>
+	                </div>
+	              </div>
 
-              <div v-if="!skillsVisible.length" class="empty">No skills</div>
-            </div>
+	                <div v-if="!skillsVisible.length" class="empty">No skills</div>
+	              </div>
+	            </div>
           </template>
         </div>
 
@@ -6549,10 +6759,10 @@ button.dangerBtn:disabled {
 
 .secDrawer {
   position: fixed;
-  top: calc(90px + env(safe-area-inset-top));
+  top: max(16px, env(safe-area-inset-top));
   right: 16px;
   bottom: max(16px, env(safe-area-inset-bottom));
-  width: min(440px, calc(100vw - 32px));
+  width: min(980px, calc(100vw - 32px));
   background: var(--bg-panel);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-lg);
@@ -6563,11 +6773,39 @@ button.dangerBtn:disabled {
 }
 
 .secDrawer.secDrawerSecretary {
-  width: min(720px, calc(100vw - 32px));
+  width: min(1100px, calc(100vw - 32px));
 }
 
 .secDrawer.wide {
-  width: min(560px, calc(100vw - 32px));
+  width: min(980px, calc(100vw - 32px));
+}
+
+.secResizeHandle {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 10px;
+  cursor: col-resize;
+  z-index: 2;
+}
+
+.secResizeHandle::after {
+  content: "";
+  position: absolute;
+  left: 4px;
+  top: 16px;
+  bottom: 16px;
+  width: 2px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.6);
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.secResizeHandle:hover::after,
+.secResizeHandle.active::after {
+  opacity: 1;
 }
 
 .feedCoach {
@@ -7027,6 +7265,10 @@ button.dangerBtn:disabled {
 
 .skillsBody {
   padding-top: 12px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .skillsMeta {
@@ -7044,12 +7286,31 @@ button.dangerBtn:disabled {
 
 .skillsToolbar input {
   width: 100%;
+  flex: 1;
+  min-width: 0;
+}
+
+.skillsLimit {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  white-space: nowrap;
+}
+
+.skillsPager {
+  display: flex;
+  gap: 8px;
+  align-items: center;
 }
 
 .skillsTable {
   border: 1px solid var(--border-color);
   border-radius: 14px;
   overflow: hidden;
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto 1fr;
 }
 
 .skillsHead {
@@ -7059,6 +7320,11 @@ button.dangerBtn:disabled {
   padding: 10px 12px;
   background: var(--bg-subtle);
   font-weight: 800;
+}
+
+.skillsRows {
+  overflow: auto;
+  min-height: 0;
 }
 
 .skillsRow {
@@ -9056,13 +9322,13 @@ button.dangerBtn:disabled {
 }
 
 .secChat {
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-lg);
-  padding: 16px;
-  background: var(--bg-subtle);
   flex: 1;
   min-height: 0;
   display: flex;
+  border: none;
+  border-radius: 0;
+  padding: 0;
+  background: transparent;
 }
 
 .secChat summary {
@@ -9119,19 +9385,25 @@ button.dangerBtn:disabled {
   background: var(--bg-panel);
   flex: 1;
   min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 
 .msg {
   padding: 10px 14px;
   border-radius: var(--radius-md);
-  margin-bottom: 10px;
+  margin: 0;
   background: var(--bg-subtle);
   border: 1px solid transparent;
+  max-width: min(92%, 820px);
+  align-self: flex-start;
 }
 
 .msg.user {
   background: var(--color-primary-bg);
   color: var(--color-primary-hover);
+  align-self: flex-end;
 }
 
 .msg.user .content {
@@ -9237,6 +9509,10 @@ button.dangerBtn:disabled {
     border-radius: 0;
   }
 
+  .secResizeHandle {
+    display: none;
+  }
+
   .secDrawerHeader {
     padding-top: calc(12px + env(safe-area-inset-top));
   }
@@ -9295,6 +9571,16 @@ button.dangerBtn:disabled {
 
   .header {
     padding: 12px 16px;
+    align-items: flex-start;
+    gap: 10px;
+  }
+
+  .headerRight {
+    flex: 1;
+    min-width: 0;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 8px;
   }
 
   .secOrb {

@@ -75,6 +75,105 @@ func TestAPI_Skills_ListLinkUnlink(t *testing.T) {
 	}
 }
 
+func TestAPI_Skills_ListPagingAndFilter(t *testing.T) {
+	home := t.TempDir()
+	sourceRoot := filepath.Join(home, ".agents", "skills")
+	mustMkdirAll(t, filepath.Join(sourceRoot, "skill-creator"))
+	mustMkdirAll(t, filepath.Join(sourceRoot, "skill-one"))
+	mustMkdirAll(t, filepath.Join(sourceRoot, "skill-two"))
+
+	svc, err := skills.NewService(skills.Options{
+		HomeDir:     home,
+		SourceRoots: []string{sourceRoot},
+	})
+	if err != nil {
+		t.Fatalf("new skills: %v", err)
+	}
+
+	apiSvc := &API{Skills: svc}
+	srv := httptest.NewServer(apiSvc.Handler())
+	t.Cleanup(srv.Close)
+
+	type page struct {
+		Skills []skills.Skill `json:"skills"`
+		Total  int            `json:"total"`
+		Offset int            `json:"offset"`
+		Limit  int            `json:"limit"`
+	}
+
+	{
+		res, err := http.Get(srv.URL + "/api/skills?limit=2&offset=0")
+		if err != nil {
+			t.Fatalf("get: %v", err)
+		}
+		defer res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("status=%d, want 200", res.StatusCode)
+		}
+		var got page
+		if err := json.NewDecoder(res.Body).Decode(&got); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if got.Total != 3 {
+			t.Fatalf("total=%d, want 3", got.Total)
+		}
+		if got.Limit != 2 || got.Offset != 0 {
+			t.Fatalf("limit=%d offset=%d, want limit=2 offset=0", got.Limit, got.Offset)
+		}
+		if len(got.Skills) != 2 {
+			t.Fatalf("skills=%d, want 2", len(got.Skills))
+		}
+	}
+
+	{
+		res, err := http.Get(srv.URL + "/api/skills?limit=2&offset=2")
+		if err != nil {
+			t.Fatalf("get: %v", err)
+		}
+		defer res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("status=%d, want 200", res.StatusCode)
+		}
+		var got page
+		if err := json.NewDecoder(res.Body).Decode(&got); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if got.Total != 3 {
+			t.Fatalf("total=%d, want 3", got.Total)
+		}
+		if got.Limit != 2 || got.Offset != 2 {
+			t.Fatalf("limit=%d offset=%d, want limit=2 offset=2", got.Limit, got.Offset)
+		}
+		if len(got.Skills) != 1 {
+			t.Fatalf("skills=%d, want 1", len(got.Skills))
+		}
+		if got.Skills[0].Name != "skill-two" {
+			t.Fatalf("skill[0].name=%q, want skill-two", got.Skills[0].Name)
+		}
+	}
+
+	{
+		res, err := http.Get(srv.URL + "/api/skills?q=creator")
+		if err != nil {
+			t.Fatalf("get: %v", err)
+		}
+		defer res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("status=%d, want 200", res.StatusCode)
+		}
+		var got page
+		if err := json.NewDecoder(res.Body).Decode(&got); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if got.Total != 1 {
+			t.Fatalf("total=%d, want 1", got.Total)
+		}
+		if len(got.Skills) != 1 || got.Skills[0].Name != "skill-creator" {
+			t.Fatalf("skills=%v, want only skill-creator", got.Skills)
+		}
+	}
+}
+
 func mustMkdirAll(t *testing.T, path string) {
 	t.Helper()
 	if err := os.MkdirAll(path, 0o755); err != nil {
