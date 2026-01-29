@@ -5685,6 +5685,7 @@ watch(
   color: var(--text-main);
   background: linear-gradient(180deg, var(--bg-subtle) 0%, var(--bg-app) 100%);
   min-height: 100vh;
+  min-height: 100dvh;
   box-sizing: border-box;
   padding-bottom: 20px;
 }
@@ -5863,6 +5864,7 @@ watch(
   position: sticky;
   top: 90px; /* Header height + spacing */
   max-height: calc(100vh - 110px);
+  max-height: calc(100dvh - 110px);
   overflow-y: auto;
 }
 
@@ -6201,7 +6203,7 @@ button.dangerBtn:disabled {
 .secOrb {
   position: fixed;
   right: -18px;
-  bottom: 26px;
+  bottom: max(26px, env(safe-area-inset-bottom));
   width: 56px;
   height: 56px;
   border-radius: 999px;
@@ -6221,7 +6223,7 @@ button.dangerBtn:disabled {
 
 .secOrb:hover,
 .secOrb.open {
-  right: 16px;
+  right: max(16px, env(safe-area-inset-right));
 }
 
 .secOrb:hover {
@@ -6289,7 +6291,7 @@ button.dangerBtn:disabled {
 .feedCoach {
   position: fixed;
   right: 88px;
-  bottom: 28px;
+  bottom: max(28px, env(safe-area-inset-bottom));
   background: var(--bg-panel);
   border: 1px solid var(--border-color);
   box-shadow: var(--shadow-lg);
@@ -6412,6 +6414,7 @@ button.dangerBtn:disabled {
   display: grid;
   gap: 12px;
   height: calc(100vh - 170px);
+  height: calc(100dvh - 170px);
   max-height: 900px;
 }
 
@@ -7249,7 +7252,7 @@ button.dangerBtn:disabled {
 .foremanToast {
   position: fixed;
   right: 18px;
-  bottom: 92px;
+  bottom: calc(92px + env(safe-area-inset-bottom));
   z-index: 999;
   max-width: min(520px, calc(100vw - 36px));
   background: var(--bg-panel);
@@ -7279,7 +7282,7 @@ button.dangerBtn:disabled {
   .foremanToast {
     left: 18px;
     right: 18px;
-    bottom: 86px;
+    bottom: calc(86px + env(safe-area-inset-bottom));
   }
 }
 
@@ -8857,8 +8860,8 @@ button.dangerBtn:disabled {
   }
 
   .secOrb {
-    right: 16px;
-    bottom: 16px;
+    right: max(16px, env(safe-area-inset-right));
+    bottom: max(16px, env(safe-area-inset-bottom));
   }
 
   .secDrawer {
@@ -8878,6 +8881,24 @@ button.dangerBtn:disabled {
     left: 16px;
     bottom: 84px;
     max-width: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.001ms !important;
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+  }
+
+  .row:hover,
+  .secRow:hover,
+  button.primary:hover:not(:disabled),
+  button.dangerBtn:hover:not(:disabled),
+  .secOrb:hover {
+    transform: none !important;
   }
 }
 </style>
