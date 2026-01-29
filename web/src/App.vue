@@ -127,6 +127,13 @@ const selectedTask = computed(
 const selectedLogs = computed(
   () => logsByTask.value.get(selectedTaskId.value) ?? [],
 );
+const selectedRunInstruction = computed(() => {
+  const t = selectedTask.value;
+  if (!t) return "";
+  const mode = t.mode === "resume" ? "Resume" : "New";
+  const p = promptSummary(t.prompt);
+  return p ? `${mode} · ${p}` : mode;
+});
 
 const outputTab = ref<"result" | "logs" | "trace">("result");
 const resultPreviewTab = ref<"markdown" | "raw" | "html">("markdown");
@@ -184,6 +191,37 @@ const filesFileOriginal = ref("");
 const filesFileLoading = ref(false);
 const filesFileError = ref("");
 const filesSaving = ref(false);
+
+const filesSidebarWidth = ref(340);
+const filesResizing = ref(false);
+
+function startFilesResize(e: MouseEvent) {
+  filesResizing.value = true;
+  document.body.style.cursor = "col-resize";
+  document.body.style.userSelect = "none";
+
+  const startX = e.clientX;
+  const startWidth = filesSidebarWidth.value;
+
+  const onMove = (tm: MouseEvent) => {
+    const diff = tm.clientX - startX;
+    let newW = startWidth + diff;
+    if (newW < 200) newW = 200;
+    if (newW > 800) newW = 800;
+    filesSidebarWidth.value = newW;
+  };
+
+  const onUp = () => {
+    filesResizing.value = false;
+    document.body.style.cursor = "";
+    document.body.style.userSelect = "";
+    window.removeEventListener("mousemove", onMove);
+    window.removeEventListener("mouseup", onUp);
+  };
+
+  window.addEventListener("mousemove", onMove);
+  window.addEventListener("mouseup", onUp);
+}
 
 const filesDirty = computed(
   () => filesFileContent.value !== filesFileOriginal.value,
@@ -1248,6 +1286,62 @@ function sessionDisplayLabel(s: SessionGroup): string {
   const t = (s.title ?? "").trim();
   if (t) return t;
   return sessionShortID(s);
+}
+
+function toSingleLine(text: string): string {
+  return (text ?? "").replace(/\s+/g, " ").trim();
+}
+
+function shortPathTail(path: string, segments = 2): string {
+  const raw = (path ?? "").trim();
+  if (!raw) return "";
+  const norm = normalizePathForCompare(raw);
+  if (!norm) return raw;
+  if (norm === "/") return "/";
+  const parts = norm.split("/").filter(Boolean);
+  if (parts.length === 0) return raw;
+  const tail = parts.slice(-Math.max(1, segments)).join("/");
+  return parts.length > segments ? `…/${tail}` : tail;
+}
+
+function workdirLabelForSession(workdir: string): string {
+  const raw = (workdir ?? "").trim();
+  if (!raw) return "";
+  const dir = normalizePathForCompare(raw);
+  if (!dir) return raw;
+
+  // Prefer the longest pinned workspace prefix with a user-defined name.
+  let bestRoot = "";
+  let bestName = "";
+  for (const p of pinnedWorkspaces.value) {
+    const root = normalizePathForCompare(p);
+    if (!root) continue;
+    if (!(dir === root || dir.startsWith(root + "/"))) continue;
+    const name = pinnedWorkspaceName(p);
+    if (!name) continue;
+    if (root.length > bestRoot.length) {
+      bestRoot = root;
+      bestName = name;
+    }
+  }
+
+  if (!bestName) return shortPathTail(dir, 2);
+  if (dir === bestRoot) return bestName;
+
+  let rel = dir.slice(bestRoot.length);
+  if (rel.startsWith("/")) rel = rel.slice(1);
+  const relParts = rel.split("/").filter(Boolean);
+  if (relParts.length === 0) return bestName;
+
+  const relTail =
+    relParts.length <= 2
+      ? relParts.join("/")
+      : `…/${relParts.slice(-2).join("/")}`;
+  return `${bestName}/${relTail}`;
+}
+
+function promptSummary(text: string): string {
+  return toSingleLine(text);
 }
 
 function openSessionRename(s: SessionGroup) {
@@ -3303,7 +3397,14 @@ watch(
                 <span v-if="s.deleted_at" class="pill deleted">deleted</span>
               </div>
               <div class="rowTopRight">
+                <span
+                  v-if="s.latest.warning || s.warning"
+                  class="warn"
+                  :title="s.latest.warning || s.warning"
+                  >⚠</span
+                >
                 <span class="pill" :class="s.status">{{ s.status }}</span>
+                <span class="pill kind">{{ s.runs.length }} runs</span>
                 <details class="rowMore" @click.stop>
                   <summary
                     title="More"
@@ -3327,19 +3428,17 @@ watch(
                 </details>
               </div>
             </div>
-            <div class="rowMid">
-              <span class="pill kind">{{ s.worker_type }}</span>
-              <span class="score">score {{ s.score }}</span>
-              <span class="pill kind">{{ s.runs.length }} runs</span>
+            <div class="rowSub">
+              <span class="rowWorkdir mono" :title="s.workdir">{{
+                workdirLabelForSession(s.workdir)
+              }}</span>
               <span
-                v-if="s.latest.warning || s.warning"
-                class="warn"
-                :title="s.latest.warning || s.warning"
-                >⚠</span
+                v-if="promptSummary(s.latest.prompt)"
+                class="rowPrompt"
+                :title="s.latest.prompt"
+                >{{ promptSummary(s.latest.prompt) }}</span
               >
             </div>
-            <div class="rowPath mono" :title="s.workdir">{{ s.workdir }}</div>
-            <div class="rowBottom">{{ s.latest.prompt }}</div>
           </div>
 
           <button
@@ -3396,6 +3495,12 @@ watch(
                   class="warn"
                   :title="selectedTask.error"
                   >!</span
+                >
+                <span
+                  v-if="selectedRunInstruction"
+                  class="detailPrompt"
+                  :title="selectedRunInstruction"
+                  >{{ selectedRunInstruction }}</span
                 >
               </div>
               <div class="detailTopActions">
@@ -4947,7 +5052,7 @@ watch(
               <div v-if="filesNotice" class="tinyHint">{{ filesNotice }}</div>
             </div>
 
-            <div class="filesSplit">
+            <div class="filesSplit" :style="{ '--sidebar-width': filesSidebarWidth + 'px' }">
               <div class="filesTreePane">
                 <div class="filesTreeActions">
                   <button type="button" @click="filesNewFile" :disabled="!filesRoot">
@@ -5009,6 +5114,12 @@ watch(
                   </div>
                 </div>
               </div>
+
+              <div
+                class="filesResizer"
+                @mousedown="startFilesResize"
+                :class="{ resizing: filesResizing }"
+              ></div>
 
               <div class="filesEditorPane">
                 <div v-if="filesSelectedKind !== 'file'" class="empty">
@@ -6598,8 +6709,22 @@ button.dangerBtn:disabled {
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: 340px 1fr;
-  gap: 12px;
+  grid-template-columns: var(--sidebar-width, 340px) 12px 1fr;
+  gap: 0;
+}
+
+.filesResizer {
+  width: 100%;
+  cursor: col-resize;
+  background: transparent;
+  display: flex;
+  justify-content: center;
+  transition: background 0.2s;
+}
+
+.filesResizer:hover,
+.filesResizer.resizing {
+  background: rgba(148, 163, 184, 0.25);
 }
 
 .filesTreePane,
@@ -6718,6 +6843,9 @@ button.dangerBtn:disabled {
   }
   .filesTreePane {
     max-height: 240px;
+  }
+  .filesResizer {
+    display: none;
   }
 }
 
@@ -7193,6 +7321,34 @@ button.dangerBtn:disabled {
   flex: 0 0 auto;
 }
 
+.rowSub {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.rowWorkdir {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 42%;
+  font-size: 11px;
+  color: var(--text-sub);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rowPrompt {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--text-main);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .rowName {
   font-size: 12px;
   font-weight: 700;
@@ -7250,38 +7406,6 @@ button.dangerBtn:disabled {
 .rowMorePopup button {
   width: 100%;
   text-align: left;
-}
-
-.rowMid {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--text-sub);
-  font-size: 11px;
-  margin-bottom: 6px;
-}
-
-.rowPath {
-  font-size: 11px;
-  color: var(--text-sub);
-  margin-bottom: 4px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  background: rgba(15, 23, 42, 0.06);
-  padding: 2px 8px;
-  border-radius: 999px;
-}
-
-.rowBottom {
-  font-size: 12px;
-  color: var(--text-main);
-  display: -webkit-box;
-  line-clamp: 1;
-  -webkit-line-clamp: 1;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-  line-height: 1.35;
 }
 
 .mono {
@@ -7425,6 +7549,19 @@ button.dangerBtn:disabled {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.detailPrompt {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--text-sub);
+  padding-left: 10px;
+  margin-left: 2px;
+  border-left: 1px solid rgba(148, 163, 184, 0.25);
 }
 
 .detailMini {
@@ -7919,7 +8056,10 @@ button.dangerBtn:disabled {
 }
 
 .resultBox.markdown :deep(table) {
-  width: 100%;
+  width: max-content;
+  max-width: 100%;
+  display: block;
+  overflow-x: auto;
   border-collapse: collapse;
   margin: 10px 0;
   font-size: 13px;
@@ -7945,6 +8085,11 @@ button.dangerBtn:disabled {
   background: var(--bg-subtle);
   color: var(--text-main);
   border-radius: 10px;
+}
+
+.resultBox.markdown :deep(img) {
+  max-width: 100%;
+  height: auto;
 }
 
 .resultBox.markdown :deep(.mermaid) {
