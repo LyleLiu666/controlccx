@@ -124,18 +124,17 @@ This is the next actionable queue after the completed phases above. New items MU
 3) `add-quick-actions`
    - High-frequency cockpit shortcuts (one-click actions) for common workflows and “what’s next” guidance.
 
-4) `add-attention-autopilot`
-   - “Needs attention” should be handled proactively by the Secretary where possible (auto-continue/auto-retry/auto-diagnose), escalating to user only when truly necessary.
-
-5) `add-file-advanced-capabilities`
+4) `add-file-advanced-capabilities`
    - File search, diff viewer, file monitor, upload/download (workbench-style; optional but valuable for power users).
 
-6) `add-editor-monaco`
-   - Monaco-grade editing for large files/language service/diff (workbench-style; optional; depends on 5).
+5) `add-editor-monaco`
+   - Monaco-grade editing for large files/language service/diff (workbench-style; optional; depends on 4).
 
 ### Timeline (Chronological, newest → oldest)
 This is a time-ordered view for quickly understanding recent work. It does not replace dependency-driven ordering.
 
+- `add-attention-autopilot` (done)
+- `update-vision-metrics` (done)
 - `update-secretary-drawer-ui` (done)
 - `update-secretary-autoresume` (done)
 - `update-dashboard-focus-polish` (done)
