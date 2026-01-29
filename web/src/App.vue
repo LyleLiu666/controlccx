@@ -52,6 +52,13 @@ import {
   updateAuth,
 } from "./api";
 import { appendChatMessageUnique, sendChatAndReload } from "./chatOps";
+import {
+  attentionAutopilotIsNoConversationFound,
+  attentionAutopilotMarkSeen,
+  attentionAutopilotSeenAtMs,
+  attentionAutopilotShouldAttempt,
+  attentionAutopilotStopForSession,
+} from "./attentionAutopilot";
 
 const tasks = ref<Map<string, Task>>(new Map());
 const selectedTaskId = ref<string>("");
@@ -252,6 +259,8 @@ const sessionsFiltersOpen = ref(false);
 const LS_KEY_AUTO_DELIVERY_FOREMAN = "controlccx.auto_delivery_foreman.v1";
 const LS_KEY_DELIVERY_FOREMAN_SEEN = "controlccx.delivery_foreman.seen_runs.v1";
 const LS_KEY_CLAUDE_AUTO_APPROVE = "controlccx.claude.auto_approve.v1";
+const LS_KEY_ATTENTION_AUTOPILOT = "controlccx.attention_autopilot.v1";
+const LS_KEY_ATTENTION_AUTOPILOT_SEEN = "controlccx.attention_autopilot.seen.v1";
 
 const autoDeliveryForeman = ref<boolean>(true);
 const deliveryForemanSeenRuns = ref<Set<string>>(new Set());
@@ -259,6 +268,13 @@ const deliveryForemanRunning = ref(false);
 const deliveryForemanQueue = ref<Task[]>([]);
 const deliveryForemanToast = ref("");
 const deliveryForemanToastOpen = ref(false);
+
+const attentionAutopilotEnabled = ref<boolean>(true);
+const attentionAutopilotRunning = ref(false);
+const attentionAutopilotQueue = ref<string[]>([]);
+const attentionAutopilotQueued = new Set<string>();
+const attentionAutopilotSeen = ref<Record<string, string>>({});
+const attentionAutopilotNote = ref("");
 
 function formatLogTime(ts: string): string {
   const s = (ts ?? "").trim();
@@ -989,6 +1005,8 @@ const workspaceSelect = ref<string>(loadString(LS_KEY_WORKSPACE_FILTER));
   autoDeliveryForeman.value = loadBool(LS_KEY_AUTO_DELIVERY_FOREMAN, true);
   deliveryForemanSeenRuns.value = new Set(loadStringArray(LS_KEY_DELIVERY_FOREMAN_SEEN));
   claudeAutoApprove.value = loadBool(LS_KEY_CLAUDE_AUTO_APPROVE, false);
+  attentionAutopilotEnabled.value = loadBool(LS_KEY_ATTENTION_AUTOPILOT, true);
+  attentionAutopilotSeen.value = loadStringMap(LS_KEY_ATTENTION_AUTOPILOT_SEEN);
 
   const fs = loadString(LS_KEY_FEED_SCOPE).trim();
   if (fs === "current" || fs === "all") liveScope.value = fs;
@@ -1074,6 +1092,7 @@ watch(secretaryView, (v) => saveString(LS_KEY_SECRETARY_VIEW, v));
 watch(secretaryScope, (v) => saveString(LS_KEY_SECRETARY_SCOPE, v));
 watch(autoDeliveryForeman, (v) => saveBool(LS_KEY_AUTO_DELIVERY_FOREMAN, Boolean(v)));
 watch(claudeAutoApprove, (v) => saveBool(LS_KEY_CLAUDE_AUTO_APPROVE, Boolean(v)));
+watch(attentionAutopilotEnabled, (v) => saveBool(LS_KEY_ATTENTION_AUTOPILOT, Boolean(v)));
 watch(theme, (v) => saveString(LS_KEY_THEME, v));
 watch(liveScope, (v) => saveString(LS_KEY_FEED_SCOPE, v));
 watch(liveWrap, (v) => saveBool(LS_KEY_FEED_WRAP, v));
@@ -1193,6 +1212,15 @@ async function refresh() {
   const next = new Map<string, Task>();
   for (const t of taskList) next.set(t.id, t);
   tasks.value = next;
+  // If the page reloads while a session is interrupted, Autopilot should still try once.
+  if (attentionAutopilotEnabled.value) {
+    const keys = new Set<string>();
+    for (const t of taskList) {
+      if (t.status !== "interrupted") continue;
+      keys.add(sessionKeyForTask(t));
+    }
+    for (const k of keys) enqueueAttentionAutopilot(k);
+  }
   if (selectedTaskId.value && !tasks.value.has(selectedTaskId.value)) {
     selectedTaskId.value = taskList[0]?.id ?? "";
   } else if (!selectedTaskId.value) {
@@ -1584,6 +1612,110 @@ async function maybeTriggerDeliveryForeman(prev: Task | undefined, next: Task) {
   } finally {
     deliveryForemanRunning.value = false;
   }
+}
+
+const ATTENTION_AUTOPILOT_COOLDOWN_MS = 5 * 60 * 1000;
+
+function persistAttentionAutopilotSeen() {
+  saveStringMap(LS_KEY_ATTENTION_AUTOPILOT_SEEN, attentionAutopilotSeen.value);
+}
+
+function markAttentionAutopilotSeen(sessionKey: string) {
+  attentionAutopilotSeen.value = attentionAutopilotMarkSeen(
+    attentionAutopilotSeen.value,
+    sessionKey,
+    Date.now(),
+  );
+  persistAttentionAutopilotSeen();
+}
+
+function stopAttentionAutopilotForSession(sessionKey: string) {
+  attentionAutopilotSeen.value = attentionAutopilotStopForSession(
+    attentionAutopilotSeen.value,
+    sessionKey,
+  );
+  persistAttentionAutopilotSeen();
+}
+
+function enqueueAttentionAutopilot(sessionKey: string) {
+  const k = String(sessionKey ?? "").trim();
+  if (!k) return;
+  if (attentionAutopilotQueued.has(k)) return;
+  attentionAutopilotQueued.add(k);
+  attentionAutopilotQueue.value = [...attentionAutopilotQueue.value, k].slice(0, 20);
+  void runAttentionAutopilotLoop();
+}
+
+async function runAttentionAutopilotLoop() {
+  if (attentionAutopilotRunning.value) return;
+  if (!attentionAutopilotEnabled.value) return;
+  attentionAutopilotRunning.value = true;
+  try {
+    while (attentionAutopilotQueue.value.length) {
+      if (!attentionAutopilotEnabled.value) return;
+      const [key, ...rest] = attentionAutopilotQueue.value;
+      attentionAutopilotQueue.value = rest;
+      attentionAutopilotQueued.delete(key);
+
+      const sess = sessionsAll.value.find((s) => s.key === key) ?? null;
+      if (!sess) continue;
+
+      if (sess.deleted_at) continue;
+      if (!sess.session_id) continue;
+      if (sess.status !== "interrupted") continue;
+      if (sess.latest.status === "running" || sess.latest.status === "queued") continue;
+
+      const now = Date.now();
+      const last = attentionAutopilotSeenAtMs(attentionAutopilotSeen.value, key);
+      const should = attentionAutopilotShouldAttempt({
+        enabled: attentionAutopilotEnabled.value,
+        deleted: Boolean(sess.deleted_at),
+        hasSessionID: Boolean(sess.session_id?.trim()),
+        sessionStatus: sess.status,
+        latestStatus: sess.latest.status,
+        nowMs: now,
+        lastAttemptMs: last,
+        cooldownMs: ATTENTION_AUTOPILOT_COOLDOWN_MS,
+      });
+      if (!should) continue;
+
+      markAttentionAutopilotSeen(key);
+
+      const short = (sess.session_id || sess.latest.id).slice(0, 8);
+      attentionAutopilotNote.value = `Autopilot: resuming ${short}…`;
+      try {
+        const unsafe = sess.worker_type === "claude-code" ? Boolean(claudeAutoApprove.value) : false;
+        const nt = await resumeTaskWithOptions(sess.latest.id, {
+          prompt: "continue",
+          unsafe_automation: unsafe || undefined,
+        });
+        upsertTask(nt);
+        attentionAutopilotNote.value = `Autopilot: resume started for ${short}.`;
+      } catch (e: any) {
+        const msg = e?.message ?? String(e);
+        if (attentionAutopilotIsNoConversationFound(msg)) {
+          stopAttentionAutopilotForSession(key);
+          attentionAutopilotNote.value = `Autopilot stopped for ${short}: session not found. Start a new run instead.`;
+        } else {
+          attentionAutopilotNote.value = `Autopilot: resume failed for ${short}: ${msg}`;
+        }
+      }
+    }
+  } finally {
+    attentionAutopilotRunning.value = false;
+  }
+}
+
+function maybeTriggerAttentionAutopilot(prev: Task | undefined, next: Task) {
+  if (!attentionAutopilotEnabled.value) return;
+  if (!next?.id) return;
+  if (!prev) return;
+  if (prev.status === next.status) return;
+  if (next.status !== "interrupted") return;
+
+  // Non-disruptive: enqueue and run in background; do not steal focus.
+  const key = sessionKeyForTask(next);
+  enqueueAttentionAutopilot(key);
 }
 
 async function onCancelTask() {
@@ -2238,6 +2370,7 @@ function connectEvents() {
         upsertTask(nextTask);
         // Fire-and-forget; avoid blocking SSE handling.
         void maybeTriggerDeliveryForeman(prevTask, nextTask);
+        maybeTriggerAttentionAutopilot(prevTask, nextTask);
       } else if (evt.type === "task.log") {
         appendLog(evt.payload as LogEntry);
       } else if (evt.type === "chat.message") {
@@ -2800,7 +2933,10 @@ const needsAttentionSessions = computed(() => {
     .filter(
       (s) =>
         s.status !== "succeeded" &&
-        (s.score > 0 || s.status === "failed" || s.status === "blocked"),
+        (s.score > 0 ||
+          s.status === "failed" ||
+          s.status === "blocked" ||
+          s.status === "interrupted"),
     )
     .slice(0, 6);
 });
@@ -4048,10 +4184,19 @@ watch(
             <div class="secSection">
               <div class="secSectionTitleRow">
                 <div class="secSectionTitle">Needs Attention</div>
-                <select v-model="secretaryScope" class="secScopeSelect" title="Scope">
-                  <option value="current">Current</option>
-                  <option value="all">All</option>
-                </select>
+                <div class="secSectionControls">
+                  <select v-model="secretaryScope" class="secScopeSelect" title="Scope">
+                    <option value="current">Current</option>
+                    <option value="all">All</option>
+                  </select>
+                  <label class="secMiniToggle" title="Auto resume interrupted sessions">
+                    <input type="checkbox" v-model="attentionAutopilotEnabled" />
+                    Autopilot
+                  </label>
+                </div>
+              </div>
+              <div v-if="attentionAutopilotNote" class="secAutopilotNote">
+                {{ attentionAutopilotNote }}
               </div>
               <div v-if="needsAttentionSessions.length === 0" class="empty">
                 暂无需要关注的 session
@@ -8378,10 +8523,45 @@ button.dangerBtn:disabled {
   gap: 10px;
 }
 
+.secSectionControls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
 .secScopeSelect {
   padding: 6px 10px;
   font-size: 12px;
   border-radius: 999px;
+}
+
+.secMiniToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  background: var(--bg-subtle);
+  color: var(--text-sub);
+  font-size: 12px;
+  font-weight: 800;
+  user-select: none;
+}
+
+.secMiniToggle input {
+  width: 14px;
+  height: 14px;
+}
+
+.secAutopilotNote {
+  font-size: 12px;
+  color: var(--text-sub);
+  background: var(--bg-subtle);
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  padding: 8px 10px;
+  border-radius: var(--radius-md);
+  overflow-wrap: anywhere;
 }
 
 .secRow {
