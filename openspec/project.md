@@ -7,6 +7,43 @@ while an observer assistant monitors execution using task/log/system context and
 ## Vision
 一个以 Claude Code 和 Codex 为基础的 agent 系统：用户可以方便地创建任务、同时管理多个任务，免去 TUI 的不方便；易用、好用、安全、有流程；既能以简洁的 UX 满足普通用户，也提供足够的功能纵深满足高端用户。
 
+## Product Principles (3–5)
+These principles are used to order roadmap work, shape specs, and define “better” in reviews.
+
+1) **Cockpit-first UX (progressive disclosure)**
+   - Default UI MUST feel like a “驾驶室”：focus on the few high-frequency actions (create / monitor / resume / copy results).
+   - Advanced controls MUST exist, but SHOULD be hidden behind progressive disclosure (menus/drawers) and never dominate the main canvas.
+
+2) **Resumability and resilience**
+   - Users MUST be able to resume/reattach to in-flight work without losing context.
+   - If resume is impossible (e.g. the conversation/session truly does not exist), the system MUST fail fast with a clear, actionable error (not silently creating a meaningless new run).
+
+3) **Safety by default, with explicit governance**
+   - Powerful actions (workspace writes, deletions, risky commands) MUST be governed by an approval workflow.
+   - The workflow MUST be predictable and explainable: users should understand “why it was blocked” and “what to do next”.
+
+4) **Never feel stuck (observable progress)**
+   - While work is running, the UI MUST always show what is happening “now” (active step / active tool / latest logs).
+   - Long-running silence SHOULD be mitigated with explicit “still running” signals (heartbeats, tool activity, milestones).
+
+5) **Local-first, cross-platform, one-command start**
+   - The system SHOULD run locally, be cross-platform, and be easy to start and operate.
+   - External CLIs (Claude/Codex) MUST be discoverable/configurable across common install methods.
+
+## North Star Metrics & Acceptance Criteria
+We use these to evaluate whether an iteration moves the product closer to the vision.
+
+### North Star Metrics (observable/testable)
+- **Time-to-start**: from clicking “New Run” to first visible log/event should be fast (target: <10s in a healthy local setup).
+- **Continuity success rate**: resuming a valid session should succeed reliably; invalid resumes should fail fast with a clear reason and next-step guidance.
+- **Stuck perception**: during a long run, users can always tell the system is working (active step shown, newest logs surfaced, no “is it frozen?” moments).
+- **Safety coverage**: unsafe actions are consistently routed through the intended approval mode without accidental bypass.
+
+### Acceptance Criteria (what “done” means per iteration)
+- Every OpenSpec change MUST state which principle(s) and metric(s) it is improving.
+- Every OpenSpec change MUST include a verification step (tests, validate, or a reproducible manual checklist).
+- UX changes MUST include at least one narrow-screen/mobile check.
+
 ## Tech Stack
 - Backend: Go (HTTP API, SSE, worker orchestration)
 - Frontend: Vue 3 + Vite (task dashboard + chat UI)
@@ -74,6 +111,27 @@ with strong foundations first, then add higher-level productivity layers.
 
 8) **Foreman Dashboard (operational overview)**
    - `add-foreman-dashboard` (done)
+
+### Next Changes Queue (dependency-ordered)
+This is the next actionable queue after the completed phases above. New items MUST be appended here (and ordered) before implementation starts.
+
+1) `update-mobile-shell-polish`
+   - Keyboard/IME/viewport edge cases, accessibility (reduce motion), and narrow-screen ergonomics.
+
+2) `add-context-and-templates`
+   - Context panel, context compression, and reusable templates to reduce “blank prompt” work.
+
+3) `add-quick-actions`
+   - High-frequency cockpit shortcuts (one-click actions) for common workflows and “what’s next” guidance.
+
+4) `add-attention-autopilot`
+   - “Needs attention” should be handled proactively by the Secretary where possible (auto-continue/auto-retry/auto-diagnose), escalating to user only when truly necessary.
+
+5) `add-file-advanced-capabilities`
+   - File search, diff viewer, file monitor, upload/download (workbench-style; optional but valuable for power users).
+
+6) `add-editor-monaco`
+   - Monaco-grade editing for large files/language service/diff (workbench-style; optional; depends on 5).
 
 ### Timeline (Chronological, newest → oldest)
 This is a time-ordered view for quickly understanding recent work. It does not replace dependency-driven ordering.
