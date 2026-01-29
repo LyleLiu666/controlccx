@@ -62,6 +62,7 @@ import {
 } from "./attentionAutopilot";
 import { computePopupPosition } from "./menuPosition";
 import { prettifyLogMessage } from "./logPretty";
+import { deriveRunActivity } from "./runActivity";
 
 const tasks = ref<Map<string, Task>>(new Map());
 const selectedTaskId = ref<string>("");
@@ -145,6 +146,12 @@ const selectedRunInstruction = computed(() => {
   const mode = t.mode === "resume" ? "Resume" : "New";
   const p = promptSummary(t.prompt);
   return p ? `${mode} · ${p}` : mode;
+});
+const selectedRunActivity = computed(() => {
+  const t = selectedTask.value;
+  if (!t) return null;
+  if (!(t.status === "running" || t.status === "queued")) return null;
+  return deriveRunActivity(selectedLogs.value);
 });
 
 const outputTab = ref<"result" | "logs" | "trace">("result");
@@ -3812,7 +3819,13 @@ watch(
                   >!</span
                 >
                 <span
-                  v-if="selectedRunInstruction"
+                  v-if="selectedRunActivity"
+                  class="detailPrompt running"
+                  :title="`${formatLocalDateTime(selectedRunActivity.time)} · ${selectedRunActivity.summary}`"
+                  >{{ selectedRunActivity.summary }}</span
+                >
+                <span
+                  v-else-if="selectedRunInstruction"
                   class="detailPrompt"
                   :title="selectedRunInstruction"
                   >{{ selectedRunInstruction }}</span
@@ -8073,6 +8086,27 @@ button.dangerBtn:disabled {
   padding-left: 10px;
   margin-left: 2px;
   border-left: 1px solid rgba(148, 163, 184, 0.25);
+}
+
+.detailPrompt.running {
+  flex: 0 1 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-left: none;
+  padding: 4px 10px;
+  margin-left: 8px;
+  border: 1px solid rgba(20, 184, 166, 0.35);
+  background: rgba(20, 184, 166, 0.12);
+  color: var(--text-main);
+  font-weight: 800;
+  border-radius: 999px;
+}
+
+.detailPrompt.running::before {
+  content: "⏳";
+  font-size: 12px;
+  opacity: 0.9;
 }
 
 .detailMini {

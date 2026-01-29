@@ -145,9 +145,22 @@ const defaultAgentSystemPrompt = `You are the ControlCCX Secretary (an agent).
 
 You MUST answer user questions by calling the provided tools when needed, and you MUST NOT invent task/log/system data.
 
-You MUST respond with exactly one JSON object and nothing else.
+You MUST respond in ONE of the following formats and nothing else.
+Prefer the tag format (it is more robust for long messages).
 
-Allowed response shapes:
+Format A (preferred, tag format):
+1) Tool call:
+<action>tool</action>
+<tool><tool_name></tool>
+<args>{...json...}</args>
+
+2) Final answer:
+<action>final</action>
+<message><your answer in Chinese></message>
+
+IMPORTANT: Do NOT include literal "<action>" or "<message>" inside <message>.
+
+Format B (legacy JSON format):
 1) Tool call:
 {"action":"tool","tool":"<tool_name>","args":{...}}
 2) Final answer:
@@ -223,21 +236,110 @@ func parseAgentStep(raw string) (agentStep, bool) {
 		// Remove optional language (e.g. json).
 		if i := strings.IndexByte(s, '\n'); i >= 0 {
 			head := strings.TrimSpace(s[:i])
-				if len(head) <= 16 && !strings.ContainsAny(head, "{}[]\"") {
-					s = strings.TrimSpace(s[i+1:])
-				}
+			if len(head) <= 16 && !strings.ContainsAny(head, "{}[]\"") {
+				s = strings.TrimSpace(s[i+1:])
 			}
+		}
 		if j := strings.LastIndex(s, "```"); j >= 0 {
 			s = strings.TrimSpace(s[:j])
 		}
 	}
 
+	// Prefer robust tag format for long messages:
+	// <action>final</action><message>...</message>
+	// <action>tool</action><tool>...</tool><args>{...}</args>
+	if step, ok := parseAgentStepTags(s); ok {
+		return step, true
+	}
+
+	if step, ok := parseAgentStepJSON(s); ok {
+		return step, true
+	}
+	// If the model wrapped JSON with extra text, try extracting from the last json-ish prefix.
+	if i := strings.LastIndex(s, `{"action"`); i >= 0 {
+		if step, ok := parseAgentStepJSON(s[i:]); ok {
+			return step, true
+		}
+	}
+	// Fall back to first object.
+	if i := strings.IndexByte(s, '{'); i >= 0 {
+		if step, ok := parseAgentStepJSON(s[i:]); ok {
+			return step, true
+		}
+	}
+	return agentStep{}, false
+}
+
+func parseAgentStepJSON(s string) (agentStep, bool) {
+	dec := json.NewDecoder(strings.NewReader(strings.TrimSpace(s)))
 	var step agentStep
-	if err := json.Unmarshal([]byte(s), &step); err != nil {
+	if err := dec.Decode(&step); err != nil {
 		return agentStep{}, false
 	}
 	step.Action = strings.TrimSpace(step.Action)
 	step.Tool = strings.TrimSpace(step.Tool)
 	step.Message = strings.TrimSpace(step.Message)
 	return step, step.Action != ""
+}
+
+func parseAgentStepTags(s string) (agentStep, bool) {
+	action, ok := extractLastTag(s, "action")
+	if !ok {
+		return agentStep{}, false
+	}
+	step := agentStep{Action: strings.TrimSpace(action)}
+	if step.Action == "" {
+		return agentStep{}, false
+	}
+	switch step.Action {
+	case "final":
+		msg, ok := extractLastTag(s, "message")
+		if !ok {
+			return agentStep{}, false
+		}
+		step.Message = strings.TrimSpace(msg)
+		return step, step.Message != ""
+	case "tool":
+		tool, ok := extractLastTag(s, "tool")
+		if !ok {
+			return agentStep{}, false
+		}
+		step.Tool = strings.TrimSpace(tool)
+		if step.Tool == "" {
+			return agentStep{}, false
+		}
+		argsRaw, ok := extractLastTag(s, "args")
+		if ok {
+			var args map[string]any
+			if err := json.Unmarshal([]byte(strings.TrimSpace(argsRaw)), &args); err == nil && args != nil {
+				step.Args = args
+			}
+		}
+		return step, true
+	default:
+		return agentStep{}, false
+	}
+}
+
+func extractLastTag(s string, tag string) (string, bool) {
+	raw := s
+	low := strings.ToLower(raw)
+	open := "<" + strings.ToLower(tag) + ">"
+	close := "</" + strings.ToLower(tag) + ">"
+
+	searchFrom := len(low)
+	for searchFrom > 0 {
+		i := strings.LastIndex(low[:searchFrom], open)
+		if i < 0 {
+			return "", false
+		}
+		start := i + len(open)
+		j := strings.Index(low[start:], close)
+		if j < 0 {
+			searchFrom = i
+			continue
+		}
+		return raw[start : start+j], true
+	}
+	return "", false
 }
