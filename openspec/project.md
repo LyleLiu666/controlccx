@@ -130,6 +130,7 @@ This is the next actionable queue after the completed phases above. New items MU
 ### Timeline (Chronological, newest → oldest)
 This is a time-ordered view for quickly understanding recent work. It does not replace dependency-driven ordering.
 
+- `update-codex-sandbox-mode` (done)
 - `update-mobile-shell-polish` (done)
 - `add-attention-autopilot` (done)
 - `update-vision-metrics` (done)

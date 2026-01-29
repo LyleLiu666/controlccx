@@ -95,6 +95,9 @@ func buildCodex(cfg config.Config, task tasks.Task) (ToolCommand, error) {
 	args := []string{"e"}
 	if cfg.Workers.UnsafeAutomation || task.UnsafeAutomation {
 		args = append(args, "--dangerously-bypass-approvals-and-sandbox")
+	} else {
+		// Safe default: allow workspace writes while keeping Codex sandboxing/approvals.
+		args = append(args, "--sandbox", "workspace-write")
 	}
 	args = append(args, "--skip-git-repo-check")
 

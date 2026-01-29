@@ -4625,7 +4625,7 @@ watch(
 	
 	    <div
 	      v-if="newRunOpen"
-	      class="modalOverlay"
+	      class="modalOverlay newRunOverlay"
       @click.self="closeNewRun"
     >
       <div class="modal newRunModal">
@@ -4654,9 +4654,16 @@ watch(
               v-if="(newTool?.driver ?? newWorkerType) === 'claude-code'"
               class="newRunAutoApprove full"
             >
-              <label class="settingsToggleRow">
-                <input type="checkbox" v-model="claudeAutoApprove" />
-                <span>Auto-approve tools (dangerous)</span>
+              <label class="newRunAutoApproveRow">
+                <span class="newRunAutoApproveTitle">
+                  Auto-approve tools <span class="pill warn">dangerous</span>
+                </span>
+                <input
+                  type="checkbox"
+                  class="newRunSwitch"
+                  v-model="claudeAutoApprove"
+                  :title="'Enables --dangerously-skip-permissions (dangerous)'"
+                />
               </label>
               <div class="tinyHint">
                 Enables <span class="mono">--dangerously-skip-permissions</span>. Use only if you accept the risk.
@@ -6186,11 +6193,89 @@ button.dangerBtn:disabled {
 
 .newRunBody {
   padding: 0;
+  overflow: auto;
+}
+
+.modal.newRunModal {
+  height: min(680px, 92vh);
 }
 
 .newRunForm {
   padding: 20px;
   margin: 0;
+  min-height: 0;
+}
+
+.newRunAutoApprove {
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--bg-subtle);
+  padding: 12px 14px;
+  display: grid;
+  gap: 10px;
+}
+
+.newRunAutoApprove label.newRunAutoApproveRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-direction: row;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-main);
+  user-select: none;
+}
+
+.newRunAutoApproveTitle {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.newRunSwitch {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 46px;
+  height: 26px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.22);
+  border: 1px solid rgba(148, 163, 184, 0.45);
+  position: relative;
+  flex: 0 0 auto;
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.newRunSwitch::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  background: var(--bg-panel);
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
+  transition: transform 0.15s ease, background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.newRunSwitch:checked {
+  background: var(--color-primary-bg);
+  border-color: var(--color-primary);
+}
+
+.newRunSwitch:checked::after {
+  transform: translateX(20px);
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+}
+
+.newRunSwitch:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--color-primary-bg);
 }
 
 .newRunHint {
@@ -8855,6 +8940,10 @@ button.dangerBtn:disabled {
 }
 
 @media (max-width: 720px) {
+  .newRunForm {
+    grid-template-columns: 1fr;
+  }
+
   .header {
     padding: 12px 16px;
   }
@@ -8881,6 +8970,50 @@ button.dangerBtn:disabled {
     left: 16px;
     bottom: 84px;
     max-width: none;
+  }
+}
+
+@media (max-width: 640px) {
+  .newRunOverlay {
+    padding: 0;
+  }
+
+  .modal.newRunModal {
+    width: 100vw;
+    height: 100dvh;
+    border-radius: 0;
+    border: none;
+    box-shadow: none;
+  }
+
+  .modal.newRunModal .modalHeader {
+    padding-top: calc(16px + env(safe-area-inset-top));
+  }
+
+  .modal.newRunModal .modalFooter {
+    padding-bottom: calc(14px + env(safe-area-inset-bottom));
+  }
+
+  .newRunForm {
+    padding: 16px;
+  }
+}
+
+@media (max-width: 520px) {
+  .modal.newRunModal .workdirRow {
+    grid-template-columns: 1fr;
+  }
+
+  .modal.newRunModal .workdirRow button {
+    width: 100%;
+  }
+
+  .modal.newRunModal .modalFooter {
+    justify-content: space-between;
+  }
+
+  .modal.newRunModal .modalFooter button {
+    flex: 1 1 auto;
   }
 }
 
