@@ -63,6 +63,7 @@ import {
 import { computePopupPosition } from "./menuPosition";
 import { prettifyLogMessage } from "./logPretty";
 import { deriveRunActivity } from "./runActivity";
+import SkillsModal from "./components/SkillsModal.vue";
 
 const tasks = ref<Map<string, Task>>(new Map());
 const selectedTaskId = ref<string>("");
@@ -5422,217 +5423,26 @@ watch(
       </div>
     </div>
 
-    <div
-      v-if="skillsOpen"
-      class="modalOverlay"
-      @click.self="skillsOpen = false"
-    >
-      <div class="modal skillsModal">
-        <div class="modalHeader">
-          <div class="modalTitle">Skills</div>
-          <button
-            type="button"
-            class="headerMiniBtn"
-            @click="refreshSkills"
-            :disabled="skillsLoading"
-          >
-            Refresh
-          </button>
-          <button class="iconBtn" type="button" @click="skillsOpen = false">
-            ✕
-          </button>
-        </div>
-
-        <div class="modalBody skillsBody">
-          <div v-if="skillsError" class="modalError">{{ skillsError }}</div>
-          <div v-else-if="skillsLoading" class="loading">Loading...</div>
-          <template v-else>
-            <div class="skillsMeta">
-              <div class="tinyHint">
-                Sources:
-                <span class="mono">{{
-                  (skillsData?.source_roots ?? []).join(" · ")
-                }}</span>
-              </div>
-              <div class="tinyHint">
-                Targets:
-                <span class="mono">{{
-                  (skillsData?.targets ?? [])
-                    .map((t) => `${t.target}:${t.root}`)
-                    .join(" · ")
-                }}</span>
-              </div>
-            </div>
-
-	            <div class="skillsToolbar">
-	              <input v-model="skillsFilter" placeholder="Filter skills..." />
-	              <label class="skillsLimit">
-	                <span class="tinyHint">Page</span>
-	                <select v-model.number="skillsLimit" :disabled="skillsLoading">
-	                  <option :value="50">50</option>
-	                  <option :value="100">100</option>
-	                  <option :value="200">200</option>
-	                  <option :value="500">500</option>
-	                </select>
-	              </label>
-	              <div class="skillsPager">
-	                <span class="tinyHint mono">{{ skillsRangeLabel }}</span>
-	                <button
-	                  type="button"
-	                  @click="skillsPrevPage"
-	                  :disabled="skillsLoading || !skillsCanPrev"
-	                  title="Previous page"
-	                >
-	                  Prev
-	                </button>
-	                <button
-	                  type="button"
-	                  @click="skillsNextPage"
-	                  :disabled="skillsLoading || !skillsCanNext"
-	                  title="Next page"
-	                >
-	                  Next
-	                </button>
-	              </div>
-	            </div>
-
-	            <div class="skillsTable">
-	              <div class="skillsHead">
-	                <div>Skill</div>
-	                <div>Claude</div>
-	                <div>Codex</div>
-	              </div>
-
-	              <div class="skillsRows">
-	                <div
-	                  v-for="s in skillsVisible"
-	                  :key="s.name"
-	                  class="skillsRow"
-	                >
-	                <div class="skillsName">
-	                  <div class="mono">{{ s.name }}</div>
-	                  <div class="tinyHint mono" v-if="s.source" :title="s.source">
-	                    {{ s.source }}
-	                  </div>
-	                  <div class="tinyHint warn" v-else>missing source</div>
-	                </div>
-
-                <div class="skillsCell">
-                  <template v-for="t in [summarizeSkillTarget(s, 'claude')]" :key="t.target">
-                    <span
-                      class="pill skillStatus"
-                      :class="skillBadgeClass(t.status)"
-                      :title="t.detail"
-                      >{{ t.status }}</span
-                    >
-                    <button
-                      type="button"
-                      class="primary"
-                      v-if="!t.enabled"
-                      @click="onSkillsToggle(s.name, 'claude', true)"
-                      :disabled="
-                        !t.canEnable ||
-                        !!skillsActionBusy.get(skillsKey(s.name, 'claude'))
-                      "
-                      :title="
-                        t.canEnable
-                          ? 'Enable for Claude'
-                          : 'Cannot enable: unmanaged entry exists in target root'
-                      "
-                    >
-                      {{
-                        skillsActionBusy.get(skillsKey(s.name, "claude"))
-                          ? "..."
-                          : "Enable"
-                      }}
-                    </button>
-                    <button
-                      type="button"
-                      v-else
-                      @click="onSkillsToggle(s.name, 'claude', false)"
-                      :disabled="
-                        !t.canDisable ||
-                        !!skillsActionBusy.get(skillsKey(s.name, 'claude'))
-                      "
-                      :title="
-                        t.canDisable
-                          ? 'Disable for Claude'
-                          : 'Cannot disable: unmanaged entry exists in target root'
-                      "
-                    >
-                      {{
-                        skillsActionBusy.get(skillsKey(s.name, "claude"))
-                          ? "..."
-                          : "Disable"
-                      }}
-                    </button>
-                  </template>
-                </div>
-
-                <div class="skillsCell">
-                  <template v-for="t in [summarizeSkillTarget(s, 'codex')]" :key="t.target">
-                    <span
-                      class="pill skillStatus"
-                      :class="skillBadgeClass(t.status)"
-                      :title="t.detail"
-                      >{{ t.status }}</span
-                    >
-                    <button
-                      type="button"
-                      class="primary"
-                      v-if="!t.enabled"
-                      @click="onSkillsToggle(s.name, 'codex', true)"
-                      :disabled="
-                        !t.canEnable ||
-                        !!skillsActionBusy.get(skillsKey(s.name, 'codex'))
-                      "
-                      :title="
-                        t.canEnable
-                          ? 'Enable for Codex'
-                          : 'Cannot enable: unmanaged entry exists in a Codex root'
-                      "
-                    >
-                      {{
-                        skillsActionBusy.get(skillsKey(s.name, "codex"))
-                          ? "..."
-                          : "Enable"
-                      }}
-                    </button>
-                    <button
-                      type="button"
-                      v-else
-                      @click="onSkillsToggle(s.name, 'codex', false)"
-                      :disabled="
-                        !t.canDisable ||
-                        !!skillsActionBusy.get(skillsKey(s.name, 'codex'))
-                      "
-                      :title="
-                        t.canDisable
-                          ? 'Disable for Codex'
-                          : 'Cannot disable: unmanaged entry exists in a Codex root'
-                      "
-                    >
-                      {{
-                        skillsActionBusy.get(skillsKey(s.name, "codex"))
-                          ? "..."
-                          : "Disable"
-                      }}
-                    </button>
-	                  </template>
-	                </div>
-	              </div>
-
-	                <div v-if="!skillsVisible.length" class="empty">No skills</div>
-	              </div>
-	            </div>
-          </template>
-        </div>
-
-        <div class="modalFooter">
-          <button type="button" @click="skillsOpen = false">Close</button>
-        </div>
-      </div>
-    </div>
+    <SkillsModal
+      :open="skillsOpen"
+      :loading="skillsLoading"
+      :error="skillsError"
+      :data="skillsData"
+      v-model:filter="skillsFilter"
+      v-model:limit="skillsLimit"
+      :range-label="skillsRangeLabel"
+      :can-prev="skillsCanPrev"
+      :can-next="skillsCanNext"
+      :action-busy="skillsActionBusy"
+      :summarize-target="summarizeSkillTarget"
+      :badge-class="skillBadgeClass"
+      :make-key="skillsKey"
+      @close="skillsOpen = false"
+      @refresh="refreshSkills"
+      @prev-page="skillsPrevPage"
+      @next-page="skillsNextPage"
+      @toggle="onSkillsToggle"
+    />
 
     <div
       v-if="filesOpen"
@@ -6410,9 +6220,9 @@ h2 {
   overflow-wrap: anywhere;
 }
 
-input:not([type="checkbox"]):not([type="radio"]),
-select,
-textarea {
+:deep(input:not([type="checkbox"]):not([type="radio"])),
+:deep(select),
+:deep(textarea) {
   border: 1px solid var(--border-color);
   background-color: var(--bg-subtle);
   border-radius: var(--radius-md);
@@ -6426,20 +6236,20 @@ textarea {
   box-sizing: border-box;
 }
 
-input:not([type="checkbox"]):not([type="radio"]):focus,
-select:focus,
-textarea:focus {
+:deep(input:not([type="checkbox"]):not([type="radio"]):focus),
+:deep(select:focus),
+:deep(textarea:focus) {
   border-color: var(--color-primary);
   background: var(--bg-panel);
   box-shadow: 0 0 0 3px var(--color-primary-bg);
 }
 
-input[type="checkbox"],
-input[type="radio"] {
+:deep(input[type="checkbox"]),
+:deep(input[type="radio"]) {
   accent-color: var(--color-primary);
 }
 
-textarea {
+:deep(textarea) {
   resize: vertical; /* Only allow vertical resize */
   line-height: 1.6;
   min-height: 92px;
@@ -6457,23 +6267,23 @@ textarea {
   overscroll-behavior: contain;
 }
 
-textarea:hover {
+:deep(textarea:hover) {
   border-color: #94a3b8;
   background-color: var(--bg-panel);
 }
 
-textarea:focus {
+:deep(textarea:focus) {
   border-color: var(--color-primary);
   background-color: var(--bg-panel);
   box-shadow: 0 0 0 3px var(--color-primary-bg), inset 0 1px 2px rgba(0, 0, 0, 0.04);
 }
 
-textarea::placeholder {
+:deep(textarea::placeholder) {
   color: #94a3b8;
   font-style: italic;
 }
 
-button {
+:deep(button) {
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
   padding: 8px 14px;
@@ -6485,33 +6295,33 @@ button {
   transition: all 0.2s;
 }
 
-button:hover:not(:disabled) {
+:deep(button:hover:not(:disabled)) {
   background: var(--bg-subtle);
   border-color: rgba(148, 163, 184, 0.5);
   color: var(--color-primary);
 }
 
-button:disabled {
+:deep(button:disabled) {
   opacity: 0.6;
   cursor: not-allowed;
   background: var(--bg-subtle);
 }
 
-button.primary {
+:deep(button.primary) {
   background: var(--color-primary);
   color: white;
   border-color: var(--color-primary);
   box-shadow: 0 2px 4px rgba(13, 148, 136, 0.2);
 }
 
-button.primary:disabled {
+:deep(button.primary:disabled) {
   background: #94a3b8;
   border-color: #94a3b8;
   opacity: 1;
   box-shadow: none;
 }
 
-button.primary:hover:not(:disabled) {
+:deep(button.primary:hover:not(:disabled)) {
   background: var(--color-primary-hover);
   border-color: var(--color-primary-hover);
   transform: translateY(-1px);
@@ -6519,18 +6329,18 @@ button.primary:hover:not(:disabled) {
   color: white;
 }
 
-button.primary:active:not(:disabled) {
+:deep(button.primary:active:not(:disabled)) {
   transform: translateY(0);
 }
 
-button.dangerBtn {
+:deep(button.dangerBtn) {
   background: #ef4444;
   color: white;
   border-color: #ef4444;
   box-shadow: 0 2px 4px rgba(239, 68, 68, 0.2);
 }
 
-button.dangerBtn:hover:not(:disabled) {
+:deep(button.dangerBtn:hover:not(:disabled)) {
   background: #dc2626;
   border-color: #dc2626;
   box-shadow: 0 4px 6px rgba(220, 38, 38, 0.3);
@@ -6538,11 +6348,11 @@ button.dangerBtn:hover:not(:disabled) {
   transform: translateY(-1px);
 }
 
-button.dangerBtn:active:not(:disabled) {
+:deep(button.dangerBtn:active:not(:disabled)) {
   transform: translateY(0);
 }
 
-button.dangerBtn:disabled {
+:deep(button.dangerBtn:disabled) {
   background: #94a3b8;
   border-color: #94a3b8;
   opacity: 1;
@@ -7139,7 +6949,7 @@ button.dangerBtn:disabled {
   }
 }
 
-.modalOverlay {
+:deep(.modalOverlay) {
   position: fixed;
   inset: 0;
   background: var(--overlay-modal);
@@ -7150,7 +6960,7 @@ button.dangerBtn:disabled {
   z-index: 999;
 }
 
-.modal, .settingsModal {
+:deep(.modal), :deep(.settingsModal) {
   background: var(--bg-panel);
   border-radius: 24px;
   border: 1px solid var(--border-color);
@@ -7159,7 +6969,7 @@ button.dangerBtn:disabled {
   animation: popIn 0.2s ease-out;
 }
 
-.modal {
+:deep(.modal) {
   width: min(860px, 95vw);
   height: min(600px, 90vh);
   display: grid;
@@ -7181,7 +6991,7 @@ button.dangerBtn:disabled {
   height: min(600px, 90vh);
 }
 
-.headerMiniBtn {
+:deep(.headerMiniBtn) {
   margin-left: 10px;
   padding: 6px 10px;
   border-radius: 999px;
@@ -7191,12 +7001,12 @@ button.dangerBtn:disabled {
   font-weight: 700;
 }
 
-.headerMiniBtn:disabled {
+:deep(.headerMiniBtn:disabled) {
   opacity: 0.6;
   cursor: not-allowed;
 }
 
-.skillsModal {
+:deep(.skillsModal) {
   width: min(980px, 95vw);
   height: min(660px, 90vh);
 }
@@ -7263,7 +7073,7 @@ button.dangerBtn:disabled {
   width: 100%;
 }
 
-.skillsBody {
+:deep(.skillsBody) {
   padding-top: 12px;
   display: flex;
   flex-direction: column;
@@ -7271,39 +7081,39 @@ button.dangerBtn:disabled {
   overflow: hidden;
 }
 
-.skillsMeta {
+:deep(.skillsMeta) {
   display: grid;
   gap: 6px;
   margin-bottom: 10px;
 }
 
-.skillsToolbar {
+:deep(.skillsToolbar) {
   display: flex;
   gap: 10px;
   align-items: center;
   margin: 10px 0 14px;
 }
 
-.skillsToolbar input {
+:deep(.skillsToolbar input) {
   width: 100%;
   flex: 1;
   min-width: 0;
 }
 
-.skillsLimit {
+:deep(.skillsLimit) {
   display: flex;
   gap: 8px;
   align-items: center;
   white-space: nowrap;
 }
 
-.skillsPager {
+:deep(.skillsPager) {
   display: flex;
   gap: 8px;
   align-items: center;
 }
 
-.skillsTable {
+:deep(.skillsTable) {
   border: 1px solid var(--border-color);
   border-radius: 14px;
   overflow: hidden;
@@ -7313,7 +7123,7 @@ button.dangerBtn:disabled {
   grid-template-rows: auto 1fr;
 }
 
-.skillsHead {
+:deep(.skillsHead) {
   display: grid;
   grid-template-columns: 1.4fr 1fr 1fr;
   gap: 12px;
@@ -7322,12 +7132,12 @@ button.dangerBtn:disabled {
   font-weight: 800;
 }
 
-.skillsRows {
+:deep(.skillsRows) {
   overflow: auto;
   min-height: 0;
 }
 
-.skillsRow {
+:deep(.skillsRow) {
   display: grid;
   grid-template-columns: 1.4fr 1fr 1fr;
   gap: 12px;
@@ -7336,47 +7146,47 @@ button.dangerBtn:disabled {
   align-items: center;
 }
 
-.skillsName {
+:deep(.skillsName) {
   min-width: 0;
 }
 
-.skillsName .mono {
+:deep(.skillsName .mono) {
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.skillsCell {
+:deep(.skillsCell) {
   display: flex;
   gap: 10px;
   align-items: center;
   flex-wrap: wrap;
 }
 
-.skillStatus {
+:deep(.skillStatus) {
   min-width: 72px;
   text-align: center;
 }
 
-.pill.skillStatus.ok {
+:deep(.pill.skillStatus.ok) {
   border-color: rgba(16, 185, 129, 0.45);
   color: rgb(16, 185, 129);
 }
 
-.pill.skillStatus.warn {
+:deep(.pill.skillStatus.warn) {
   border-color: rgba(245, 158, 11, 0.45);
   color: rgb(245, 158, 11);
 }
 
-.pill.skillStatus.partial {
+:deep(.pill.skillStatus.partial) {
   border-color: rgba(59, 130, 246, 0.45);
   color: rgb(59, 130, 246);
 }
 
-.pill.skillStatus.muted {
+:deep(.pill.skillStatus.muted) {
   opacity: 0.75;
 }
 
-.pill.skillStatus.dim {
+:deep(.pill.skillStatus.dim) {
   opacity: 0.6;
 }
 
@@ -7385,7 +7195,7 @@ button.dangerBtn:disabled {
   to { opacity: 1; transform: scale(1); }
 }
 
-.modalHeader {
+:deep(.modalHeader) {
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -7394,7 +7204,7 @@ button.dangerBtn:disabled {
   background: var(--bg-subtle);
 }
 
-.modalFooter {
+:deep(.modalFooter) {
   display: flex;
   justify-content: flex-end;
   gap: 10px;
@@ -7403,7 +7213,7 @@ button.dangerBtn:disabled {
   background: var(--bg-subtle);
 }
 
-.modalTitle {
+:deep(.modalTitle) {
   font-weight: 700;
   font-size: 16px;
   color: var(--text-main);
@@ -7435,19 +7245,19 @@ button.dangerBtn:disabled {
   background: var(--bg-panel);
 }
 
-.iconBtn {
+:deep(.iconBtn) {
   border: none;
   background: transparent;
   padding: 8px;
   color: var(--text-sub);
   border-radius: 50%;
 }
-.iconBtn:hover {
+:deep(.iconBtn:hover) {
   background: var(--bg-subtle);
   color: var(--text-main);
 }
 
-.modalBody, .settingsBody, .dirModalBody {
+:deep(.modalBody), :deep(.settingsBody), :deep(.dirModalBody) {
   padding: 20px;
   min-height: 0;
 }
@@ -7749,7 +7559,7 @@ button.dangerBtn:disabled {
   color: #f472b6;
 }
 
-.modalError {
+:deep(.modalError) {
   border: 1px solid rgba(239, 68, 68, 0.25);
   background: rgba(239, 68, 68, 0.08);
   color: var(--text-main);
@@ -8198,12 +8008,12 @@ button.dangerBtn:disabled {
   z-index: 290;
 }
 
-.mono {
+:deep(.mono) {
   font-family: var(--font-mono);
   font-size: 0.9em;
 }
 
-.pill {
+:deep(.pill) {
   font-size: 11px;
   padding: 2px 10px;
   border-radius: 999px;
@@ -8613,7 +8423,7 @@ button.dangerBtn:disabled {
   opacity: 1;
 }
 
-.tinyHint {
+:deep(.tinyHint) {
   font-size: 12px;
   color: var(--text-sub);
 }
