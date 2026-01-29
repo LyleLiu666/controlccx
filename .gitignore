@@ -6,7 +6,7 @@ web/dist/*
 *.db
 *.db-journal
 *.log
-
-
-openspec/
-
+# Private docs/specs are intentionally excluded from OSS.
+docs/
+**/specs/
+**/openspec/
