@@ -7,4 +7,6 @@ web/dist/*
 *.db-journal
 *.log
 
-openspec/openspec/
+
+openspec/
+
