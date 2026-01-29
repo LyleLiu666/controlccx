@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import MarkdownIt from "markdown-it";
 import mermaid from "mermaid";
+import hljs from "highlight.js/lib/common";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import type {
   AuthInfo,
@@ -60,6 +61,7 @@ import {
   attentionAutopilotStopForSession,
 } from "./attentionAutopilot";
 import { computePopupPosition } from "./menuPosition";
+import { prettifyLogMessage } from "./logPretty";
 
 const tasks = ref<Map<string, Task>>(new Map());
 const selectedTaskId = ref<string>("");
@@ -147,6 +149,7 @@ const selectedRunInstruction = computed(() => {
 
 const outputTab = ref<"result" | "logs" | "trace">("result");
 const resultPreviewTab = ref<"markdown" | "raw" | "html">("markdown");
+const logPreviewTab = ref<"pretty" | "raw">("pretty");
 const logShowAssistant = ref(true);
 const logShowStdout = ref(true);
 const logShowStderr = ref(true);
@@ -624,6 +627,32 @@ const filteredLogs = computed(() => {
   });
   // Newest first for easier scanning.
   return list.slice().reverse();
+});
+
+function highlightJsonHtml(text: string): string {
+  const raw = String(text ?? "");
+  if (!raw) return "";
+  try {
+    return hljs.highlight(raw, { language: "json", ignoreIllegals: true }).value;
+  } catch {
+    return escapeHtml(raw);
+  }
+}
+
+const prettyLogs = computed(() => {
+  return filteredLogs.value.map((l) => {
+    const pretty = prettifyLogMessage(l.message ?? "");
+    const jsonHtml = pretty.kind === "json" && pretty.prettyJson ? highlightJsonHtml(pretty.prettyJson) : "";
+    return {
+      id: l.id,
+      time: l.time,
+      stream: l.stream,
+      summary: pretty.summary,
+      details: pretty.details,
+      kind: pretty.kind,
+      jsonHtml,
+    };
+  });
 });
 
 const filesVisibleNodes = computed(() => {
@@ -4012,6 +4041,27 @@ watch(
                   HTML
                 </button>
               </template>
+              <template v-else-if="outputTab === 'logs'">
+                <span class="tabDivider"></span>
+                <button
+                  type="button"
+                  class="tabBtn"
+                  :class="{ active: logPreviewTab === 'pretty' }"
+                  @click="logPreviewTab = 'pretty'"
+                  title="Pretty view (summaries + expandable JSON)"
+                >
+                  Pretty
+                </button>
+                <button
+                  type="button"
+                  class="tabBtn"
+                  :class="{ active: logPreviewTab === 'raw' }"
+                  @click="logPreviewTab = 'raw'"
+                  title="Raw text"
+                >
+                  Raw
+                </button>
+              </template>
               <div class="tabSpacer"></div>
               <button
                 v-if="outputTab === 'result'"
@@ -4134,19 +4184,41 @@ watch(
                 <input v-model="logSearch" placeholder="Filter logs..." />
               </div>
 
-              <div class="logbox">
-                <div
-                  v-for="l in filteredLogs"
-                  :key="l.id"
-                  class="logLine"
-                  :class="`s-${l.stream}`"
-                >
-                  <span class="logTime" :title="formatLocalDateTime(l.time)">{{
-                    formatLogTime(l.time)
-                  }}</span>
-                  <span class="logTag" :class="l.stream">{{ l.stream }}</span>
-                  <span class="logMsg">{{ l.message }}</span>
-                </div>
+              <div class="logbox" :class="logPreviewTab">
+                <template v-if="logPreviewTab === 'raw'">
+                  <div
+                    v-for="l in filteredLogs"
+                    :key="l.id"
+                    class="logLine"
+                    :class="`s-${l.stream}`"
+                  >
+                    <span class="logTime" :title="formatLocalDateTime(l.time)">{{
+                      formatLogTime(l.time)
+                    }}</span>
+                    <span class="logTag" :class="l.stream">{{ l.stream }}</span>
+                    <span class="logMsg">{{ l.message }}</span>
+                  </div>
+                </template>
+                <template v-else>
+                  <details
+                    v-for="p in prettyLogs"
+                    :key="p.id"
+                    class="logEvent"
+                    :class="`s-${p.stream}`"
+                  >
+                    <summary class="logEventSummary">
+                      <span class="logTime" :title="formatLocalDateTime(p.time)">{{
+                        formatLogTime(p.time)
+                      }}</span>
+                      <span class="logTag" :class="p.stream">{{ p.stream }}</span>
+                      <span class="logSummary">{{ p.summary }}</span>
+                    </summary>
+                    <div class="logEventBody">
+                      <pre v-if="p.kind === 'text'" class="logDetail">{{ p.details }}</pre>
+                      <pre v-else class="hljs logDetail"><code v-html="p.jsonHtml"></code></pre>
+                    </div>
+                  </details>
+                </template>
               </div>
             </div>
           </div>
@@ -8573,15 +8645,22 @@ button.dangerBtn:disabled {
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
   padding: 10px 12px;
-  background: #0f172a;
-  color: #e2e8f0;
+  background: var(--bg-panel);
+  color: var(--text-main);
   flex: 1;
   min-height: 0;
   overflow: auto;
   font-size: 12px;
-  line-height: 1.5;
+  line-height: 1.45;
+  box-shadow: inset 0 2px 4px rgba(0,0,0,0.08);
+}
+
+.logbox.raw {
   font-family: var(--font-mono);
-  box-shadow: inset 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.logbox.pretty {
+  padding: 8px 10px;
 }
 
 .logLine {
@@ -8599,7 +8678,7 @@ button.dangerBtn:disabled {
 
 .logTime {
   font-size: 11px;
-  color: #94a3b8;
+  color: var(--text-sub);
 }
 
 .logTag {
@@ -8643,6 +8722,143 @@ button.dangerBtn:disabled {
 .logMsg {
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+.logEvent {
+  border-bottom: 1px solid rgba(148, 163, 184, 0.14);
+}
+
+.logEvent:last-child {
+  border-bottom: none;
+}
+
+.logEventSummary {
+  display: grid;
+  grid-template-columns: 64px 74px 1fr;
+  gap: 10px;
+  align-items: start;
+  padding: 6px 0;
+  cursor: pointer;
+  list-style: none;
+}
+
+.logEventSummary::-webkit-details-marker {
+  display: none;
+}
+
+.logEventSummary::marker {
+  content: "";
+}
+
+.logEvent[open] .logEventSummary {
+  background: rgba(148, 163, 184, 0.08);
+  border-radius: 10px;
+  padding-left: 8px;
+  padding-right: 8px;
+}
+
+.logSummary {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-main);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.logEventBody {
+  padding: 8px 0 12px;
+}
+
+.logDetail {
+  border: 1px solid var(--border-color);
+  background: var(--bg-subtle);
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+  overflow: auto;
+  max-height: 320px;
+  margin: 0 0 0 148px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.logbox.pretty :deep(.hljs) {
+  color: var(--text-main);
+  background: transparent;
+  padding: 0;
+}
+
+@media (max-width: 720px) {
+  .logEventSummary {
+    grid-template-columns: 60px 70px 1fr;
+  }
+
+  .logLine {
+    grid-template-columns: 60px 70px 1fr;
+  }
+
+  .logDetail {
+    margin-left: 0;
+  }
+}
+
+.logbox.pretty :deep(.hljs-comment),
+.logbox.pretty :deep(.hljs-quote) {
+  color: var(--text-sub);
+  font-style: italic;
+}
+
+.logbox.pretty :deep(.hljs-keyword),
+.logbox.pretty :deep(.hljs-selector-tag),
+.logbox.pretty :deep(.hljs-subst) {
+  color: #2563eb;
+}
+
+.logbox.pretty :deep(.hljs-string),
+.logbox.pretty :deep(.hljs-title),
+.logbox.pretty :deep(.hljs-section),
+.logbox.pretty :deep(.hljs-attribute) {
+  color: #0f766e;
+}
+
+.logbox.pretty :deep(.hljs-number),
+.logbox.pretty :deep(.hljs-literal),
+.logbox.pretty :deep(.hljs-symbol),
+.logbox.pretty :deep(.hljs-bullet) {
+  color: #7c3aed;
+}
+
+.logbox.pretty :deep(.hljs-meta),
+.logbox.pretty :deep(.hljs-doctag) {
+  color: #be185d;
+}
+
+:global(:root[data-theme="dark"]) .logbox.pretty :deep(.hljs-keyword),
+:global(:root[data-theme="dark"]) .logbox.pretty :deep(.hljs-selector-tag),
+:global(:root[data-theme="dark"]) .logbox.pretty :deep(.hljs-subst) {
+  color: #60a5fa;
+}
+
+:global(:root[data-theme="dark"]) .logbox.pretty :deep(.hljs-string),
+:global(:root[data-theme="dark"]) .logbox.pretty :deep(.hljs-title),
+:global(:root[data-theme="dark"]) .logbox.pretty :deep(.hljs-section),
+:global(:root[data-theme="dark"]) .logbox.pretty :deep(.hljs-attribute) {
+  color: #2dd4bf;
+}
+
+:global(:root[data-theme="dark"]) .logbox.pretty :deep(.hljs-number),
+:global(:root[data-theme="dark"]) .logbox.pretty :deep(.hljs-literal),
+:global(:root[data-theme="dark"]) .logbox.pretty :deep(.hljs-symbol),
+:global(:root[data-theme="dark"]) .logbox.pretty :deep(.hljs-bullet) {
+  color: #a78bfa;
+}
+
+:global(:root[data-theme="dark"]) .logbox.pretty :deep(.hljs-meta),
+:global(:root[data-theme="dark"]) .logbox.pretty :deep(.hljs-doctag) {
+  color: #f472b6;
 }
 
 .secretary {
