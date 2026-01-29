@@ -59,6 +59,7 @@ import {
   attentionAutopilotShouldAttempt,
   attentionAutopilotStopForSession,
 } from "./attentionAutopilot";
+import { computePopupPosition } from "./menuPosition";
 
 const tasks = ref<Map<string, Task>>(new Map());
 const selectedTaskId = ref<string>("");
@@ -255,6 +256,12 @@ const runsOpen = ref(false);
 const isPhone = ref(false);
 const sessionsDrawerOpen = ref(false);
 const sessionsFiltersOpen = ref(false);
+
+const sessionActionsMenuOpen = ref(false);
+const sessionActionsMenuSession = ref<SessionGroup | null>(null);
+const sessionActionsMenuAnchor = ref<HTMLElement | null>(null);
+const sessionActionsMenuPos = ref({ left: 0, top: 0 });
+const sessionActionsMenuEl = ref<HTMLDivElement | null>(null);
 
 const LS_KEY_AUTO_DELIVERY_FOREMAN = "controlccx.auto_delivery_foreman.v1";
 const LS_KEY_DELIVERY_FOREMAN_SEEN = "controlccx.delivery_foreman.seen_runs.v1";
@@ -1294,6 +1301,7 @@ async function onCreateTask(): Promise<boolean> {
 }
 
 async function onSelectTask(id: string) {
+  closeSessionActionsMenu();
   selectedTaskId.value = id;
   if (!logsByTask.value.has(id)) await loadLogs(id);
   if (isPhone.value) sessionsDrawerOpen.value = false;
@@ -1446,6 +1454,76 @@ function openNewRun() {
 
 function closeNewRun() {
   newRunOpen.value = false;
+}
+
+function closeSessionActionsMenu() {
+  sessionActionsMenuOpen.value = false;
+  sessionActionsMenuSession.value = null;
+  sessionActionsMenuAnchor.value = null;
+}
+
+function positionSessionActionsMenu(opts?: { menuWidth?: number; menuHeight?: number }) {
+  const anchorEl = sessionActionsMenuAnchor.value;
+  if (!anchorEl) return;
+  const rect = anchorEl.getBoundingClientRect();
+  const menuWidth = Math.max(160, Math.min(320, opts?.menuWidth ?? 180));
+  const menuHeight = Math.max(80, Math.min(420, opts?.menuHeight ?? 140));
+  sessionActionsMenuPos.value = computePopupPosition({
+    anchor: {
+      left: rect.left,
+      top: rect.top,
+      right: rect.right,
+      bottom: rect.bottom,
+      width: rect.width,
+      height: rect.height,
+    },
+    menu: { width: menuWidth, height: menuHeight },
+    viewport: { width: window.innerWidth, height: window.innerHeight },
+    margin: 10,
+    offsetY: 8,
+  });
+}
+
+function openSessionActionsMenu(s: SessionGroup, ev: MouseEvent) {
+  const el = ev.currentTarget as HTMLElement | null;
+  if (!el) return;
+  sessionActionsMenuSession.value = s;
+  sessionActionsMenuAnchor.value = el;
+  sessionActionsMenuOpen.value = true;
+  positionSessionActionsMenu();
+  void nextTick(() => {
+    const menuEl = sessionActionsMenuEl.value;
+    if (!menuEl) return;
+    const m = menuEl.getBoundingClientRect();
+    positionSessionActionsMenu({ menuWidth: m.width, menuHeight: m.height });
+  });
+}
+
+function toggleSessionActionsMenu(s: SessionGroup, ev: MouseEvent) {
+  ev.stopPropagation();
+  if (sessionActionsMenuOpen.value && sessionActionsMenuSession.value?.key === s.key) {
+    closeSessionActionsMenu();
+    return;
+  }
+  openSessionActionsMenu(s, ev);
+}
+
+function onSessionActionsMenuKeyDown(ev: KeyboardEvent) {
+  if (!sessionActionsMenuOpen.value) return;
+  if (ev.key !== "Escape") return;
+  ev.preventDefault();
+  closeSessionActionsMenu();
+}
+
+function onSessionActionsMenuDocumentMouseDown(ev: MouseEvent) {
+  if (!sessionActionsMenuOpen.value) return;
+  const t = ev.target as Node | null;
+  if (!t) return;
+  const menuEl = sessionActionsMenuEl.value;
+  const anchorEl = sessionActionsMenuAnchor.value;
+  if (menuEl && menuEl.contains(t)) return;
+  if (anchorEl && anchorEl.contains(t)) return;
+  closeSessionActionsMenu();
 }
 
 async function onCreateTaskFromModal() {
@@ -2731,6 +2809,10 @@ onMounted(async () => {
   await refreshTools();
   connectEvents();
   window.addEventListener("keydown", onGlobalKeyDown);
+  document.addEventListener("mousedown", onSessionActionsMenuDocumentMouseDown, true);
+  window.addEventListener("keydown", onSessionActionsMenuKeyDown, true);
+  window.addEventListener("resize", closeSessionActionsMenu, true);
+  window.addEventListener("scroll", closeSessionActionsMenu, true);
   focusInHandler = (e: FocusEvent) => {
     if (!isPhone.value) return;
     const t = e.target as any;
@@ -2759,6 +2841,10 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   if (es) es.close();
   window.removeEventListener("keydown", onGlobalKeyDown);
+  document.removeEventListener("mousedown", onSessionActionsMenuDocumentMouseDown, true);
+  window.removeEventListener("keydown", onSessionActionsMenuKeyDown, true);
+  window.removeEventListener("resize", closeSessionActionsMenu, true);
+  window.removeEventListener("scroll", closeSessionActionsMenu, true);
   if (focusInHandler) window.removeEventListener("focusin", focusInHandler);
   if (phoneMq && phoneMqHandler) {
     phoneMq.removeEventListener?.("change", phoneMqHandler);
@@ -3617,27 +3703,15 @@ watch(
                 >
                 <span class="pill" :class="s.status">{{ s.status }}</span>
                 <span class="pill kind">{{ s.runs.length }} runs</span>
-                <details class="rowMore" @click.stop>
-                  <summary
-                    title="More"
-                    aria-label="Session actions"
-                    @click.stop
-                  >
-                    ⋯
-                  </summary>
-                  <div class="rowMorePopup" @click.stop>
-                    <button type="button" @click="openSessionRename(s)">
-                      Rename
-                    </button>
-                    <button
-                      type="button"
-                      class="dangerBtn"
-                      @click="openSessionDelete(s)"
-                    >
-                      Delete
-                    </button>
-                  </div>
-                </details>
+                <button
+                  type="button"
+                  class="rowMoreBtn"
+                  title="More"
+                  aria-label="Session actions"
+                  @click.stop="toggleSessionActionsMenu(s, $event)"
+                >
+                  ⋯
+                </button>
               </div>
             </div>
             <div class="rowSub">
@@ -5628,6 +5702,44 @@ watch(
         </div>
       </div>
     </div>
+
+    <teleport to="body">
+      <div
+        v-if="sessionActionsMenuOpen"
+        class="menuOverlay"
+        @mousedown="closeSessionActionsMenu"
+      ></div>
+      <div
+        v-if="sessionActionsMenuOpen && sessionActionsMenuSession"
+        ref="sessionActionsMenuEl"
+        class="rowMorePopup menuPopup"
+        :style="{
+          left: sessionActionsMenuPos.left + 'px',
+          top: sessionActionsMenuPos.top + 'px',
+        }"
+        @mousedown.stop
+      >
+        <button
+          type="button"
+          @click="
+            openSessionRename(sessionActionsMenuSession);
+            closeSessionActionsMenu();
+          "
+        >
+          Rename
+        </button>
+        <button
+          type="button"
+          class="dangerBtn"
+          @click="
+            openSessionDelete(sessionActionsMenuSession);
+            closeSessionActionsMenu();
+          "
+        >
+          Delete
+        </button>
+      </div>
+    </teleport>
   </div>
 </template>
 
@@ -7695,11 +7807,7 @@ button.dangerBtn:disabled {
   white-space: nowrap;
 }
 
-.rowMore {
-  position: relative;
-}
-
-.rowMore summary {
+.rowMoreBtn {
   width: 30px;
   height: 28px;
   display: inline-flex;
@@ -7711,27 +7819,11 @@ button.dangerBtn:disabled {
   color: var(--text-main);
   font-weight: 900;
   font-size: 16px;
-  list-style: none;
   cursor: pointer;
 }
 
-.rowMore summary::-webkit-details-marker {
-  display: none;
-}
-
-.rowMore[open] summary {
-  border-color: rgba(20, 184, 166, 0.6);
-  box-shadow: 0 0 0 2px rgba(20, 184, 166, 0.2);
-}
-
-.rowMore[open] {
-  z-index: 40;
-}
-
 .rowMorePopup {
-  position: absolute;
-  right: 0;
-  top: calc(100% + 8px);
+  position: fixed;
   width: 180px;
   background: var(--bg-panel);
   border: 1px solid var(--border-color);
@@ -7740,12 +7832,19 @@ button.dangerBtn:disabled {
   padding: 8px;
   display: grid;
   gap: 8px;
-  z-index: 50;
+  z-index: 300;
 }
 
 .rowMorePopup button {
   width: 100%;
   text-align: left;
+}
+
+.menuOverlay {
+  position: fixed;
+  inset: 0;
+  background: transparent;
+  z-index: 290;
 }
 
 .mono {
