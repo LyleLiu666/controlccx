@@ -63,6 +63,11 @@ func (s *Service) RespondWithOptions(ctx context.Context, userMessage string, op
 		return Reply{Message: "请先描述你的问题。"}, nil
 	}
 
+	lower := strings.ToLower(msg)
+	if looksLikeResumeQuery(msg, lower) {
+		return s.handleResumeQuery(ctx, msg, lower)
+	}
+
 	backend := s.selectBackend(opts.Backend)
 	if backend != nil {
 		agent := Agent{
@@ -109,7 +114,6 @@ func (s *Service) RespondWithOptions(ctx context.Context, userMessage string, op
 		return Reply{}, fmt.Errorf("llm backend not available for backend=%q", strings.TrimSpace(opts.Backend))
 	}
 
-	lower := strings.ToLower(msg)
 	all, err := s.Store.ListTasks(ctx, 500)
 	if err != nil {
 		return Reply{}, err
@@ -200,6 +204,160 @@ func looksLikeLengthQuery(msg, lower string) bool {
 		strings.Contains(msg, "几字") ||
 		strings.Contains(lower, "word count") ||
 		(strings.Contains(lower, "words") && (strings.Contains(lower, "enough") || strings.Contains(lower, "count")))
+}
+
+func looksLikeResumeQuery(msg, lower string) bool {
+	if strings.Contains(msg, "继续") ||
+		strings.Contains(msg, "恢复") ||
+		strings.Contains(msg, "重试") ||
+		strings.Contains(lower, "resume") ||
+		strings.Contains(lower, "retry") ||
+		strings.Contains(lower, "continue") {
+		return true
+	}
+	return false
+}
+
+func pickResumeTargetByPrefix(all []tasks.Task, prefix string) (tasks.Task, bool) {
+	p := strings.ToLower(strings.TrimSpace(prefix))
+	if p == "" {
+		return tasks.Task{}, false
+	}
+	var best tasks.Task
+	found := false
+	for _, t := range all {
+		id := strings.ToLower(t.ID)
+		sid := strings.ToLower(strings.TrimSpace(t.SessionID))
+		if strings.HasPrefix(id, p) || (sid != "" && strings.HasPrefix(sid, p)) {
+			if !found || t.UpdatedAt.After(best.UpdatedAt) {
+				best = t
+				found = true
+			}
+		}
+	}
+	return best, found
+}
+
+func pickResumeTargetAuto(all []tasks.Task) (tasks.Task, bool) {
+	if len(all) == 0 {
+		return tasks.Task{}, false
+	}
+
+	runningBySession := map[string]bool{}
+	for _, t := range all {
+		sid := strings.TrimSpace(t.SessionID)
+		if sid == "" {
+			continue
+		}
+		if t.Status == tasks.StatusRunning || t.Status == tasks.StatusQueued {
+			runningBySession[sid] = true
+		}
+	}
+
+	sort.SliceStable(all, func(i, j int) bool {
+		return all[i].UpdatedAt.After(all[j].UpdatedAt)
+	})
+
+	for _, t := range all {
+		if t.Status != tasks.StatusFailed && t.Status != tasks.StatusBlocked && t.Status != tasks.StatusInterrupted {
+			continue
+		}
+		if t.SessionDeletedAt != nil {
+			continue
+		}
+		sid := strings.TrimSpace(t.SessionID)
+		if sid == "" {
+			continue
+		}
+		if runningBySession[sid] {
+			continue
+		}
+		return t, true
+	}
+	return tasks.Task{}, false
+}
+
+func (s *Service) handleResumeQuery(ctx context.Context, msg string, lower string) (Reply, error) {
+	if s.Store == nil {
+		return Reply{}, fmt.Errorf("observer: store is required")
+	}
+	if s.Runner == nil {
+		return Reply{Message: "当前无法继续：task runner 未配置。"}, nil
+	}
+
+	all, err := s.Store.ListTasks(ctx, 500)
+	if err != nil {
+		return Reply{}, err
+	}
+	if len(all) == 0 {
+		return Reply{Message: "当前还没有任务。"}, nil
+	}
+
+	var target tasks.Task
+	ok := false
+
+	// Prefer explicit id/session references (8-hex prefix is enough for our UI).
+	prefixes := reIDPrefix.FindAllString(lower, -1)
+	for _, p := range prefixes {
+		if t, found := pickResumeTargetByPrefix(all, p); found {
+			target = t
+			ok = true
+			break
+		}
+	}
+
+	if !ok {
+		target, ok = pickResumeTargetAuto(all)
+	}
+	if !ok {
+		return Reply{Message: "没有找到可继续的任务（failed/blocked/interrupted 且可 resume 的 session）。"}, nil
+	}
+
+	tool := s.agentTools()["task_resume"]
+	if tool == nil {
+		return Reply{Message: "当前无法继续：task_resume 不可用。"}, nil
+	}
+
+	res, err := tool.Run(ctx, map[string]any{"task_id": target.ID})
+	if err != nil {
+		return Reply{Message: fmt.Sprintf("无法继续：%v", err)}, nil
+	}
+
+	// Best-effort extract details for a human-friendly reply.
+	newID := ""
+	newSID := strings.TrimSpace(target.SessionID)
+	newWorkdir := strings.TrimSpace(target.WorkDir)
+	if m, ok := res.(map[string]any); ok {
+		if tm, ok := m["task"].(map[string]any); ok {
+			if v, ok := tm["id"].(string); ok {
+				newID = strings.TrimSpace(v)
+			}
+			if v, ok := tm["session_id"].(string); ok && strings.TrimSpace(v) != "" {
+				newSID = strings.TrimSpace(v)
+			}
+			if v, ok := tm["workdir"].(string); ok && strings.TrimSpace(v) != "" {
+				newWorkdir = strings.TrimSpace(v)
+			}
+		}
+	}
+
+	idShort := newID
+	if len(idShort) > 8 {
+		idShort = idShort[:8]
+	}
+	sidShort := newSID
+	if len(sidShort) > 8 {
+		sidShort = sidShort[:8]
+	}
+
+	msgParts := []string{fmt.Sprintf("已创建新的 resume run：%s", idShort)}
+	if strings.TrimSpace(sidShort) != "" {
+		msgParts = append(msgParts, fmt.Sprintf("session %s", sidShort))
+	}
+	if strings.TrimSpace(newWorkdir) != "" {
+		msgParts = append(msgParts, fmt.Sprintf("workdir %s", newWorkdir))
+	}
+	return Reply{Message: strings.Join(msgParts, " · ")}, nil
 }
 
 type lengthReq struct {
