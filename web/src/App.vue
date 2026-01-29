@@ -13,8 +13,6 @@ import type {
   FSRoot,
   LogEntry,
   ServerEvent,
-  Skill,
-  SkillsListResponse,
   TaskTraceResponse,
   Tool,
   ToolDriver,
@@ -34,7 +32,6 @@ import {
   fetchFSRead,
   fetchFSRoots,
   fetchLogs,
-  fetchSkills,
   fetchTools,
   fetchTaskTrace,
   fetchSystemInfo,
@@ -43,13 +40,11 @@ import {
   fsMkdir,
   fsWrite,
   deleteTool,
-  linkSkill,
   renameSession,
   resumeTaskWithOptions,
   sendChat,
   sendChatStream,
   upsertTool,
-  unlinkSkill,
   updateAuth,
 } from "./api";
 import { appendChatMessageUnique, sendChatAndReload } from "./chatOps";
@@ -64,6 +59,7 @@ import { computePopupPosition } from "./menuPosition";
 import { prettifyLogMessage } from "./logPretty";
 import { deriveRunActivity } from "./runActivity";
 import SkillsModal from "./components/SkillsModal.vue";
+import { useSkills } from "./composables/useSkills";
 
 const tasks = ref<Map<string, Task>>(new Map());
 const selectedTaskId = ref<string>("");
@@ -128,33 +124,26 @@ const toolEditCommand = ref("");
 const toolEditArgs = ref("");
 const toolEditEnv = ref("");
 
-const skillsOpen = ref(false);
-const skillsLoading = ref(false);
-const skillsError = ref("");
-const skillsFilter = ref("");
-const skillsLimit = ref(200);
-const skillsOffset = ref(0);
-const skillsData = ref<SkillsListResponse | null>(null);
-const skillsActionBusy = ref<Map<string, boolean>>(new Map());
-
-const skillsTotal = computed(
-  () => skillsData.value?.total ?? (skillsData.value?.skills.length ?? 0),
-);
-const skillsRangeLabel = computed(() => {
-  const total = skillsTotal.value;
-  if (!total) return "0";
-  const pageLen = skillsData.value?.skills.length ?? 0;
-  const from = Math.min(total, skillsOffset.value + 1);
-  const to = Math.min(total, skillsOffset.value + pageLen);
-  return `${from}-${to} / ${total}`;
-});
-const skillsCanPrev = computed(() => skillsOffset.value > 0);
-const skillsCanNext = computed(() => {
-  const total = skillsTotal.value;
-  if (!total) return false;
-  const pageLen = skillsData.value?.skills.length ?? 0;
-  return skillsOffset.value + pageLen < total;
-});
+const {
+  skillsOpen,
+  skillsLoading,
+  skillsError,
+  skillsFilter,
+  skillsLimit,
+  skillsData,
+  skillsRangeLabel,
+  skillsCanPrev,
+  skillsCanNext,
+  skillsActionBusy,
+  openSkills,
+  refreshSkills,
+  skillsPrevPage,
+  skillsNextPage,
+  skillsKey,
+  onSkillsToggle,
+  summarizeSkillTarget,
+  skillBadgeClass,
+} = useSkills();
 
 const selectedTask = computed(
   () => tasks.value.get(selectedTaskId.value) ?? null,
@@ -2755,147 +2744,6 @@ async function deleteToolOverride() {
     toolsError.value = e?.message ?? String(e);
   } finally {
     toolsSaving.value = false;
-  }
-}
-
-async function openSkills() {
-  skillsError.value = "";
-  skillsOpen.value = true;
-  await refreshSkills();
-}
-
-async function refreshSkills() {
-  skillsError.value = "";
-  skillsLoading.value = true;
-  try {
-    skillsData.value = await fetchSkills({
-      q: skillsFilter.value,
-      limit: skillsLimit.value,
-      offset: skillsOffset.value,
-    });
-  } catch (e: any) {
-    skillsError.value = e?.message ?? String(e);
-  } finally {
-    skillsLoading.value = false;
-  }
-}
-
-let skillsRefreshTimer: number | null = null;
-watch([skillsFilter, skillsLimit], () => {
-  skillsOffset.value = 0;
-  if (!skillsOpen.value) return;
-  if (skillsRefreshTimer) window.clearTimeout(skillsRefreshTimer);
-  skillsRefreshTimer = window.setTimeout(() => void refreshSkills(), 250);
-});
-watch(skillsOpen, (open) => {
-  if (!open && skillsRefreshTimer) {
-    window.clearTimeout(skillsRefreshTimer);
-    skillsRefreshTimer = null;
-  }
-});
-
-async function skillsPrevPage() {
-  if (skillsLoading.value) return;
-  skillsOffset.value = Math.max(0, skillsOffset.value - skillsLimit.value);
-  await refreshSkills();
-}
-
-async function skillsNextPage() {
-  if (skillsLoading.value) return;
-  skillsOffset.value = skillsOffset.value + skillsLimit.value;
-  await refreshSkills();
-}
-
-function skillsKey(name: string, target: "claude" | "codex") {
-  return `${target}:${name}`;
-}
-
-async function onSkillsToggle(
-  name: string,
-  target: "claude" | "codex",
-  enable: boolean,
-) {
-  const key = skillsKey(name, target);
-  skillsActionBusy.value.set(key, true);
-  skillsActionBusy.value = new Map(skillsActionBusy.value);
-  skillsError.value = "";
-  try {
-    if (enable) {
-      await linkSkill({ name, target });
-    } else {
-      await unlinkSkill({ name, target });
-    }
-    await refreshSkills();
-  } catch (e: any) {
-    skillsError.value = e?.message ?? String(e);
-  } finally {
-    skillsActionBusy.value.delete(key);
-    skillsActionBusy.value = new Map(skillsActionBusy.value);
-  }
-}
-
-type SkillsSummary = {
-  target: "claude" | "codex";
-  status:
-    | "missing"
-    | "linked"
-    | "broken"
-    | "present"
-    | "copied"
-    | "conflict"
-    | "external"
-    | "partial";
-  canEnable: boolean;
-  canDisable: boolean;
-  enabled: boolean;
-  detail: string;
-};
-
-function summarizeSkillTarget(skill: Skill, target: "claude" | "codex"): SkillsSummary {
-  const states = (skill.targets ?? []).filter((s) => s.target === target);
-  const detail = states
-    .map((s) => `${s.root}: ${s.status}${s.note ? ` (${s.note})` : ""}`)
-    .join("\n");
-
-  const hasSource = !!(skill.source && skill.source.trim());
-  const statuses = states.map((s) => s.status);
-  const unique = Array.from(new Set(statuses));
-
-  const status =
-    unique.length === 1 && unique[0] ? (unique[0] as SkillsSummary["status"]) : "partial";
-
-  const anyManagedEnabled = statuses.some((s) => s === "linked" || s === "copied");
-  const anyBroken = statuses.some((s) => s === "broken");
-  const enabled = anyManagedEnabled;
-
-  const hasUnmanagedBlocker = statuses.some(
-    (s) => s === "present" || s === "conflict" || s === "external",
-  );
-  const canEnable = hasSource && !hasUnmanagedBlocker;
-  const canDisable = !hasUnmanagedBlocker && (anyManagedEnabled || anyBroken);
-
-  return { target, status, canEnable, canDisable, enabled, detail };
-}
-
-const skillsVisible = computed(() => skillsData.value?.skills ?? []);
-
-function skillBadgeClass(status: string) {
-  switch (status) {
-    case "linked":
-    case "copied":
-      return "ok";
-    case "broken":
-    case "conflict":
-      return "warn";
-    case "external":
-    case "present":
-      return "muted";
-    case "missing":
-      return "dim";
-    case "partial":
-      return "partial";
-    default:
-      return "dim";
   }
 }
 
