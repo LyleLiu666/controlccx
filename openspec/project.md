@@ -4,6 +4,9 @@
 ControlCCX is a local “control center” for running multiple agent workers (e.g., Claude Code and Codex) asynchronously,
 while an observer assistant monitors execution using task/log/system context and supports real-time conversation.
 
+## Vision
+一个以 Claude Code 和 Codex 为基础的 agent 系统：用户可以方便地创建任务、同时管理多个任务，免去 TUI 的不方便；易用、好用、安全、有流程；既能以简洁的 UX 满足普通用户，也提供足够的功能纵深满足高端用户。
+
 ## Tech Stack
 - Backend: Go (HTTP API, SSE, worker orchestration)
 - Frontend: Vue 3 + Vite (task dashboard + chat UI)
@@ -71,6 +74,25 @@ with strong foundations first, then add higher-level productivity layers.
 
 8) **Foreman Dashboard (operational overview)**
    - `add-foreman-dashboard` (done)
+
+### Timeline (Chronological, newest → oldest)
+This is a time-ordered view for quickly understanding recent work. It does not replace dependency-driven ordering.
+
+- `update-secretary-drawer-ui` (done)
+- `update-secretary-autoresume` (done)
+- `update-dashboard-focus-polish` (done)
+- `add-foreman-dashboard` (done)
+- `add-tooling-extensibility` (done)
+- `add-machine-skills-management` (done)
+- `add-session-management` (done)
+- `add-preview-tabs` (done)
+- `add-workspace-file-ops` (done)
+- `add-mobile-shell` (done)
+- `add-approval-trilogy` (done)
+- `add-delivery-foreman-check` (done)
+- `add-claude-auto-approve-toggle` (done)
+- `add-approval-blocked-mvp` (done)
+- `add-controlccx-foundation` (done)
 
 ### Git Workflow
 - Small, focused changes.
