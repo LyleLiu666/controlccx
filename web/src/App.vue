@@ -76,6 +76,8 @@ const resumePrompt = ref<string>("");
 const resumeExpanded = ref(true);
 const chatInput = ref<string>("");
 const chatInputEl = ref<HTMLTextAreaElement | null>(null);
+const chatMsgsEl = ref<HTMLDivElement | null>(null);
+const chatIsComposing = ref(false);
 const errorBanner = ref<string>("");
 const chatBackend = ref<"auto" | "claude" | "codex">("auto");
 const chatStreamEnabled = ref<boolean>(true);
@@ -438,6 +440,16 @@ const selectedResultHtml = computed(() => {
     return `<pre>${escapeHtml(text)}</pre>`;
   }
 });
+
+function renderMarkdownSafe(text: string): string {
+  const raw = String(text ?? "");
+  if (!raw.trim()) return "";
+  try {
+    return md.render(raw);
+  } catch {
+    return `<pre>${escapeHtml(raw)}</pre>`;
+  }
+}
 
 function wrapHtmlForPreview(html: string): string {
   const raw = (html ?? "").trim();
@@ -1719,6 +1731,40 @@ async function onSendChat() {
   }
 }
 
+function shouldAutoScrollChat(el: HTMLElement): boolean {
+  const threshold = 90;
+  const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
+  return distance <= threshold;
+}
+
+function scrollChatToBottom() {
+  const el = chatMsgsEl.value;
+  if (!el) return;
+  try {
+    el.scrollTop = el.scrollHeight;
+  } catch {
+    // ignore
+  }
+}
+
+function onChatCompositionStart() {
+  chatIsComposing.value = true;
+}
+
+function onChatCompositionEnd() {
+  chatIsComposing.value = false;
+}
+
+async function onChatKeyDown(e: KeyboardEvent) {
+  if (e.key !== "Enter") return;
+  if (e.shiftKey) return; // Shift+Enter -> newline
+  if (isImeComposing(e) || chatIsComposing.value) return;
+  if (chatSending.value) return;
+  if (!chatInput.value.trim()) return;
+  e.preventDefault();
+  await onSendChat();
+}
+
 async function openDirPicker() {
   dirPickerOpen.value = true;
   dirError.value = "";
@@ -2984,6 +3030,7 @@ watch(
     if (view !== "chat") return;
     await nextTick();
     chatInputEl.value?.focus();
+    scrollChatToBottom();
   },
   { immediate: false },
 );
@@ -3035,6 +3082,20 @@ async function renderFilePreviewMermaidIfNeeded() {
   }
 }
 
+async function renderChatMermaidIfNeeded() {
+  if (!secretaryOpen.value) return;
+  if (secretaryView.value !== "chat") return;
+  const root = chatMsgsEl.value;
+  if (!root) return;
+  try {
+    const nodes = Array.from(root.querySelectorAll<HTMLElement>(".mermaid"));
+    if (nodes.length === 0) return;
+    await mermaid.run({ nodes });
+  } catch {
+    // ignore mermaid parse errors
+  }
+}
+
 watch(
   [theme, outputTab, resultPreviewTab, selectedResultHtml],
   async () => {
@@ -3048,6 +3109,21 @@ watch([theme, filePreviewOpen, filePreviewTab, filePreviewMarkdownHtml], async (
   applyMermaidTheme();
   await renderFilePreviewMermaidIfNeeded();
 });
+
+watch(
+  [secretaryOpen, secretaryView, theme, () => chat.value.length, chatStreamAnswer, chatStreamStatus],
+  async ([open, view]) => {
+    if (!open) return;
+    if (view !== "chat") return;
+    const el = chatMsgsEl.value;
+    const stick = el ? shouldAutoScrollChat(el) : true;
+    applyMermaidTheme();
+    await nextTick();
+    await renderChatMermaidIfNeeded();
+    if (stick) scrollChatToBottom();
+  },
+  { immediate: false },
+);
 
 watch(
   [liveOpen, liveScope],
@@ -3911,7 +3987,7 @@ watch(
       class="secDrawerOverlay"
       @click.self="closeSecretary"
     >
-      <aside class="secDrawer" role="dialog" aria-modal="true">
+      <aside class="secDrawer secDrawerSecretary" role="dialog" aria-modal="true">
         <div class="secDrawerHeader">
           <div class="secDrawerTitle">Secretary</div>
           <div class="secTabs" role="tablist" aria-label="Secretary tabs">
@@ -4088,7 +4164,7 @@ watch(
                     />
                   </label>
                 </div>
-                <div class="msgs">
+                <div class="msgs" ref="chatMsgsEl">
                   <div
                     v-for="m in chat"
                     :key="m.id"
@@ -4096,16 +4172,22 @@ watch(
                     :class="m.role"
                   >
                     <div class="role">{{ m.role }}</div>
-                    <div class="content">{{ m.content }}</div>
+                    <div
+                      class="content chatMarkdown"
+                      v-html="renderMarkdownSafe(m.content)"
+                      @click="onResultMarkdownClick"
+                    ></div>
                   </div>
                   <div
                     v-if="chatStreamStatus || chatStreamAnswer"
                     class="msg assistant streaming"
                   >
                     <div class="role">assistant</div>
-                    <div class="content">
-                      {{ chatStreamAnswer || chatStreamStatus }}
-                    </div>
+                    <div
+                      class="content chatMarkdown"
+                      v-html="renderMarkdownSafe(chatStreamAnswer || chatStreamStatus)"
+                      @click="onResultMarkdownClick"
+                    ></div>
                   </div>
                 </div>
                 <div class="input">
@@ -4114,6 +4196,9 @@ watch(
                     v-model="chatInput"
                     rows="3"
                     placeholder="Ask the secretary..."
+                    @keydown="onChatKeyDown"
+                    @compositionstart="onChatCompositionStart"
+                    @compositionend="onChatCompositionEnd"
                   ></textarea>
                   <button
                     class="primary"
@@ -6048,6 +6133,10 @@ button.dangerBtn:disabled {
   grid-template-rows: auto 1fr;
 }
 
+.secDrawer.secDrawerSecretary {
+  width: min(720px, calc(100vw - 32px));
+}
+
 .secDrawer.wide {
   width: min(560px, calc(100vw - 32px));
 }
@@ -6134,18 +6223,28 @@ button.dangerBtn:disabled {
 }
 
 .secDrawerBody {
-  padding: 16px;
-  overflow: auto;
+  padding: 14px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 
 .secOverview {
   display: grid;
   gap: 20px;
+  overflow: auto;
+  min-height: 0;
+  flex: 1;
 }
 
 .secChatView {
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: 12px;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .secAttentionHint {
@@ -8336,6 +8435,9 @@ button.dangerBtn:disabled {
   border-radius: var(--radius-lg);
   padding: 16px;
   background: var(--bg-subtle);
+  flex: 1;
+  min-height: 0;
+  display: flex;
 }
 
 .secChat summary {
@@ -8344,11 +8446,19 @@ button.dangerBtn:disabled {
   cursor: pointer;
 }
 
+.secChat .chat {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  flex: 1;
+}
+
 .chatControls {
   display: flex;
   gap: 12px;
   align-items: flex-end;
-  margin: 12px 0;
+  margin: 0;
   flex-wrap: wrap;
 }
 
@@ -8382,7 +8492,8 @@ button.dangerBtn:disabled {
   padding: 12px;
   overflow: auto;
   background: var(--bg-panel);
-  max-height: 300px;
+  flex: 1;
+  min-height: 0;
 }
 
 .msg {
@@ -8398,6 +8509,10 @@ button.dangerBtn:disabled {
   color: var(--color-primary-hover);
 }
 
+.msg.user .content {
+  color: var(--color-primary-hover);
+}
+
 .msg.streaming {
   border-style: dashed;
   opacity: 0.9;
@@ -8410,6 +8525,100 @@ button.dangerBtn:disabled {
   letter-spacing: 0.05em;
   margin-bottom: 4px;
   font-weight: 700;
+}
+
+.msg .content {
+  font-size: 13px;
+  line-height: 1.65;
+  color: var(--text-main);
+}
+
+.msg .content.chatMarkdown {
+  white-space: normal;
+}
+
+.msg .content.chatMarkdown :deep(p) {
+  margin: 0 0 10px;
+}
+
+.msg .content.chatMarkdown :deep(pre) {
+  margin: 10px 0;
+  padding: 12px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  overflow: auto;
+}
+
+.msg .content.chatMarkdown :deep(code) {
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.msg .content.chatMarkdown :deep(p code),
+.msg .content.chatMarkdown :deep(li code) {
+  background: var(--bg-panel);
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  padding: 1px 6px;
+  border-radius: 8px;
+}
+
+.msg .content.chatMarkdown :deep(code.fileRef) {
+  cursor: pointer;
+  border-color: rgba(45, 212, 191, 0.45);
+}
+
+.msg .content.chatMarkdown :deep(code.fileRef:hover) {
+  color: var(--color-primary);
+  text-decoration: underline;
+}
+
+.msg .content.chatMarkdown :deep(a) {
+  color: var(--color-primary);
+  text-decoration: none;
+}
+
+.msg .content.chatMarkdown :deep(a:hover) {
+  text-decoration: underline;
+}
+
+.secChat .input {
+  display: flex;
+  gap: 10px;
+  align-items: flex-end;
+}
+
+.secChat .input textarea {
+  flex: 1;
+  width: auto;
+  min-height: 48px;
+  max-height: 220px;
+  resize: vertical;
+}
+
+.secChat .input button {
+  flex: 0 0 auto;
+  min-width: 92px;
+  padding-left: 16px;
+  padding-right: 16px;
+}
+
+@media (max-width: 640px) {
+  .secDrawer {
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 100vw;
+    border-radius: 0;
+  }
+
+  .secDrawerHeader {
+    padding-top: calc(12px + env(safe-area-inset-top));
+  }
+
+  .secDrawerBody {
+    padding-bottom: calc(14px + env(safe-area-inset-bottom));
+  }
 }
 
 @media (max-width: 1300px) {
