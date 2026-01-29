@@ -115,24 +115,22 @@ with strong foundations first, then add higher-level productivity layers.
 ### Next Changes Queue (dependency-ordered)
 This is the next actionable queue after the completed phases above. New items MUST be appended here (and ordered) before implementation starts.
 
-1) `update-mobile-shell-polish`
-   - Keyboard/IME/viewport edge cases, accessibility (reduce motion), and narrow-screen ergonomics.
-
-2) `add-context-and-templates`
+1) `add-context-and-templates`
    - Context panel, context compression, and reusable templates to reduce “blank prompt” work.
 
-3) `add-quick-actions`
+2) `add-quick-actions`
    - High-frequency cockpit shortcuts (one-click actions) for common workflows and “what’s next” guidance.
 
-4) `add-file-advanced-capabilities`
+3) `add-file-advanced-capabilities`
    - File search, diff viewer, file monitor, upload/download (workbench-style; optional but valuable for power users).
 
-5) `add-editor-monaco`
-   - Monaco-grade editing for large files/language service/diff (workbench-style; optional; depends on 4).
+4) `add-editor-monaco`
+   - Monaco-grade editing for large files/language service/diff (workbench-style; optional; depends on 3).
 
 ### Timeline (Chronological, newest → oldest)
 This is a time-ordered view for quickly understanding recent work. It does not replace dependency-driven ordering.
 
+- `update-mobile-shell-polish` (done)
 - `add-attention-autopilot` (done)
 - `update-vision-metrics` (done)
 - `update-secretary-drawer-ui` (done)
