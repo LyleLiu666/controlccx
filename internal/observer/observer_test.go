@@ -253,3 +253,108 @@ func TestObserver_ResumeFallback_ExplicitPrefixResumesTarget(t *testing.T) {
 		t.Fatalf("expected reply to mention new run id prefix, got: %q", reply.Message)
 	}
 }
+
+func TestObserver_ResumeFallback_DoesNotTriggerOnMentionedContinue(t *testing.T) {
+	ctx := context.Background()
+	conn, err := db.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "controlccx.db")})
+	if err != nil {
+		t.Fatalf("db open: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+
+	store := tasks.NewStore(conn)
+	runner := &stubRunner{}
+	obs := &Service{Store: store, Runner: runner}
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	task, err := store.CreateTask(ctx, tasks.CreateTaskInput{
+		WorkerType: tasks.WorkerClaudeCode,
+		Mode:       tasks.ModeNew,
+		Prompt:     "some task",
+		WorkDir:    ".",
+		SessionID:  "22222222-2222-2222-2222-222222222222",
+	})
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	_ = store.FinishTask(ctx, task.ID, tasks.FinishTaskInput{
+		Status:     tasks.StatusInterrupted,
+		ExitCode:   nil,
+		Error:      "interrupted",
+		SessionID:  "",
+		FinishedAt: now,
+	})
+
+	_, err = obs.Respond(ctx, "秘书的机制还是有问题，似乎只会回答continue")
+	if err != nil {
+		t.Fatalf("respond: %v", err)
+	}
+
+	if len(runner.started) != 0 {
+		t.Fatalf("expected no resume run to start, got %d", len(runner.started))
+	}
+
+	all, err := store.ListTasks(ctx, 50)
+	if err != nil {
+		t.Fatalf("list tasks: %v", err)
+	}
+	if len(all) != 1 {
+		t.Fatalf("expected no new tasks, got %d", len(all))
+	}
+}
+
+func TestObserver_ResumeFallback_DoesNotTriggerOnContinueAsVerb(t *testing.T) {
+	ctx := context.Background()
+	conn, err := db.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "controlccx.db")})
+	if err != nil {
+		t.Fatalf("db open: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+
+	store := tasks.NewStore(conn)
+	runner := &stubRunner{}
+	obs := &Service{Store: store, Runner: runner}
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	task, err := store.CreateTask(ctx, tasks.CreateTaskInput{
+		WorkerType: tasks.WorkerClaudeCode,
+		Mode:       tasks.ModeNew,
+		Prompt:     "some task",
+		WorkDir:    ".",
+		SessionID:  "22222222-2222-2222-2222-222222222222",
+	})
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	_ = store.FinishTask(ctx, task.ID, tasks.FinishTaskInput{
+		Status:     tasks.StatusInterrupted,
+		ExitCode:   nil,
+		Error:      "interrupted",
+		SessionID:  "",
+		FinishedAt: now,
+	})
+
+	cases := []string{
+		"继续完善这个机制",
+		"continue is scary",
+	}
+	for _, msg := range cases {
+		t.Run(msg, func(t *testing.T) {
+			runner.started = nil
+			_, err = obs.Respond(ctx, msg)
+			if err != nil {
+				t.Fatalf("respond: %v", err)
+			}
+			if len(runner.started) != 0 {
+				t.Fatalf("expected no resume run to start, got %d", len(runner.started))
+			}
+			all, err := store.ListTasks(ctx, 50)
+			if err != nil {
+				t.Fatalf("list tasks: %v", err)
+			}
+			if len(all) != 1 {
+				t.Fatalf("expected no new tasks, got %d", len(all))
+			}
+		})
+	}
+}

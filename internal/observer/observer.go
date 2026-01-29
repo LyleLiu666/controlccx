@@ -207,15 +207,138 @@ func looksLikeLengthQuery(msg, lower string) bool {
 }
 
 func looksLikeResumeQuery(msg, lower string) bool {
-	if strings.Contains(msg, "继续") ||
-		strings.Contains(msg, "恢复") ||
-		strings.Contains(msg, "重试") ||
-		strings.Contains(lower, "resume") ||
-		strings.Contains(lower, "retry") ||
-		strings.Contains(lower, "continue") {
+	// Be conservative: only treat explicit commands as "resume".
+	// Avoid triggering on casual mentions like "只会回答continue".
+	s := strings.TrimSpace(msg)
+	if s == "" {
+		return false
+	}
+
+	s = stripResumePreface(s)
+	lower = strings.ToLower(s)
+
+	if startsWithEnglishResumeCommand(lower, "continue") ||
+		startsWithEnglishResumeCommand(lower, "resume") ||
+		startsWithEnglishResumeCommand(lower, "retry") {
 		return true
 	}
+
+	if startsWithChineseResumeCommand(s, "继续") ||
+		startsWithChineseResumeCommand(s, "恢复") ||
+		startsWithChineseResumeCommand(s, "重试") {
+		return true
+	}
+
 	return false
+}
+
+func stripResumePreface(s string) string {
+	s = strings.TrimSpace(s)
+	// Keep this list small and deterministic; it is only for intent parsing.
+	prefixes := []string{
+		"请帮我",
+		"请帮忙",
+		"麻烦你",
+		"麻烦您",
+		"麻烦",
+		"帮我",
+		"请",
+	}
+
+	for i := 0; i < 2; i++ {
+		trimmed := strings.TrimSpace(s)
+		changed := false
+		for _, p := range prefixes {
+			if strings.HasPrefix(trimmed, p) {
+				s = strings.TrimSpace(strings.TrimPrefix(trimmed, p))
+				s = strings.TrimLeft(s, " :：,，\t")
+				changed = true
+				break
+			}
+		}
+		if !changed {
+			break
+		}
+	}
+	return strings.TrimSpace(s)
+}
+
+func startsWithEnglishResumeCommand(lower string, keyword string) bool {
+	if !strings.HasPrefix(lower, keyword) {
+		return false
+	}
+	if len(lower) == len(keyword) {
+		return true
+	}
+	next := lower[len(keyword)]
+	if (next >= 'a' && next <= 'z') || (next >= '0' && next <= '9') || next == '_' {
+		// Not a word boundary.
+		return false
+	}
+
+	rest := strings.TrimSpace(lower[len(keyword):])
+	if rest == "" {
+		return true
+	}
+	return resumeHasTargetHint(rest)
+}
+
+func startsWithChineseResumeCommand(s string, keyword string) bool {
+	if !strings.HasPrefix(s, keyword) {
+		return false
+	}
+
+	rest := s[len(keyword):]
+	if rest == "" {
+		return true
+	}
+
+	r, _ := utf8.DecodeRuneInString(rest)
+	if unicode.IsSpace(r) || unicode.IsPunct(r) || unicode.IsSymbol(r) {
+		return true
+	}
+	if r <= unicode.MaxASCII && (unicode.IsLetter(r) || unicode.IsDigit(r)) {
+		return true
+	}
+
+	// Common short command particles.
+	for _, suf := range []string{"一下", "下", "吧", "呀", "呢", "吗", "么", "啊", "哈"} {
+		if !strings.HasPrefix(rest, suf) {
+			continue
+		}
+		after := rest[len(suf):]
+		if strings.TrimSpace(after) == "" {
+			return true
+		}
+		rr, _ := utf8.DecodeRuneInString(after)
+		if unicode.IsSpace(rr) || unicode.IsPunct(rr) || unicode.IsSymbol(rr) {
+			return true
+		}
+		if rr <= unicode.MaxASCII && (unicode.IsLetter(rr) || unicode.IsDigit(rr)) {
+			return true
+		}
+		return resumeHasTargetHint(after)
+	}
+
+	// If the remaining text references a task/session explicitly, treat it as a resume command.
+	return resumeHasTargetHint(rest)
+}
+
+func resumeHasTargetHint(s string) bool {
+	if strings.TrimSpace(s) == "" {
+		return false
+	}
+	// IDs/prefixes strongly suggest intent.
+	if reIDPrefix.FindString(strings.ToLower(s)) != "" {
+		return true
+	}
+	lower := strings.ToLower(s)
+	return strings.Contains(s, "任务") ||
+		strings.Contains(s, "会话") ||
+		strings.Contains(lower, "task") ||
+		strings.Contains(lower, "run") ||
+		strings.Contains(lower, "session") ||
+		strings.Contains(lower, "sess")
 }
 
 func pickResumeTargetByPrefix(all []tasks.Task, prefix string) (tasks.Task, bool) {
