@@ -7225,7 +7225,7 @@ button.dangerBtn:disabled {
   gap: 10px;
   flex: 1;
   min-height: 0;
-  overflow: hidden;
+  overflow: visible;
   padding: 16px; /* match panel content padding (compact) */
 }
 
@@ -7356,7 +7356,8 @@ button.dangerBtn:disabled {
   box-shadow: 0 2px 4px rgba(0,0,0,0.03);
   cursor: pointer;
   position: relative;
-  overflow: hidden;
+  overflow: visible;
+  z-index: 0;
 }
 
 .row:focus-visible {
@@ -7375,12 +7376,15 @@ button.dangerBtn:disabled {
   top: 0;
   bottom: 0;
   width: 3px;
+  border-top-left-radius: var(--radius-md);
+  border-bottom-left-radius: var(--radius-md);
   background: transparent;
   transition: background 0.2s;
 }
 
 .row:hover {
   transform: translateY(-2px);
+  z-index: 6;
   box-shadow: 0 8px 16px -4px rgba(0,0,0,0.1);
   border-color: var(--color-primary-bg);
 }
@@ -7487,6 +7491,10 @@ button.dangerBtn:disabled {
   box-shadow: 0 0 0 2px rgba(20, 184, 166, 0.2);
 }
 
+.rowMore[open] {
+  z-index: 40;
+}
+
 .rowMorePopup {
   position: absolute;
   right: 0;
@@ -7499,7 +7507,7 @@ button.dangerBtn:disabled {
   padding: 8px;
   display: grid;
   gap: 8px;
-  z-index: 20;
+  z-index: 50;
 }
 
 .rowMorePopup button {
