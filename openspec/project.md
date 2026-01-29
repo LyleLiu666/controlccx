@@ -64,13 +64,13 @@ with strong foundations first, then add higher-level productivity layers.
    - `add-session-management` (done)
 
 6) **Machine Skills Management (tooling foundation)**
-   - `add-machine-skills-management` (in progress)
+   - `add-machine-skills-management` (done)
 
 7) **Tooling Extensibility (multi-tool adapters + tool-level env)**
-   - `add-tooling-extensibility` (planned)
+   - `add-tooling-extensibility` (done)
 
 8) **Foreman Dashboard (operational overview)**
-   - `add-foreman-dashboard` (planned)
+   - `add-foreman-dashboard` (done)
 
 ### Git Workflow
 - Small, focused changes.
