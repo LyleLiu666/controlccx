@@ -7,7 +7,7 @@
 > - WebCode：`/Users/liu_y/code/opensource/WebCode`
 
 ## 一句话结论
-WebCode 在 **移动端体验、工作区文件管理/预览、可扩展 CLI 工具体系、上下文与快捷操作、会话管理 UX** 等方面明显更完整；ControlCCX 更像“控制台+观测器”，但在“编程工作台”与“移动场景”上功能/体验断层。
+在本轮迭代后，ControlCCX 已补齐 WebCode 的多项关键能力：**移动端壳层、工作区文件读写闭环、Markdown/Raw/HTML 预览、多工具配置与工具级 env、会话管理（重命名/删除）以及更强的 run 观测（Trace/Logs 导出）**。目前主要差距集中在 **上下文管理/模板/快捷操作** 与 **更“工作台化”的文件高级能力（搜索/对比/监控、Monaco 编辑器）**。
 
 ---
 
@@ -15,31 +15,31 @@ WebCode 在 **移动端体验、工作区文件管理/预览、可扩展 CLI 工
 
 1) **移动端体验体系**
    - WebCode：专门的移动端适配与触控优化、iOS 视口/键盘兼容、无障碍与减动画支持（`docs/移动端兼容性优化说明.md`）。
-   - ControlCCX：仅基于宽度判断 `isPhone` 与少量 media query（`web/src/App.vue`），未见系统性的移动交互优化。
+   - ControlCCX：已加入 Mobile Shell（抽屉/顶部导航/触控目标等基础适配，`web/src/App.vue`），但仍缺少更系统性的移动交互（键盘遮挡、无障碍、动效降级）。
 
 2) **工作区文件管理（文件树/上传下载/搜索/对比/监控）**
    - WebCode：文件树、上传/下载、文件对比、文件搜索、文件监控面板、创建/删除文件夹等（`WebCodeCli/Pages/CodeAssistant.razor`，`WebCodeCli/Components/FileSearchPanel.razor`，`WebCodeCli/Components/DiffViewerPanel.razor`，`WebCodeCli/Components/FileMonitorPanel.razor`）。
-   - ControlCCX：仅提供目录选择与只读文件预览（`web/src/App.vue`），后端只有 `fs/roots|list|read` 且无写入接口（`internal/api/api.go`）。
+   - ControlCCX：已具备文件树浏览、预览/编辑、mkdir/delete/write 等读写闭环（`web/src/App.vue` + `internal/api/api.go`）。剩余差距：文件搜索、diff viewer、文件监控、上传/下载（更偏“工作台”能力）。
 
 3) **代码/内容预览能力（Monaco + HTML 预览 + 多 Tab）**
    - WebCode：Monaco Editor 代码高亮、Markdown/原始/HTML 预览多 Tab（`README.md`，`WebCodeCli/Pages/CodeAssistant.razor`）。
-   - ControlCCX：Markdown 渲染 + Highlight.js 的只读预览，无编辑器与 HTML 预览（`web/src/App.vue`）。
+   - ControlCCX：已支持 Markdown/Raw/HTML 多 Tab 预览，并在文件编辑中提供轻量 textarea（`web/src/App.vue`）。剩余差距：Monaco 级编辑体验（大文件、语言服务、Diff 体验）。
 
 4) **多 CLI 工具与扩展体系**
    - WebCode：多 CLI 工具适配（Claude/Codex/Copilot/Qwen/Gemini 等），配置化扩展（`README.md`，`WebCodeCli.Domain/Domain/Service/Adapters/`）。
-   - ControlCCX：WorkerType 仅 `claude-code` / `codex`（`web/src/types.ts`）。
+   - ControlCCX：已支持 Tools 配置与多工具适配（driver/command/args/env，可在 UI 管理，`internal/tooling/*` + `web/src/App.vue`）。
 
 5) **工具级配置与环境变量管理**
    - WebCode：在 UI 中为每个 CLI 工具配置环境变量并持久化（`docs/环境变量配置功能说明.md`，`WebCodeCli/Components/EnvironmentVariableConfigModal.razor`）。
-   - ControlCCX：仅提供 Claude/Codex 的全局 API Key/Model 设置（`web/src/App.vue`），未见多工具级配置能力。
+   - ControlCCX：已支持 tool-level env 管理与持久化（Tools 面板），并与 Worker/Run 绑定（`internal/tooling/*` + `web/src/App.vue`）。
 
 6) **上下文管理/模板/快捷操作的生产力功能**
    - WebCode：上下文面板、上下文压缩、模板库、快捷操作（`WebCodeCli/README_上下文管理.md`，`WebCodeCli/Components/ContextPreviewPanel.razor`，`WebCodeCli/Components/TemplateLibraryModal.razor`，`WebCodeCli/Components/QuickActionsPanel.razor`）。
-   - ControlCCX：无对应 UI/组件与逻辑。
+   - ControlCCX：目前仍缺少这类“生产力层”模块；这是下一阶段最值得补齐的差距（偏驾驶室：引导、快捷键、可执行下一步、模板化复用）。
 
 7) **会话管理 UX（重命名/删除/用户身份）**
    - WebCode：会话重命名、删除、当前用户/退出（`WebCodeCli/Pages/CodeAssistant.razor`）。
-   - ControlCCX：会话列表支持筛选/固定，但无重命名/删除入口（`web/src/App.vue`）。
+   - ControlCCX：已支持会话重命名/删除（软删除）与筛选（`web/src/App.vue`）。
 
 ---
 
@@ -49,13 +49,13 @@ WebCode 在 **移动端体验、工作区文件管理/预览、可扩展 CLI 工
 |---|---|---|---|
 | 移动端适配 | 触控目标、iOS 视口、键盘与刘海屏、滚动体验、无障碍（`docs/移动端兼容性优化说明.md`） | 基础响应式 + 抽屉（`web/src/App.vue`） | 手机/平板体验明显差；“随时随地编程”场景缺失 |
 | 工作区文件树 | 文件树视图、层级展开、文件选择（`WebCodeCli/Pages/CodeAssistant.razor`） | 无文件树，仅目录选择 + 只读预览 | 无法在 UI 中组织/浏览工作区结构 |
-| 文件操作 | 上传/下载、创建/删除文件夹、批量下载（`WebCodeCli/Pages/CodeAssistant.razor`） | 无上传/下载/写入 API（`internal/api/api.go`） | 只能读文件，无法完成“工作区闭环” |
-| 文件搜索/对比/监控 | 搜索面板、Diff、文件监控（`WebCodeCli/Components/FileSearchPanel.razor` 等） | 无对应模块 | 无法在 UI 内做高阶文件分析 |
-| 预览能力 | Monaco + Markdown + 原始 + HTML 预览（`README.md`，`WebCodeCli/Pages/CodeAssistant.razor`） | Markdown + Highlight.js，缺 HTML/编辑器 | 生成前端页面无法直接预览 |
-| 工具扩展 | 多 CLI 工具适配与配置（`README.md`） | 仅 Claude/Codex 两类（`web/src/types.ts`） | 新工具接入成本高 |
-| 工具级环境变量 | UI 配置并持久化（`docs/环境变量配置功能说明.md`） | 只有全局 Key/Model（`web/src/App.vue`） | 难以多工具/多环境切换 |
-| 生产力功能 | 上下文管理、模板库、快捷操作（`WebCodeCli/Components/*`） | 无 | 成熟度与效率差距明显 |
-| 会话管理 | 重命名、删除、用户管理入口（`WebCodeCli/Pages/CodeAssistant.razor`） | 会话筛选/固定，但无重命名/删除 | 运营与多用户场景不足 |
+| 文件操作 | 上传/下载、创建/删除文件夹、批量下载（`WebCodeCli/Pages/CodeAssistant.razor`） | 已支持 mkdir/delete/write（`internal/api/api.go` + `web/src/App.vue`），仍缺上传/下载（文件级） | “闭环”已成立，但效率/可移植性仍可提升 |
+| 文件搜索/对比/监控 | 搜索面板、Diff、文件监控（`WebCodeCli/Components/FileSearchPanel.razor` 等） | 仍缺对应模块 | 无法在 UI 内做高阶文件分析 |
+| 预览能力 | Monaco + Markdown + 原始 + HTML 预览（`README.md`，`WebCodeCli/Pages/CodeAssistant.razor`） | 已支持 Markdown/Raw/HTML 多 Tab；编辑为轻量 textarea | Monaco 级编辑体验仍有差距 |
+| 工具扩展 | 多 CLI 工具适配与配置（`README.md`） | 已支持 tools 配置（driver/command/args/env） | 继续扩展更多 driver/适配器需要额外工作 |
+| 工具级环境变量 | UI 配置并持久化（`docs/环境变量配置功能说明.md`） | 已支持 tool-level env | 差距收敛 |
+| 生产力功能 | 上下文管理、模板库、快捷操作（`WebCodeCli/Components/*`） | 仍缺 | 成熟度与效率差距明显（下一阶段优先） |
+| 会话管理 | 重命名、删除、用户管理入口（`WebCodeCli/Pages/CodeAssistant.razor`） | 已支持会话重命名/删除（软删除） | 多用户/账号体系仍未覆盖（若需要） |
 
 ---
 
@@ -104,3 +104,12 @@ WebCode 在 **移动端体验、工作区文件管理/预览、可扩展 CLI 工
 - Change: `openspec/changes/add-tooling-extensibility/`
 - 覆盖缺口：**多 CLI 工具适配 + 工具级环境变量管理**
 - 说明：纳入计划，但排在后面（先把核心体验与闭环做稳）
+
+### Phase 6：生产力层（驾驶室优先）
+- 建议新增 Change（待定）：上下文面板 / 模板库 / Quick Actions（更偏“驾驶室”，用于减少用户无聊与手动操作）
+
+### Phase 7：文件高级能力（工作台化，可选）
+- 建议新增 Change（待定）：文件搜索 / diff viewer / 文件监控（更偏“工作台”，看需求取舍）
+
+### Phase 8：编辑体验升级（工作台化，可选）
+- 建议新增 Change（待定）：Monaco Editor（或更轻量替代），与 Diff 结合
