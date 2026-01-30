@@ -6251,7 +6251,7 @@ h2 {
   line-height: 1;
 }
 
-.secDrawerOverlay {
+:deep(.secDrawerOverlay) {
   position: fixed;
   inset: 0;
   background: var(--overlay-drawer);
@@ -6259,7 +6259,7 @@ h2 {
   z-index: 200;
 }
 
-.secDrawer {
+:deep(.secDrawer) {
   position: fixed;
   top: max(16px, env(safe-area-inset-top));
   right: 16px;
@@ -6274,15 +6274,15 @@ h2 {
   grid-template-rows: auto 1fr;
 }
 
-.secDrawer.secDrawerSecretary {
+:deep(.secDrawer.secDrawerSecretary) {
   width: min(1100px, calc(100vw - 32px));
 }
 
-.secDrawer.wide {
+:deep(.secDrawer.wide) {
   width: min(980px, calc(100vw - 32px));
 }
 
-.secResizeHandle {
+:deep(.secResizeHandle) {
   position: absolute;
   left: 0;
   top: 0;
@@ -6292,7 +6292,7 @@ h2 {
   z-index: 2;
 }
 
-.secResizeHandle::after {
+:deep(.secResizeHandle)::after {
   content: "";
   position: absolute;
   left: 4px;
@@ -6305,8 +6305,8 @@ h2 {
   transition: opacity 0.15s ease;
 }
 
-.secResizeHandle:hover::after,
-.secResizeHandle.active::after {
+:deep(.secResizeHandle:hover)::after,
+:deep(.secResizeHandle.active)::after {
   opacity: 1;
 }
 
@@ -6337,7 +6337,7 @@ h2 {
   gap: 10px;
 }
 
-.secDrawerHeader {
+:deep(.secDrawerHeader) {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -6346,20 +6346,20 @@ h2 {
   background: var(--bg-subtle);
 }
 
-.secDrawerTitle {
+:deep(.secDrawerTitle) {
   font-weight: 800;
   font-size: 14px;
   color: var(--text-main);
 }
 
-.secTabs {
+:deep(.secTabs) {
   display: flex;
   gap: 6px;
   flex: 1;
   justify-content: center;
 }
 
-.secTab {
+:deep(.secTab) {
   border: 1px solid var(--border-color);
   background: var(--bg-panel);
   border-radius: 999px;
@@ -6370,13 +6370,13 @@ h2 {
   position: relative;
 }
 
-.secTab.active {
+:deep(.secTab.active) {
   background: var(--color-primary);
   color: white;
   border-color: var(--color-primary);
 }
 
-.secTabBadge {
+:deep(.secTabBadge) {
   margin-left: 6px;
   display: inline-grid;
   place-items: center;
@@ -6391,7 +6391,7 @@ h2 {
   font-weight: 900;
 }
 
-.secDrawerBody {
+:deep(.secDrawerBody) {
   padding: 14px;
   overflow: hidden;
   display: flex;
@@ -6399,7 +6399,7 @@ h2 {
   min-height: 0;
 }
 
-.secOverview {
+:deep(.secOverview) {
   display: grid;
   gap: 20px;
   overflow: auto;
@@ -6407,7 +6407,7 @@ h2 {
   flex: 1;
 }
 
-.secChatView {
+:deep(.secChatView) {
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -6416,7 +6416,7 @@ h2 {
   overflow: hidden;
 }
 
-.secAttentionHint {
+:deep(.secAttentionHint) {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -6428,7 +6428,7 @@ h2 {
   font-size: 13px;
 }
 
-.secAttentionHint .text {
+:deep(.secAttentionHint .text) {
   flex: 1;
 }
 
@@ -8869,20 +8869,20 @@ h2 {
   color: #f472b6;
 }
 
-.secretary {
+:deep(.secretary) {
   display: grid;
   gap: 20px;
   height: auto; /* Allow auto height now that we are sticky */
   grid-template-rows: auto 1fr auto;
 }
 
-.secretaryCards {
+:deep(.secretaryCards) {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
   gap: 12px;
 }
 
-.secCard {
+:deep(.secCard) {
   border: none;
   border-radius: var(--radius-md);
   background: linear-gradient(135deg, var(--bg-subtle) 0%, var(--color-primary-bg) 100%);
@@ -8896,12 +8896,12 @@ h2 {
   transition: transform 0.2s, box-shadow 0.2s;
 }
 
-.secCard:hover {
+:deep(.secCard:hover) {
   transform: translateY(-2px);
   box-shadow: 0 4px 12px rgba(13, 148, 136, 0.15);
 }
 
-.secK {
+:deep(.secK) {
   font-size: 11px;
   color: var(--text-sub);
   text-transform: uppercase;
@@ -8909,44 +8909,44 @@ h2 {
   letter-spacing: 0.05em;
 }
 
-.secV {
+:deep(.secV) {
   font-size: 24px;
   font-weight: 800;
   color: var(--color-primary);
   margin-top: 6px;
 }
 
-.secSection {
+:deep(.secSection) {
   display: grid;
   gap: 10px;
 }
 
-.secSectionTitle {
+:deep(.secSectionTitle) {
   font-size: 13px;
   font-weight: 700;
   color: var(--text-main);
 }
 
-.secSectionTitleRow {
+:deep(.secSectionTitleRow) {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
 }
 
-.secSectionControls {
+:deep(.secSectionControls) {
   display: flex;
   align-items: center;
   gap: 10px;
 }
 
-.secScopeSelect {
+:deep(.secScopeSelect) {
   padding: 6px 10px;
   font-size: 12px;
   border-radius: 999px;
 }
 
-.secMiniToggle {
+:deep(.secMiniToggle) {
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -8960,12 +8960,12 @@ h2 {
   user-select: none;
 }
 
-.secMiniToggle input {
+:deep(.secMiniToggle input) {
   width: 14px;
   height: 14px;
 }
 
-.secAutopilotNote {
+:deep(.secAutopilotNote) {
   font-size: 12px;
   color: var(--text-sub);
   background: var(--bg-subtle);
@@ -8975,7 +8975,7 @@ h2 {
   overflow-wrap: anywhere;
 }
 
-.secRow {
+:deep(.secRow) {
   background: var(--bg-panel);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
@@ -8987,13 +8987,13 @@ h2 {
   overflow: hidden;
 }
 
-.secRow:hover {
+:deep(.secRow:hover) {
   transform: translateY(-2px);
   box-shadow: var(--shadow-md);
   border-color: var(--color-primary-bg);
 }
 
-.secRowMain {
+:deep(.secRowMain) {
   flex: 1;
   border: none;
   background: transparent;
@@ -9002,21 +9002,21 @@ h2 {
   cursor: pointer;
 }
 
-.secRowActions {
+:deep(.secRowActions) {
   display: flex;
   align-items: center;
   gap: 8px;
   padding: 12px;
 }
 
-.secAction {
+:deep(.secAction) {
   padding: 6px 10px;
   font-size: 12px;
   border-radius: 999px;
   white-space: nowrap;
 }
 
-.briefing {
+:deep(.briefing) {
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
   padding: 14px;
@@ -9029,7 +9029,7 @@ h2 {
   line-height: 1.6;
 }
 
-.secChat {
+:deep(.secChat) {
   flex: 1;
   min-height: 0;
   display: flex;
@@ -9039,13 +9039,13 @@ h2 {
   background: transparent;
 }
 
-.secChat summary {
+:deep(.secChat summary) {
   font-weight: 600;
   color: var(--color-primary);
   cursor: pointer;
 }
 
-.secChat .chat {
+:deep(.secChat .chat) {
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -9053,7 +9053,7 @@ h2 {
   flex: 1;
 }
 
-.chatControls {
+:deep(.chatControls) {
   display: flex;
   gap: 12px;
   align-items: flex-end;
@@ -9061,7 +9061,7 @@ h2 {
   flex-wrap: wrap;
 }
 
-.chatControls label {
+:deep(.chatControls label) {
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -9069,8 +9069,8 @@ h2 {
   color: var(--text-sub);
 }
 
-.chatControls select,
-.chatControls input[type="number"] {
+:deep(.chatControls select),
+:deep(.chatControls input[type="number"]) {
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
   padding: 8px 10px;
@@ -9078,14 +9078,14 @@ h2 {
   font-size: 13px;
 }
 
-.chatControls label.chatToggle {
+:deep(.chatControls label.chatToggle) {
   flex-direction: row;
   gap: 8px;
   align-items: center;
   padding-bottom: 8px;
 }
 
-.msgs {
+:deep(.msgs) {
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
   padding: 12px;
@@ -9098,7 +9098,7 @@ h2 {
   gap: 12px;
 }
 
-.msg {
+:deep(.msg) {
   padding: 10px 14px;
   border-radius: var(--radius-md);
   margin: 0;
@@ -9108,22 +9108,22 @@ h2 {
   align-self: flex-start;
 }
 
-.msg.user {
+:deep(.msg.user) {
   background: var(--color-primary-bg);
   color: var(--color-primary-hover);
   align-self: flex-end;
 }
 
-.msg.user .content {
+:deep(.msg.user .content) {
   color: var(--color-primary-hover);
 }
 
-.msg.streaming {
+:deep(.msg.streaming) {
   border-style: dashed;
   opacity: 0.9;
 }
 
-.role {
+:deep(.role) {
   font-size: 11px;
   color: var(--text-sub);
   text-transform: uppercase;
@@ -9132,21 +9132,21 @@ h2 {
   font-weight: 700;
 }
 
-.msg .content {
+:deep(.msg .content) {
   font-size: 13px;
   line-height: 1.65;
   color: var(--text-main);
 }
 
-.msg .content.chatMarkdown {
+:deep(.msg .content.chatMarkdown) {
   white-space: normal;
 }
 
-.msg .content.chatMarkdown :deep(p) {
+:deep(.msg .content.chatMarkdown p) {
   margin: 0 0 10px;
 }
 
-.msg .content.chatMarkdown :deep(pre) {
+:deep(.msg .content.chatMarkdown pre) {
   margin: 10px 0;
   padding: 12px;
   background: var(--bg-panel);
@@ -9155,45 +9155,45 @@ h2 {
   overflow: auto;
 }
 
-.msg .content.chatMarkdown :deep(code) {
+:deep(.msg .content.chatMarkdown code) {
   font-family: var(--font-mono);
   font-size: 12px;
 }
 
-.msg .content.chatMarkdown :deep(p code),
-.msg .content.chatMarkdown :deep(li code) {
+:deep(.msg .content.chatMarkdown p code),
+:deep(.msg .content.chatMarkdown li code) {
   background: var(--bg-panel);
   border: 1px solid rgba(148, 163, 184, 0.22);
   padding: 1px 6px;
   border-radius: 8px;
 }
 
-.msg .content.chatMarkdown :deep(code.fileRef) {
+:deep(.msg .content.chatMarkdown code.fileRef) {
   cursor: pointer;
   border-color: rgba(45, 212, 191, 0.45);
 }
 
-.msg .content.chatMarkdown :deep(code.fileRef:hover) {
+:deep(.msg .content.chatMarkdown code.fileRef:hover) {
   color: var(--color-primary);
   text-decoration: underline;
 }
 
-.msg .content.chatMarkdown :deep(a) {
+:deep(.msg .content.chatMarkdown a) {
   color: var(--color-primary);
   text-decoration: none;
 }
 
-.msg .content.chatMarkdown :deep(a:hover) {
+:deep(.msg .content.chatMarkdown a:hover) {
   text-decoration: underline;
 }
 
-.secChat .input {
+:deep(.secChat .input) {
   display: flex;
   gap: 10px;
   align-items: flex-end;
 }
 
-.secChat .input textarea {
+:deep(.secChat .input textarea) {
   flex: 1;
   width: auto;
   min-height: 48px;
@@ -9201,7 +9201,7 @@ h2 {
   resize: vertical;
 }
 
-.secChat .input button {
+:deep(.secChat .input button) {
   flex: 0 0 auto;
   min-width: 92px;
   padding-left: 16px;
@@ -9209,7 +9209,7 @@ h2 {
 }
 
 @media (max-width: 640px) {
-  .secDrawer {
+  :deep(.secDrawer) {
     top: 0;
     right: 0;
     bottom: 0;
@@ -9217,15 +9217,15 @@ h2 {
     border-radius: 0;
   }
 
-  .secResizeHandle {
+  :deep(.secResizeHandle) {
     display: none;
   }
 
-  .secDrawerHeader {
+  :deep(.secDrawerHeader) {
     padding-top: calc(12px + env(safe-area-inset-top));
   }
 
-  .secDrawerBody {
+  :deep(.secDrawerBody) {
     padding-bottom: calc(14px + env(safe-area-inset-bottom));
   }
 }
@@ -9238,7 +9238,7 @@ h2 {
   :deep(.skillsPageWrap) {
     grid-template-columns: 1fr;
   }
-  .secretaryCards {
+  :deep(.secretaryCards) {
     grid-template-columns: repeat(4, 1fr);
   }
   /* Disable sticky on mobile */
@@ -9264,7 +9264,7 @@ h2 {
     min-height: 40px;
   }
 
-  .secTab,
+  :deep(.secTab),
   .feedConn,
   .feedReconnect,
   .feedHint,
@@ -9299,7 +9299,7 @@ h2 {
     bottom: max(16px, env(safe-area-inset-bottom));
   }
 
-  .secDrawer {
+  :deep(.secDrawer) {
     top: 0;
     right: 0;
     bottom: 0;
@@ -9307,7 +9307,7 @@ h2 {
     border-radius: 0;
   }
 
-  .secDrawer.wide {
+  :deep(.secDrawer.wide) {
     width: 100vw;
   }
 
