@@ -2,6 +2,7 @@ package observer
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -386,6 +387,263 @@ func (s *Service) agentTools() map[string]Tool {
 				}
 				ok := s.Runner.Cancel(taskID)
 				return map[string]any{"ok": ok, "task_id": taskID}, nil
+			},
+		},
+		"acceptance_classify": ToolFunc{
+			ToolName:        "acceptance_classify",
+			ToolDescription: "（deterministic）判断某个任务是否属于复杂任务，并给出一句话理由。参数：{task_id: string}。task_id 可为：完整 id / id 前缀 / session_id / prompt 关键词",
+			Fn: func(ctx context.Context, args map[string]any) (any, error) {
+				if s.Store == nil {
+					return nil, errors.New("tasks store not configured")
+				}
+				taskID := stringArg(args, "task_id")
+				if taskID == "" {
+					taskID = stringArg(args, "id")
+				}
+				taskID, err := s.resolveTaskID(ctx, taskID)
+				if err != nil {
+					return nil, err
+				}
+				t, err := s.Store.GetTask(ctx, taskID)
+				if err != nil {
+					return nil, err
+				}
+				prompt := s.bestEffortSessionPrompt(ctx, t)
+				complex, reason, signals := classifyComplexityHeuristic(prompt)
+				return map[string]any{
+					"complex":    complex,
+					"reason":     reason,
+					"signals":    signals,
+					"prompt":     truncateDisplay(strings.TrimSpace(prompt), 240),
+					"task_id":    t.ID,
+					"session_id": strings.TrimSpace(t.SessionID),
+				}, nil
+			},
+		},
+		"acceptance_prepare": ToolFunc{
+			ToolName:        "acceptance_prepare",
+			ToolDescription: "准备/推进验收状态（按 run_id 变更自动推进 iteration，并 enforce max_iterations）。参数：{task_id: string, max_iterations?: number}。返回：{can_continue:boolean, iteration_advanced:boolean, state:AcceptanceState}",
+			Fn: func(ctx context.Context, args map[string]any) (any, error) {
+				if s.Store == nil {
+					return nil, errors.New("tasks store not configured")
+				}
+				runID := stringArg(args, "task_id")
+				if runID == "" {
+					runID = stringArg(args, "id")
+				}
+				if runID == "" {
+					return nil, errors.New("acceptance_prepare: task_id is required")
+				}
+				resolved, err := s.resolveTaskID(ctx, runID)
+				if err != nil {
+					return nil, err
+				}
+				t, err := s.Store.GetTask(ctx, resolved)
+				if err != nil {
+					return nil, err
+				}
+				key := tasks.SessionKey(t.ID, t.SessionID)
+
+				maxIter := intArg(args, "max_iterations", 10, 1, 100)
+
+				prev, ok, err := s.Store.GetAcceptanceState(ctx, key)
+				if err != nil {
+					return nil, err
+				}
+
+				iterationAdvanced := false
+				canContinue := true
+
+				if !ok {
+					st, err := s.Store.UpsertAcceptanceState(ctx, tasks.UpsertAcceptanceStateInput{
+						Key:           key,
+						Status:        "running",
+						Iteration:     1,
+						MaxIterations: maxIter,
+						CurrentGate:   "contract",
+						Summary:       "acceptance started",
+						RunID:         t.ID,
+					})
+					if err != nil {
+						return nil, err
+					}
+					return map[string]any{
+						"can_continue":       true,
+						"iteration_advanced": false,
+						"state":              st,
+					}, nil
+				}
+
+				// Terminal states: do not proceed.
+				switch strings.ToLower(strings.TrimSpace(prev.Status)) {
+				case "accepted", "failed":
+					return map[string]any{
+						"can_continue":       false,
+						"iteration_advanced": false,
+						"state":              prev,
+					}, nil
+				}
+
+				next := prev
+				next.MaxIterations = maxIter
+				if next.Iteration <= 0 {
+					next.Iteration = 1
+				}
+
+				if strings.TrimSpace(prev.RunID) != "" && strings.TrimSpace(prev.RunID) != t.ID {
+					if next.Iteration >= next.MaxIterations {
+						canContinue = false
+						next.Status = "failed"
+						next.Summary = "iteration limit reached"
+					} else {
+						next.Iteration++
+						iterationAdvanced = true
+					}
+				}
+				next.RunID = t.ID
+				if strings.TrimSpace(next.Status) == "" {
+					next.Status = "running"
+				}
+
+				st, err := s.Store.UpsertAcceptanceState(ctx, tasks.UpsertAcceptanceStateInput{
+					Key:           key,
+					Status:        next.Status,
+					Iteration:     next.Iteration,
+					MaxIterations: next.MaxIterations,
+					CurrentGate:   strings.TrimSpace(next.CurrentGate),
+					Summary:       strings.TrimSpace(next.Summary),
+					PlanJSON:      next.PlanJSON,
+					Report:        next.Report,
+					RunID:         next.RunID,
+				})
+				if err != nil {
+					return nil, err
+				}
+				return map[string]any{
+					"can_continue":       canContinue,
+					"iteration_advanced": iterationAdvanced,
+					"state":              st,
+				}, nil
+			},
+		},
+		"acceptance_build_contract": ToolFunc{
+			ToolName:        "acceptance_build_contract",
+			ToolDescription: "（deterministic baseline）从 session prompt 中抽取 objective constraints，并生成 acceptance plan_json（方法论优先、无固定分类）。参数：{task_id: string}。返回：{plan_json:string, plan:object}",
+			Fn: func(ctx context.Context, args map[string]any) (any, error) {
+				if s.Store == nil {
+					return nil, errors.New("tasks store not configured")
+				}
+				taskID := stringArg(args, "task_id")
+				if taskID == "" {
+					taskID = stringArg(args, "id")
+				}
+				taskID, err := s.resolveTaskID(ctx, taskID)
+				if err != nil {
+					return nil, err
+				}
+				t, err := s.Store.GetTask(ctx, taskID)
+				if err != nil {
+					return nil, err
+				}
+				prompt := s.bestEffortSessionPrompt(ctx, t)
+				plan := buildAcceptancePlanHeuristic(prompt)
+				b, err := json.Marshal(plan)
+				if err != nil {
+					return nil, fmt.Errorf("acceptance_build_contract: %w", err)
+				}
+				return map[string]any{
+					"plan_json": string(b),
+					"plan":      plan,
+					"prompt":    truncateDisplay(strings.TrimSpace(prompt), 300),
+				}, nil
+			},
+		},
+		"acceptance_evaluate_objectives": ToolFunc{
+			ToolName:        "acceptance_evaluate_objectives",
+			ToolDescription: "（deterministic）按 plan_json 评估客观标准（words/sections/字数等），输出 pass/fail + 证据。参数：{task_id: string, plan_json: string}",
+			Fn: func(ctx context.Context, args map[string]any) (any, error) {
+				if s.Store == nil {
+					return nil, errors.New("tasks store not configured")
+				}
+				taskID := stringArg(args, "task_id")
+				if taskID == "" {
+					taskID = stringArg(args, "id")
+				}
+				taskID, err := s.resolveTaskID(ctx, taskID)
+				if err != nil {
+					return nil, err
+				}
+				t, err := s.Store.GetTask(ctx, taskID)
+				if err != nil {
+					return nil, err
+				}
+
+				planJSON := stringArg(args, "plan_json")
+				plan, err := parseAcceptancePlanJSON(planJSON)
+				if err != nil {
+					return nil, err
+				}
+
+				out, err := s.latestTaskOutput(ctx, t)
+				if err != nil {
+					return nil, err
+				}
+				st := computeLengthStat(out)
+				hs := computeHeadingStat(out)
+
+				results := make([]AcceptanceObjectiveResult, 0, len(plan.ObjectiveCriteria))
+				for _, c := range plan.ObjectiveCriteria {
+					measured, unit, ok := acceptanceMeasureForMethod(c.Method, st, hs)
+					if !ok {
+						results = append(results, AcceptanceObjectiveResult{
+							ID:     strings.TrimSpace(c.ID),
+							Title:  strings.TrimSpace(c.Title),
+							Method: strings.TrimSpace(c.Method),
+							Pass:   false,
+							Min:    c.Min,
+							Max:    c.Max,
+							Unit:   strings.TrimSpace(c.Unit),
+							Note:   "unsupported objective method",
+						})
+						continue
+					}
+					pass := true
+					if c.Min > 0 && measured < c.Min {
+						pass = false
+					}
+					if c.Max > 0 && measured > c.Max {
+						pass = false
+					}
+
+					title := strings.TrimSpace(c.Title)
+					if title == "" {
+						title = strings.TrimSpace(c.ID)
+					}
+					results = append(results, AcceptanceObjectiveResult{
+						ID:       strings.TrimSpace(c.ID),
+						Title:    title,
+						Method:   strings.TrimSpace(c.Method),
+						Pass:     pass,
+						Measured: measured,
+						Min:      c.Min,
+						Max:      c.Max,
+						Unit:     unit,
+						Evidence: []AcceptanceEvidenceRef{
+							{Kind: "count", Ref: fmt.Sprintf("%s=%d", unit, measured), Note: fmt.Sprintf("min=%d max=%d", c.Min, c.Max)},
+						},
+					})
+				}
+
+				return map[string]any{
+					"task_id": t.ID,
+					"results": results,
+					"stats": map[string]any{
+						"chars_no_space": st.NonSpaceRunes,
+						"chars":          st.Runes,
+						"words":          st.Words,
+						"sections":       hs.HeadingLines,
+					},
+				}, nil
 			},
 		},
 		"acceptance_get": ToolFunc{

@@ -3,6 +3,7 @@ package observer
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
@@ -97,9 +98,12 @@ func (s *Service) RespondWithOptions(ctx context.Context, userMessage string, op
 - 你 MUST 先判断该 run 是否真的“可交付完成”
 - 你 MUST 判断“是否复杂任务”，并给出一句话理由（无硬阈值；不确定时 SHOULD 更保守）
 - 若为复杂任务：你 MUST 进入【Acceptance Gates / 验收闸门】闭环：
+  - 先调用 acceptance_prepare({task_id: run_id, max_iterations: 10}) 获取本轮 iteration，并确保不会超过上限
+  - 若 acceptance_prepare 返回 can_continue=false：你 MUST 停止自动迭代并升级给用户（最小下一步 + 证据）
   - 先调用 acceptance_get({task_id: run_id}) 获取当前验收状态（用于避免重复触发/无限循环）
+  - 你 SHOULD 调用 acceptance_build_contract({task_id: run_id}) 得到 deterministic baseline 的 plan_json，然后再结合用户要求补齐/修正
   - 使用 acceptance_update 写入/更新验收状态（status/iteration/current_gate/summary/plan_json/report），确保 UI 可见进度（iteration i/10）
-  - 对“客观标准（Objective）”尽量用确定性证据：例如用 task_output_stats 统计 words/sections/字数；必要时用 task_logs 获取命令结果摘要
+  - 对“客观标准（Objective）”优先用确定性证据：调用 acceptance_evaluate_objectives({task_id: run_id, plan_json}) 或 task_output_stats 统计 words/sections/字数，并把测量值写入报告
   - 对“主观标准（Subjective）”必须先拆解 rubric，再逐项判定 pass/fail 并给出修改建议
   - 若验收不通过且仍可自动推进：你 SHOULD 调用 task_resume 创建新的 resume run（把失败项变成下一轮最小修复动作，并在回复里包含新 run id + 本轮目标）
   - 若达到迭代上限（默认 10）或遇到高风险/信息不足：你 MUST 停止自动迭代并升级给用户（最小下一步 + 证据）
@@ -141,6 +145,10 @@ func (s *Service) RespondWithOptions(ctx context.Context, userMessage string, op
 		return Reply{}, fmt.Errorf("llm backend not available for backend=%q", strings.TrimSpace(opts.Backend))
 	}
 
+	if looksLikeDeliveryForemanPrompt(msg, lower) {
+		return s.handleDeliveryForemanFallback(ctx, msg)
+	}
+
 	all, err := s.Store.ListTasks(ctx, 500)
 	if err != nil {
 		return Reply{}, err
@@ -180,6 +188,167 @@ func (s *Service) RespondWithOptions(ctx context.Context, userMessage string, op
 	}
 
 	return Reply{Message: "我可以回答：当前运行任务数量、最有问题的任务、任务结果字数是否达标、以及服务器系统信息。你也可以直接问：'我们有几个任务在执行' / '哪个任务问题比较多' / '刚刚那个写脱口秀的任务字数够不够'。"}, nil
+}
+
+var reRunIDLine = regexp.MustCompile(`(?m)^\s*run_id:\s*([0-9a-fA-F-]{8,64})\s*$`)
+
+func looksLikeDeliveryForemanPrompt(msg string, lower string) bool {
+	if strings.Contains(lower, "delivery foreman") || strings.Contains(msg, "交付前哨") {
+		return true
+	}
+	// Heuristic: our prompt format includes run_id + recent_logs_tail blocks.
+	return strings.Contains(lower, "run_id:") && strings.Contains(lower, "runs_in_session:")
+}
+
+func extractRunIDFromMessage(msg string) string {
+	m := reRunIDLine.FindStringSubmatch(msg)
+	if len(m) < 2 {
+		return ""
+	}
+	return strings.TrimSpace(m[1])
+}
+
+func (s *Service) handleDeliveryForemanFallback(ctx context.Context, msg string) (Reply, error) {
+	if s == nil || s.Store == nil {
+		return Reply{}, fmt.Errorf("tasks store not configured")
+	}
+
+	runID := extractRunIDFromMessage(msg)
+	if runID == "" {
+		return Reply{Message: "Delivery Foreman（fallback）：无法解析 run_id。"}, nil
+	}
+	resolved, err := s.resolveTaskID(ctx, runID)
+	if err != nil {
+		return Reply{Message: fmt.Sprintf("Delivery Foreman（fallback）：找不到任务 %q。", runID)}, nil
+	}
+	t, err := s.Store.GetTask(ctx, resolved)
+	if err != nil {
+		return Reply{}, err
+	}
+
+	prompt := s.bestEffortSessionPrompt(ctx, t)
+	complex, reason, signals := classifyComplexityHeuristic(prompt)
+	if !complex {
+		return Reply{Message: fmt.Sprintf("Delivery Foreman（fallback）：判断为简单任务（%s），无需验收闸门。", reason)}, nil
+	}
+
+	plan := buildAcceptancePlanHeuristic(prompt)
+	plan.ComplexityReason = reason
+	planJSON, _ := json.Marshal(plan)
+
+	out, err := s.latestTaskOutput(ctx, t)
+	if err != nil {
+		return Reply{}, err
+	}
+	st := computeLengthStat(out)
+	hs := computeHeadingStat(out)
+
+	results := make([]AcceptanceObjectiveResult, 0, len(plan.ObjectiveCriteria))
+	for _, c := range plan.ObjectiveCriteria {
+		measured, unit, ok := acceptanceMeasureForMethod(c.Method, st, hs)
+		if !ok {
+			results = append(results, AcceptanceObjectiveResult{
+				ID:     strings.TrimSpace(c.ID),
+				Title:  strings.TrimSpace(c.Title),
+				Method: strings.TrimSpace(c.Method),
+				Pass:   false,
+				Min:    c.Min,
+				Max:    c.Max,
+				Unit:   strings.TrimSpace(c.Unit),
+				Note:   "unsupported objective method",
+			})
+			continue
+		}
+		pass := true
+		if c.Min > 0 && measured < c.Min {
+			pass = false
+		}
+		if c.Max > 0 && measured > c.Max {
+			pass = false
+		}
+		title := strings.TrimSpace(c.Title)
+		if title == "" {
+			title = strings.TrimSpace(c.ID)
+		}
+		results = append(results, AcceptanceObjectiveResult{
+			ID:       strings.TrimSpace(c.ID),
+			Title:    title,
+			Method:   strings.TrimSpace(c.Method),
+			Pass:     pass,
+			Measured: measured,
+			Min:      c.Min,
+			Max:      c.Max,
+			Unit:     unit,
+			Evidence: []AcceptanceEvidenceRef{
+				{Kind: "count", Ref: fmt.Sprintf("%s=%d", unit, measured), Note: fmt.Sprintf("min=%d max=%d", c.Min, c.Max)},
+			},
+		})
+	}
+
+	var sb strings.Builder
+	sb.WriteString("## Acceptance (deterministic fallback)\n\n")
+	sb.WriteString("- LLM backend: **unavailable** (cannot run rubric evaluation / auto-iteration)\n")
+	sb.WriteString(fmt.Sprintf("- run_id: `%s`\n", t.ID))
+	if sid := strings.TrimSpace(t.SessionID); sid != "" {
+		sb.WriteString(fmt.Sprintf("- session_id: `%s`\n", sid))
+	}
+	sb.WriteString(fmt.Sprintf("- complexity: **complex** — %s\n", reason))
+	if len(signals) > 0 {
+		sb.WriteString(fmt.Sprintf("- signals: %s\n", strings.Join(signals, ", ")))
+	}
+
+	sb.WriteString("\n### Objective\n")
+	if len(results) == 0 {
+		sb.WriteString("- (none)\n")
+	} else {
+		for _, r := range results {
+			status := "FAIL"
+			if r.Pass {
+				status = "PASS"
+			}
+			sb.WriteString(fmt.Sprintf("- %s %s (measured=%d %s, min=%d, max=%d)\n", status, r.Title, r.Measured, r.Unit, r.Min, r.Max))
+		}
+	}
+
+	sb.WriteString("\n### Subjective\n")
+	if len(plan.SubjectiveRubrics) == 0 {
+		sb.WriteString("- (none)\n")
+	} else {
+		sb.WriteString("- (requires LLM) subjective rubrics present but not evaluated.\n")
+	}
+
+	sb.WriteString("\n### Next\n")
+	sb.WriteString("- 配置一个可用的 LLM backend（claude/codex），以启用主观 rubric 验收与自动迭代。\n")
+	sb.WriteString("- 或者手动执行默认验证步骤，并把证据写入日志供验收。\n")
+
+	key := tasks.SessionKey(t.ID, t.SessionID)
+	prev, ok, err := s.Store.GetAcceptanceState(ctx, key)
+	if err != nil {
+		return Reply{}, err
+	}
+	iter := 1
+	maxIter := 10
+	if ok {
+		if prev.Iteration > 0 {
+			iter = prev.Iteration
+		}
+		if prev.MaxIterations > 0 {
+			maxIter = prev.MaxIterations
+		}
+	}
+	_, _ = s.Store.UpsertAcceptanceState(ctx, tasks.UpsertAcceptanceStateInput{
+		Key:           key,
+		Status:        "failed",
+		Iteration:     iter,
+		MaxIterations: maxIter,
+		CurrentGate:   "fallback",
+		Summary:       "LLM backend unavailable; objective-only evaluation",
+		PlanJSON:      string(planJSON),
+		Report:        sb.String(),
+		RunID:         t.ID,
+	})
+
+	return Reply{Message: "Delivery Foreman（fallback）：已生成验收报告（仅客观标准；主观标准需 LLM 才能拆解与判断）。"}, nil
 }
 
 func (s *Service) recentChatContext(ctx context.Context, currentUserMessage string) (string, error) {

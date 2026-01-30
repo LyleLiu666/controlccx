@@ -1944,8 +1944,12 @@ async function buildDeliveryForemanPrompt(t: Task): Promise<string> {
   parts.push("");
   parts.push("【Acceptance Gates / 验收闸门（仅复杂任务启用）】");
   parts.push("当你判断这是复杂任务时：");
-  parts.push("1) 先调用 acceptance_get({task_id: run_id}) 获取当前验收状态，避免重复触发/无限循环。");
-  parts.push("2) 你 MUST 使用 acceptance_update 写入/更新验收状态（server 持久化），让 UI 可见进度与报告。");
+  parts.push("1) 先调用 acceptance_prepare({task_id: run_id, max_iterations: 10}) 获取 iteration i/10，并确保不会超过上限。");
+  parts.push("   - 若 can_continue=false：你 MUST 升级给用户（最小下一步 + 证据），不要继续自动迭代。");
+  parts.push("2) 再调用 acceptance_get({task_id: run_id}) 获取当前验收状态，避免重复触发/无限循环。");
+  parts.push("3) 你 SHOULD 调用 acceptance_build_contract({task_id: run_id}) 得到 deterministic baseline 的 plan_json，再结合用户要求补齐/修正。");
+  parts.push("4) 你 SHOULD 调用 acceptance_evaluate_objectives({task_id: run_id, plan_json}) 评估客观标准，并把测量值写入 report（Markdown）。");
+  parts.push("5) 你 MUST 使用 acceptance_update 写入/更新验收状态（server 持久化），让 UI 可见进度与报告。");
   parts.push("");
   parts.push("【验收方法论（不要把任务硬塞进固定分类）】");
   parts.push("- 先复述交付意图：intent_summary（人类可读，不需要固定枚举）");
@@ -1959,6 +1963,21 @@ async function buildDeliveryForemanPrompt(t: Task): Promise<string> {
   parts.push("- pnpm test");
   parts.push("- 启动后首页可打开（HTTP smoke）");
   parts.push("- 可选：Playwright smoke（优先 Playwright MCP；不可用则降级 HTTP smoke，并在报告里说明）");
+  parts.push("");
+  parts.push("【Worker Verification Recipes（跨工具通用，写进 report 作为证据）】");
+  parts.push("3.1 Project DoD recipe（仅适用 runnable deliverable）：");
+  parts.push("- README：必须有 Quick Start/一键启动（给出单行命令）；没有就先补齐");
+  parts.push("- Go：若存在 go.mod -> 运行 `go test ./...`（把输出保留在日志）");
+  parts.push("- Node：若存在 package.json 且包含 test script -> 运行 `pnpm test`（或项目约定的 test 命令）；否则记录为 skipped（not applicable）");
+  parts.push("");
+  parts.push("3.2 Smoke recipe（start + HTTP smoke + stop cleanly）：");
+  parts.push("- 按 README 的启动命令启动服务（尽量前台运行，便于 Ctrl+C 退出）");
+  parts.push("- 发现端口后，用 `curl -fsS http://127.0.0.1:<port>/`（或 /health）确认可访问（记录 HTTP 状态码/响应片段）");
+  parts.push("- 停止服务（Ctrl+C），确认没有残留进程/端口占用（记录结果）");
+  parts.push("");
+  parts.push("3.3 Optional: Playwright MCP smoke（优先 MCP；不可用则降级）：");
+  parts.push("- 若环境提供 Playwright MCP：打开首页并断言关键 UI 可见（截图/断言结果作为证据）");
+  parts.push("- 若不可用：降级为 3.2 的 HTTP smoke，并在 report 里写明“为何降级”");
   parts.push("");
   parts.push("【plan_json schema（作为 JSON 字符串写入 acceptance_update.plan_json）】");
   parts.push(
