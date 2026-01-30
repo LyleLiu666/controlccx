@@ -70,6 +70,13 @@ func (s *Service) RespondWithOptions(ctx context.Context, userMessage string, op
 
 	backend := s.selectBackend(opts.Backend)
 	if backend != nil {
+		llmMsg := msg
+		if s.Chat != nil {
+			ctxText, err := s.recentChatContext(ctx, msg)
+			if err == nil && strings.TrimSpace(ctxText) != "" {
+				llmMsg = ctxText + "\n\nCurrent user message:\n" + msg
+			}
+		}
 		agent := Agent{
 			LLM:      backend,
 			Tools:    s.agentTools(),
@@ -102,15 +109,15 @@ func (s *Service) RespondWithOptions(ctx context.Context, userMessage string, op
 同时兼容 legacy JSON 格式：
 {"action":"tool","tool":"<tool_name>","args":{...}}
 {"action":"final","message":"<中文回答>"}`,
-			OnToolCall:   opts.OnToolCall,
-			OnToolResult: opts.OnToolResult,
-		}
+				OnToolCall:   opts.OnToolCall,
+				OnToolResult: opts.OnToolResult,
+			}
 
-		ans, err := agent.Run(ctx, msg)
-		if err == nil && strings.TrimSpace(ans) != "" {
-			return Reply{Message: ans}, nil
-		}
-		if s.ForceAgent {
+			ans, err := agent.Run(ctx, llmMsg)
+			if err == nil && strings.TrimSpace(ans) != "" {
+				return Reply{Message: ans}, nil
+			}
+			if s.ForceAgent {
 			if err == nil {
 				err = fmt.Errorf("llm agent returned empty response")
 			}
@@ -162,6 +169,76 @@ func (s *Service) RespondWithOptions(ctx context.Context, userMessage string, op
 	}
 
 	return Reply{Message: "我可以回答：当前运行任务数量、最有问题的任务、任务结果字数是否达标、以及服务器系统信息。你也可以直接问：'我们有几个任务在执行' / '哪个任务问题比较多' / '刚刚那个写脱口秀的任务字数够不够'。"}, nil
+}
+
+func (s *Service) recentChatContext(ctx context.Context, currentUserMessage string) (string, error) {
+	if s == nil || s.Chat == nil {
+		return "", nil
+	}
+
+	msgs, err := s.Chat.Tail(ctx, 12)
+	if err != nil {
+		return "", err
+	}
+	if len(msgs) == 0 {
+		return "", nil
+	}
+
+	// When called via /api/chat, the current user message has already been appended.
+	last := msgs[len(msgs)-1]
+	if last.Role == chat.RoleUser && strings.TrimSpace(last.Content) == strings.TrimSpace(currentUserMessage) {
+		msgs = msgs[:len(msgs)-1]
+	}
+	if len(msgs) == 0 {
+		return "", nil
+	}
+
+	const maxPerMessage = 800
+	var sb strings.Builder
+	sb.WriteString("Recent chat context:\n")
+	for _, m := range msgs {
+		role := strings.ToUpper(string(m.Role))
+		content := strings.TrimSpace(m.Content)
+		if content == "" {
+			continue
+		}
+		content = strings.ReplaceAll(content, "\r\n", "\n")
+		content = strings.ReplaceAll(content, "\r", "\n")
+		content = strings.ReplaceAll(content, "\n", "\\n")
+		content = truncateRunes(content, maxPerMessage)
+		sb.WriteString(role)
+		sb.WriteString(": ")
+		sb.WriteString(content)
+		sb.WriteByte('\n')
+	}
+	out := strings.TrimSpace(sb.String())
+	if out == "Recent chat context:" {
+		return "", nil
+	}
+	return out, nil
+}
+
+func truncateRunes(s string, max int) string {
+	s = strings.TrimSpace(s)
+	if max <= 0 {
+		return s
+	}
+	if utf8.RuneCountInString(s) <= max {
+		return s
+	}
+	var sb strings.Builder
+	// Best-effort sizing. UTF-8 can be up to 4 bytes per rune.
+	sb.Grow(max * 4)
+	n := 0
+	for _, r := range s {
+		if n >= max-1 {
+			break
+		}
+		sb.WriteRune(r)
+		n++
+	}
+	sb.WriteRune('…')
+	return sb.String()
 }
 
 func pickMaxSteps(requested int, fallback int) int {

@@ -445,21 +445,29 @@ func (s *Service) agentTools() map[string]Tool {
 		Fn:              taskOutputStats.Fn,
 	}
 
-	if s.Chat != nil {
-		tools["chat_history"] = ToolFunc{
-			ToolName:        "chat_history",
-			ToolDescription: "列出最近的对话消息。参数：{after?: number, limit?: number (1..500)}",
-			Fn: func(ctx context.Context, args map[string]any) (any, error) {
-				after := int64(intArg(args, "after", 0, 0, 1<<31-1))
-				limit := intArg(args, "limit", 50, 1, 500)
-				msgs, err := s.Chat.List(ctx, after, limit)
-				if err != nil {
-					return nil, err
-				}
-				return map[string]any{"messages": msgs}, nil
-			},
+		if s.Chat != nil {
+			tools["chat_history"] = ToolFunc{
+				ToolName:        "chat_history",
+				ToolDescription: "列出最近的对话消息。参数：{after?: number, limit?: number (1..500)}",
+				Fn: func(ctx context.Context, args map[string]any) (any, error) {
+					after := int64(intArg(args, "after", 0, 0, 1<<31-1))
+					limit := intArg(args, "limit", 50, 1, 500)
+					var (
+						msgs []chat.Message
+						err  error
+					)
+					if after > 0 {
+						msgs, err = s.Chat.List(ctx, after, limit)
+					} else {
+						msgs, err = s.Chat.Tail(ctx, limit)
+					}
+					if err != nil {
+						return nil, err
+					}
+					return map[string]any{"messages": msgs}, nil
+				},
+			}
 		}
-	}
 
 	return tools
 }
