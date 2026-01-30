@@ -3765,7 +3765,7 @@ watch(
 
       <section class="panel">
         <div v-if="!selectedSession" class="empty">Select a session</div>
-        <div v-else class="detail">
+          <div v-else class="detail">
           <div class="detailHeader compact">
             <div class="detailTop">
               <div class="detailTopLeft">
@@ -3794,6 +3794,14 @@ watch(
                   title="Open runs"
                 >
                   {{ selectedSession.runs.length }} runs
+                </button>
+                <button
+                  type="button"
+                  class="detailMini detailMiniBtn"
+                  @click="openWorkspaceFiles"
+                  title="Browse workspace files"
+                >
+                  Files
                 </button>
                 <span
                   v-if="selectedTask?.warning || selectedSession.warning"
@@ -3841,13 +3849,6 @@ watch(
                         title="Focus workspace"
                       >
                         Focus workspace
-                      </button>
-                      <button
-                        type="button"
-                        @click="openWorkspaceFiles"
-                        title="Browse workspace files"
-                      >
-                        Files
                       </button>
                       <button
                         type="button"
@@ -4447,15 +4448,15 @@ watch(
 	              @click="onSelectTask(r.id)"
 	            >
 	              <div class="runTop">
-	                <span class="mono">{{ r.id.slice(0, 8) }}</span>
-	                <span class="pill" :class="r.status">{{ r.status }}</span>
-	              </div>
-	              <div class="runMid">
-	                <span class="pill kind">{{ r.mode }}</span>
-	                <span class="score">score {{ r.score }}</span>
-	                <span class="mono" :title="r.created_at">{{
-	                  formatLocalDateTime(r.created_at)
-	                }}</span>
+                  <div class="runTopLeft">
+                    <span class="mono runId">{{ r.id.slice(0, 8) }}</span>
+                    <span class="pill kind">{{ r.mode }}</span>
+                    <span class="score">score {{ r.score }}</span>
+                    <span class="mono runTime" :title="r.created_at">{{
+                      formatLocalDateTime(r.created_at)
+                    }}</span>
+                  </div>
+                  <span class="pill" :class="r.status">{{ r.status }}</span>
 	              </div>
 	              <div class="runBottom">{{ r.prompt }}</div>
 	            </button>
@@ -8184,7 +8185,7 @@ h2 {
   background: var(--bg-panel);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
-  padding: 12px 12px 10px;
+  padding: 10px 12px;
   transition: all 0.2s;
   cursor: pointer;
   width: 100%;
@@ -8202,23 +8203,34 @@ h2 {
 .runTop {
   display: flex;
   justify-content: space-between;
-  align-items: center;
+  align-items: flex-start;
   gap: 10px;
-  margin-bottom: 8px;
+  margin-bottom: 6px;
 }
 
-.runMid {
+.runTopLeft {
   display: flex;
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
-  color: var(--text-sub);
   font-size: 12px;
-  margin-bottom: 8px;
+  color: var(--text-sub);
+  min-width: 0;
+}
+
+.runId {
+  font-weight: 900;
+  color: var(--text-main);
+}
+
+.runTime {
+  opacity: 0.8;
+  white-space: nowrap;
 }
 
 .runBottom {
-  font-size: 13px;
+  font-size: 14px;
+  font-weight: 600;
   color: var(--text-main);
   line-height: 1.45;
   display: -webkit-box;
