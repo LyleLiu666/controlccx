@@ -1719,12 +1719,23 @@ function normalizeRoutePath(path: string): string {
 
 function navigateTo(path: string, opts?: { replace?: boolean }) {
   if (typeof window === "undefined") return;
-  const next = normalizeRoutePath(path);
-  if (window.location.pathname === next) return;
+  const u = new URL(path, window.location.href);
+  const nextPath = normalizeRoutePath(u.pathname);
+  const next = nextPath + (u.search || "");
+  if (window.location.pathname + window.location.search === next) return;
   if (opts?.replace) {
     window.history.replaceState({}, "", next);
   } else {
     window.history.pushState({}, "", next);
+  }
+}
+
+function openInNewTab(url: string) {
+  if (typeof window === "undefined") return;
+  try {
+    window.open(url, "_blank", "noopener,noreferrer");
+  } catch {
+    // ignore
   }
 }
 
@@ -1733,13 +1744,14 @@ async function openSkillsPage() {
   await Promise.all([openSkills(), refreshSkillVersions()]);
 }
 
-async function toggleSkillsPage() {
-  if (skillsOpen.value) {
-    closeSkillsPage();
+function openSkillsInNewTab() {
+  if (typeof window === "undefined") return;
+  const path = normalizeRoutePath(window.location.pathname);
+  if (path === "/skills") {
+    void refreshSkillsPage();
     return;
   }
-  navigateTo("/skills");
-  await openSkillsPage();
+  openInNewTab("/skills");
 }
 
 function closeSkillsPage() {
@@ -1751,14 +1763,81 @@ async function refreshSkillsPage() {
   await Promise.all([refreshSkills(), refreshSkillVersions()]);
 }
 
+async function openFilesForBase(base: string) {
+  const b = (base ?? "").trim() || ".";
+  if (filesDirty.value && !window.confirm("Discard unsaved changes?")) return;
+
+  filesOpen.value = true;
+  filesLoading.value = true;
+  filesError.value = "";
+  filesNotice.value = "";
+  filesBase.value = b;
+  filesRoot.value = null;
+  resetFilesEditor();
+
+  try {
+    const res = await fetchFSEntries(".", b);
+    filesBase.value = res.path;
+    filesRoot.value = {
+      name: res.path,
+      path: res.path,
+      kind: "dir",
+      expanded: true,
+      loading: false,
+      children: (res.entries ?? []).map((e) => fsEntryToNode(e, res.path)),
+    };
+  } catch (e: any) {
+    filesError.value = e?.message ?? String(e);
+  } finally {
+    filesLoading.value = false;
+  }
+}
+
+async function openFilesPageFromLocation() {
+  if (typeof window === "undefined") return;
+  const qs = new URLSearchParams(window.location.search);
+  const base = (qs.get("base") ?? "").trim();
+  await openFilesForBase(base);
+  if (!base.trim()) {
+    filesNotice.value =
+      "Tip: open Files from a session to browse its workdir, or pass ?base=/path.";
+  }
+}
+
+function closeFilesPage() {
+  closeFiles();
+  if (filesOpen.value) return;
+  navigateTo("/");
+}
+
 function applyRouteFromLocation() {
   if (typeof window === "undefined") return;
   const path = normalizeRoutePath(window.location.pathname);
+  const restoreFilesRoute = () => {
+    const base = (filesBase.value ?? "").trim() || ".";
+    navigateTo(`/files?base=${encodeURIComponent(base)}`, { replace: true });
+  };
   if (path === "/skills") {
+    if (filesOpen.value) {
+      closeFiles();
+      if (filesOpen.value) {
+        restoreFilesRoute();
+        return;
+      }
+    }
     void openSkillsPage();
     return;
   }
+  if (path === "/files") {
+    skillsOpen.value = false;
+    void openFilesPageFromLocation();
+    return;
+  }
   if (skillsOpen.value) skillsOpen.value = false;
+  if (filesOpen.value) {
+    closeFiles();
+    if (filesOpen.value) restoreFilesRoute();
+  }
 }
 
 function onRoutePopState() {
@@ -2292,36 +2371,11 @@ async function onFilesNodeClick(node: FileNode) {
   await openFilesFile(node.path);
 }
 
-async function openWorkspaceFiles() {
+function openWorkspaceFilesInNewTab() {
   const sess = selectedSession.value;
   if (!sess) return;
   const base = (sess.workdir ?? "").trim() || ".";
-  if (filesDirty.value && !window.confirm("Discard unsaved changes?")) return;
-
-  filesOpen.value = true;
-  filesLoading.value = true;
-  filesError.value = "";
-  filesNotice.value = "";
-  filesBase.value = base;
-  filesRoot.value = null;
-  resetFilesEditor();
-
-  try {
-    const res = await fetchFSEntries(".", base);
-    filesBase.value = res.path;
-    filesRoot.value = {
-      name: res.path,
-      path: res.path,
-      kind: "dir",
-      expanded: true,
-      loading: false,
-      children: (res.entries ?? []).map((e) => fsEntryToNode(e, res.path)),
-    };
-  } catch (e: any) {
-    filesError.value = e?.message ?? String(e);
-  } finally {
-    filesLoading.value = false;
-  }
+  openInNewTab(`/files?base=${encodeURIComponent(base)}`);
 }
 
 async function filesSave() {
@@ -3219,6 +3273,10 @@ function onGlobalKeyDown(e: KeyboardEvent) {
       runsOpen.value = false;
       return;
     }
+    if (filesOpen.value) {
+      closeFilesPage();
+      return;
+    }
     if (skillsOpen.value) {
       closeSkillsPage();
       return;
@@ -3435,7 +3493,7 @@ watch(
 	        <button type="button" class="primary" @click="openNewRun">
 	          New Run
 	        </button>
-	        <button type="button" class="settingsBtn" @click="toggleSkillsPage">
+	        <button type="button" class="settingsBtn" @click="openSkillsInNewTab">
 	          Skills
 	        </button>
 	        <button type="button" class="settingsBtn" @click="openAuthSettings">
@@ -3497,6 +3555,186 @@ watch(
             />
           </div>
 	      </section>
+
+      <section v-else-if="filesOpen" class="panel filesPagePanel">
+        <h2>
+          Files
+          <span class="h2Spacer"></span>
+          <button type="button" class="h2Btn" @click="filesRoot && refreshFilesDir(filesRoot.path)" :disabled="filesLoading || !filesRoot">
+            Refresh
+          </button>
+          <button type="button" class="h2Btn" @click="closeFilesPage">Back</button>
+        </h2>
+
+        <div class="filesPageBody">
+          <div v-if="filesError" class="modalError">
+            {{ filesError }}
+          </div>
+          <div v-else-if="filesLoading" class="loading">Loading...</div>
+          <template v-else>
+            <div class="filesTopRow">
+              <div class="mono filesRootPath" :title="filesRoot?.path">
+                {{ filesRoot?.path }}
+              </div>
+              <div v-if="filesNotice" class="tinyHint">{{ filesNotice }}</div>
+            </div>
+
+            <div class="filesSplit" :style="{ '--sidebar-width': filesSidebarWidth + 'px' }">
+              <div class="filesTreePane">
+                <div class="filesTreeActions">
+                  <button type="button" @click="filesNewFile" :disabled="!filesRoot">
+                    New file
+                  </button>
+                  <button type="button" @click="filesNewFolder" :disabled="!filesRoot">
+                    New folder
+                  </button>
+                  <button
+                    type="button"
+                    @click="filesDeleteSelected"
+                    :disabled="
+                      !filesSelectedPath || filesSelectedPath === filesRoot?.path
+                    "
+                  >
+                    Delete
+                  </button>
+                  <button
+                    type="button"
+                    @click="filesRoot && refreshFilesDir(filesRoot.path)"
+                    :disabled="!filesRoot"
+                  >
+                    Refresh
+                  </button>
+                </div>
+
+                <div class="filesTreeList">
+                  <button
+                    v-for="v in filesVisibleNodes"
+                    :key="v.node.path"
+                    type="button"
+                    class="filesNode"
+                    :class="{
+                      active:
+                        normalizePathForCompare(v.node.path) ===
+                        normalizePathForCompare(filesSelectedPath),
+                    }"
+                    :style="{ paddingLeft: `${12 + v.depth * 14}px` }"
+                    @click="onFilesNodeClick(v.node)"
+                  >
+                    <span class="filesNodeTwisty">{{
+                      v.node.kind === "dir" ? (v.node.expanded ? "▾" : "▸") : ""
+                    }}</span>
+                    <span class="filesNodeIcon">{{
+                      v.node.kind === "dir" ? "📁" : "📄"
+                    }}</span>
+                    <span class="filesNodeName">{{ v.node.name }}</span>
+                    <span
+                      v-if="v.node.kind === 'file'"
+                      class="filesNodeMeta mono"
+                      >{{ v.node.size ?? 0 }}</span
+                    >
+                    <span v-if="v.node.loading" class="filesNodeMeta tinyHint"
+                      >…</span
+                    >
+                  </button>
+                  <div v-if="!filesVisibleNodes.length" class="empty">
+                    Empty folder
+                  </div>
+                </div>
+              </div>
+
+              <div
+                class="filesResizer"
+                @mousedown="startFilesResize"
+                :class="{ resizing: filesResizing }"
+              ></div>
+
+              <div class="filesEditorPane">
+                <div v-if="filesSelectedKind !== 'file'" class="empty">
+                  {{
+                    filesSelectedKind === "dir"
+                      ? "Select a file to preview/edit."
+                      : "Select a file."
+                  }}
+                </div>
+                <template v-else>
+                  <div class="filesEditorHeader">
+                    <div class="mono filesEditorPath" :title="filesSelectedPath">
+                      {{ filesSelectedPath }}
+                    </div>
+                    <span class="tinyHint mono">{{ filesFileSize }} bytes</span>
+                    <span v-if="filesFileTruncated" class="pill warn"
+                      >truncated</span
+                    >
+                    <div class="tabSpacer"></div>
+                    <button
+                      type="button"
+                      @click="copyText(filesFileContent)"
+                      :disabled="!filesFileContent"
+                    >
+                      Copy
+                    </button>
+                    <button
+                      type="button"
+                      class="primary"
+                      @click="filesSave"
+                      :disabled="filesSaving || !filesDirty || filesFileTruncated"
+                    >
+                      {{ filesSaving ? "Saving..." : "Save" }}
+                    </button>
+                  </div>
+
+                  <div class="outputTabs">
+                    <button
+                      type="button"
+                      class="tabBtn"
+                      :class="{ active: filesView === 'preview' }"
+                      @click="filesView = 'preview'"
+                    >
+                      Preview
+                    </button>
+                    <button
+                      type="button"
+                      class="tabBtn"
+                      :class="{ active: filesView === 'edit' }"
+                      @click="filesView = 'edit'"
+                    >
+                      Edit
+                    </button>
+                    <div class="tabSpacer"></div>
+                    <div v-if="filesDirty" class="tinyHint">unsaved</div>
+                  </div>
+
+                  <div v-if="filesFileError" class="modalError">
+                    {{ filesFileError }}
+                  </div>
+                  <div v-else-if="filesFileLoading" class="loading">Loading...</div>
+                  <template v-else>
+                    <div v-if="filesView === 'edit'" class="filesEditorEdit">
+                      <textarea
+                        v-model="filesFileContent"
+                        rows="18"
+                        spellcheck="false"
+                      ></textarea>
+                    </div>
+                    <template v-else>
+                      <div
+                        v-if="filesIsMarkdown"
+                        class="resultBox markdown filePreviewBox"
+                        v-html="filesPreviewHtml"
+                        @click="onFilesPreviewMarkdownClick"
+                      ></div>
+
+                      <div v-else class="resultBox fileCodeBox">
+                        <pre class="hljs"><code v-html="filesCodeHtml"></code></pre>
+                      </div>
+                    </template>
+                  </template>
+                </template>
+              </div>
+            </div>
+          </template>
+        </div>
+      </section>
 
       <template v-else>
       <section
@@ -3798,7 +4036,7 @@ watch(
                 <button
                   type="button"
                   class="detailMini detailMiniBtn"
-                  @click="openWorkspaceFiles"
+                  @click="openWorkspaceFilesInNewTab"
                   title="Browse workspace files"
                 >
                   Files
@@ -5041,197 +5279,11 @@ watch(
       </div>
     </div>
 
-    <div
-      v-if="filesOpen"
-      class="modalOverlay"
-      @click.self="closeFiles"
-    >
-      <div class="modal filesModal">
-        <div class="modalHeader">
-          <div class="modalTitle">Files</div>
-          <button class="iconBtn" type="button" @click="closeFiles">✕</button>
-        </div>
-
-        <div class="modalBody filesModalBody">
-          <div v-if="filesError" class="modalError">
-            {{ filesError }}
-          </div>
-          <div v-else-if="filesLoading" class="loading">Loading...</div>
-          <template v-else>
-            <div class="filesTopRow">
-              <div class="mono filesRootPath" :title="filesRoot?.path">
-                {{ filesRoot?.path }}
-              </div>
-              <div v-if="filesNotice" class="tinyHint">{{ filesNotice }}</div>
-            </div>
-
-            <div class="filesSplit" :style="{ '--sidebar-width': filesSidebarWidth + 'px' }">
-              <div class="filesTreePane">
-                <div class="filesTreeActions">
-                  <button type="button" @click="filesNewFile" :disabled="!filesRoot">
-                    New file
-                  </button>
-                  <button type="button" @click="filesNewFolder" :disabled="!filesRoot">
-                    New folder
-                  </button>
-                  <button
-                    type="button"
-                    @click="filesDeleteSelected"
-                    :disabled="
-                      !filesSelectedPath || filesSelectedPath === filesRoot?.path
-                    "
-                  >
-                    Delete
-                  </button>
-                  <button
-                    type="button"
-                    @click="filesRoot && refreshFilesDir(filesRoot.path)"
-                    :disabled="!filesRoot"
-                  >
-                    Refresh
-                  </button>
-                </div>
-
-                <div class="filesTreeList">
-                  <button
-                    v-for="v in filesVisibleNodes"
-                    :key="v.node.path"
-                    type="button"
-                    class="filesNode"
-                    :class="{
-                      active:
-                        normalizePathForCompare(v.node.path) ===
-                        normalizePathForCompare(filesSelectedPath),
-                    }"
-                    :style="{ paddingLeft: `${12 + v.depth * 14}px` }"
-                    @click="onFilesNodeClick(v.node)"
-                  >
-                    <span class="filesNodeTwisty">{{
-                      v.node.kind === "dir" ? (v.node.expanded ? "▾" : "▸") : ""
-                    }}</span>
-                    <span class="filesNodeIcon">{{
-                      v.node.kind === "dir" ? "📁" : "📄"
-                    }}</span>
-                    <span class="filesNodeName">{{ v.node.name }}</span>
-                    <span
-                      v-if="v.node.kind === 'file'"
-                      class="filesNodeMeta mono"
-                      >{{ v.node.size ?? 0 }}</span
-                    >
-                    <span v-if="v.node.loading" class="filesNodeMeta tinyHint"
-                      >…</span
-                    >
-                  </button>
-                  <div v-if="!filesVisibleNodes.length" class="empty">
-                    Empty folder
-                  </div>
-                </div>
-              </div>
-
-              <div
-                class="filesResizer"
-                @mousedown="startFilesResize"
-                :class="{ resizing: filesResizing }"
-              ></div>
-
-              <div class="filesEditorPane">
-                <div v-if="filesSelectedKind !== 'file'" class="empty">
-                  {{
-                    filesSelectedKind === "dir"
-                      ? "Select a file to preview/edit."
-                      : "Select a file."
-                  }}
-                </div>
-                <template v-else>
-                  <div class="filesEditorHeader">
-                    <div class="mono filesEditorPath" :title="filesSelectedPath">
-                      {{ filesSelectedPath }}
-                    </div>
-                    <span class="tinyHint mono">{{ filesFileSize }} bytes</span>
-                    <span v-if="filesFileTruncated" class="pill warn"
-                      >truncated</span
-                    >
-                    <div class="tabSpacer"></div>
-                    <button
-                      type="button"
-                      @click="copyText(filesFileContent)"
-                      :disabled="!filesFileContent"
-                    >
-                      Copy
-                    </button>
-                    <button
-                      type="button"
-                      class="primary"
-                      @click="filesSave"
-                      :disabled="filesSaving || !filesDirty || filesFileTruncated"
-                    >
-                      {{ filesSaving ? "Saving..." : "Save" }}
-                    </button>
-                  </div>
-
-                  <div class="outputTabs">
-                    <button
-                      type="button"
-                      class="tabBtn"
-                      :class="{ active: filesView === 'preview' }"
-                      @click="filesView = 'preview'"
-                    >
-                      Preview
-                    </button>
-                    <button
-                      type="button"
-                      class="tabBtn"
-                      :class="{ active: filesView === 'edit' }"
-                      @click="filesView = 'edit'"
-                    >
-                      Edit
-                    </button>
-                    <div class="tabSpacer"></div>
-                    <div v-if="filesDirty" class="tinyHint">unsaved</div>
-                  </div>
-
-                  <div v-if="filesFileError" class="modalError">
-                    {{ filesFileError }}
-                  </div>
-                  <div v-else-if="filesFileLoading" class="loading">Loading...</div>
-                  <template v-else>
-                    <div v-if="filesView === 'edit'" class="filesEditorEdit">
-                      <textarea
-                        v-model="filesFileContent"
-                        rows="18"
-                        spellcheck="false"
-                      ></textarea>
-                    </div>
-                    <template v-else>
-                      <div
-                        v-if="filesIsMarkdown"
-                        class="resultBox markdown filePreviewBox"
-                        v-html="filesPreviewHtml"
-                        @click="onFilesPreviewMarkdownClick"
-                      ></div>
-
-                      <div v-else class="resultBox fileCodeBox">
-                        <pre class="hljs"><code v-html="filesCodeHtml"></code></pre>
-                      </div>
-                    </template>
-                  </template>
-                </template>
-              </div>
-            </div>
-          </template>
-        </div>
-
-        <div class="modalFooter">
-          <button type="button" @click="closeFiles">Close</button>
-        </div>
-      </div>
-    </div>
-
-    <div
-      v-if="filePreviewOpen"
-      class="modalOverlay"
-      @click.self="closeFilePreview"
-    >
+	    <div
+	      v-if="filePreviewOpen"
+	      class="modalOverlay"
+	      @click.self="closeFilePreview"
+	    >
       <div class="modal fileModal">
         <div class="modalHeader">
           <div class="modalTitle mono">
@@ -5684,6 +5736,22 @@ watch(
   grid-column: 1 / -1;
   max-height: calc(100vh - 110px);
   max-height: calc(100dvh - 110px);
+}
+
+.filesPagePanel {
+  grid-column: 1 / -1;
+  max-height: calc(100vh - 110px);
+  max-height: calc(100dvh - 110px);
+}
+
+.filesPageBody {
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
 }
 
 /* Sticky sidebars */
