@@ -158,3 +158,84 @@ func TestTools_taskResume_RejectsOverlappingRunsInSession(t *testing.T) {
 		t.Fatalf("started=%v, want 0", r.started)
 	}
 }
+
+func TestTools_acceptanceUpdate_UpsertsAndMerges(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "controlccx.db")
+
+	conn, err := db.Open(ctx, db.Options{Path: dbPath})
+	if err != nil {
+		t.Fatalf("db open: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+
+	store := tasks.NewStore(conn)
+	task, err := store.CreateTask(ctx, tasks.CreateTaskInput{
+		WorkerType: tasks.WorkerExec,
+		Mode:       tasks.ModeNew,
+		Prompt:     "hi",
+		WorkDir:    ".",
+		SessionID:  "sess-1",
+	})
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	svc := &Service{Store: store}
+	tools := svc.agentTools()
+
+	_, err = tools["acceptance_update"].Run(ctx, map[string]any{
+		"task_id":        task.ID,
+		"status":         "running",
+		"iteration":      1,
+		"max_iterations": 10,
+		"current_gate":   "runnability.smoke",
+		"summary":        "starting",
+		"plan_json":      `{"intent":"runnable"}`,
+	})
+	if err != nil {
+		t.Fatalf("acceptance_update: %v", err)
+	}
+
+	st, ok, err := store.GetAcceptanceState(ctx, "s:sess-1")
+	if err != nil {
+		t.Fatalf("get acceptance: %v", err)
+	}
+	if !ok {
+		t.Fatalf("expected state present")
+	}
+	if st.Iteration != 1 || st.CurrentGate != "runnability.smoke" {
+		t.Fatalf("unexpected state=%+v", st)
+	}
+
+	// Partial update should merge (keep iteration/gate).
+	_, err = tools["acceptance_update"].Run(ctx, map[string]any{
+		"key":     "s:sess-1",
+		"summary": "still running",
+	})
+	if err != nil {
+		t.Fatalf("acceptance_update partial: %v", err)
+	}
+	st2, ok, err := store.GetAcceptanceState(ctx, "s:sess-1")
+	if err != nil {
+		t.Fatalf("get acceptance2: %v", err)
+	}
+	if !ok {
+		t.Fatalf("expected state present")
+	}
+	if st2.Iteration != 1 || st2.CurrentGate != "runnability.smoke" || st2.Summary != "still running" {
+		t.Fatalf("unexpected merged state=%+v", st2)
+	}
+
+	res, err := tools["acceptance_get"].Run(ctx, map[string]any{"key": "s:sess-1"})
+	if err != nil {
+		t.Fatalf("acceptance_get: %v", err)
+	}
+	m, ok := res.(map[string]any)
+	if !ok {
+		t.Fatalf("unexpected result type: %T", res)
+	}
+	if m["ok"] != true {
+		t.Fatalf("expected ok=true, got %v", m["ok"])
+	}
+}

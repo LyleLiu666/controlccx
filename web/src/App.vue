@@ -4,6 +4,7 @@ import mermaid from "mermaid";
 import hljs from "highlight.js/lib/common";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import type {
+  AcceptanceState,
   AuthInfo,
   AuthPatch,
   AuthStatus,
@@ -45,6 +46,7 @@ import {
   sendChat,
   upsertTool,
   updateAuth,
+  fetchAcceptance,
 } from "./api";
 import { appendChatMessageUnique, sendChatAndReload } from "./chatOps";
 import {
@@ -213,6 +215,11 @@ const filePreviewTab = ref<"preview" | "raw" | "html">("preview");
 const traceByTask = ref<Map<string, TaskTraceResponse>>(new Map());
 const traceLoading = ref(false);
 const traceError = ref("");
+
+const acceptanceState = ref<AcceptanceState | null>(null);
+const acceptanceLoading = ref(false);
+const acceptanceError = ref("");
+const acceptanceExpanded = ref(false);
 
 type FileNode = {
   name: string;
@@ -1935,6 +1942,15 @@ async function buildDeliveryForemanPrompt(t: Task): Promise<string> {
   parts.push("如果已完成且属于复杂任务：给出工业级交付 checklist（以可执行步骤/命令为主，不默认执行）。");
   parts.push("如果是简单任务：一句话说明无需工业级交付检查并结束。");
   parts.push("");
+  parts.push("【Acceptance Gates / 验收闸门（仅复杂任务启用）】");
+  parts.push("当你判断这是复杂任务时，你 MUST 使用 acceptance_update 工具写入验收状态，方便 UI 展示进度与报告：");
+  parts.push("- 第一次：写入 plan_json（JSON 字符串，包含 intent_summary + objective_criteria + subjective_rubrics + default_gates 等）");
+  parts.push("- 迭代中：status=running, iteration=i, max_iterations=10, current_gate=..., summary=...");
+  parts.push("- 验收通过：status=accepted, current_gate=done, summary=..., report=...（Markdown，含证据）");
+  parts.push("- 验收失败/需用户介入/到达上限：status=failed, summary=..., report=...（Markdown，含证据与最小下一步）");
+  parts.push("你可以直接传 {task_id: run_id, ...} 给 acceptance_update，不需要手动填写 key。");
+  parts.push("注意：不要重复刷屏；每轮只汇报新增信息，并确保用户能看到 i/10 进展。");
+  parts.push("");
   parts.push("【上下文】");
   parts.push(`run_id: ${runID}`);
   if (sessionID) parts.push(`session_id: ${sessionID}`);
@@ -1960,6 +1976,28 @@ async function runDeliveryForemanOnce(t: Task) {
   const prompt = await buildDeliveryForemanPrompt(t);
   chat.value = await sendChatAndReload(prompt, { sendChat, fetchChat });
   showDeliveryForemanToast("Delivery Foreman: suggestion ready (open Secretary to view).");
+}
+
+async function refreshAcceptance() {
+  const key = selectedSessionKey.value.trim();
+  if (!key) {
+    acceptanceState.value = null;
+    acceptanceError.value = "";
+    acceptanceLoading.value = false;
+    acceptanceExpanded.value = false;
+    return;
+  }
+  acceptanceLoading.value = true;
+  acceptanceError.value = "";
+  try {
+    const res = await fetchAcceptance(key);
+    acceptanceState.value = res.ok ? res.state : null;
+  } catch (e: any) {
+    acceptanceError.value = e?.message ?? String(e);
+    acceptanceState.value = null;
+  } finally {
+    acceptanceLoading.value = false;
+  }
 }
 
 async function maybeTriggerDeliveryForeman(prev: Task | undefined, next: Task) {
@@ -3039,6 +3077,10 @@ const selectedSession = computed(() => {
   return sessionsAll.value.find((s) => s.key === key) ?? null;
 });
 
+watch(selectedSessionKey, () => {
+  void refreshAcceptance();
+}, { immediate: true });
+
 const recentWorkspaces = computed(() => {
   const latestByPath = new Map<string, string>();
   for (const t of tasks.value.values()) {
@@ -4045,6 +4087,13 @@ watch(
                 <span class="pill" :class="selectedSession.status">{{
                   selectedSession.status
                 }}</span>
+                <span
+                  v-if="acceptanceState"
+                  class="pill acceptance"
+                  :title="`Acceptance ${acceptanceState.status} · ${acceptanceState.current_gate || '(no gate)'} · ${acceptanceState.summary || ''}`"
+                >
+                  Acc {{ acceptanceState.iteration }}/{{ acceptanceState.max_iterations }}
+                </span>
                 <span class="pill kind">{{ selectedSession.worker_type }}</span>
                 <button
                   type="button"
@@ -4194,6 +4243,44 @@ watch(
                 Copy snippet
               </button>
             </div>
+          </div>
+
+          <div v-if="acceptanceState || acceptanceLoading || acceptanceError" class="acceptanceHint">
+            <div class="text">
+              <span class="k">Acceptance</span>
+              <span v-if="acceptanceLoading">Loading…</span>
+              <template v-else-if="acceptanceError">
+                {{ acceptanceError }}
+              </template>
+              <template v-else-if="acceptanceState">
+                {{ acceptanceState.status }} · {{ acceptanceState.iteration }}/{{
+                  acceptanceState.max_iterations
+                }}
+                <span v-if="acceptanceState.current_gate" class="mono"
+                  >· {{ acceptanceState.current_gate }}</span
+                >
+                <span v-if="acceptanceState.summary">· {{ acceptanceState.summary }}</span>
+              </template>
+            </div>
+            <div class="actions">
+              <button type="button" @click="refreshAcceptance" :disabled="acceptanceLoading">
+                Refresh
+              </button>
+              <button
+                v-if="acceptanceState && (acceptanceState.report || acceptanceState.plan_json)"
+                type="button"
+                @click="acceptanceExpanded = !acceptanceExpanded"
+              >
+                {{ acceptanceExpanded ? "Hide" : "View" }}
+              </button>
+            </div>
+          </div>
+
+          <div
+            v-if="acceptanceExpanded && acceptanceState && (acceptanceState.report || acceptanceState.plan_json)"
+            class="acceptanceReport"
+          >
+            <div class="resultBox markdown" v-html="renderMarkdownSafe(acceptanceState.report || acceptanceState.plan_json || '')"></div>
           </div>
 
           <div class="resumeBar">
@@ -8240,6 +8327,47 @@ h2 {
   font-size: 12px;
   font-weight: 800;
   border-radius: 999px;
+}
+
+.pill.acceptance {
+  border: 1px solid rgba(59, 130, 246, 0.35);
+  background: rgba(59, 130, 246, 0.12);
+  color: var(--text-main);
+}
+
+.acceptanceHint {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  border: 1px solid rgba(59, 130, 246, 0.28);
+  background: rgba(59, 130, 246, 0.08);
+  color: var(--text-main);
+  margin-bottom: 12px;
+}
+
+.acceptanceHint .text {
+  font-size: 13px;
+  color: var(--text-main);
+}
+
+.acceptanceHint .actions {
+  display: flex;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.acceptanceHint .actions button {
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 800;
+  border-radius: 999px;
+}
+
+.acceptanceReport {
+  margin-bottom: 12px;
 }
 
 @container (max-width: 540px) {

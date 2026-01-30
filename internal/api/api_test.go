@@ -156,6 +156,63 @@ func TestAPI_TasksAndChat(t *testing.T) {
 		}
 	})
 
+	t.Run("acceptance", func(t *testing.T) {
+		// Create a task so we can reference via session key.
+		task, err := taskStore.CreateTask(ctx, tasks.CreateTaskInput{
+			WorkerType: tasks.WorkerExec,
+			Mode:       tasks.ModeNew,
+			Prompt:     "hi",
+			WorkDir:    ".",
+			SessionID:  "sess-acc-1",
+		})
+		if err != nil {
+			t.Fatalf("create task: %v", err)
+		}
+		_, err = taskStore.UpsertAcceptanceState(ctx, tasks.UpsertAcceptanceStateInput{
+			Key:           "s:sess-acc-1",
+			Status:        "running",
+			Iteration:     2,
+			MaxIterations: 10,
+			CurrentGate:   "runnability.smoke",
+			Summary:       "in progress",
+			RunID:         task.ID,
+		})
+		if err != nil {
+			t.Fatalf("upsert acceptance: %v", err)
+		}
+
+		res, err := http.Get(srv.URL + "/api/acceptance?key=" + url.QueryEscape("s:sess-acc-1"))
+		if err != nil {
+			t.Fatalf("get acceptance: %v", err)
+		}
+		defer res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(res.Body)
+			t.Fatalf("status=%d, want 200; body=%s", res.StatusCode, string(body))
+		}
+		var body struct {
+			OK    bool                  `json:"ok"`
+			State *tasks.AcceptanceState `json:"state"`
+		}
+		if err := json.NewDecoder(res.Body).Decode(&body); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if !body.OK || body.State == nil || body.State.Key != "s:sess-acc-1" {
+			t.Fatalf("unexpected response: %+v", body)
+		}
+
+		// task_id variant
+		res2, err := http.Get(srv.URL + "/api/acceptance?task_id=" + url.QueryEscape(task.ID))
+		if err != nil {
+			t.Fatalf("get acceptance by task: %v", err)
+		}
+		defer res2.Body.Close()
+		if res2.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(res2.Body)
+			t.Fatalf("status=%d, want 200; body=%s", res2.StatusCode, string(body))
+		}
+	})
+
 	t.Run("chat stream", func(t *testing.T) {
 		sb := &stubObserverBackend{
 			outputs: []string{

@@ -1,4 +1,5 @@
 import type {
+  AcceptanceResponse,
   AuthInfo,
   AuthPatch,
   AuthStatus,
@@ -52,6 +53,11 @@ export async function fetchTasks(limit = 200, includeDeleted = false): Promise<T
   if (includeDeleted) qs.set("include_deleted", "1");
   const res = await getJSON<{ tasks: Task[] }>(`/api/tasks?${qs.toString()}`);
   return res.tasks;
+}
+
+export async function fetchAcceptance(key: string): Promise<AcceptanceResponse> {
+  const qs = new URLSearchParams({ key: String(key ?? "") });
+  return getJSON<AcceptanceResponse>(`/api/acceptance?${qs.toString()}`);
 }
 
 export async function createTask(input: {

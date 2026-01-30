@@ -42,6 +42,7 @@ func (a *API) Handler() http.Handler {
 	mux.HandleFunc("/api/tasks", a.handleTasks)
 	mux.HandleFunc("/api/tasks/", a.handleTaskByID)
 	mux.HandleFunc("/api/sessions/", a.handleSessionByKey)
+	mux.HandleFunc("/api/acceptance", a.handleAcceptance)
 	mux.HandleFunc("/api/tools", a.handleTools)
 	mux.HandleFunc("/api/tools/upsert", a.handleToolsUpsert)
 	mux.HandleFunc("/api/tools/delete", a.handleToolsDelete)
@@ -71,6 +72,48 @@ func (a *API) Handler() http.Handler {
 	mux.HandleFunc("/api/auth", a.handleAuth)
 	mux.HandleFunc("/api/auth/status", a.handleAuthStatus)
 	return mux
+}
+
+func (a *API) handleAcceptance(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if a.Tasks == nil {
+		http.Error(w, "tasks store not configured", http.StatusServiceUnavailable)
+		return
+	}
+
+	key := strings.TrimSpace(r.URL.Query().Get("key"))
+	if key == "" {
+		taskID := strings.TrimSpace(r.URL.Query().Get("task_id"))
+		if taskID == "" {
+			taskID = strings.TrimSpace(r.URL.Query().Get("id"))
+		}
+		if taskID != "" {
+			t, err := a.Tasks.GetTask(r.Context(), taskID)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusNotFound)
+				return
+			}
+			key = tasks.SessionKey(t.ID, t.SessionID)
+		}
+	}
+	if key == "" {
+		http.Error(w, "key or task_id is required", http.StatusBadRequest)
+		return
+	}
+
+	state, ok, err := a.Tasks.GetAcceptanceState(r.Context(), key)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if !ok {
+		writeJSON(w, map[string]any{"ok": false, "state": nil})
+		return
+	}
+	writeJSON(w, map[string]any{"ok": true, "state": state})
 }
 
 func (a *API) handleSystem(w http.ResponseWriter, r *http.Request) {

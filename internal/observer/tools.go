@@ -388,6 +388,137 @@ func (s *Service) agentTools() map[string]Tool {
 				return map[string]any{"ok": ok, "task_id": taskID}, nil
 			},
 		},
+		"acceptance_get": ToolFunc{
+			ToolName:        "acceptance_get",
+			ToolDescription: "获取某个 session 的验收状态（Acceptance Gates）。参数：{key?: string, task_id?: string}。优先使用 key（形如 s:<session_id> / t:<task_id>）。",
+			Fn: func(ctx context.Context, args map[string]any) (any, error) {
+				if s.Store == nil {
+					return nil, errors.New("tasks store not configured")
+				}
+				key := stringArg(args, "key")
+				if key == "" {
+					taskID := stringArg(args, "task_id")
+					if taskID == "" {
+						taskID = stringArg(args, "id")
+					}
+					if taskID != "" {
+						resolved, err := s.resolveTaskID(ctx, taskID)
+						if err != nil {
+							return nil, err
+						}
+						t, err := s.Store.GetTask(ctx, resolved)
+						if err != nil {
+							return nil, err
+						}
+						key = tasks.SessionKey(t.ID, t.SessionID)
+					}
+				}
+				if key == "" {
+					return nil, errors.New("acceptance_get: key or task_id is required")
+				}
+				st, ok, err := s.Store.GetAcceptanceState(ctx, key)
+				if err != nil {
+					return nil, err
+				}
+				return map[string]any{"ok": ok, "state": st}, nil
+			},
+		},
+		"acceptance_update": ToolFunc{
+			ToolName:        "acceptance_update",
+			ToolDescription: "更新/写入某个 session 的验收状态（Acceptance Gates），用于 UI 可见的进度与报告。参数：{key?: string, task_id?: string, status?: string, iteration?: number, max_iterations?: number, current_gate?: string, summary?: string, plan_json?: string, report?: string, run_id?: string}。未提供的字段将保留原值。",
+			Fn: func(ctx context.Context, args map[string]any) (any, error) {
+				if s.Store == nil {
+					return nil, errors.New("tasks store not configured")
+				}
+
+				// Resolve session key.
+				key := stringArg(args, "key")
+				runID := stringArg(args, "run_id")
+				if runID == "" {
+					runID = stringArg(args, "task_id")
+				}
+				if runID == "" {
+					runID = stringArg(args, "id")
+				}
+				if key == "" && runID != "" {
+					resolved, err := s.resolveTaskID(ctx, runID)
+					if err != nil {
+						return nil, err
+					}
+					t, err := s.Store.GetTask(ctx, resolved)
+					if err != nil {
+						return nil, err
+					}
+					key = tasks.SessionKey(t.ID, t.SessionID)
+					if runID == "" {
+						runID = t.ID
+					}
+				}
+				if key == "" {
+					return nil, errors.New("acceptance_update: key or task_id is required")
+				}
+
+				// Merge with existing state so callers can send partial updates.
+				prev, ok, err := s.Store.GetAcceptanceState(ctx, key)
+				if err != nil {
+					return nil, err
+				}
+				next := tasks.UpsertAcceptanceStateInput{
+					Key:           key,
+					Status:        "",
+					Iteration:     0,
+					MaxIterations: 0,
+					CurrentGate:   "",
+					Summary:       "",
+					PlanJSON:      "",
+					Report:        "",
+					RunID:         "",
+				}
+				if ok {
+					next.Status = prev.Status
+					next.Iteration = prev.Iteration
+					next.MaxIterations = prev.MaxIterations
+					next.CurrentGate = prev.CurrentGate
+					next.Summary = prev.Summary
+					next.PlanJSON = prev.PlanJSON
+					next.Report = prev.Report
+					next.RunID = prev.RunID
+				}
+
+				if _, exists := args["status"]; exists {
+					next.Status = stringArg(args, "status")
+				}
+				if _, exists := args["iteration"]; exists {
+					next.Iteration = intArg(args, "iteration", next.Iteration, 0, 1<<31-1)
+				}
+				if _, exists := args["max_iterations"]; exists {
+					next.MaxIterations = intArg(args, "max_iterations", next.MaxIterations, 0, 1<<31-1)
+				}
+				if _, exists := args["current_gate"]; exists {
+					next.CurrentGate = stringArg(args, "current_gate")
+				}
+				if _, exists := args["summary"]; exists {
+					next.Summary = stringArg(args, "summary")
+				}
+				if _, exists := args["plan_json"]; exists {
+					next.PlanJSON = stringArg(args, "plan_json")
+				}
+				if _, exists := args["report"]; exists {
+					next.Report = stringArg(args, "report")
+				}
+				if _, exists := args["run_id"]; exists {
+					next.RunID = stringArg(args, "run_id")
+				} else if runID != "" && strings.TrimSpace(next.RunID) == "" {
+					next.RunID = runID
+				}
+
+				st, err := s.Store.UpsertAcceptanceState(ctx, next)
+				if err != nil {
+					return nil, err
+				}
+				return map[string]any{"ok": true, "state": st}, nil
+			},
+		},
 	}
 
 	taskOutputStats := ToolFunc{

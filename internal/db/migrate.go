@@ -86,6 +86,18 @@ func Migrate(ctx context.Context, conn *sql.DB) error {
 			deleted_at INTEGER,
 			updated_at INTEGER NOT NULL DEFAULT 0
 		);`,
+		`CREATE TABLE IF NOT EXISTS acceptance_states (
+			session_key TEXT PRIMARY KEY,
+			status TEXT NOT NULL DEFAULT '',
+			iteration INTEGER NOT NULL DEFAULT 0,
+			max_iterations INTEGER NOT NULL DEFAULT 10,
+			current_gate TEXT NOT NULL DEFAULT '',
+			summary TEXT NOT NULL DEFAULT '',
+			plan_json TEXT NOT NULL DEFAULT '',
+			report TEXT NOT NULL DEFAULT '',
+			run_id TEXT NOT NULL DEFAULT '',
+			updated_at INTEGER NOT NULL DEFAULT 0
+		);`,
 	)
 
 	for _, stmt := range stmts {

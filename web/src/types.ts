@@ -48,6 +48,24 @@ export type Task = {
   finished_at?: string;
 };
 
+export type AcceptanceState = {
+  key: string;
+  status: string;
+  iteration: number;
+  max_iterations: number;
+  current_gate: string;
+  summary: string;
+  plan_json?: string;
+  report?: string;
+  run_id?: string;
+  updated_at: string;
+};
+
+export type AcceptanceResponse = {
+  ok: boolean;
+  state: AcceptanceState | null;
+};
+
 export type SkillTargetRoot = {
   target: "cursor" | "claude_code" | "codex";
   root: string;
