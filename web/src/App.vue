@@ -1818,10 +1818,21 @@ function closeFilesPage() {
 function applyRouteFromLocation() {
   if (typeof window === "undefined") return;
   const path = normalizeRoutePath(window.location.pathname);
+  const qs = new URLSearchParams(window.location.search);
   const restoreFilesRoute = () => {
     const base = (filesBase.value ?? "").trim() || ".";
     navigateTo(`/files?base=${encodePathForQueryValue(base)}`, { replace: true });
   };
+
+  // Back-compat / defensive: if someone lands on `/?base=...`, treat it as Files.
+  if ((path === "/" || path === "/index.html") && qs.has("base")) {
+    const base = (qs.get("base") ?? "").trim();
+    skillsOpen.value = false;
+    navigateTo(`/files?base=${encodePathForQueryValue(base)}`, { replace: true });
+    void openFilesForBase(base);
+    return;
+  }
+
   if (path === "/skills") {
     if (filesOpen.value) {
       closeFiles();
