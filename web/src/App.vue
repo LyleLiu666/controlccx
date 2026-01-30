@@ -43,7 +43,6 @@ import {
   renameSession,
   resumeTaskWithOptions,
   sendChat,
-  sendChatStream,
   upsertTool,
   updateAuth,
 } from "./api";
@@ -59,7 +58,9 @@ import { computePopupPosition } from "./menuPosition";
 import { prettifyLogMessage } from "./logPretty";
 import { deriveRunActivity } from "./runActivity";
 import SkillsModal from "./components/SkillsModal.vue";
+import SecretaryDrawer from "./components/SecretaryDrawer.vue";
 import { useSkills } from "./composables/useSkills";
+import { useSecretaryChat } from "./composables/useSecretaryChat";
 
 const tasks = ref<Map<string, Task>>(new Map());
 const selectedTaskId = ref<string>("");
@@ -71,7 +72,6 @@ const eventsLastHeartbeatMs = ref(0);
 const eventsLastError = ref("");
 
 const systemInfo = ref<SystemInfo | null>(null);
-const chat = ref<ChatMessage[]>([]);
 
 const newWorkerType = ref<WorkerType>("claude-code");
 const newWorkdir = ref<string>(".");
@@ -82,17 +82,22 @@ const claudeAutoApprove = ref<boolean>(false);
 
 const resumePrompt = ref<string>("");
 const resumeExpanded = ref(true);
-const chatInput = ref<string>("");
-const chatInputEl = ref<HTMLTextAreaElement | null>(null);
-const chatMsgsEl = ref<HTMLDivElement | null>(null);
-const chatIsComposing = ref(false);
 const errorBanner = ref<string>("");
-const chatBackend = ref<"auto" | "claude" | "codex">("auto");
-const chatStreamEnabled = ref<boolean>(true);
-const chatMaxSteps = ref<number>(8);
-const chatStreamStatus = ref<string>("");
-const chatStreamAnswer = ref<string>("");
-const chatSending = ref<boolean>(false);
+const {
+  chat,
+  chatInput,
+  chatBackend,
+  chatStreamEnabled,
+  chatMaxSteps,
+  chatStreamStatus,
+  chatStreamAnswer,
+  chatSending,
+  sendChatMessage,
+} = useSecretaryChat({
+  onError: (message: string) => {
+    errorBanner.value = message;
+  },
+});
 
 const theme = ref<"light" | "dark">("light");
 
@@ -2022,94 +2027,6 @@ async function onResumeEnter(e: KeyboardEvent) {
   await onResumeTask();
 }
 
-async function onSendChat() {
-  const msg = chatInput.value.trim();
-  if (!msg) return;
-  if (chatSending.value) return;
-  errorBanner.value = "";
-  chatSending.value = true;
-  try {
-    if (!chatStreamEnabled.value) {
-      chat.value = await sendChatAndReload(msg, { sendChat, fetchChat });
-      chatInput.value = "";
-      return;
-    }
-
-    chatStreamStatus.value = "thinking";
-    chatStreamAnswer.value = "";
-    chatInput.value = "";
-
-    await sendChatStream(
-      msg,
-      { backend: chatBackend.value, max_steps: chatMaxSteps.value },
-      (evt) => {
-        if (evt.event === "status") {
-          const phase = String(evt.data?.phase ?? "");
-          if (phase) chatStreamStatus.value = phase;
-          return;
-        }
-        if (evt.event === "tool_call") {
-          const tool = String(evt.data?.tool ?? "");
-          if (tool) chatStreamStatus.value = `tool: ${tool}`;
-          return;
-        }
-        if (evt.event === "tool_result") {
-          const tool = String(evt.data?.tool ?? "");
-          if (tool) chatStreamStatus.value = `tool done: ${tool}`;
-          return;
-        }
-        if (evt.event === "final") {
-          const m = String(evt.data?.message ?? "");
-          if (m) chatStreamAnswer.value = m;
-          chatStreamStatus.value = "";
-        }
-      },
-    );
-
-    chat.value = await fetchChat();
-    chatStreamStatus.value = "";
-    chatStreamAnswer.value = "";
-  } catch (e: any) {
-    errorBanner.value = e?.message ?? String(e);
-  } finally {
-    chatSending.value = false;
-  }
-}
-
-function shouldAutoScrollChat(el: HTMLElement): boolean {
-  const threshold = 90;
-  const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
-  return distance <= threshold;
-}
-
-function scrollChatToBottom() {
-  const el = chatMsgsEl.value;
-  if (!el) return;
-  try {
-    el.scrollTop = el.scrollHeight;
-  } catch {
-    // ignore
-  }
-}
-
-function onChatCompositionStart() {
-  chatIsComposing.value = true;
-}
-
-function onChatCompositionEnd() {
-  chatIsComposing.value = false;
-}
-
-async function onChatKeyDown(e: KeyboardEvent) {
-  if (e.key !== "Enter") return;
-  if (e.shiftKey) return; // Shift+Enter -> newline
-  if (isImeComposing(e) || chatIsComposing.value) return;
-  if (chatSending.value) return;
-  if (!chatInput.value.trim()) return;
-  e.preventDefault();
-  await onSendChat();
-}
-
 async function openDirPicker() {
   dirPickerOpen.value = true;
   dirError.value = "";
@@ -3263,18 +3180,6 @@ watch(newRunOpen, async (open) => {
   newRunPromptEl.value?.focus();
 });
 
-watch(
-  [secretaryOpen, secretaryView],
-  async ([open, view]) => {
-    if (!open) return;
-    if (view !== "chat") return;
-    await nextTick();
-    chatInputEl.value?.focus();
-    scrollChatToBottom();
-  },
-  { immediate: false },
-);
-
 function applyMermaidTheme() {
   try {
     mermaid.initialize({
@@ -3322,20 +3227,6 @@ async function renderFilePreviewMermaidIfNeeded() {
   }
 }
 
-async function renderChatMermaidIfNeeded() {
-  if (!secretaryOpen.value) return;
-  if (secretaryView.value !== "chat") return;
-  const root = chatMsgsEl.value;
-  if (!root) return;
-  try {
-    const nodes = Array.from(root.querySelectorAll<HTMLElement>(".mermaid"));
-    if (nodes.length === 0) return;
-    await mermaid.run({ nodes });
-  } catch {
-    // ignore mermaid parse errors
-  }
-}
-
 watch(
   [theme, outputTab, resultPreviewTab, selectedResultHtml],
   async () => {
@@ -3349,21 +3240,6 @@ watch([theme, filePreviewOpen, filePreviewTab, filePreviewMarkdownHtml], async (
   applyMermaidTheme();
   await renderFilePreviewMermaidIfNeeded();
 });
-
-watch(
-  [secretaryOpen, secretaryView, theme, () => chat.value.length, chatStreamAnswer, chatStreamStatus],
-  async ([open, view]) => {
-    if (!open) return;
-    if (view !== "chat") return;
-    const el = chatMsgsEl.value;
-    const stick = el ? shouldAutoScrollChat(el) : true;
-    applyMermaidTheme();
-    await nextTick();
-    await renderChatMermaidIfNeeded();
-    if (stick) scrollChatToBottom();
-  },
-  { immediate: false },
-);
 
 watch(
   [liveOpen, liveScope],
@@ -4262,272 +4138,36 @@ watch(
       </div>
     </div>
 
-	    <div
+	    <SecretaryDrawer
 	      v-if="secretaryOpen"
-	      class="secDrawerOverlay"
-	      @click.self="closeSecretary"
-	    >
-	      <aside
-	        class="secDrawer secDrawerSecretary"
-	        :class="{ full: secretaryFull }"
-	        :style="{
-	          width: secretaryFull ? 'calc(100vw - 32px)' : secretaryWidth + 'px',
-	        }"
-	        role="dialog"
-	        aria-modal="true"
-	      >
-	        <div
-	          class="secResizeHandle"
-	          :class="{ active: secretaryResizing }"
-	          @mousedown="startSecretaryResize"
-	          title="Resize"
-	        ></div>
-	        <div class="secDrawerHeader">
-	          <div class="secDrawerTitle">Secretary</div>
-	          <div class="secTabs" role="tablist" aria-label="Secretary tabs">
-            <button
-              type="button"
-              class="secTab"
-              :class="{ active: secretaryView === 'chat' }"
-              role="tab"
-              :aria-selected="secretaryView === 'chat'"
-              @click="secretaryView = 'chat'"
-            >
-              Chat
-            </button>
-            <button
-              type="button"
-              class="secTab"
-              :class="{ active: secretaryView === 'overview' }"
-              role="tab"
-              :aria-selected="secretaryView === 'overview'"
-              @click="secretaryView = 'overview'"
-            >
-              Overview
-              <span
-                v-if="needsAttentionSessions.length"
-                class="secTabBadge"
-                :title="`Needs attention: ${needsAttentionSessions.length}`"
-              >
-                {{ needsAttentionSessions.length }}
-	              </span>
-	            </button>
-	          </div>
-	          <button
-	            class="iconBtn"
-	            type="button"
-	            @click="secretaryFull = !secretaryFull"
-	            :title="secretaryFull ? 'Exit full screen' : 'Full screen'"
-	          >
-	            {{ secretaryFull ? "⤡" : "⤢" }}
-	          </button>
-	          <button class="iconBtn" type="button" @click="closeSecretary">
-	            ✕
-	          </button>
-	        </div>
-
-        <div class="secDrawerBody">
-          <div v-if="secretaryView === 'overview'" class="secOverview">
-            <div class="secretaryCards">
-              <div class="secCard">
-                <div class="secK">Sessions</div>
-                <div class="secV">{{ secretaryCounts.total }}</div>
-              </div>
-              <div class="secCard">
-                <div class="secK">Running</div>
-                <div class="secV">{{ secretaryCounts.running }}</div>
-              </div>
-              <div class="secCard">
-                <div class="secK">Blocked</div>
-                <div class="secV">{{ secretaryCounts.blocked }}</div>
-              </div>
-              <div class="secCard">
-                <div class="secK">Failed</div>
-                <div class="secV">{{ secretaryCounts.failed }}</div>
-              </div>
-            </div>
-
-            <div class="secSection">
-              <div class="secSectionTitleRow">
-                <div class="secSectionTitle">Needs Attention</div>
-                <div class="secSectionControls">
-                  <select v-model="secretaryScope" class="secScopeSelect" title="Scope">
-                    <option value="current">Current</option>
-                    <option value="all">All</option>
-                  </select>
-                  <label class="secMiniToggle" title="Auto resume interrupted sessions">
-                    <input type="checkbox" v-model="attentionAutopilotEnabled" />
-                    Autopilot
-                  </label>
-                </div>
-              </div>
-              <div v-if="attentionAutopilotNote" class="secAutopilotNote">
-                {{ attentionAutopilotNote }}
-              </div>
-              <div v-if="needsAttentionSessions.length === 0" class="empty">
-                暂无需要关注的 session
-              </div>
-              <div
-                v-for="s in needsAttentionSessions"
-                :key="s.key"
-                class="secRow"
-              >
-                <button
-                  type="button"
-                  class="secRowMain"
-                  @click="
-                    onSelectTask(s.latest.id);
-                    closeSecretary();
-                  "
-                >
-                  <div class="rowTop">
-                    <span class="mono">{{
-                      (s.session_id || s.latest.id).slice(0, 8)
-                    }}</span>
-                    <span class="pill" :class="s.status">{{ s.status }}</span>
-                  </div>
-                  <div class="rowMid">
-                    <span class="pill kind">{{ s.worker_type }}</span>
-                    <span class="score">score {{ s.score }}</span>
-                  </div>
-                  <div class="rowPath mono">{{ s.workdir }}</div>
-                </button>
-                <div class="secRowActions">
-                  <button
-                    type="button"
-                    class="secAction"
-                    @click="secretaryResumeSessionRun(s)"
-                    :disabled="
-                      !s.session_id ||
-                      !!s.deleted_at ||
-                      s.latest.status === 'running' ||
-                      s.latest.status === 'queued'
-                    "
-                    title="Resume session"
-                  >
-                    Resume
-                  </button>
-                  <button
-                    type="button"
-                    class="secAction"
-                    @click="secretaryCancelSessionRun(s)"
-                    :disabled="
-                      !(s.latest.status === 'running' || s.latest.status === 'queued')
-                    "
-                    title="Cancel run"
-                  >
-                    Cancel
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            <div class="secSection">
-              <div class="secSectionTitle">Briefing</div>
-              <pre class="briefing">{{ secretaryBriefing }}</pre>
-            </div>
-          </div>
-
-          <div v-else class="secChatView">
-            <div
-              v-if="needsAttentionSessions.length"
-              class="secAttentionHint"
-            >
-              <div class="text">
-                Needs attention: {{ needsAttentionSessions.length }} session(s)
-              </div>
-              <button
-                type="button"
-                @click="secretaryView = 'overview'"
-                title="Open overview"
-              >
-                View
-              </button>
-            </div>
-
-	            <div class="secChat">
-	              <div class="chat">
-	                <details class="chatControlsDetails">
-	                  <summary>Chat settings</summary>
-	                  <div class="chatControls">
-	                    <label>
-	                      Agent
-	                      <select v-model="chatBackend" :disabled="chatSending">
-	                        <option value="auto">auto</option>
-	                        <option value="claude">claude</option>
-	                        <option value="codex">codex</option>
-	                      </select>
-	                    </label>
-	                    <label class="chatToggle">
-	                      <input
-	                        type="checkbox"
-	                        v-model="chatStreamEnabled"
-	                        :disabled="chatSending"
-	                      />
-	                      Stream
-	                    </label>
-	                    <label>
-	                      Max steps
-	                      <input
-	                        type="number"
-	                        min="1"
-	                        max="32"
-	                        v-model.number="chatMaxSteps"
-	                        :disabled="chatSending"
-	                      />
-	                    </label>
-	                  </div>
-	                </details>
-	                <div class="msgs" ref="chatMsgsEl">
-	                  <div
-	                    v-for="m in chat"
-                    :key="m.id"
-                    class="msg"
-                    :class="m.role"
-                  >
-                    <div class="role">{{ m.role }}</div>
-                    <div
-                      class="content chatMarkdown"
-                      v-html="renderMarkdownSafe(m.content)"
-                      @click="onResultMarkdownClick"
-                    ></div>
-                  </div>
-                  <div
-                    v-if="chatStreamStatus || chatStreamAnswer"
-                    class="msg assistant streaming"
-                  >
-                    <div class="role">assistant</div>
-                    <div
-                      class="content chatMarkdown"
-                      v-html="renderMarkdownSafe(chatStreamAnswer || chatStreamStatus)"
-                      @click="onResultMarkdownClick"
-                    ></div>
-                  </div>
-                </div>
-                <div class="input">
-                  <textarea
-                    ref="chatInputEl"
-                    v-model="chatInput"
-                    rows="3"
-                    placeholder="Ask the secretary..."
-                    @keydown="onChatKeyDown"
-                    @compositionstart="onChatCompositionStart"
-                    @compositionend="onChatCompositionEnd"
-                  ></textarea>
-                  <button
-                    class="primary"
-                    @click="onSendChat"
-                    :disabled="chatSending || !chatInput.trim()"
-                  >
-                    Send
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </aside>
-    </div>
+	      v-model:full="secretaryFull"
+	      v-model:view="secretaryView"
+	      v-model:scope="secretaryScope"
+	      v-model:autopilotEnabled="attentionAutopilotEnabled"
+	      v-model:chatBackend="chatBackend"
+	      v-model:chatStreamEnabled="chatStreamEnabled"
+	      v-model:chatMaxSteps="chatMaxSteps"
+	      v-model:chatInput="chatInput"
+	      :width="secretaryWidth"
+	      :resizing="secretaryResizing"
+	      :counts="secretaryCounts"
+	      :needsAttentionSessions="needsAttentionSessions"
+	      :autopilotNote="attentionAutopilotNote"
+	      :briefing="secretaryBriefing"
+	      :chat="chat"
+	      :chatStreamStatus="chatStreamStatus"
+	      :chatStreamAnswer="chatStreamAnswer"
+	      :chatSending="chatSending"
+	      :theme="theme"
+	      :renderMarkdownSafe="renderMarkdownSafe"
+	      @close="closeSecretary"
+	      @startResize="startSecretaryResize"
+	      @selectTask="onSelectTask"
+	      @resumeSession="secretaryResumeSessionRun"
+	      @cancelSession="secretaryCancelSessionRun"
+	      @sendChat="sendChatMessage"
+	      @markdownClick="onResultMarkdownClick"
+	    />
 
 		    <div v-if="liveOpen" class="secDrawerOverlay" @click.self="liveOpen = false">
 		      <aside
