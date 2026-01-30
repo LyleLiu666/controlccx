@@ -77,10 +77,40 @@ func (s *Store) CreateTask(ctx context.Context, in CreateTaskInput) (Task, error
 	if in.UnsafeAutomation {
 		unsafeInt = 1
 	}
+
+	safetyPreset := strings.TrimSpace(in.SafetyPreset)
+	taskIntent := strings.TrimSpace(in.TaskIntent)
+	codexSandbox := strings.TrimSpace(in.CodexSandbox)
+	codexApproval := strings.TrimSpace(in.CodexApprovalPolicy)
+	codexSearch := 0
+	if in.CodexSearch {
+		codexSearch = 1
+	}
+	claudePermissionMode := strings.TrimSpace(in.ClaudePermissionMode)
+	claudeSandbox := 0
+	if in.ClaudeSandbox {
+		claudeSandbox = 1
+	}
+	claudeDomains := normalizeDomains(in.ClaudeWebFetchDomains)
+	claudeDomainsJSON := ""
+	if len(claudeDomains) > 0 {
+		if b, err := json.Marshal(claudeDomains); err == nil {
+			claudeDomainsJSON = string(b)
+		}
+	}
+
 	_, err = tx.ExecContext(ctx, `
-		INSERT OR REPLACE INTO task_run_options (task_id, unsafe_automation)
-		VALUES (?, ?);
-	`, id, unsafeInt)
+		INSERT OR REPLACE INTO task_run_options (
+			task_id, unsafe_automation,
+			safety_preset, task_intent,
+			codex_sandbox, codex_approval_policy, codex_search,
+			claude_permission_mode, claude_sandbox, claude_webfetch_domains_json
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+	`, id, unsafeInt,
+		safetyPreset, taskIntent,
+		codexSandbox, codexApproval, codexSearch,
+		claudePermissionMode, claudeSandbox, claudeDomainsJSON,
+	)
 	if err != nil {
 		return Task{}, fmt.Errorf("tasks: insert run options: %w", err)
 	}
@@ -95,7 +125,11 @@ func (s *Store) CreateTask(ctx context.Context, in CreateTaskInput) (Task, error
 func (s *Store) GetTask(ctx context.Context, id string) (Task, error) {
 	row := s.db.QueryRowContext(ctx, `
 		SELECT
-			t.id, t.worker_type, t.mode, t.status, COALESCE(o.unsafe_automation, 0),
+			t.id, t.worker_type, t.mode, t.status,
+			COALESCE(o.unsafe_automation, 0),
+			COALESCE(o.safety_preset, ''), COALESCE(o.task_intent, ''),
+			COALESCE(o.codex_sandbox, ''), COALESCE(o.codex_approval_policy, ''), COALESCE(o.codex_search, 0),
+			COALESCE(o.claude_permission_mode, ''), COALESCE(o.claude_sandbox, 0), COALESCE(o.claude_webfetch_domains_json, ''),
 			t.prompt, t.workdir, t.session_id, COALESCE(sm.title, ''), sm.deleted_at,
 			t.warning, t.error, t.exit_code,
 			stderr_count, keyword_count, score,
@@ -132,7 +166,11 @@ func (s *Store) ListTasksWithOptions(ctx context.Context, limit int, opts ListTa
 	}
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT
-			t.id, t.worker_type, t.mode, t.status, COALESCE(o.unsafe_automation, 0),
+			t.id, t.worker_type, t.mode, t.status,
+			COALESCE(o.unsafe_automation, 0),
+			COALESCE(o.safety_preset, ''), COALESCE(o.task_intent, ''),
+			COALESCE(o.codex_sandbox, ''), COALESCE(o.codex_approval_policy, ''), COALESCE(o.codex_search, 0),
+			COALESCE(o.claude_permission_mode, ''), COALESCE(o.claude_sandbox, 0), COALESCE(o.claude_webfetch_domains_json, ''),
 			t.prompt, t.workdir, t.session_id, COALESCE(sm.title, ''), sm.deleted_at,
 			t.warning, t.error, t.exit_code,
 			t.stderr_count, t.keyword_count, t.score,
@@ -614,6 +652,14 @@ func scanTask(row rowScanner) (Task, error) {
 		t                         Task
 		workerType, mode, status  string
 		unsafeAutomation          int
+		safetyPreset              string
+		taskIntent                string
+		codexSandbox              string
+		codexApproval             string
+		codexSearch               int
+		claudePermissionMode      string
+		claudeSandbox             int
+		claudeWebFetchDomainsJSON string
 		sessionTitle              string
 		sessionDeletedAt          sql.NullInt64
 		createdAt, updatedAt      int64
@@ -621,7 +667,11 @@ func scanTask(row rowScanner) (Task, error) {
 		exitCode                  sql.NullInt64
 	)
 	err := row.Scan(
-		&t.ID, &workerType, &mode, &status, &unsafeAutomation,
+		&t.ID, &workerType, &mode, &status,
+		&unsafeAutomation,
+		&safetyPreset, &taskIntent,
+		&codexSandbox, &codexApproval, &codexSearch,
+		&claudePermissionMode, &claudeSandbox, &claudeWebFetchDomainsJSON,
 		&t.Prompt, &t.WorkDir, &t.SessionID, &sessionTitle, &sessionDeletedAt,
 		&t.Warning, &t.Error, &exitCode,
 		&t.StderrCount, &t.KeywordCount, &t.Score,
@@ -638,6 +688,19 @@ func scanTask(row rowScanner) (Task, error) {
 	t.Mode = Mode(mode)
 	t.Status = Status(status)
 	t.UnsafeAutomation = unsafeAutomation != 0
+	t.SafetyPreset = strings.TrimSpace(safetyPreset)
+	t.TaskIntent = strings.TrimSpace(taskIntent)
+	t.CodexSandbox = strings.TrimSpace(codexSandbox)
+	t.CodexApprovalPolicy = strings.TrimSpace(codexApproval)
+	t.CodexSearch = codexSearch != 0
+	t.ClaudePermissionMode = strings.TrimSpace(claudePermissionMode)
+	t.ClaudeSandbox = claudeSandbox != 0
+	if strings.TrimSpace(claudeWebFetchDomainsJSON) != "" {
+		var domains []string
+		if err := json.Unmarshal([]byte(claudeWebFetchDomainsJSON), &domains); err == nil {
+			t.ClaudeWebFetchDomains = normalizeDomains(domains)
+		}
+	}
 	t.SessionTitle = strings.TrimSpace(sessionTitle)
 	t.CreatedAt = fromMillis(createdAt)
 	t.UpdatedAt = fromMillis(updatedAt)
@@ -659,6 +722,27 @@ func scanTask(row rowScanner) (Task, error) {
 		t.ExitCode = &v
 	}
 	return t, nil
+}
+
+func normalizeDomains(domains []string) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(domains))
+	for _, d := range domains {
+		d = strings.TrimSpace(d)
+		if d == "" {
+			continue
+		}
+		key := strings.ToLower(d)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, d)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func toMillis(t time.Time) int64 {

@@ -331,7 +331,14 @@ func (m *Manager) withCodexDefaults(args []string) []string {
 	if len(args) == 0 {
 		return args
 	}
-	if args[0] != "e" && args[0] != "exec" {
+	execIdx := -1
+	for i, a := range args {
+		if a == "e" || a == "exec" {
+			execIdx = i
+			break
+		}
+	}
+	if execIdx < 0 {
 		return args
 	}
 
@@ -358,9 +365,9 @@ func (m *Manager) withCodexDefaults(args []string) []string {
 		return args
 	}
 	out := make([]string, 0, len(args)+len(insert))
-	out = append(out, args[:1]...)
+	out = append(out, args[:execIdx+1]...)
 	out = append(out, insert...)
-	out = append(out, args[1:]...)
+	out = append(out, args[execIdx+1:]...)
 	return out
 }
 

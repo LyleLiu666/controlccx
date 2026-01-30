@@ -25,11 +25,15 @@ func TestManager_buildToolCommand_CodexDefaults(t *testing.T) {
 	wantModel := "gpt-5.2"
 	wantCfg := `model_reasoning_effort="xhigh"`
 
-	if len(tool.Args) < 5 {
-		t.Fatalf("args=%v, want >= 5", tool.Args)
+	execIdx := indexOfAny(tool.Args, "e", "exec")
+	if execIdx < 0 {
+		t.Fatalf("args=%v, expected exec subcommand", tool.Args)
 	}
-	if tool.Args[0] != "e" || tool.Args[1] != "-m" || tool.Args[2] != wantModel || tool.Args[3] != "-c" || tool.Args[4] != wantCfg {
-		t.Fatalf("args prefix=%v, want [e -m %s -c %s]", tool.Args[:min(5, len(tool.Args))], wantModel, wantCfg)
+	if len(tool.Args) < execIdx+5 {
+		t.Fatalf("args=%v, want >= %d", tool.Args, execIdx+5)
+	}
+	if tool.Args[execIdx+1] != "-m" || tool.Args[execIdx+2] != wantModel || tool.Args[execIdx+3] != "-c" || tool.Args[execIdx+4] != wantCfg {
+		t.Fatalf("args near exec=%v, want [exec -m %s -c %s]", tool.Args[execIdx:min(execIdx+5, len(tool.Args))], wantModel, wantCfg)
 	}
 }
 
@@ -58,11 +62,15 @@ func TestManager_buildToolCommand_CodexUsesStoredModelAndEffort(t *testing.T) {
 	}
 	wantCfg := `model_reasoning_effort="high"`
 
-	if len(tool.Args) < 5 {
-		t.Fatalf("args=%v, want >= 5", tool.Args)
+	execIdx := indexOfAny(tool.Args, "e", "exec")
+	if execIdx < 0 {
+		t.Fatalf("args=%v, expected exec subcommand", tool.Args)
 	}
-	if tool.Args[0] != "e" || tool.Args[1] != "-m" || tool.Args[2] != "o3" || tool.Args[3] != "-c" || tool.Args[4] != wantCfg {
-		t.Fatalf("args prefix=%v, want [e -m o3 -c %s]", tool.Args[:min(5, len(tool.Args))], wantCfg)
+	if len(tool.Args) < execIdx+5 {
+		t.Fatalf("args=%v, want >= %d", tool.Args, execIdx+5)
+	}
+	if tool.Args[execIdx+1] != "-m" || tool.Args[execIdx+2] != "o3" || tool.Args[execIdx+3] != "-c" || tool.Args[execIdx+4] != wantCfg {
+		t.Fatalf("args near exec=%v, want [exec -m o3 -c %s]", tool.Args[execIdx:min(execIdx+5, len(tool.Args))], wantCfg)
 	}
 }
 
@@ -71,4 +79,15 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+
+func indexOfAny(items []string, values ...string) int {
+	for i, it := range items {
+		for _, v := range values {
+			if it == v {
+				return i
+			}
+		}
+	}
+	return -1
 }

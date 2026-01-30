@@ -65,6 +65,14 @@ export async function createTask(input: {
   prompt: string;
   workdir: string;
   unsafe_automation?: boolean;
+  safety_preset?: string;
+  task_intent?: string;
+  codex_sandbox?: string;
+  codex_approval_policy?: string;
+  codex_search?: boolean;
+  claude_permission_mode?: string;
+  claude_sandbox?: boolean;
+  claude_webfetch_domains?: string[];
 }): Promise<Task> {
   return postJSON<Task>("/api/tasks", { ...input, mode: "new" });
 }
@@ -79,7 +87,18 @@ export async function resumeTask(id: string, prompt: string): Promise<Task> {
 
 export async function resumeTaskWithOptions(
   id: string,
-  input: { prompt: string; unsafe_automation?: boolean },
+  input: {
+    prompt: string;
+    unsafe_automation?: boolean;
+    safety_preset?: string;
+    task_intent?: string;
+    codex_sandbox?: string;
+    codex_approval_policy?: string;
+    codex_search?: boolean;
+    claude_permission_mode?: string;
+    claude_sandbox?: boolean;
+    claude_webfetch_domains?: string[];
+  },
 ): Promise<Task> {
   return postJSON<Task>(`/api/tasks/${id}/resume`, input);
 }

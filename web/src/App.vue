@@ -13,8 +13,6 @@ import type {
   FSListEntry,
   FSRoot,
   LogEntry,
-  ServerEvent,
-  TaskTraceResponse,
   Tool,
   ToolDriver,
   ToolsListResponse,
@@ -34,9 +32,7 @@ import {
   fetchFSRoots,
   fetchLogs,
   fetchTools,
-  fetchTaskTrace,
   fetchSystemInfo,
-  fetchTasks,
   fsDelete,
   fsMkdir,
   fsWrite,
@@ -63,18 +59,12 @@ import SkillsPanel from "./components/SkillsPanel.vue";
 import SkillsVersionsPanel from "./components/SkillsVersionsPanel.vue";
 import SkillsGovernancePanel from "./components/SkillsGovernancePanel.vue";
 import SecretaryDrawer from "./components/SecretaryDrawer.vue";
+import LiveDrawer from "./components/LiveDrawer.vue";
 import { useSkills } from "./composables/useSkills";
 import { useSkillVersions } from "./composables/useSkillVersions";
 import { useSecretaryChat } from "./composables/useSecretaryChat";
-
-const tasks = ref<Map<string, Task>>(new Map());
-const selectedTaskId = ref<string>("");
-const logsByTask = ref<Map<string, LogEntry[]>>(new Map());
-
-const eventsConnected = ref(true);
-const eventsLastEventMs = ref(Date.now());
-const eventsLastHeartbeatMs = ref(0);
-const eventsLastError = ref("");
+import { useTasks } from "./composables/useTasks";
+import { useLiveFeed } from "./composables/useLiveFeed";
 
 const systemInfo = ref<SystemInfo | null>(null);
 
@@ -168,26 +158,6 @@ const {
   deleteSkillVersionByID,
 } = useSkillVersions();
 
-const selectedTask = computed(
-  () => tasks.value.get(selectedTaskId.value) ?? null,
-);
-const selectedLogs = computed(
-  () => logsByTask.value.get(selectedTaskId.value) ?? [],
-);
-const selectedRunInstruction = computed(() => {
-  const t = selectedTask.value;
-  if (!t) return "";
-  const mode = t.mode === "resume" ? "Resume" : "New";
-  const p = promptSummary(t.prompt);
-  return p ? `${mode} · ${p}` : mode;
-});
-const selectedRunActivity = computed(() => {
-  const t = selectedTask.value;
-  if (!t) return null;
-  if (!(t.status === "running" || t.status === "queued")) return null;
-  return deriveRunActivity(selectedLogs.value);
-});
-
 const outputTab = ref<"result" | "logs" | "trace">("result");
 const resultPreviewTab = ref<"markdown" | "raw" | "html">("markdown");
 const logPreviewTab = ref<"pretty" | "raw">("pretty");
@@ -212,9 +182,51 @@ const filePreviewError = ref("");
 const filePreviewBoxEl = ref<HTMLDivElement | null>(null);
 const filePreviewTab = ref<"preview" | "raw" | "html">("preview");
 
-const traceByTask = ref<Map<string, TaskTraceResponse>>(new Map());
-const traceLoading = ref(false);
-const traceError = ref("");
+const {
+  tasks,
+  selectedTaskId,
+  selectedTask,
+  selectedLogs,
+  logsByTask,
+  traceLoading,
+  traceError,
+  selectedTrace,
+  eventsConnected,
+  eventsLastEventMs,
+  eventsLastHeartbeatMs,
+  eventsLastError,
+  refreshTasks,
+  loadLogs,
+  loadTrace,
+  selectTask,
+  upsertTask,
+  connectEvents,
+  reconnectEvents,
+} = useTasks({
+  showDeleted: sessionsShowDeleted,
+  onTaskUpsert: (prev, next) => {
+    // Fire-and-forget; avoid blocking SSE handling.
+    void maybeTriggerDeliveryForeman(prev, next);
+    maybeTriggerAttentionAutopilot(prev, next);
+  },
+  onChatMessage: (m) => {
+    chat.value = appendChatMessageUnique(chat.value, m);
+  },
+});
+
+const selectedRunInstruction = computed(() => {
+  const t = selectedTask.value;
+  if (!t) return "";
+  const mode = t.mode === "resume" ? "Resume" : "New";
+  const p = promptSummary(t.prompt);
+  return p ? `${mode} · ${p}` : mode;
+});
+const selectedRunActivity = computed(() => {
+  const t = selectedTask.value;
+  if (!t) return null;
+  if (!(t.status === "running" || t.status === "queued")) return null;
+  return deriveRunActivity(selectedLogs.value);
+});
 
 const acceptanceState = ref<AcceptanceState | null>(null);
 const acceptanceLoading = ref(false);
@@ -324,49 +336,32 @@ function startSecretaryResize(e: MouseEvent) {
   window.addEventListener("mouseup", onUp);
 }
 
-const liveOpen = ref(false);
-const liveScope = ref<"current" | "all">("current");
-const liveMode = ref<"milestones" | "all">("milestones");
-const livePaused = ref(false);
-const liveWrap = ref(true);
-const liveFull = ref(false);
-const liveWidth = ref(980);
-const liveResizing = ref(false);
-const liveBoxEl = ref<HTMLDivElement | null>(null);
-const liveNowMs = ref(Date.now());
+const {
+  liveOpen,
+  liveScope,
+  liveMode,
+  livePaused,
+  liveWrap,
+  liveFull,
+  liveWidth,
+  liveResizing,
+  liveBoxEl,
+  eventsIdleSeconds,
+  feedIdleSeconds,
+  liveItems,
+  startLiveResize,
+} = useLiveFeed({
+  logsByTask,
+  eventsLastEventMs,
+  getCurrentRunIDs: () => selectedSession.value?.runs.map((r) => r.id) ?? [],
+  loadLogs,
+  onResizeEnd: (width) => {
+    saveInt(LS_KEY_LIVE_WIDTH, width);
+  },
+});
+
 const feedCoachDismissed = ref(false);
 const feedCoachOpen = ref(false);
-
-function startLiveResize(e: MouseEvent) {
-  if (liveFull.value) return;
-  liveResizing.value = true;
-  document.body.style.cursor = "col-resize";
-  document.body.style.userSelect = "none";
-
-  const startX = e.clientX;
-  const startWidth = liveWidth.value;
-
-  const onMove = (tm: MouseEvent) => {
-    const diff = startX - tm.clientX;
-    let newW = startWidth + diff;
-    const maxW = Math.min(1600, window.innerWidth - 32);
-    if (newW < 520) newW = 520;
-    if (newW > maxW) newW = maxW;
-    liveWidth.value = newW;
-  };
-
-  const onUp = () => {
-    liveResizing.value = false;
-    document.body.style.cursor = "";
-    document.body.style.userSelect = "";
-    window.removeEventListener("mousemove", onMove);
-    window.removeEventListener("mouseup", onUp);
-    saveInt(LS_KEY_LIVE_WIDTH, liveWidth.value);
-  };
-
-  window.addEventListener("mousemove", onMove);
-  window.addEventListener("mouseup", onUp);
-}
 
 const runsOpen = ref(false);
 
@@ -1332,7 +1327,6 @@ function sessionKeyForTask(t: Task): string {
   return `t:${t.id}`;
 }
 
-let es: EventSource | null = null;
 let phoneMq: MediaQueryList | null = null;
 let phoneMqHandler: (() => void) | null = null;
 let focusInHandler: ((e: FocusEvent) => void) | null = null;
@@ -1348,40 +1342,13 @@ function scrollFocusedIntoView(el: HTMLElement) {
   }, 50);
 }
 
-function upsertTask(task: Task) {
-  if (!sessionsShowDeleted.value && task.session_deleted_at) {
-    const next = new Map(tasks.value);
-    next.delete(task.id);
-    tasks.value = next;
-    if (selectedTaskId.value === task.id) {
-      selectedTaskId.value = Array.from(next.keys())[0] ?? "";
-    }
-    return;
-  }
-  // Ensure reactivity for Map updates (some environments don't track Map mutations reliably).
-  const next = new Map(tasks.value);
-  next.set(task.id, task);
-  tasks.value = next;
-  if (!selectedTaskId.value) selectedTaskId.value = task.id;
-}
-
-function appendLog(entry: LogEntry) {
-  const list = logsByTask.value.get(entry.task_id) ?? [];
-  const next = new Map(logsByTask.value);
-  next.set(entry.task_id, [...list, entry]);
-  logsByTask.value = next;
-}
-
 async function refresh() {
   const [sys, taskList, chatList] = await Promise.all([
     fetchSystemInfo(),
-    fetchTasks(200, sessionsShowDeleted.value),
+    refreshTasks(200),
     fetchChat(),
   ]);
   systemInfo.value = sys;
-  const next = new Map<string, Task>();
-  for (const t of taskList) next.set(t.id, t);
-  tasks.value = next;
   // If the page reloads while a session is interrupted, Autopilot should still try once.
   if (attentionAutopilotEnabled.value) {
     const keys = new Set<string>();
@@ -1390,11 +1357,6 @@ async function refresh() {
       keys.add(sessionKeyForTask(t));
     }
     for (const k of keys) enqueueAttentionAutopilot(k);
-  }
-  if (selectedTaskId.value && !tasks.value.has(selectedTaskId.value)) {
-    selectedTaskId.value = taskList[0]?.id ?? "";
-  } else if (!selectedTaskId.value) {
-    selectedTaskId.value = taskList[0]?.id ?? "";
   }
   chat.value = chatList;
 }
@@ -1406,36 +1368,6 @@ async function refreshAuth() {
     // ignore auth status failures (UI still works; tasks will surface logs)
   }
 }
-
-async function loadLogs(taskId: string) {
-  const logs = await fetchLogs(taskId, 0, 500);
-  const next = new Map(logsByTask.value);
-  next.set(taskId, logs);
-  logsByTask.value = next;
-}
-
-async function loadTrace(taskId: string) {
-  if (!taskId) return;
-  if (traceByTask.value.has(taskId)) return;
-  traceError.value = "";
-  traceLoading.value = true;
-  try {
-    const trace = await fetchTaskTrace(taskId);
-    const next = new Map(traceByTask.value);
-    next.set(taskId, trace);
-    traceByTask.value = next;
-  } catch (e: any) {
-    traceError.value = e?.message ?? String(e);
-  } finally {
-    traceLoading.value = false;
-  }
-}
-
-const selectedTrace = computed(() => {
-  const id = selectedTaskId.value;
-  if (!id) return null;
-  return traceByTask.value.get(id) ?? null;
-});
 
 async function onCreateTask(): Promise<boolean> {
   errorBanner.value = "";
@@ -1465,10 +1397,10 @@ async function onCreateTask(): Promise<boolean> {
 
 async function onSelectTask(id: string) {
   closeSessionActionsMenu();
-  selectedTaskId.value = id;
-  if (!logsByTask.value.has(id)) await loadLogs(id);
-  if (isPhone.value) sessionsDrawerOpen.value = false;
-  runsOpen.value = false;
+  await selectTask(id, {
+    closeMobileDrawer: isPhone.value ? () => { sessionsDrawerOpen.value = false; } : undefined,
+    closeRunsModal: () => { runsOpen.value = false; },
+  });
 }
 
 const sessionRenameOpen = ref(false);
@@ -2697,71 +2629,6 @@ function unpinWorkspace(path: string) {
   }
 }
 
-function connectEvents() {
-  if (es) {
-    try {
-      es.close();
-    } catch {
-      // ignore
-    }
-    es = null;
-  }
-
-  eventsConnected.value = true;
-  eventsLastError.value = "";
-  eventsLastEventMs.value = Date.now();
-  es = new EventSource("/api/events");
-
-  es.onopen = () => {
-    eventsConnected.value = true;
-    eventsLastError.value = "";
-    eventsLastEventMs.value = Date.now();
-  };
-
-  es.onerror = () => {
-    // EventSource will auto-reconnect, but we surface status to the user.
-    eventsConnected.value = false;
-    eventsLastError.value = "disconnected";
-  };
-
-  const onAny = (e: MessageEvent) => {
-    try {
-      const evt = JSON.parse(e.data) as ServerEvent;
-      eventsConnected.value = true;
-      eventsLastEventMs.value = Date.now();
-      if (evt.type === "task.created" || evt.type === "task.updated") {
-        const nextTask = evt.payload as Task;
-        const prevTask = tasks.value.get(nextTask.id);
-        upsertTask(nextTask);
-        // Fire-and-forget; avoid blocking SSE handling.
-        void maybeTriggerDeliveryForeman(prevTask, nextTask);
-        maybeTriggerAttentionAutopilot(prevTask, nextTask);
-      } else if (evt.type === "task.log") {
-        appendLog(evt.payload as LogEntry);
-      } else if (evt.type === "chat.message") {
-        chat.value = appendChatMessageUnique(chat.value, evt.payload as ChatMessage);
-      }
-    } catch {
-      // ignore
-    }
-  };
-
-  es.addEventListener("task.created", onAny);
-  es.addEventListener("task.updated", onAny);
-  es.addEventListener("task.log", onAny);
-  es.addEventListener("chat.message", onAny);
-  es.addEventListener("hello", onAny);
-  es.addEventListener("heartbeat", () => {
-    eventsConnected.value = true;
-    eventsLastHeartbeatMs.value = Date.now();
-    eventsLastEventMs.value = eventsLastHeartbeatMs.value;
-  });
-}
-
-function reconnectEvents() {
-  connectEvents();
-}
-
 function openAuthSettings() {
   authSettingsError.value = "";
   authSettingsOpen.value = true;
@@ -3012,7 +2879,6 @@ onMounted(async () => {
 });
 
 onBeforeUnmount(() => {
-  if (es) es.close();
   window.removeEventListener("keydown", onGlobalKeyDown);
   window.removeEventListener("popstate", onRoutePopState);
   document.removeEventListener("mousedown", onSessionActionsMenuDocumentMouseDown, true);
@@ -3257,124 +3123,6 @@ const secretaryBriefing = computed(() => {
   return lines.join("\n");
 });
 
-type FeedItem = {
-  task_id: string;
-  task_short: string;
-  time: string;
-  time_ms: number;
-  stream: LogEntry["stream"];
-  message: string;
-};
-
-function isMilestoneMessage(stream: LogEntry["stream"], message: string): boolean {
-  const msg = (message ?? "").trim();
-  if (!msg) return false;
-  const lower = msg.toLowerCase();
-
-  if (stream === "assistant") return true;
-
-  if (stream === "system") {
-    if (lower.startsWith("run.start")) return true;
-    if (lower.startsWith("run.finish")) return true;
-    if (lower.includes("blocked") || lower.includes("requires approval")) return true;
-    if (lower.includes("error") || lower.includes("panic") || lower.includes("failed"))
-      return true;
-    if (lower.includes("skipped overlong") || lower.includes("read error"))
-      return true;
-    return false;
-  }
-
-  // stderr is noisy; keep only obvious problems.
-  if (stream === "stderr") {
-    if (lower.includes("error") || lower.includes("panic") || lower.includes("failed"))
-      return true;
-    return false;
-  }
-
-  // stdout is usually too chatty for milestones.
-  return false;
-}
-
-function summarizeForFeed(stream: LogEntry["stream"], message: string): string {
-  const msg = (message ?? "").trimEnd();
-  if (!msg) return "";
-  const max = stream === "assistant" ? 280 : 220;
-  if (msg.length <= max) return msg;
-  return msg.slice(0, max).trimEnd() + "…";
-}
-
-const liveItemsAll = computed<FeedItem[]>(() => {
-  const scope = liveScope.value;
-  const byTask: Array<{ taskId: string; logs: LogEntry[] }> = [];
-
-  if (scope === "current") {
-    const sess = selectedSession.value;
-    if (!sess) return [];
-    for (const r of sess.runs) {
-      const logs = logsByTask.value.get(r.id);
-      if (!logs || logs.length === 0) continue;
-      byTask.push({ taskId: r.id, logs });
-    }
-  } else {
-    for (const [taskId, logs] of logsByTask.value.entries()) {
-      if (!logs || logs.length === 0) continue;
-      byTask.push({ taskId, logs });
-    }
-  }
-
-  const out: FeedItem[] = [];
-  for (const { taskId, logs } of byTask) {
-    for (const l of logs) {
-      out.push({
-        task_id: taskId,
-        task_short: taskId.slice(0, 8),
-        time: l.time,
-        time_ms: parseLogTimeMs(l.time),
-        stream: l.stream,
-        message: l.message ?? "",
-      });
-    }
-  }
-
-  out.sort((a, b) => {
-    const dm = a.time_ms - b.time_ms;
-    if (dm !== 0) return dm;
-    return a.time.localeCompare(b.time);
-  });
-
-  const max = 240;
-  return out.length > max ? out.slice(out.length - max) : out;
-});
-
-const liveItems = computed<FeedItem[]>(() => {
-  if (liveMode.value === "all") return liveItemsAll.value;
-  const out = liveItemsAll.value.filter((f) =>
-    isMilestoneMessage(f.stream, f.message),
-  );
-  return out.map((f) => ({ ...f, message: summarizeForFeed(f.stream, f.message) }));
-});
-
-const liveLastTimeMsAll = computed(() => {
-  const list = liveItemsAll.value;
-  if (list.length === 0) return 0;
-  return list[list.length - 1].time_ms;
-});
-
-const eventsIdleSeconds = computed(() => {
-  const last = eventsLastEventMs.value;
-  if (!last) return 0;
-  const s = Math.floor((liveNowMs.value - last) / 1000);
-  return s > 0 ? s : 0;
-});
-
-const feedIdleSeconds = computed(() => {
-  // Idle should consider any output, not only milestones.
-  const last = liveLastTimeMsAll.value;
-  if (!last) return 0;
-  const s = Math.floor((liveNowMs.value - last) / 1000);
-  return s > 0 ? s : 0;
-});
-
 function shouldIgnoreGlobalHotkey(e: KeyboardEvent): boolean {
   const t = e.target as any;
   if (!t) return false;
@@ -3508,65 +3256,6 @@ watch([theme, filePreviewOpen, filePreviewTab, filePreviewMarkdownHtml], async (
   applyMermaidTheme();
   await renderFilePreviewMermaidIfNeeded();
 });
-
-watch(
-  [liveOpen, liveScope],
-  async ([open]) => {
-    if (!open) return;
-    await nextTick();
-    // Backfill a small amount of logs to avoid "blank" Live after refresh.
-    if (liveScope.value === "current") {
-      const sess = selectedSession.value;
-      if (sess) {
-        const runs = sess.runs.slice(-6);
-        await Promise.all(
-          runs.map(async (r) => {
-            const existing = logsByTask.value.get(r.id);
-            if (existing && existing.length > 0) return;
-            try {
-              await loadLogs(r.id);
-            } catch {
-              // ignore
-            }
-          }),
-        );
-      }
-    }
-    if (!livePaused.value) {
-      const el = liveBoxEl.value;
-      if (el) el.scrollTop = el.scrollHeight;
-    }
-  },
-  { immediate: false },
-);
-
-watch(
-  () => liveItems.value.length,
-  async () => {
-    if (!liveOpen.value) return;
-    if (livePaused.value) return;
-    await nextTick();
-    const el = liveBoxEl.value;
-    if (el) el.scrollTop = el.scrollHeight;
-  },
-);
-
-let liveTimer: number | null = null;
-watch(
-  [liveOpen],
-  ([open]) => {
-    if (liveTimer != null) {
-      window.clearInterval(liveTimer);
-      liveTimer = null;
-    }
-    if (!open) return;
-    liveNowMs.value = Date.now();
-    liveTimer = window.setInterval(() => {
-      liveNowMs.value = Date.now();
-    }, 1000);
-  },
-  { immediate: true },
-);
 
 let feedCoachTimer: number | null = null;
 watch(
@@ -4718,134 +4407,27 @@ watch(
 	      @markdownClick="onResultMarkdownClick"
 	    />
 
-		    <div v-if="liveOpen" class="secDrawerOverlay" @click.self="liveOpen = false">
-		      <aside
-		        class="secDrawer wide"
-		        :class="{ full: liveFull }"
-		        :style="{
-		          width: liveFull ? 'calc(100vw - 32px)' : liveWidth + 'px',
-		        }"
-		        role="dialog"
-		        aria-modal="true"
-		      >
-		        <div
-		          class="secResizeHandle"
-		          :class="{ active: liveResizing }"
-		          @mousedown="startLiveResize"
-		          title="Resize"
-		        ></div>
-	        <div class="secDrawerHeader">
-	          <div class="secDrawerTitle">Live</div>
-	          <button
-	            class="iconBtn"
-	            type="button"
-	            @click="liveFull = !liveFull"
-	            :title="liveFull ? 'Exit full screen' : 'Full screen'"
-	          >
-	            {{ liveFull ? "⤡" : "⤢" }}
-	          </button>
-	          <button class="iconBtn" type="button" @click="liveOpen = false">
-	            ✕
-	          </button>
-	        </div>
-        <div class="secDrawerBody">
-          <div class="secFeed">
-            <div class="feedControls">
-              <div class="feedLeft">
-                <label class="feedLabel">
-                  Scope
-                  <select v-model="liveScope">
-                    <option value="current">Current</option>
-                    <option value="all">All</option>
-                  </select>
-                </label>
-                <label class="feedLabel">
-                  View
-                  <select v-model="liveMode">
-                    <option value="milestones">Milestones</option>
-                    <option value="all">All Logs</option>
-                  </select>
-                </label>
-                <label class="feedToggle">
-                  <input type="checkbox" v-model="liveWrap" />
-                  Wrap
-                </label>
-                <button type="button" @click="livePaused = !livePaused">
-                  {{ livePaused ? "Resume" : "Pause" }}
-                </button>
-              </div>
-              <div class="feedRight">
-                <span
-                  class="feedConn"
-                  :class="{ bad: !eventsConnected || eventsIdleSeconds >= 25 }"
-                  :title="
-                    eventsConnected
-                      ? `Connected · last event ${eventsIdleSeconds}s ago`
-                      : `Disconnected · last event ${eventsIdleSeconds}s ago`
-                  "
-                >
-                  {{ eventsConnected ? "Connected" : "Reconnecting…" }}
-                </span>
-                <button
-                  v-if="!eventsConnected || eventsIdleSeconds >= 25"
-                  type="button"
-                  class="feedReconnect"
-                  @click="reconnectEvents"
-                  title="Reconnect event stream"
-                >
-                  Reconnect
-                </button>
-                <span
-                  v-if="liveMode === 'milestones'"
-                  class="feedHint"
-                  title="Milestones show system run.start/run.finish, assistant output, and error-like lines."
-                >
-                  Milestones
-                </span>
-                <span
-                  v-if="selectedTask?.status === 'running' && feedIdleSeconds >= 10"
-                  class="feedIdle"
-                  :title="
-                    feedIdleSeconds >= 300
-                      ? `Quiet for ${feedIdleSeconds}s · tools may be silent`
-                      : `No log output for ${feedIdleSeconds}s`
-                  "
-                >
-                  {{ feedIdleSeconds >= 300 ? "Quiet" : "No logs" }}
-                  {{ feedIdleSeconds }}s
-                </span>
-              </div>
-            </div>
-
-            <div
-              ref="liveBoxEl"
-              class="feedBox"
-              :class="{ wrap: liveWrap }"
-              role="log"
-              aria-label="Live feed"
-            >
-              <div v-if="liveItems.length === 0" class="empty">
-                暂无日志（仅展示本次打开页面后收到的实时日志）
-              </div>
-              <div v-else class="feedLines">
-                <div
-                  v-for="(f, idx) in liveItems"
-                  :key="f.task_id + ':' + f.time + ':' + idx"
-                  class="feedLine"
-                >
-                  <span class="feedTime mono" :title="formatLocalDateTime(f.time)">{{
-                    formatLogTime(f.time)
-                  }}</span>
-                  <span class="feedTask mono" :title="f.task_id">{{ f.task_short }}</span>
-                  <span class="feedStream">{{ f.stream }}</span>
-                  <span class="feedMsg">{{ f.message }}</span>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-	      </aside>
-	    </div>
+		    <LiveDrawer
+		      v-if="liveOpen"
+		      v-model:full="liveFull"
+		      v-model:scope="liveScope"
+		      v-model:mode="liveMode"
+		      v-model:wrap="liveWrap"
+		      v-model:paused="livePaused"
+		      :width="liveWidth"
+		      :resizing="liveResizing"
+		      :items="liveItems"
+		      :eventsConnected="eventsConnected"
+		      :eventsIdleSeconds="eventsIdleSeconds"
+		      :feedIdleSeconds="feedIdleSeconds"
+		      :selectedTaskStatus="selectedTask?.status ?? ''"
+		      :boxElRef="liveBoxEl"
+		      :formatLogTime="formatLogTime"
+		      :formatLocalDateTime="formatLocalDateTime"
+		      @close="liveOpen = false"
+		      @reconnect="reconnectEvents"
+		      @startResize="startLiveResize"
+		    />
 
 	    <div v-if="runsOpen" class="modalOverlay" @click.self="runsOpen = false">
 	      <div class="modal runsModal">

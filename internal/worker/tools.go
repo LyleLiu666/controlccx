@@ -1,6 +1,7 @@
 package worker
 
 import (
+	"encoding/json"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -49,6 +50,12 @@ func buildClaude(cfg config.Config, task tasks.Task) (ToolCommand, error) {
 	if cfg.Workers.UnsafeAutomation || task.UnsafeAutomation {
 		args = append(args, "--dangerously-skip-permissions")
 	}
+	if strings.TrimSpace(task.ClaudePermissionMode) != "" {
+		args = append(args, "--permission-mode", strings.TrimSpace(task.ClaudePermissionMode))
+	}
+	if settings, ok := claudeSettingsForTask(task); ok {
+		args = append(args, "--settings", settings)
+	}
 	// Note: do not force --setting-sources. Users often rely on their normal Claude settings/auth.
 	if task.Mode == tasks.ModeResume && strings.TrimSpace(task.SessionID) != "" {
 		args = append(args, "-r", strings.TrimSpace(task.SessionID))
@@ -92,14 +99,31 @@ func buildCodex(cfg config.Config, task tasks.Task) (ToolCommand, error) {
 
 	workdir := filepath.Clean(task.WorkDir)
 
-	args := []string{"e"}
-	if cfg.Workers.UnsafeAutomation || task.UnsafeAutomation {
+	unsafe := cfg.Workers.UnsafeAutomation || task.UnsafeAutomation
+
+	args := []string{}
+	if unsafe {
 		args = append(args, "--dangerously-bypass-approvals-and-sandbox")
 	} else {
-		// Safe default: allow workspace writes while keeping Codex sandboxing/approvals.
-		args = append(args, "--sandbox", "workspace-write")
+		policy := strings.TrimSpace(task.CodexApprovalPolicy)
+		if policy == "" {
+			policy = "never"
+		}
+		args = append(args, "--ask-for-approval", policy)
+
+		sandbox := strings.TrimSpace(task.CodexSandbox)
+		if sandbox == "" {
+			// Safe default: allow workspace writes while keeping Codex sandboxing/approvals.
+			sandbox = "workspace-write"
+		}
+		args = append(args, "--sandbox", sandbox)
+
+		if task.CodexSearch {
+			args = append(args, "--search")
+		}
 	}
-	args = append(args, "--skip-git-repo-check")
+
+	args = append(args, "exec", "--skip-git-repo-check")
 
 	if task.Mode == tasks.ModeResume && strings.TrimSpace(task.SessionID) != "" {
 		args = append(args, "--json", "resume", strings.TrimSpace(task.SessionID), "-")
@@ -118,6 +142,70 @@ func buildCodex(cfg config.Config, task tasks.Task) (ToolCommand, error) {
 		tool.Warning = "codex on Windows is best-effort (PowerShell environment can be unstable)"
 	}
 	return tool, nil
+}
+
+func claudeSettingsForTask(task tasks.Task) (string, bool) {
+	// We only inject settings when explicitly requested. This avoids implicitly changing
+	// behavior for existing users/API clients that rely on their own Claude settings.
+	if !task.ClaudeSandbox && len(task.ClaudeWebFetchDomains) == 0 && strings.TrimSpace(task.SafetyPreset) == "" && strings.TrimSpace(task.TaskIntent) == "" {
+		return "", false
+	}
+
+	isSearchBrowse := strings.TrimSpace(task.TaskIntent) == "search-browse" || strings.Contains(strings.ToLower(task.SafetyPreset), "search-browse") || len(task.ClaudeWebFetchDomains) > 0
+
+	type permissions struct {
+		Allow []string `json:"allow,omitempty"`
+		Ask   []string `json:"ask,omitempty"`
+		Deny  []string `json:"deny,omitempty"`
+	}
+
+	p := permissions{
+		Deny: []string{
+			"Bash(curl *)",
+			"Bash(wget *)",
+			"Read(./.env)",
+			"Read(./secrets/**)",
+		},
+	}
+	if !isSearchBrowse {
+		p.Deny = append(p.Deny, "WebFetch")
+	} else {
+		for _, d := range task.ClaudeWebFetchDomains {
+			d = strings.TrimSpace(d)
+			if d == "" {
+				continue
+			}
+			p.Allow = append(p.Allow, "WebFetch(domain:"+d+")")
+		}
+	}
+
+	type sandboxSettings struct {
+		Enabled                 bool `json:"enabled"`
+		AutoAllowBashIfSandboxed bool `json:"autoAllowBashIfSandboxed,omitempty"`
+		AllowUnsandboxedCommands bool `json:"allowUnsandboxedCommands,omitempty"`
+	}
+
+	var sandbox *sandboxSettings
+	if task.ClaudeSandbox && runtime.GOOS != "windows" {
+		sandbox = &sandboxSettings{
+			Enabled:                 true,
+			AutoAllowBashIfSandboxed: true,
+			AllowUnsandboxedCommands: false,
+		}
+	}
+
+	payload := map[string]any{
+		"permissions": p,
+	}
+	if sandbox != nil {
+		payload["sandbox"] = sandbox
+	}
+
+	b, err := json.Marshal(payload)
+	if err != nil {
+		return "", false
+	}
+	return string(b), true
 }
 
 func buildExec(cfg config.Config, task tasks.Task) ToolCommand {

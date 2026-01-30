@@ -69,6 +69,14 @@ func Migrate(ctx context.Context, conn *sql.DB) error {
 		`CREATE TABLE IF NOT EXISTS task_run_options (
 			task_id TEXT PRIMARY KEY,
 			unsafe_automation INTEGER NOT NULL DEFAULT 0,
+			safety_preset TEXT NOT NULL DEFAULT '',
+			task_intent TEXT NOT NULL DEFAULT '',
+			codex_sandbox TEXT NOT NULL DEFAULT '',
+			codex_approval_policy TEXT NOT NULL DEFAULT '',
+			codex_search INTEGER NOT NULL DEFAULT 0,
+			claude_permission_mode TEXT NOT NULL DEFAULT '',
+			claude_sandbox INTEGER NOT NULL DEFAULT 0,
+			claude_webfetch_domains_json TEXT NOT NULL DEFAULT '',
 			FOREIGN KEY(task_id) REFERENCES tasks(id) ON DELETE CASCADE
 		);`,
 		`CREATE TABLE IF NOT EXISTS task_invocations (
@@ -106,8 +114,67 @@ func Migrate(ctx context.Context, conn *sql.DB) error {
 		}
 	}
 
+	// Additive column migrations (safe at user_version==schemaVersion).
+	if err := ensureTaskRunOptionsColumns(ctx, tx); err != nil {
+		return err
+	}
+
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("db: migrate commit: %w", err)
+	}
+	return nil
+}
+
+func ensureTaskRunOptionsColumns(ctx context.Context, tx *sql.Tx) error {
+	if tx == nil {
+		return fmt.Errorf("db: ensure task_run_options columns: tx is nil")
+	}
+
+	rows, err := tx.QueryContext(ctx, "PRAGMA table_info(task_run_options);")
+	if err != nil {
+		return fmt.Errorf("db: ensure task_run_options columns: table_info: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	existing := map[string]bool{}
+	for rows.Next() {
+		var (
+			cid     int
+			name    string
+			typ     string
+			notnull int
+			dflt    any
+			pk      int
+		)
+		if err := rows.Scan(&cid, &name, &typ, &notnull, &dflt, &pk); err != nil {
+			return fmt.Errorf("db: ensure task_run_options columns: scan: %w", err)
+		}
+		existing[name] = true
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("db: ensure task_run_options columns: rows: %w", err)
+	}
+
+	type col struct {
+		Name string
+		Def  string
+	}
+	for _, c := range []col{
+		{Name: "safety_preset", Def: "safety_preset TEXT NOT NULL DEFAULT ''"},
+		{Name: "task_intent", Def: "task_intent TEXT NOT NULL DEFAULT ''"},
+		{Name: "codex_sandbox", Def: "codex_sandbox TEXT NOT NULL DEFAULT ''"},
+		{Name: "codex_approval_policy", Def: "codex_approval_policy TEXT NOT NULL DEFAULT ''"},
+		{Name: "codex_search", Def: "codex_search INTEGER NOT NULL DEFAULT 0"},
+		{Name: "claude_permission_mode", Def: "claude_permission_mode TEXT NOT NULL DEFAULT ''"},
+		{Name: "claude_sandbox", Def: "claude_sandbox INTEGER NOT NULL DEFAULT 0"},
+		{Name: "claude_webfetch_domains_json", Def: "claude_webfetch_domains_json TEXT NOT NULL DEFAULT ''"},
+	} {
+		if existing[c.Name] {
+			continue
+		}
+		if _, err := tx.ExecContext(ctx, "ALTER TABLE task_run_options ADD COLUMN "+c.Def+";"); err != nil {
+			return fmt.Errorf("db: ensure task_run_options columns: add %s: %w", c.Name, err)
+		}
 	}
 	return nil
 }

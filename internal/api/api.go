@@ -456,8 +456,16 @@ func (a *API) handleTaskByID(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		var body struct {
-			Prompt           string `json:"prompt"`
-			UnsafeAutomation bool   `json:"unsafe_automation,omitempty"`
+			Prompt                string   `json:"prompt"`
+			UnsafeAutomation      bool     `json:"unsafe_automation,omitempty"`
+			SafetyPreset          string   `json:"safety_preset,omitempty"`
+			TaskIntent            string   `json:"task_intent,omitempty"`
+			CodexSandbox          string   `json:"codex_sandbox,omitempty"`
+			CodexApprovalPolicy   string   `json:"codex_approval_policy,omitempty"`
+			CodexSearch           bool     `json:"codex_search,omitempty"`
+			ClaudePermissionMode  string   `json:"claude_permission_mode,omitempty"`
+			ClaudeSandbox         bool     `json:"claude_sandbox,omitempty"`
+			ClaudeWebFetchDomains []string `json:"claude_webfetch_domains,omitempty"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			http.Error(w, "invalid json", http.StatusBadRequest)
@@ -482,6 +490,14 @@ func (a *API) handleTaskByID(w http.ResponseWriter, r *http.Request) {
 			WorkerType:       prev.WorkerType,
 			Mode:             tasks.ModeResume,
 			UnsafeAutomation: body.UnsafeAutomation,
+			SafetyPreset:     body.SafetyPreset,
+			TaskIntent:       body.TaskIntent,
+			CodexSandbox:     body.CodexSandbox,
+			CodexApprovalPolicy: body.CodexApprovalPolicy,
+			CodexSearch:      body.CodexSearch,
+			ClaudePermissionMode: body.ClaudePermissionMode,
+			ClaudeSandbox:    body.ClaudeSandbox,
+			ClaudeWebFetchDomains: body.ClaudeWebFetchDomains,
 			Prompt:           body.Prompt,
 			WorkDir:          prev.WorkDir,
 			SessionID:        prev.SessionID,

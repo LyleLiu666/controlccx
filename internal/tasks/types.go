@@ -35,6 +35,14 @@ type Task struct {
 	Mode         Mode       `json:"mode"`
 	Status       Status     `json:"status"`
 	UnsafeAutomation bool   `json:"unsafe_automation,omitempty"`
+	SafetyPreset string     `json:"safety_preset,omitempty"`
+	TaskIntent   string     `json:"task_intent,omitempty"`
+	CodexSandbox string     `json:"codex_sandbox,omitempty"`
+	CodexApprovalPolicy string `json:"codex_approval_policy,omitempty"`
+	CodexSearch  bool       `json:"codex_search,omitempty"`
+	ClaudePermissionMode string   `json:"claude_permission_mode,omitempty"`
+	ClaudeSandbox bool      `json:"claude_sandbox,omitempty"`
+	ClaudeWebFetchDomains []string `json:"claude_webfetch_domains,omitempty"`
 	Prompt       string     `json:"prompt"`
 	WorkDir      string     `json:"workdir"`
 	SessionID    string     `json:"session_id"`
@@ -75,6 +83,14 @@ type CreateTaskInput struct {
 	WorkerType WorkerType `json:"worker_type"`
 	Mode       Mode       `json:"mode"`
 	UnsafeAutomation bool `json:"unsafe_automation,omitempty"`
+	SafetyPreset string   `json:"safety_preset,omitempty"`
+	TaskIntent   string   `json:"task_intent,omitempty"`
+	CodexSandbox string   `json:"codex_sandbox,omitempty"`
+	CodexApprovalPolicy string `json:"codex_approval_policy,omitempty"`
+	CodexSearch  bool     `json:"codex_search,omitempty"`
+	ClaudePermissionMode string   `json:"claude_permission_mode,omitempty"`
+	ClaudeSandbox bool    `json:"claude_sandbox,omitempty"`
+	ClaudeWebFetchDomains []string `json:"claude_webfetch_domains,omitempty"`
 	Prompt     string     `json:"prompt"`
 	WorkDir    string     `json:"workdir"`
 	SessionID  string     `json:"session_id,omitempty"`

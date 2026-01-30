@@ -29,6 +29,14 @@ export type Task = {
   mode: "new" | "resume";
   status: TaskStatus;
   unsafe_automation?: boolean;
+  safety_preset?: string;
+  task_intent?: string;
+  codex_sandbox?: string;
+  codex_approval_policy?: string;
+  codex_search?: boolean;
+  claude_permission_mode?: string;
+  claude_sandbox?: boolean;
+  claude_webfetch_domains?: string[];
   prompt: string;
   workdir: string;
   session_id: string;
