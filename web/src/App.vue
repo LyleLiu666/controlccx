@@ -60,6 +60,9 @@ import SkillsVersionsPanel from "./components/SkillsVersionsPanel.vue";
 import SkillsGovernancePanel from "./components/SkillsGovernancePanel.vue";
 import SecretaryDrawer from "./components/SecretaryDrawer.vue";
 import LiveDrawer from "./components/LiveDrawer.vue";
+import FilesModal from "./components/FilesModal.vue";
+import AuthSettingsModal from "./components/AuthSettingsModal.vue";
+import ToolsSettingsModal from "./components/ToolsSettingsModal.vue";
 import { useSkills } from "./composables/useSkills";
 import { useSkillVersions } from "./composables/useSkillVersions";
 import { useSecretaryChat } from "./composables/useSecretaryChat";
@@ -73,10 +76,14 @@ const newWorkdir = ref<string>(".");
 const newPrompt = ref<string>("");
 const newRunOpen = ref(false);
 const newRunPromptEl = ref<HTMLTextAreaElement | null>(null);
-const claudeAutoApprove = ref<boolean>(false);
+
+type TaskIntent = "analyze" | "code" | "search-browse" | "install";
+
+const newRunHighRiskOptIn = ref(false);
 
 const resumePrompt = ref<string>("");
 const resumeExpanded = ref(true);
+const resumeHighRiskOptIn = ref(false);
 const errorBanner = ref<string>("");
 const {
   chat,
@@ -377,7 +384,11 @@ const sessionActionsMenuEl = ref<HTMLDivElement | null>(null);
 
 const LS_KEY_AUTO_DELIVERY_FOREMAN = "controlccx.auto_delivery_foreman.v1";
 const LS_KEY_DELIVERY_FOREMAN_SEEN = "controlccx.delivery_foreman.seen_runs.v1";
-const LS_KEY_CLAUDE_AUTO_APPROVE = "controlccx.claude.auto_approve.v1";
+const LS_KEY_CLAUDE_AUTO_APPROVE_LEGACY = "controlccx.claude.auto_approve.v1";
+const LS_KEY_RUN_SAFETY_INTENT_BY_TOOL = "controlccx.run_safety.intent_by_tool.v1";
+const LS_KEY_RUN_SAFETY_PRESET_BY_TOOL = "controlccx.run_safety.preset_by_tool.v1";
+const LS_KEY_RUN_SAFETY_CLAUDE_DOMAINS_BY_TOOL =
+  "controlccx.run_safety.claude_webfetch_domains_by_tool.v1";
 const LS_KEY_ATTENTION_AUTOPILOT = "controlccx.attention_autopilot.v1";
 const LS_KEY_ATTENTION_AUTOPILOT_SEEN = "controlccx.attention_autopilot.seen.v1";
 
@@ -394,6 +405,10 @@ const attentionAutopilotQueue = ref<string[]>([]);
 const attentionAutopilotQueued = new Set<string>();
 const attentionAutopilotSeen = ref<Record<string, string>>({});
 const attentionAutopilotNote = ref("");
+
+const runSafetyPresetByTool = ref<Record<string, string>>({});
+const runSafetyIntentByTool = ref<Record<string, string>>({});
+const runSafetyClaudeDomainsByTool = ref<Record<string, string>>({});
 
 function formatLogTime(ts: string): string {
   const s = (ts ?? "").trim();
@@ -1158,10 +1173,25 @@ const workspaceSelect = ref<string>(loadString(LS_KEY_WORKSPACE_FILTER));
 	    secretaryWidth.value = Math.max(520, Math.min(maxW, Math.min(1600, sw)));
 	  }
 
-	  autoDeliveryForeman.value = loadBool(LS_KEY_AUTO_DELIVERY_FOREMAN, true);
-	  deliveryForemanSeenRuns.value = new Set(loadStringArray(LS_KEY_DELIVERY_FOREMAN_SEEN));
-	  claudeAutoApprove.value = loadBool(LS_KEY_CLAUDE_AUTO_APPROVE, false);
-	  attentionAutopilotEnabled.value = loadBool(LS_KEY_ATTENTION_AUTOPILOT, true);
+  autoDeliveryForeman.value = loadBool(LS_KEY_AUTO_DELIVERY_FOREMAN, true);
+  deliveryForemanSeenRuns.value = new Set(loadStringArray(LS_KEY_DELIVERY_FOREMAN_SEEN));
+
+  runSafetyIntentByTool.value = loadStringMap(LS_KEY_RUN_SAFETY_INTENT_BY_TOOL);
+  runSafetyPresetByTool.value = loadStringMap(LS_KEY_RUN_SAFETY_PRESET_BY_TOOL);
+  runSafetyClaudeDomainsByTool.value = loadStringMap(
+    LS_KEY_RUN_SAFETY_CLAUDE_DOMAINS_BY_TOOL,
+  );
+
+  // Back-compat: v1 Claude auto-approve was a single boolean toggle.
+  const legacyClaudeAutoApprove = loadBool(LS_KEY_CLAUDE_AUTO_APPROVE_LEGACY, false);
+  if (legacyClaudeAutoApprove && !runSafetyPresetByTool.value["claude-code"]) {
+    runSafetyPresetByTool.value = {
+      ...runSafetyPresetByTool.value,
+      "claude-code": "unsafe",
+    };
+  }
+
+  attentionAutopilotEnabled.value = loadBool(LS_KEY_ATTENTION_AUTOPILOT, true);
   attentionAutopilotSeen.value = loadStringMap(LS_KEY_ATTENTION_AUTOPILOT_SEEN);
 
   const fs = loadString(LS_KEY_FEED_SCOPE).trim();
@@ -1255,7 +1285,21 @@ watch(secretaryView, (v) => saveString(LS_KEY_SECRETARY_VIEW, v));
 watch(secretaryScope, (v) => saveString(LS_KEY_SECRETARY_SCOPE, v));
 watch(secretaryFull, (v) => saveBool(LS_KEY_SECRETARY_FULL, Boolean(v)));
 watch(autoDeliveryForeman, (v) => saveBool(LS_KEY_AUTO_DELIVERY_FOREMAN, Boolean(v)));
-watch(claudeAutoApprove, (v) => saveBool(LS_KEY_CLAUDE_AUTO_APPROVE, Boolean(v)));
+watch(
+  runSafetyIntentByTool,
+  (v) => saveStringMap(LS_KEY_RUN_SAFETY_INTENT_BY_TOOL, v),
+  { deep: true },
+);
+watch(
+  runSafetyPresetByTool,
+  (v) => saveStringMap(LS_KEY_RUN_SAFETY_PRESET_BY_TOOL, v),
+  { deep: true },
+);
+watch(
+  runSafetyClaudeDomainsByTool,
+  (v) => saveStringMap(LS_KEY_RUN_SAFETY_CLAUDE_DOMAINS_BY_TOOL, v),
+  { deep: true },
+);
 watch(attentionAutopilotEnabled, (v) => saveBool(LS_KEY_ATTENTION_AUTOPILOT, Boolean(v)));
 watch(theme, (v) => saveString(LS_KEY_THEME, v));
 watch(liveScope, (v) => saveString(LS_KEY_FEED_SCOPE, v));
@@ -1372,17 +1416,33 @@ async function refreshAuth() {
 async function onCreateTask(): Promise<boolean> {
   errorBanner.value = "";
   try {
-    const driver =
-      newTool.value?.driver ??
-      (newWorkerType.value === "claude-code" || newWorkerType.value === "codex"
-        ? (newWorkerType.value as ToolDriver)
-        : "");
-    const unsafe = driver === "claude-code" ? Boolean(claudeAutoApprove.value) : false;
+    const driver = newRunDriver.value;
+    const intent = newRunTaskIntent.value;
+    const preset = newRunSafetyPreset.value;
+    const domainsText = newRunClaudeDomainsText.value;
+
+    if (
+      (driver === "claude-code" || driver === "codex") &&
+      isHighRiskPreset(driver, preset) &&
+      !newRunHighRiskOptIn.value
+    ) {
+      errorBanner.value = "High-risk preset requires explicit opt-in.";
+      return false;
+    }
+
+    // Persist effective choices for future runs.
+    setStringMapKey(runSafetyIntentByTool, newWorkerType.value, intent);
+    setStringMapKey(runSafetyPresetByTool, newWorkerType.value, preset);
+    if (driver === "claude-code") {
+      setStringMapKey(runSafetyClaudeDomainsByTool, newWorkerType.value, domainsText);
+    }
+
+    const safety = buildRunSafetyPayload(driver, intent, preset, domainsText);
     const t = await createTask({
       worker_type: newWorkerType.value,
       prompt: newPrompt.value,
       workdir: newWorkdir.value,
-      unsafe_automation: unsafe || undefined,
+      ...safety,
     });
     upsertTask(t);
     selectedTaskId.value = t.id;
@@ -2094,11 +2154,16 @@ async function runAttentionAutopilotLoop() {
       const short = (sess.session_id || sess.latest.id).slice(0, 8);
       attentionAutopilotNote.value = `Autopilot: resuming ${short}…`;
       try {
-        const unsafe = sess.worker_type === "claude-code" ? Boolean(claudeAutoApprove.value) : false;
-        const nt = await resumeTaskWithOptions(sess.latest.id, {
-          prompt: "continue",
-          unsafe_automation: unsafe || undefined,
-        });
+        const driver = toolDriverForWorkerType(sess.worker_type);
+        const intent = normalizeTaskIntent(sess.latest.task_intent ?? "code");
+        const preset = effectiveSafetyPresetForTask(driver, sess.latest);
+        const domainsText = (sess.latest.claude_webfetch_domains ?? []).join(", ");
+        if (isHighRiskPreset(driver, preset)) {
+          attentionAutopilotNote.value = `Autopilot skipped for ${short}: high-risk preset requires manual resume.`;
+          continue;
+        }
+        const safety = buildRunSafetyPayload(driver, intent, preset, domainsText);
+        const nt = await resumeTaskWithOptions(sess.latest.id, { prompt: "continue", ...safety });
         upsertTask(nt);
         attentionAutopilotNote.value = `Autopilot: resume started for ${short}.`;
       } catch (e: any) {
@@ -2164,11 +2229,18 @@ async function secretaryResumeSessionRun(s: SessionGroup) {
   }
   errorBanner.value = "";
   try {
-    const unsafe = s.worker_type === "claude-code" ? Boolean(claudeAutoApprove.value) : false;
-    const nt = await resumeTaskWithOptions(s.latest.id, {
-      prompt: "continue",
-      unsafe_automation: unsafe || undefined,
-    });
+    const driver = toolDriverForWorkerType(s.worker_type);
+    const intent = normalizeTaskIntent(runSafetyIntentByTool.value[s.worker_type] ?? s.latest.task_intent ?? "code");
+    const savedPreset = runSafetyPresetByTool.value[s.worker_type] ?? "";
+    const preset = normalizeSafetyPreset(driver, intent, savedPreset || effectiveSafetyPresetForTask(driver, s.latest));
+    const domainsText =
+      runSafetyClaudeDomainsByTool.value[s.worker_type] ?? (s.latest.claude_webfetch_domains ?? []).join(", ");
+    if (isHighRiskPreset(driver, preset)) {
+      errorBanner.value = "该 run 需要高风险设置（需手动确认）；请在详情面板中 Resume 并勾选 opt-in。";
+      return;
+    }
+    const safety = buildRunSafetyPayload(driver, intent, preset, domainsText);
+    const nt = await resumeTaskWithOptions(s.latest.id, { prompt: "continue", ...safety });
     upsertTask(nt);
     selectedTaskId.value = nt.id;
     await loadLogs(nt.id);
@@ -2193,12 +2265,27 @@ async function onResumeTask() {
   if (!resumePrompt.value.trim()) return;
   errorBanner.value = "";
   try {
-    const unsafe =
-      sess.worker_type === "claude-code" ? Boolean(claudeAutoApprove.value) : false;
-    const nt = await resumeTaskWithOptions(sess.latest.id, {
-      prompt: resumePrompt.value,
-      unsafe_automation: unsafe || undefined,
-    });
+    const driver = resumeDriver.value;
+    const intent = resumeTaskIntent.value;
+    const preset = resumeSafetyPreset.value;
+    const domainsText = resumeClaudeDomainsText.value;
+    if (
+      (driver === "claude-code" || driver === "codex") &&
+      isHighRiskPreset(driver, preset) &&
+      !resumeHighRiskOptIn.value
+    ) {
+      errorBanner.value = "High-risk preset requires explicit opt-in.";
+      return;
+    }
+
+    setStringMapKey(runSafetyIntentByTool, sess.worker_type, intent);
+    setStringMapKey(runSafetyPresetByTool, sess.worker_type, preset);
+    if (driver === "claude-code") {
+      setStringMapKey(runSafetyClaudeDomainsByTool, sess.worker_type, domainsText);
+    }
+
+    const safety = buildRunSafetyPayload(driver, intent, preset, domainsText);
+    const nt = await resumeTaskWithOptions(sess.latest.id, { prompt: resumePrompt.value, ...safety });
     upsertTask(nt);
     selectedTaskId.value = nt.id;
     resumePrompt.value = "";
@@ -2666,6 +2753,204 @@ function toolForID(id: string): Tool | null {
 
 const newTool = computed(() => toolForID(newWorkerType.value));
 
+function toolDriverForWorkerType(workerType: string): ToolDriver {
+  const id = String(workerType ?? "").trim();
+  const t = toolForID(id);
+  if (t?.driver) return t.driver;
+  if (id === "claude-code") return "claude-code";
+  if (id === "codex") return "codex";
+  return "exec";
+}
+
+function normalizeTaskIntent(raw: string): TaskIntent {
+  const v = String(raw ?? "").trim();
+  if (v === "analyze" || v === "code" || v === "search-browse" || v === "install") return v;
+  return "code";
+}
+
+type SafetyPresetOption = { value: string; label: string; risk: "low" | "med" | "high" | "extreme" };
+
+function safetyPresetsForDriver(driver: ToolDriver): SafetyPresetOption[] {
+  if (driver === "codex") {
+    return [
+      { value: "workspace-write", label: "Workspace write (sandboxed)", risk: "low" },
+      { value: "read-only", label: "Read-only (sandboxed)", risk: "low" },
+      { value: "search-browse", label: "Search/browse (sandbox + web search)", risk: "med" },
+      { value: "danger-full-access", label: "Full access (sandbox: danger-full-access)", risk: "high" },
+      { value: "unsafe", label: "UNSAFE (no sandbox/approvals)", risk: "extreme" },
+    ];
+  }
+  if (driver === "claude-code") {
+    return [
+      { value: "no-network", label: "Sandboxed (no network)", risk: "low" },
+      { value: "search-browse", label: "Search/browse (WebFetch allowlist)", risk: "med" },
+      { value: "unsafe", label: "UNSAFE (skip permissions)", risk: "high" },
+    ];
+  }
+  return [];
+}
+
+function recommendSafetyPreset(driver: ToolDriver, intent: TaskIntent): string {
+  if (driver === "codex") {
+    if (intent === "analyze") return "read-only";
+    if (intent === "search-browse") return "search-browse";
+    if (intent === "install") return "danger-full-access";
+    return "workspace-write";
+  }
+  if (driver === "claude-code") {
+    if (intent === "search-browse") return "search-browse";
+    if (intent === "install") return "unsafe";
+    return "no-network";
+  }
+  return "";
+}
+
+function normalizeSafetyPreset(driver: ToolDriver, intent: TaskIntent, raw: string): string {
+  const v = String(raw ?? "").trim();
+  const allowed = safetyPresetsForDriver(driver).map((p) => p.value);
+  if (allowed.includes(v)) return v;
+  const rec = recommendSafetyPreset(driver, intent);
+  if (allowed.includes(rec)) return rec;
+  return allowed[0] ?? "";
+}
+
+function isHighRiskPreset(driver: ToolDriver, preset: string): boolean {
+  const p = String(preset ?? "").trim();
+  if (driver === "codex") return p === "danger-full-access" || p === "unsafe";
+  if (driver === "claude-code") return p === "unsafe";
+  return false;
+}
+
+function parseDomainList(text: string): string[] {
+  const raw = String(text ?? "")
+    .split(/[\s,]+/g)
+    .map((x) => x.trim())
+    .filter(Boolean);
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const d of raw) {
+    const key = d.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(d);
+  }
+  return out;
+}
+
+function setStringMapKey(map: { value: Record<string, string> }, key: string, value: string) {
+  const k = String(key ?? "").trim();
+  if (!k) return;
+  const v = String(value ?? "").trim();
+  const next = { ...map.value };
+  if (v) next[k] = v;
+  else delete next[k];
+  map.value = next;
+}
+
+type RunSafetyPayload = {
+  unsafe_automation?: boolean;
+  safety_preset?: string;
+  task_intent?: string;
+  codex_sandbox?: string;
+  codex_approval_policy?: string;
+  codex_search?: boolean;
+  claude_permission_mode?: string;
+  claude_sandbox?: boolean;
+  claude_webfetch_domains?: string[];
+};
+
+function buildRunSafetyPayload(
+  driver: ToolDriver,
+  intent: TaskIntent,
+  preset: string,
+  claudeDomainsText: string,
+): RunSafetyPayload {
+  const sp = String(preset ?? "").trim();
+  const ti = normalizeTaskIntent(intent);
+
+  if (driver === "codex") {
+    if (sp === "unsafe") {
+      return {
+        unsafe_automation: true,
+        safety_preset: sp,
+        task_intent: ti,
+      };
+    }
+    const sandbox =
+      sp === "search-browse"
+        ? "workspace-write"
+        : sp === "read-only" || sp === "workspace-write" || sp === "danger-full-access"
+          ? sp
+          : "workspace-write";
+    return {
+      safety_preset: sp,
+      task_intent: ti,
+      codex_sandbox: sandbox,
+      codex_approval_policy: "never",
+      codex_search: sp === "search-browse" || undefined,
+    };
+  }
+
+  if (driver === "claude-code") {
+    if (sp === "unsafe") {
+      // Keep sandbox enabled (when supported) even in unsafe mode.
+      return {
+        unsafe_automation: true,
+        safety_preset: sp,
+        task_intent: ti,
+        claude_sandbox: true,
+      };
+    }
+    const isSearchBrowse = sp === "search-browse" || ti === "search-browse";
+    const domains = isSearchBrowse ? parseDomainList(claudeDomainsText) : [];
+    return {
+      safety_preset: sp,
+      task_intent: ti,
+      claude_sandbox: true,
+      claude_webfetch_domains: domains.length ? domains : undefined,
+    };
+  }
+
+  return {};
+}
+
+function effectiveSafetyPresetForTask(driver: ToolDriver, task: Task): string {
+  const explicit = String(task.safety_preset ?? "").trim();
+  if (explicit) return explicit;
+  if (task.unsafe_automation) return "unsafe";
+
+  if (driver === "codex") {
+    if (task.codex_search) return "search-browse";
+    const sb = String(task.codex_sandbox ?? "").trim();
+    if (sb) return sb;
+    return "workspace-write";
+  }
+  if (driver === "claude-code") {
+    if (String(task.task_intent ?? "").trim() === "search-browse") return "search-browse";
+    if ((task.claude_webfetch_domains ?? []).length > 0) return "search-browse";
+    return "no-network";
+  }
+  return "";
+}
+
+const newRunDriver = computed<ToolDriver>(() => toolDriverForWorkerType(newWorkerType.value));
+const newRunTaskIntent = computed<TaskIntent>({
+  get: () => normalizeTaskIntent(runSafetyIntentByTool.value[newWorkerType.value] ?? "code"),
+  set: (value) => setStringMapKey(runSafetyIntentByTool, newWorkerType.value, value),
+});
+const newRunSafetyPreset = computed<string>({
+  get: () => normalizeSafetyPreset(newRunDriver.value, newRunTaskIntent.value, runSafetyPresetByTool.value[newWorkerType.value] ?? ""),
+  set: (value) => setStringMapKey(runSafetyPresetByTool, newWorkerType.value, value),
+});
+const newRunClaudeDomainsText = computed<string>({
+  get: () => runSafetyClaudeDomainsByTool.value[newWorkerType.value] ?? "",
+  set: (value) => setStringMapKey(runSafetyClaudeDomainsByTool, newWorkerType.value, value),
+});
+
+watch([newWorkerType, newRunTaskIntent, newRunSafetyPreset], () => {
+  newRunHighRiskOptIn.value = false;
+});
+
 function formatArgsForEdit(args?: string[]) {
   return (args ?? []).join(" ");
 }
@@ -2997,6 +3282,55 @@ const selectedSession = computed(() => {
   const key = selectedSessionKey.value;
   if (!key) return null;
   return sessionsAll.value.find((s) => s.key === key) ?? null;
+});
+
+const resumeDriver = computed<ToolDriver>(() =>
+  toolDriverForWorkerType(selectedSession.value?.worker_type ?? ""),
+);
+const resumeTaskIntent = computed<TaskIntent>({
+  get: () => {
+    const sess = selectedSession.value;
+    if (!sess) return "code";
+    const raw = runSafetyIntentByTool.value[sess.worker_type] ?? sess.latest.task_intent ?? "code";
+    return normalizeTaskIntent(raw);
+  },
+  set: (value) => {
+    const sess = selectedSession.value;
+    if (!sess) return;
+    setStringMapKey(runSafetyIntentByTool, sess.worker_type, value);
+  },
+});
+const resumeSafetyPreset = computed<string>({
+  get: () => {
+    const sess = selectedSession.value;
+    if (!sess) return "";
+    const raw = runSafetyPresetByTool.value[sess.worker_type] ?? sess.latest.safety_preset ?? "";
+    return normalizeSafetyPreset(resumeDriver.value, resumeTaskIntent.value, raw);
+  },
+  set: (value) => {
+    const sess = selectedSession.value;
+    if (!sess) return;
+    setStringMapKey(runSafetyPresetByTool, sess.worker_type, value);
+  },
+});
+const resumeClaudeDomainsText = computed<string>({
+  get: () => {
+    const sess = selectedSession.value;
+    if (!sess) return "";
+    const saved = runSafetyClaudeDomainsByTool.value[sess.worker_type];
+    if (typeof saved === "string") return saved;
+    const d = sess.latest.claude_webfetch_domains ?? [];
+    return d.join(", ");
+  },
+  set: (value) => {
+    const sess = selectedSession.value;
+    if (!sess) return;
+    setStringMapKey(runSafetyClaudeDomainsByTool, sess.worker_type, value);
+  },
+});
+
+watch([selectedSessionKey, resumeTaskIntent, resumeSafetyPreset], () => {
+  resumeHighRiskOptIn.value = false;
 });
 
 watch(selectedSessionKey, () => {
@@ -3381,185 +3715,41 @@ watch(
           </div>
 	      </section>
 
-      <section v-else-if="filesOpen" class="panel filesPagePanel">
-        <h2>
-          Files
-          <span class="h2Spacer"></span>
-          <button type="button" class="h2Btn" @click="filesRoot && refreshFilesDir(filesRoot.path)" :disabled="filesLoading || !filesRoot">
-            Refresh
-          </button>
-          <button type="button" class="h2Btn" @click="closeFilesPage">Back</button>
-        </h2>
-
-        <div class="filesPageBody">
-          <div v-if="filesError" class="modalError">
-            {{ filesError }}
-          </div>
-          <div v-else-if="filesLoading" class="loading">Loading...</div>
-          <template v-else>
-            <div class="filesTopRow">
-              <div class="mono filesRootPath" :title="filesRoot?.path">
-                {{ filesRoot?.path }}
-              </div>
-              <div v-if="filesNotice" class="tinyHint">{{ filesNotice }}</div>
-            </div>
-
-            <div class="filesSplit" :style="{ '--sidebar-width': filesSidebarWidth + 'px' }">
-              <div class="filesTreePane">
-                <div class="filesTreeActions">
-                  <button type="button" @click="filesNewFile" :disabled="!filesRoot">
-                    New file
-                  </button>
-                  <button type="button" @click="filesNewFolder" :disabled="!filesRoot">
-                    New folder
-                  </button>
-                  <button
-                    type="button"
-                    @click="filesDeleteSelected"
-                    :disabled="
-                      !filesSelectedPath || filesSelectedPath === filesRoot?.path
-                    "
-                  >
-                    Delete
-                  </button>
-                  <button
-                    type="button"
-                    @click="filesRoot && refreshFilesDir(filesRoot.path)"
-                    :disabled="!filesRoot"
-                  >
-                    Refresh
-                  </button>
-                </div>
-
-                <div class="filesTreeList">
-                  <button
-                    v-for="v in filesVisibleNodes"
-                    :key="v.node.path"
-                    type="button"
-                    class="filesNode"
-                    :class="{
-                      active:
-                        normalizePathForCompare(v.node.path) ===
-                        normalizePathForCompare(filesSelectedPath),
-                    }"
-                    :style="{ paddingLeft: `${12 + v.depth * 14}px` }"
-                    @click="onFilesNodeClick(v.node)"
-                  >
-                    <span class="filesNodeTwisty">{{
-                      v.node.kind === "dir" ? (v.node.expanded ? "▾" : "▸") : ""
-                    }}</span>
-                    <span class="filesNodeIcon">{{
-                      v.node.kind === "dir" ? "📁" : "📄"
-                    }}</span>
-                    <span class="filesNodeName">{{ v.node.name }}</span>
-                    <span
-                      v-if="v.node.kind === 'file'"
-                      class="filesNodeMeta mono"
-                      >{{ v.node.size ?? 0 }}</span
-                    >
-                    <span v-if="v.node.loading" class="filesNodeMeta tinyHint"
-                      >…</span
-                    >
-                  </button>
-                  <div v-if="!filesVisibleNodes.length" class="empty">
-                    Empty folder
-                  </div>
-                </div>
-              </div>
-
-              <div
-                class="filesResizer"
-                @mousedown="startFilesResize"
-                :class="{ resizing: filesResizing }"
-              ></div>
-
-              <div class="filesEditorPane">
-                <div v-if="filesSelectedKind !== 'file'" class="empty">
-                  {{
-                    filesSelectedKind === "dir"
-                      ? "Select a file to preview/edit."
-                      : "Select a file."
-                  }}
-                </div>
-                <template v-else>
-                  <div class="filesEditorHeader">
-                    <div class="mono filesEditorPath" :title="filesSelectedPath">
-                      {{ filesSelectedPath }}
-                    </div>
-                    <span class="tinyHint mono">{{ filesFileSize }} bytes</span>
-                    <span v-if="filesFileTruncated" class="pill warn"
-                      >truncated</span
-                    >
-                    <div class="tabSpacer"></div>
-                    <button
-                      type="button"
-                      @click="copyText(filesFileContent)"
-                      :disabled="!filesFileContent"
-                    >
-                      Copy
-                    </button>
-                    <button
-                      type="button"
-                      class="primary"
-                      @click="filesSave"
-                      :disabled="filesSaving || !filesDirty || filesFileTruncated"
-                    >
-                      {{ filesSaving ? "Saving..." : "Save" }}
-                    </button>
-                  </div>
-
-                  <div class="outputTabs">
-                    <button
-                      type="button"
-                      class="tabBtn"
-                      :class="{ active: filesView === 'preview' }"
-                      @click="filesView = 'preview'"
-                    >
-                      Preview
-                    </button>
-                    <button
-                      type="button"
-                      class="tabBtn"
-                      :class="{ active: filesView === 'edit' }"
-                      @click="filesView = 'edit'"
-                    >
-                      Edit
-                    </button>
-                    <div class="tabSpacer"></div>
-                    <div v-if="filesDirty" class="tinyHint">unsaved</div>
-                  </div>
-
-                  <div v-if="filesFileError" class="modalError">
-                    {{ filesFileError }}
-                  </div>
-                  <div v-else-if="filesFileLoading" class="loading">Loading...</div>
-                  <template v-else>
-                    <div v-if="filesView === 'edit'" class="filesEditorEdit">
-                      <textarea
-                        v-model="filesFileContent"
-                        rows="18"
-                        spellcheck="false"
-                      ></textarea>
-                    </div>
-                    <template v-else>
-                      <div
-                        v-if="filesIsMarkdown"
-                        class="resultBox markdown filePreviewBox"
-                        v-html="filesPreviewHtml"
-                        @click="onFilesPreviewMarkdownClick"
-                      ></div>
-
-                      <div v-else class="resultBox fileCodeBox">
-                        <pre class="hljs"><code v-html="filesCodeHtml"></code></pre>
-                      </div>
-                    </template>
-                  </template>
-                </template>
-              </div>
-            </div>
-          </template>
-        </div>
-      </section>
+      <FilesModal
+        v-else-if="filesOpen"
+        :root="filesRoot"
+        :loading="filesLoading"
+        :error="filesError"
+        :notice="filesNotice"
+        :sidebarWidth="filesSidebarWidth"
+        :resizing="filesResizing"
+        :visibleNodes="filesVisibleNodes"
+        :selectedPath="filesSelectedPath"
+        :selectedKind="filesSelectedKind"
+        v-model:view="filesView"
+        :dirty="filesDirty"
+        :fileSize="filesFileSize"
+        :fileTruncated="filesFileTruncated"
+        v-model:fileContent="filesFileContent"
+        :fileError="filesFileError"
+        :fileLoading="filesFileLoading"
+        :saving="filesSaving"
+        :isMarkdown="filesIsMarkdown"
+        :previewHtml="filesPreviewHtml"
+        :codeHtml="filesCodeHtml"
+        :normalizePathForCompare="normalizePathForCompare"
+        @back="closeFilesPage"
+        @refreshRoot="filesRoot && refreshFilesDir(filesRoot.path)"
+        @newFile="filesNewFile"
+        @newFolder="filesNewFolder"
+        @deleteSelected="filesDeleteSelected"
+        @refreshDir="filesRoot && refreshFilesDir(filesRoot.path)"
+        @nodeClick="onFilesNodeClick"
+        @startResize="startFilesResize"
+        @copy="copyText"
+        @save="filesSave"
+        @markdownClick="onFilesPreviewMarkdownClick"
+      />
 
       <template v-else>
       <section
@@ -4613,22 +4803,85 @@ watch(
               <span class="mono">{{ newTool.command }}</span>
             </div>
             <div
-              v-if="(newTool?.driver ?? newWorkerType) === 'claude-code'"
-              class="newRunAutoApprove full"
+              v-if="newRunDriver === 'codex' || newRunDriver === 'claude-code'"
+              class="newRunSafety full"
             >
-              <label class="newRunAutoApproveRow">
-                <span class="newRunAutoApproveTitle">
-                  Auto-approve tools <span class="pill warn">dangerous</span>
-                </span>
-                <input
-                  type="checkbox"
-                  class="newRunSwitch"
-                  v-model="claudeAutoApprove"
-                  :title="'Enables --dangerously-skip-permissions (dangerous)'"
-                />
-              </label>
+              <div class="newRunSafetyTitle">Safety</div>
+              <div class="newRunSafetyGrid">
+                <label>
+                  Task intent
+                  <select v-model="newRunTaskIntent">
+                    <option value="code">code</option>
+                    <option value="analyze">analyze</option>
+                    <option value="search-browse">search-browse</option>
+                    <option value="install">install</option>
+                  </select>
+                </label>
+                <label>
+                  Safety preset
+                  <select v-model="newRunSafetyPreset">
+                    <option
+                      v-for="p in safetyPresetsForDriver(newRunDriver)"
+                      :key="p.value"
+                      :value="p.value"
+                    >
+                      {{ p.value }}
+                    </option>
+                  </select>
+                </label>
+              </div>
               <div class="tinyHint">
-                Enables <span class="mono">--dangerously-skip-permissions</span>. Use only if you accept the risk.
+                Recommended: <span class="mono">{{ recommendSafetyPreset(newRunDriver, newRunTaskIntent) }}</span>
+                <button
+                  type="button"
+                  class="inlineBtn"
+                  @click="newRunSafetyPreset = recommendSafetyPreset(newRunDriver, newRunTaskIntent)"
+                >
+                  Use
+                </button>
+              </div>
+
+              <div
+                v-if="newRunDriver === 'claude-code' && newRunSafetyPreset === 'search-browse'"
+                class="newRunSafetyExtra"
+              >
+                <label class="full">
+                  WebFetch domains (allowlist)
+                  <input
+                    v-model="newRunClaudeDomainsText"
+                    placeholder="docs.anthropic.com, api.github.com"
+                  />
+                </label>
+                <div class="tinyHint">
+                  Search/browse uses WebFetch allowlists. Downloads via <span class="mono">curl</span>/<span class="mono">wget</span> remain denied by default.
+                </div>
+              </div>
+              <div
+                v-else-if="newRunDriver === 'codex' && newRunSafetyPreset === 'search-browse'"
+                class="tinyHint"
+              >
+                Enables Codex <span class="mono">--search</span> (native web_search tool). Search/browse is distinct from downloading/executing scripts.
+              </div>
+
+              <div
+                v-if="isHighRiskPreset(newRunDriver, newRunSafetyPreset)"
+                class="newRunSafetyWarn"
+              >
+                <div class="tinyHint warn">
+                  <template v-if="newRunDriver === 'codex' && newRunSafetyPreset === 'unsafe'">
+                    Runs Codex with <span class="mono">--dangerously-bypass-approvals-and-sandbox</span> (no sandbox).
+                  </template>
+                  <template v-else-if="newRunDriver === 'codex' && newRunSafetyPreset === 'danger-full-access'">
+                    Runs Codex with <span class="mono">--sandbox danger-full-access</span> (can access outside the workspace).
+                  </template>
+                  <template v-else-if="newRunDriver === 'claude-code' && newRunSafetyPreset === 'unsafe'">
+                    Runs Claude Code with <span class="mono">--dangerously-skip-permissions</span>. Recommended only for sandboxes with no internet access.
+                  </template>
+                </div>
+                <label class="newRunSafetyOptIn">
+                  <input type="checkbox" v-model="newRunHighRiskOptIn" />
+                  <span>I understand and want to proceed</span>
+                </label>
               </div>
             </div>
             <label>
@@ -4669,7 +4922,12 @@ watch(
             class="primary"
             @click="onCreateTaskFromModal"
             :disabled="
-              !newPrompt.trim() || !newWorkdir.trim() || !!missingAuthText
+              !newPrompt.trim() ||
+              !newWorkdir.trim() ||
+              !!missingAuthText ||
+              ((newRunDriver === 'codex' || newRunDriver === 'claude-code') &&
+                isHighRiskPreset(newRunDriver, newRunSafetyPreset) &&
+                !newRunHighRiskOptIn)
             "
           >
             Start
@@ -4678,369 +4936,45 @@ watch(
       </div>
     </div>
 
-    <div
-      v-if="authSettingsOpen"
-      class="modalOverlay"
-      @click.self="authSettingsOpen = false"
-    >
-	      <div class="modal settingsModal">
-	        <div class="modalHeader">
-	          <div class="modalTitle">Auth Settings</div>
-	          <button type="button" class="headerMiniBtn" @click="openToolsSettings">
-	            Tools
-	          </button>
-	          <button
-	            class="iconBtn"
-	            type="button"
-	            @click="authSettingsOpen = false"
-	          >
-            ✕
-          </button>
-        </div>
+	    <AuthSettingsModal
+	      :open="authSettingsOpen"
+	      :saving="authSaving"
+	      :error="authSettingsError"
+	      :storagePath="authInfo?.storage_path ?? ''"
+	      :authStatus="authStatus"
+	      v-model:autoDeliveryForeman="autoDeliveryForeman"
+	      v-model:anthropicBaseURL="authAnthropicBaseURL"
+	      v-model:anthropicApiKey="authAnthropicApiKey"
+	      v-model:anthropicAuthToken="authAnthropicAuthToken"
+	      v-model:anthropicModel="authAnthropicModel"
+	      v-model:anthropicSmallFastModel="authAnthropicSmallFastModel"
+	      v-model:openAIApiKey="authOpenAIApiKey"
+	      v-model:codexModel="authCodexModel"
+	      v-model:codexReasoningEffort="authCodexReasoningEffort"
+	      @close="authSettingsOpen = false"
+	      @openTools="openToolsSettings"
+	      @save="saveAuthSettings"
+	      @clearStored="clearStoredAuth"
+	    />
 
-        <div class="modalBody settingsBody">
-          <div class="settingsMeta" v-if="authInfo?.storage_path">
-            Storage: <span class="mono">{{ authInfo.storage_path }}</span>
-          </div>
-
-          <div v-if="authSettingsError" class="modalError">
-            {{ authSettingsError }}
-          </div>
-
-          <div class="settingsSection">
-            <div class="settingsSectionTitle">Automation</div>
-            <label class="settingsToggleRow">
-              <input type="checkbox" v-model="autoDeliveryForeman" />
-              <span>Auto Delivery Foreman</span>
-            </label>
-            <div class="tinyHint">
-              When a run finishes, send an automatic “delivery check” message to
-              the Secretary (no auto focus).
-            </div>
-          </div>
-
-          <div class="settingsSection">
-            <div class="settingsSectionTitle">Claude Code</div>
-            <div class="kv">
-              <span class="k">ANTHROPIC_BASE_URL</span>
-              <span class="mono"
-                >{{ authStatus?.claude.base_url.effective }}
-                {{ authStatus?.claude.base_url.masked }}</span
-              >
-            </div>
-            <div class="kv">
-              <span class="k">ANTHROPIC_API_KEY</span>
-              <span class="mono"
-                >{{ authStatus?.claude.api_key.effective }}
-                {{ authStatus?.claude.api_key.masked }}</span
-              >
-            </div>
-            <div class="kv">
-              <span class="k">ANTHROPIC_AUTH_TOKEN</span>
-              <span class="mono"
-                >{{ authStatus?.claude.auth_token.effective }}
-                {{ authStatus?.claude.auth_token.masked }}</span
-              >
-            </div>
-            <div class="kv">
-              <span class="k">ANTHROPIC_MODEL</span>
-              <span class="mono"
-                >{{ authStatus?.claude.model.effective }}
-                {{ authStatus?.claude.model.masked }}</span
-              >
-            </div>
-            <div class="kv">
-              <span class="k">ANTHROPIC_SMALL_FAST_MODEL</span>
-              <span class="mono"
-                >{{ authStatus?.claude.small_fast_model.effective }}
-                {{ authStatus?.claude.small_fast_model.masked }}</span
-              >
-            </div>
-
-            <label class="full">
-              Store ANTHROPIC_BASE_URL
-              <div class="secretRow">
-                <input
-                  v-model="authAnthropicBaseURL"
-                  placeholder="https://..."
-                  autocomplete="off"
-                />
-                <button
-                  type="button"
-                  @click="clearStoredAuth('anthropic_base_url')"
-                  :disabled="authSaving"
-                >
-                  Clear stored
-                </button>
-              </div>
-            </label>
-            <label class="full">
-              Store ANTHROPIC_API_KEY
-              <div class="secretRow">
-                <input
-                  v-model="authAnthropicApiKey"
-                  type="password"
-                  placeholder="Paste key…"
-                  autocomplete="off"
-                />
-                <button
-                  type="button"
-                  @click="clearStoredAuth('anthropic_api_key')"
-                  :disabled="authSaving"
-                >
-                  Clear stored
-                </button>
-              </div>
-            </label>
-            <label class="full">
-              Store ANTHROPIC_AUTH_TOKEN
-              <div class="secretRow">
-                <input
-                  v-model="authAnthropicAuthToken"
-                  type="password"
-                  placeholder="Paste token…"
-                  autocomplete="off"
-                />
-                <button
-                  type="button"
-                  @click="clearStoredAuth('anthropic_auth_token')"
-                  :disabled="authSaving"
-                >
-                  Clear stored
-                </button>
-              </div>
-            </label>
-            <label class="full">
-              Store ANTHROPIC_MODEL
-              <div class="secretRow">
-                <input
-                  v-model="authAnthropicModel"
-                  placeholder="model name…"
-                  autocomplete="off"
-                />
-                <button
-                  type="button"
-                  @click="clearStoredAuth('anthropic_model')"
-                  :disabled="authSaving"
-                >
-                  Clear stored
-                </button>
-              </div>
-            </label>
-            <label class="full">
-              Store ANTHROPIC_SMALL_FAST_MODEL
-              <div class="secretRow">
-                <input
-                  v-model="authAnthropicSmallFastModel"
-                  placeholder="model name…"
-                  autocomplete="off"
-                />
-                <button
-                  type="button"
-                  @click="clearStoredAuth('anthropic_small_fast_model')"
-                  :disabled="authSaving"
-                >
-                  Clear stored
-                </button>
-              </div>
-            </label>
-
-            <div class="settingsHelp">
-              如果你使用 Claude Code 订阅登录模式，也可以在终端运行一次
-              <span class="mono">claude /login</span>。
-            </div>
-          </div>
-
-          <div class="settingsSection">
-            <div class="settingsSectionTitle">Codex</div>
-            <div class="kv">
-              <span class="k">OPENAI_API_KEY</span>
-              <span class="mono"
-                >{{ authStatus?.codex.api_key.effective }}
-                {{ authStatus?.codex.api_key.masked }}</span
-              >
-            </div>
-            <div class="kv">
-              <span class="k">MODEL</span>
-              <span class="mono"
-                >{{ authStatus?.codex.model.effective }}
-                {{ authStatus?.codex.model.masked }}</span
-              >
-            </div>
-            <div class="kv">
-              <span class="k">REASONING</span>
-              <span class="mono"
-                >{{ authStatus?.codex.reasoning_effort.effective }}
-                {{ authStatus?.codex.reasoning_effort.masked }}</span
-              >
-            </div>
-            <label class="full">
-              Store OPENAI_API_KEY
-              <div class="secretRow">
-                <input
-                  v-model="authOpenAIApiKey"
-                  type="password"
-                  placeholder="Paste key…"
-                  autocomplete="off"
-                />
-                <button
-                  type="button"
-                  @click="clearStoredAuth('openai_api_key')"
-                  :disabled="authSaving"
-                >
-                  Clear stored
-                </button>
-              </div>
-            </label>
-            <label class="full">
-              Set model (default gpt-5.2)
-              <div class="secretRow">
-                <input
-                  v-model="authCodexModel"
-                  placeholder="gpt-5.2"
-                  autocomplete="off"
-                />
-                <button
-                  type="button"
-                  @click="clearStoredAuth('codex_model')"
-                  :disabled="authSaving"
-                >
-                  Clear stored
-                </button>
-              </div>
-            </label>
-            <label class="full">
-              Set reasoning effort (default xhigh)
-              <div class="secretRow">
-                <select v-model="authCodexReasoningEffort">
-                  <option value="">(keep)</option>
-                  <option value="low">low</option>
-                  <option value="medium">medium</option>
-                  <option value="high">high</option>
-                  <option value="xhigh">xhigh</option>
-                </select>
-                <button
-                  type="button"
-                  @click="clearStoredAuth('codex_reasoning_effort')"
-                  :disabled="authSaving"
-                >
-                  Clear stored
-                </button>
-              </div>
-            </label>
-          </div>
-        </div>
-
-        <div class="modalFooter">
-          <button type="button" @click="authSettingsOpen = false">Close</button>
-          <button
-            type="button"
-            class="primary"
-            @click="saveAuthSettings"
-            :disabled="authSaving"
-          >
-            {{ authSaving ? "Saving..." : "Save" }}
-          </button>
-        </div>
-      </div>
-    </div>
-
-    <div
-      v-if="toolsSettingsOpen"
-      class="modalOverlay"
-      @click.self="toolsSettingsOpen = false"
-    >
-      <div class="modal toolsModal">
-        <div class="modalHeader">
-          <div class="modalTitle">Tools</div>
-          <button type="button" class="headerMiniBtn" @click="startNewTool">
-            New
-          </button>
-          <button
-            type="button"
-            class="headerMiniBtn"
-            @click="refreshTools"
-            :disabled="toolsLoading || toolsSaving"
-          >
-            Refresh
-          </button>
-          <button class="iconBtn" type="button" @click="toolsSettingsOpen = false">
-            ✕
-          </button>
-        </div>
-
-        <div class="modalBody toolsBody">
-          <div v-if="toolsError" class="modalError">{{ toolsError }}</div>
-          <div v-else-if="toolsLoading" class="loading">Loading...</div>
-          <template v-else>
-            <div class="toolsSplit">
-              <div class="toolsList">
-                <button
-                  v-for="t in toolsList"
-                  :key="t.id"
-                  type="button"
-                  class="toolsItem"
-                  :class="{ active: t.id === toolEditID }"
-                  @click="loadToolIntoEditor(t)"
-                  :title="t.command"
-                >
-                  <div class="mono">{{ t.id }}</div>
-                  <div class="tinyHint mono">{{ t.driver }}</div>
-                </button>
-              </div>
-
-              <div class="toolsEditor">
-                <div class="toolsEditorGrid">
-                  <label class="full">
-                    id
-                    <input v-model="toolEditID" placeholder="my-tool" autocomplete="off" />
-                  </label>
-                  <label>
-                    driver
-                    <select v-model="toolEditDriver">
-                      <option value="claude-code">claude-code</option>
-                      <option value="codex">codex</option>
-                      <option value="exec">exec</option>
-                    </select>
-                  </label>
-                  <label class="full">
-                    command
-                    <input v-model="toolEditCommand" placeholder="claude" autocomplete="off" />
-                  </label>
-                  <label class="full">
-                    args (space separated)
-                    <textarea v-model="toolEditArgs" rows="2" placeholder="--foo --bar"></textarea>
-                  </label>
-                  <label class="full">
-                    env (KEY=VALUE per line)
-                    <textarea v-model="toolEditEnv" rows="6" placeholder="ANTHROPIC_BASE_URL=https://..."></textarea>
-                  </label>
-                </div>
-              </div>
-            </div>
-          </template>
-        </div>
-
-        <div class="modalFooter">
-          <button type="button" @click="toolsSettingsOpen = false">Close</button>
-          <button
-            type="button"
-            @click="deleteToolOverride"
-            :disabled="toolsSaving || !toolEditID.trim()"
-          >
-            Delete
-          </button>
-          <button
-            type="button"
-            class="primary"
-            @click="saveTool"
-            :disabled="toolsSaving || !toolEditID.trim() || !toolEditCommand.trim()"
-          >
-            {{ toolsSaving ? "Saving..." : "Save" }}
-          </button>
-        </div>
-      </div>
-    </div>
+	    <ToolsSettingsModal
+	      :open="toolsSettingsOpen"
+	      :loading="toolsLoading"
+	      :saving="toolsSaving"
+	      :error="toolsError"
+	      :tools="toolsList"
+	      v-model:editID="toolEditID"
+	      v-model:editDriver="toolEditDriver"
+	      v-model:editCommand="toolEditCommand"
+	      v-model:editArgs="toolEditArgs"
+	      v-model:editEnv="toolEditEnv"
+	      @close="toolsSettingsOpen = false"
+	      @newTool="startNewTool"
+	      @refresh="refreshTools"
+	      @selectTool="loadToolIntoEditor"
+	      @delete="deleteToolOverride"
+	      @save="saveTool"
+	    />
 
 	    <div
 	      v-if="filePreviewOpen"

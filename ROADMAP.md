@@ -12,20 +12,15 @@ Last updated: 2026-01-30
 - ✅ `add-skill-versions` — Skills versions store + API + UI
 - ✅ `add-skills-hub-governance` — tool adapters, onboarding/import/install/update + UI
 - ✅ `add-acceptance-gates` — acceptance state + deterministic helpers + UI progress/report
+- ✅ `refactor-web-src-structure` — split `web/src/App.vue` into mid-grain components/composables
 
 ### In progress
-- 🟡 `refactor-web-src-structure` — split `web/src/App.vue` into mid-grain components/composables (9/18 tasks)
+- (none)
 
 ## Next (foundation → upper layers)
 
-### 1) `refactor-web-src-structure` (maintainability foundation)
-Goal: reduce regression risk and make future UI changes cheaper for humans + AI.
-
-Next implementation steps:
-- Extract Live UI into `web/src/components/LiveDrawer.vue`
-- Extract Files UI into a component (keep `/files` page behavior)
-- Add composables: `useLiveFeed.ts`, `useTasks.ts` and wire them in
-- Run the manual regression checklist (Skills / Secretary / Live / Files / Tools / Runs)
+### 1) `add-sandbox-presets` (safety foundation)
+Goal: make “safe-by-default” run/resume configuration understandable and 1-click.
 
 ### 2) Upper layers (queue)
 These are valuable, but should follow the foundations above:
