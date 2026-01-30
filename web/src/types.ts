@@ -84,6 +84,18 @@ export type SkillsListResponse = {
   limit?: number;
 };
 
+export type SkillVersion = {
+  id: string;
+  created_at?: string;
+  note?: string;
+};
+
+export type SkillVersionsListResponse = {
+  source_root: string;
+  versions_root: string;
+  versions: SkillVersion[];
+};
+
 export type LogEntry = {
   id: number;
   task_id: string;

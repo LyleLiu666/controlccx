@@ -13,6 +13,8 @@ import type {
   LogEntry,
   ToolsListResponse,
   SkillsListResponse,
+  SkillVersion,
+  SkillVersionsListResponse,
   SystemInfo,
   Task,
   TaskTraceResponse,
@@ -283,4 +285,19 @@ export async function unlinkSkill(input: {
   target: "claude" | "codex";
 }): Promise<{ ok: boolean }> {
   return postJSON<{ ok: boolean }>("/api/skills/unlink", input);
+}
+
+export async function fetchSkillVersions(): Promise<SkillVersionsListResponse> {
+  return getJSON<SkillVersionsListResponse>("/api/skills/versions");
+}
+
+export async function createSkillVersion(input: {
+  id?: string;
+  note?: string;
+}): Promise<SkillVersion> {
+  return postJSON<SkillVersion>("/api/skills/versions/create", input);
+}
+
+export async function deleteSkillVersion(input: { id: string }): Promise<{ ok: boolean }> {
+  return postJSON<{ ok: boolean }>("/api/skills/versions/delete", input);
 }

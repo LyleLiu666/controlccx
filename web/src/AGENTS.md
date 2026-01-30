@@ -17,7 +17,7 @@ This folder is intentionally organized so both humans and AI agents can quickly 
 - `web/src/styles/`: shared styles/tokens (migrate incrementally; do not rewrite everything at once)
 
 ## Where to Change What (target state)
-- Skills UI: `components/SkillsPanel.vue` + `composables/useSkills.ts`
+- Skills UI: `components/SkillsPanel.vue` + `components/SkillsVersionsPanel.vue` + `composables/useSkills.ts` + `composables/useSkillVersions.ts` (route: `/skills`)
 - Secretary chat/drawer: `components/SecretaryDrawer.vue` + `composables/useSecretaryChat.ts`
 - Live feed: `components/LiveDrawer.vue` + `composables/useLiveFeed.ts`
 - Tasks + logs + trace: `composables/useTasks.ts` (and keep API calls in `api.ts`)

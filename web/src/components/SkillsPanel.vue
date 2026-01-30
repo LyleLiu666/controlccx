@@ -56,7 +56,7 @@ const skillsVisible = computed(() => props.data?.skills ?? []);
 </script>
 
 <template>
-  <div class="modalBody skillsBody skillsPageBody">
+  <div class="skillsBody skillsPageBody skillsPanelBody">
     <div v-if="error" class="modalError">{{ error }}</div>
     <div v-else-if="loading" class="loading">Loading...</div>
     <template v-else>
@@ -203,4 +203,3 @@ const skillsVisible = computed(() => props.data?.skills ?? []);
     </template>
   </div>
 </template>
-

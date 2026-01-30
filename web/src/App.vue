@@ -58,8 +58,10 @@ import { computePopupPosition } from "./menuPosition";
 import { prettifyLogMessage } from "./logPretty";
 import { deriveRunActivity } from "./runActivity";
 import SkillsPanel from "./components/SkillsPanel.vue";
+import SkillsVersionsPanel from "./components/SkillsVersionsPanel.vue";
 import SecretaryDrawer from "./components/SecretaryDrawer.vue";
 import { useSkills } from "./composables/useSkills";
+import { useSkillVersions } from "./composables/useSkillVersions";
 import { useSecretaryChat } from "./composables/useSecretaryChat";
 
 const tasks = ref<Map<string, Task>>(new Map());
@@ -149,6 +151,19 @@ const {
   summarizeSkillTarget,
   skillBadgeClass,
 } = useSkills();
+
+const {
+  skillsVersionsLoading,
+  skillsVersionsError,
+  skillsVersionsData,
+  skillsVersionNewId,
+  skillsVersionNewNote,
+  skillsVersionsCreating,
+  skillsVersionsDeleting,
+  refreshSkillVersions,
+  createSkillVersionFromForm,
+  deleteSkillVersionByID,
+} = useSkillVersions();
 
 const selectedTask = computed(
   () => tasks.value.get(selectedTaskId.value) ?? null,
@@ -1695,17 +1710,59 @@ function openRuns() {
   runsOpen.value = true;
 }
 
+function normalizeRoutePath(path: string): string {
+  let p = (path ?? "").trim();
+  if (!p.startsWith("/")) p = "/" + p;
+  while (p.length > 1 && p.endsWith("/")) p = p.slice(0, -1);
+  return p || "/";
+}
+
+function navigateTo(path: string, opts?: { replace?: boolean }) {
+  if (typeof window === "undefined") return;
+  const next = normalizeRoutePath(path);
+  if (window.location.pathname === next) return;
+  if (opts?.replace) {
+    window.history.replaceState({}, "", next);
+  } else {
+    window.history.pushState({}, "", next);
+  }
+}
+
+async function openSkillsPage() {
+  sessionsDrawerOpen.value = false;
+  await Promise.all([openSkills(), refreshSkillVersions()]);
+}
+
 async function toggleSkillsPage() {
   if (skillsOpen.value) {
-    skillsOpen.value = false;
+    closeSkillsPage();
     return;
   }
-  sessionsDrawerOpen.value = false;
-  await openSkills();
+  navigateTo("/skills");
+  await openSkillsPage();
 }
 
 function closeSkillsPage() {
   skillsOpen.value = false;
+  navigateTo("/");
+}
+
+async function refreshSkillsPage() {
+  await Promise.all([refreshSkills(), refreshSkillVersions()]);
+}
+
+function applyRouteFromLocation() {
+  if (typeof window === "undefined") return;
+  const path = normalizeRoutePath(window.location.pathname);
+  if (path === "/skills") {
+    void openSkillsPage();
+    return;
+  }
+  if (skillsOpen.value) skillsOpen.value = false;
+}
+
+function onRoutePopState() {
+  applyRouteFromLocation();
 }
 
 function dismissFeedCoach() {
@@ -2757,6 +2814,7 @@ onMounted(async () => {
   await refreshTools();
   connectEvents();
   window.addEventListener("keydown", onGlobalKeyDown);
+  window.addEventListener("popstate", onRoutePopState);
   document.addEventListener("mousedown", onSessionActionsMenuDocumentMouseDown, true);
   window.addEventListener("keydown", onSessionActionsMenuKeyDown, true);
   window.addEventListener("resize", closeSessionActionsMenu, true);
@@ -2784,11 +2842,14 @@ onMounted(async () => {
   };
   phoneMqHandler();
   phoneMq.addEventListener?.("change", phoneMqHandler);
+
+  applyRouteFromLocation();
 });
 
 onBeforeUnmount(() => {
   if (es) es.close();
   window.removeEventListener("keydown", onGlobalKeyDown);
+  window.removeEventListener("popstate", onRoutePopState);
   document.removeEventListener("mousedown", onSessionActionsMenuDocumentMouseDown, true);
   window.removeEventListener("keydown", onSessionActionsMenuKeyDown, true);
   window.removeEventListener("resize", closeSessionActionsMenu, true);
@@ -3159,7 +3220,7 @@ function onGlobalKeyDown(e: KeyboardEvent) {
       return;
     }
     if (skillsOpen.value) {
-      skillsOpen.value = false;
+      closeSkillsPage();
       return;
     }
     if (secretaryOpen.value) {
@@ -3388,34 +3449,54 @@ watch(
     <div v-if="isPhone && sessionsDrawerOpen" class="sessionsOverlay" @click.self="sessionsDrawerOpen = false"></div>
 
     <div class="grid">
-      <section v-if="skillsOpen" class="panel skillsPagePanel">
-        <h2>
-          Skills
-          <span class="h2Spacer"></span>
-          <button type="button" class="h2Btn" @click="refreshSkills" :disabled="skillsLoading">
-            Refresh
-          </button>
-          <button type="button" class="h2Btn" @click="closeSkillsPage">Back</button>
-        </h2>
+	      <section v-if="skillsOpen" class="panel skillsPagePanel">
+	        <h2>
+	          Skills
+	          <span class="h2Spacer"></span>
+	          <button
+              type="button"
+              class="h2Btn"
+              @click="refreshSkillsPage"
+              :disabled="skillsLoading || skillsVersionsLoading"
+            >
+	            Refresh
+	          </button>
+	          <button type="button" class="h2Btn" @click="closeSkillsPage">Back</button>
+	        </h2>
 
-        <SkillsPanel
-          :loading="skillsLoading"
-          :error="skillsError"
-          :data="skillsData"
-          v-model:filter="skillsFilter"
-          v-model:limit="skillsLimit"
-          :range-label="skillsRangeLabel"
-          :can-prev="skillsCanPrev"
-          :can-next="skillsCanNext"
-          :action-busy="skillsActionBusy"
-          :summarize-target="summarizeSkillTarget"
-          :badge-class="skillBadgeClass"
-          :make-key="skillsKey"
-          @prev-page="skillsPrevPage"
-          @next-page="skillsNextPage"
-          @toggle="onSkillsToggle"
-        />
-      </section>
+          <div class="skillsPageWrap">
+            <SkillsVersionsPanel
+              :loading="skillsVersionsLoading"
+              :error="skillsVersionsError"
+              :data="skillsVersionsData"
+              v-model:new-id="skillsVersionNewId"
+              v-model:new-note="skillsVersionNewNote"
+              :creating="skillsVersionsCreating"
+              :deleting="skillsVersionsDeleting"
+              @refresh="refreshSkillVersions"
+              @create="createSkillVersionFromForm"
+              @delete="deleteSkillVersionByID"
+            />
+
+            <SkillsPanel
+              :loading="skillsLoading"
+              :error="skillsError"
+              :data="skillsData"
+              v-model:filter="skillsFilter"
+              v-model:limit="skillsLimit"
+              :range-label="skillsRangeLabel"
+              :can-prev="skillsCanPrev"
+              :can-next="skillsCanNext"
+              :action-busy="skillsActionBusy"
+              :summarize-target="summarizeSkillTarget"
+              :badge-class="skillBadgeClass"
+              :make-key="skillsKey"
+              @prev-page="skillsPrevPage"
+              @next-page="skillsNextPage"
+              @toggle="onSkillsToggle"
+            />
+          </div>
+	      </section>
 
       <template v-else>
       <section
@@ -6716,6 +6797,93 @@ h2 {
   opacity: 0.6;
 }
 
+:deep(.skillsPageWrap) {
+  display: grid;
+  grid-template-columns: minmax(360px, 480px) 1fr;
+  gap: 16px;
+  padding: 20px;
+  min-height: 0;
+  overflow: hidden;
+}
+
+:deep(.skillsVersionsCard) {
+  border: 1px solid var(--border-color);
+  border-radius: 14px;
+  background: var(--bg-panel);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+:deep(.skillsVersionsHeader) {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+:deep(.skillsVersionsTitle) {
+  font-weight: 800;
+}
+
+:deep(.skillsVersionsMeta) {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+:deep(.skillsVersionsCreate) {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+:deep(.skillsVersionsCreate input) {
+  width: 100%;
+  min-width: 0;
+}
+
+:deep(.skillsVersionsList) {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  border-top: 1px solid var(--border-color);
+  margin-top: 12px;
+  padding-top: 12px;
+}
+
+:deep(.skillsVersionRow) {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 0;
+  border-top: 1px solid var(--border-color);
+}
+
+:deep(.skillsVersionRow:first-child) {
+  border-top: 0;
+}
+
+:deep(.skillsVersionMain) {
+  min-width: 0;
+}
+
+:deep(.skillsVersionMain .mono) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+:deep(.skillsVersionRight) {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
 @keyframes popIn {
   from { opacity: 0; transform: scale(0.95); }
   to { opacity: 1; transform: scale(1); }
@@ -8862,6 +9030,9 @@ h2 {
   .grid {
     grid-template-columns: 1fr;
     gap: 16px;
+  }
+  :deep(.skillsPageWrap) {
+    grid-template-columns: 1fr;
   }
   .secretaryCards {
     grid-template-columns: repeat(4, 1fr);

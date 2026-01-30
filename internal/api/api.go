@@ -24,15 +24,16 @@ import (
 )
 
 type API struct {
-	Tasks    *tasks.Store
-	Workers  *worker.Manager
-	Observer *observer.Service
-	Chat     *chat.Store
-	Hub      *events.Hub
-	FSRoots  []FSRoot
-	Auth     *auth.Store
-	Skills   *skills.Service
-	Tools    *tooling.Service
+	Tasks         *tasks.Store
+	Workers       *worker.Manager
+	Observer      *observer.Service
+	Chat          *chat.Store
+	Hub           *events.Hub
+	FSRoots       []FSRoot
+	Auth          *auth.Store
+	Skills        *skills.Service
+	SkillVersions *skills.VersionsService
+	Tools         *tooling.Service
 }
 
 func (a *API) Handler() http.Handler {
@@ -47,6 +48,9 @@ func (a *API) Handler() http.Handler {
 	mux.HandleFunc("/api/skills", a.handleSkills)
 	mux.HandleFunc("/api/skills/link", a.handleSkillsLink)
 	mux.HandleFunc("/api/skills/unlink", a.handleSkillsUnlink)
+	mux.HandleFunc("/api/skills/versions", a.handleSkillVersions)
+	mux.HandleFunc("/api/skills/versions/create", a.handleSkillVersionsCreate)
+	mux.HandleFunc("/api/skills/versions/delete", a.handleSkillVersionsDelete)
 	mux.HandleFunc("/api/fs/roots", a.handleFSRoots)
 	mux.HandleFunc("/api/fs/list", a.handleFSList)
 	mux.HandleFunc("/api/fs/read", a.handleFSRead)
@@ -424,13 +428,13 @@ func (a *API) handleTaskByID(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		newTask, err := a.Tasks.CreateTask(r.Context(), tasks.CreateTaskInput{
-			WorkerType: prev.WorkerType,
-			Mode:       tasks.ModeResume,
+			WorkerType:       prev.WorkerType,
+			Mode:             tasks.ModeResume,
 			UnsafeAutomation: body.UnsafeAutomation,
-			Prompt:     body.Prompt,
-			WorkDir:    prev.WorkDir,
-			SessionID:  prev.SessionID,
-			Warning:    prev.Warning,
+			Prompt:           body.Prompt,
+			WorkDir:          prev.WorkDir,
+			SessionID:        prev.SessionID,
+			Warning:          prev.Warning,
 		})
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)

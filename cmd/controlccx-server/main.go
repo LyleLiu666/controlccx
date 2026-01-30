@@ -100,16 +100,21 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	skillVersionsSvc, err := skills.NewVersionsService(skills.VersionsOptions{})
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	apiSvc := &api.API{
-		Tasks:    taskStore,
-		Workers:  workerMgr,
-		Observer: observerSvc,
-		Chat:     chatStore,
-		Hub:      hub,
-		Auth:     authStore,
-		Skills:   skillsSvc,
-		Tools:    toolsSvc,
+		Tasks:         taskStore,
+		Workers:       workerMgr,
+		Observer:      observerSvc,
+		Chat:          chatStore,
+		Hub:           hub,
+		Auth:          authStore,
+		Skills:        skillsSvc,
+		SkillVersions: skillVersionsSvc,
+		Tools:         toolsSvc,
 	}
 
 	mux := http.NewServeMux()
