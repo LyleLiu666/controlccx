@@ -93,6 +93,17 @@ func (s *Service) RespondWithOptions(ctx context.Context, userMessage string, op
 - 你 SHOULD 尽量直接调用 task_resume / task_cancel 等操作工具来帮用户推进（除非你需要用户确认某个高风险选择）
 - 你 MUST 在最终回复里说明你做了什么（例如：已创建新的 resume run / 已取消任务 / 为什么没法继续）
 
+当你收到【Delivery Foreman / 交付前哨】一类的请求时（通常包含 run_id / session_id / recent_logs_tail）：
+- 你 MUST 先判断该 run 是否真的“可交付完成”
+- 你 MUST 判断“是否复杂任务”，并给出一句话理由（无硬阈值；不确定时 SHOULD 更保守）
+- 若为复杂任务：你 MUST 进入【Acceptance Gates / 验收闸门】闭环：
+  - 先调用 acceptance_get({task_id: run_id}) 获取当前验收状态（用于避免重复触发/无限循环）
+  - 使用 acceptance_update 写入/更新验收状态（status/iteration/current_gate/summary/plan_json/report），确保 UI 可见进度（iteration i/10）
+  - 对“客观标准（Objective）”尽量用确定性证据：例如用 task_output_stats 统计 words/sections/字数；必要时用 task_logs 获取命令结果摘要
+  - 对“主观标准（Subjective）”必须先拆解 rubric，再逐项判定 pass/fail 并给出修改建议
+  - 若验收不通过且仍可自动推进：你 SHOULD 调用 task_resume 创建新的 resume run（把失败项变成下一轮最小修复动作，并在回复里包含新 run id + 本轮目标）
+  - 若达到迭代上限（默认 10）或遇到高风险/信息不足：你 MUST 停止自动迭代并升级给用户（最小下一步 + 证据）
+
 你必须只输出一种结构化格式（不要输出 Markdown / 代码块 / 解释文字）。优先使用 tag 格式（长文本更稳，不需要 JSON 转义）：
 
 1) 调用工具：
@@ -109,15 +120,15 @@ func (s *Service) RespondWithOptions(ctx context.Context, userMessage string, op
 同时兼容 legacy JSON 格式：
 {"action":"tool","tool":"<tool_name>","args":{...}}
 {"action":"final","message":"<中文回答>"}`,
-				OnToolCall:   opts.OnToolCall,
-				OnToolResult: opts.OnToolResult,
-			}
+			OnToolCall:   opts.OnToolCall,
+			OnToolResult: opts.OnToolResult,
+		}
 
-			ans, err := agent.Run(ctx, llmMsg)
-			if err == nil && strings.TrimSpace(ans) != "" {
-				return Reply{Message: ans}, nil
-			}
-			if s.ForceAgent {
+		ans, err := agent.Run(ctx, llmMsg)
+		if err == nil && strings.TrimSpace(ans) != "" {
+			return Reply{Message: ans}, nil
+		}
+		if s.ForceAgent {
 			if err == nil {
 				err = fmt.Errorf("llm agent returned empty response")
 			}
@@ -644,6 +655,133 @@ func computeLengthStat(s string) lengthStat {
 		Runes:         utf8.RuneCountInString(s),
 		Words:         len(strings.Fields(s)),
 	}
+}
+
+type headingStat struct {
+	HeadingLines    int
+	MarkdownHeading int
+	NumberedHeading int
+	ChineseHeading  int
+}
+
+func computeHeadingStat(s string) headingStat {
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	s = strings.ReplaceAll(s, "\r", "\n")
+	lines := strings.Split(s, "\n")
+
+	var st headingStat
+	for _, raw := range lines {
+		line := strings.TrimSpace(raw)
+		if line == "" {
+			continue
+		}
+		if isMarkdownHeadingLine(line) {
+			st.HeadingLines++
+			st.MarkdownHeading++
+			continue
+		}
+		if isNumberedHeadingLine(line) {
+			st.HeadingLines++
+			st.NumberedHeading++
+			continue
+		}
+		if isChineseHeadingLine(line) {
+			st.HeadingLines++
+			st.ChineseHeading++
+			continue
+		}
+	}
+	return st
+}
+
+func isMarkdownHeadingLine(line string) bool {
+	if !strings.HasPrefix(line, "#") {
+		return false
+	}
+	i := 0
+	for i < len(line) && line[i] == '#' {
+		i++
+	}
+	if i == 0 || i > 6 || i >= len(line) {
+		return false
+	}
+	if line[i] != ' ' && line[i] != '\t' {
+		return false
+	}
+	return strings.TrimSpace(line[i:]) != ""
+}
+
+func isNumberedHeadingLine(line string) bool {
+	i := 0
+	for i < len(line) && line[i] >= '0' && line[i] <= '9' {
+		i++
+	}
+	if i == 0 || i >= len(line) {
+		return false
+	}
+
+	hasDotSegment := false
+	for i < len(line) && line[i] == '.' {
+		j := i + 1
+		k := j
+		for k < len(line) && line[k] >= '0' && line[k] <= '9' {
+			k++
+		}
+		if k == j {
+			break
+		}
+		hasDotSegment = true
+		i = k
+	}
+
+	if i >= len(line) {
+		return false
+	}
+
+	punc := false
+	switch line[i] {
+	case '.', ')':
+		punc = true
+		i++
+	}
+
+	if i >= len(line) {
+		return false
+	}
+	if !punc && !hasDotSegment {
+		return false
+	}
+	if line[i] != ' ' && line[i] != '\t' {
+		return false
+	}
+	return strings.TrimSpace(line[i:]) != ""
+}
+
+func isChineseHeadingLine(line string) bool {
+	r := []rune(line)
+	if len(r) < 2 {
+		return false
+	}
+
+	// Pattern: "第...章/节/篇/部/条"
+	if r[0] == '第' {
+		for i := 1; i < len(r); i++ {
+			switch r[i] {
+			case '章', '节', '篇', '部', '条':
+				return i > 1
+			}
+		}
+		return false
+	}
+
+	// Pattern: "一、标题"
+	if len(r) >= 3 && r[1] == '、' {
+		switch r[0] {
+		case '一', '二', '三', '四', '五', '六', '七', '八', '九', '十', '百', '千':
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Service) answerLengthQuery(ctx context.Context, msg string, all []tasks.Task) (Reply, error) {

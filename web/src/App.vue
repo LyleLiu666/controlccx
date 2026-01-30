@@ -1943,13 +1943,47 @@ async function buildDeliveryForemanPrompt(t: Task): Promise<string> {
   parts.push("如果是简单任务：一句话说明无需工业级交付检查并结束。");
   parts.push("");
   parts.push("【Acceptance Gates / 验收闸门（仅复杂任务启用）】");
-  parts.push("当你判断这是复杂任务时，你 MUST 使用 acceptance_update 工具写入验收状态，方便 UI 展示进度与报告：");
-  parts.push("- 第一次：写入 plan_json（JSON 字符串，包含 intent_summary + objective_criteria + subjective_rubrics + default_gates 等）");
-  parts.push("- 迭代中：status=running, iteration=i, max_iterations=10, current_gate=..., summary=...");
-  parts.push("- 验收通过：status=accepted, current_gate=done, summary=..., report=...（Markdown，含证据）");
-  parts.push("- 验收失败/需用户介入/到达上限：status=failed, summary=..., report=...（Markdown，含证据与最小下一步）");
-  parts.push("你可以直接传 {task_id: run_id, ...} 给 acceptance_update，不需要手动填写 key。");
-  parts.push("注意：不要重复刷屏；每轮只汇报新增信息，并确保用户能看到 i/10 进展。");
+  parts.push("当你判断这是复杂任务时：");
+  parts.push("1) 先调用 acceptance_get({task_id: run_id}) 获取当前验收状态，避免重复触发/无限循环。");
+  parts.push("2) 你 MUST 使用 acceptance_update 写入/更新验收状态（server 持久化），让 UI 可见进度与报告。");
+  parts.push("");
+  parts.push("【验收方法论（不要把任务硬塞进固定分类）】");
+  parts.push("- 先复述交付意图：intent_summary（人类可读，不需要固定枚举）");
+  parts.push("- 抽取用户显式硬约束 -> objective_criteria（可测量阈值 + 证据来源）");
+  parts.push("- 把主观要求拆成 rubric -> subjective_rubrics（逐项 pass/fail + 理由 + 修改建议）");
+  parts.push("- 仅在明显需要“可运行/可验证交付”时才注入默认 gates，并写明适用性与理由；不适用要跳过并记录原因");
+  parts.push("");
+  parts.push("【默认 runnable DoD gates（仅适用时）】");
+  parts.push("- README 一键启动");
+  parts.push("- go test ./...");
+  parts.push("- pnpm test");
+  parts.push("- 启动后首页可打开（HTTP smoke）");
+  parts.push("- 可选：Playwright smoke（优先 Playwright MCP；不可用则降级 HTTP smoke，并在报告里说明）");
+  parts.push("");
+  parts.push("【plan_json schema（作为 JSON 字符串写入 acceptance_update.plan_json）】");
+  parts.push(
+    `{
+  "intent_summary": "...",
+  "complexity_reason": "...",
+  "objective_criteria": [
+    {"id":"word_count","title":">=30000 words","method":"task_output_stats.words","min":30000},
+    {"id":"sections","title":"14 parts","method":"task_output_stats.sections","min":14}
+  ],
+  "subjective_rubrics": [
+    {"id":"wechat","title":"适合公众号","items":[{"item":"标题/结构/可读性/CTA/合规提示","pass_criteria":"..."}]}
+  ],
+  "default_gates": [
+    {"id":"runnable.dod","applies_if":"deliverable must run","reason":"..."}
+  ]
+}`,
+  );
+  parts.push("");
+  parts.push("【写入时序（示例）】");
+  parts.push("- 第一次：acceptance_update({task_id, status:'running', iteration:i, max_iterations:10, current_gate:'contract', summary:'...', plan_json:'{...}'})");
+  parts.push("- 评估中：acceptance_update({task_id, status:'running', current_gate:'...', summary:'...'})");
+  parts.push("- 验收通过：acceptance_update({task_id, status:'accepted', current_gate:'done', summary:'...', report:'...markdown...'})");
+  parts.push("- 验收失败/需用户介入/到达上限：acceptance_update({task_id, status:'failed', summary:'...', report:'...markdown...'})");
+  parts.push("注意：不要重复刷屏；每轮只汇报新增信息，并确保用户能看到 iteration i/10 的进展。");
   parts.push("");
   parts.push("【上下文】");
   parts.push(`run_id: ${runID}`);
@@ -1975,6 +2009,9 @@ async function runDeliveryForemanOnce(t: Task) {
   showDeliveryForemanToast("Delivery Foreman: analyzing completed run…");
   const prompt = await buildDeliveryForemanPrompt(t);
   chat.value = await sendChatAndReload(prompt, { sendChat, fetchChat });
+  if (selectedSessionKey.value === sessionKeyForTask(t)) {
+    await refreshAcceptance();
+  }
   showDeliveryForemanToast("Delivery Foreman: suggestion ready (open Secretary to view).");
 }
 
@@ -3080,6 +3117,23 @@ const selectedSession = computed(() => {
 watch(selectedSessionKey, () => {
   void refreshAcceptance();
 }, { immediate: true });
+
+let acceptancePollTimer: number | null = null;
+watch(
+  [selectedSessionKey, () => acceptanceState.value?.status ?? ""],
+  ([key, status]) => {
+    if (acceptancePollTimer != null) {
+      window.clearInterval(acceptancePollTimer);
+      acceptancePollTimer = null;
+    }
+    if (!key) return;
+    if (String(status).toLowerCase() !== "running") return;
+    acceptancePollTimer = window.setInterval(() => {
+      void refreshAcceptance();
+    }, 4000);
+  },
+  { immediate: true },
+);
 
 const recentWorkspaces = computed(() => {
   const latestByPath = new Map<string, string>();

@@ -332,13 +332,13 @@ func (s *Service) agentTools() map[string]Tool {
 				unsafe := boolArg(args, "unsafe_automation", prev.UnsafeAutomation)
 
 				next, err := s.Store.CreateTask(ctx, tasks.CreateTaskInput{
-					WorkerType:        prev.WorkerType,
-					Mode:              tasks.ModeResume,
-					UnsafeAutomation:  unsafe,
-					Prompt:            prompt,
-					WorkDir:           prev.WorkDir,
-					SessionID:         sid,
-					Warning:           prev.Warning,
+					WorkerType:       prev.WorkerType,
+					Mode:             tasks.ModeResume,
+					UnsafeAutomation: unsafe,
+					Prompt:           prompt,
+					WorkDir:          prev.WorkDir,
+					SessionID:        sid,
+					Warning:          prev.Warning,
 				})
 				if err != nil {
 					return nil, err
@@ -547,6 +547,7 @@ func (s *Service) agentTools() map[string]Tool {
 			maxChars := intArg(args, "max_chars", 2000, 1, 20000)
 			preview := truncateDisplay(out, maxChars)
 			st := computeLengthStat(out)
+			hs := computeHeadingStat(out)
 			return map[string]any{
 				"task": map[string]any{
 					"id":          t.ID,
@@ -560,9 +561,15 @@ func (s *Service) agentTools() map[string]Tool {
 				},
 				"output_preview": preview,
 				"stats": map[string]any{
-					"chars_no_space": st.NonSpaceRunes,
-					"chars":          st.Runes,
-					"words":          st.Words,
+					"chars_no_space":    st.NonSpaceRunes,
+					"chars":             st.Runes,
+					"words":             st.Words,
+					"heading_lines":     hs.HeadingLines,
+					"headings_markdown": hs.MarkdownHeading,
+					"headings_numbered": hs.NumberedHeading,
+					"headings_chinese":  hs.ChineseHeading,
+					// Alias: many acceptance checks talk about "sections".
+					"sections": hs.HeadingLines,
 				},
 			}, nil
 		},
@@ -576,29 +583,29 @@ func (s *Service) agentTools() map[string]Tool {
 		Fn:              taskOutputStats.Fn,
 	}
 
-		if s.Chat != nil {
-			tools["chat_history"] = ToolFunc{
-				ToolName:        "chat_history",
-				ToolDescription: "列出最近的对话消息。参数：{after?: number, limit?: number (1..500)}",
-				Fn: func(ctx context.Context, args map[string]any) (any, error) {
-					after := int64(intArg(args, "after", 0, 0, 1<<31-1))
-					limit := intArg(args, "limit", 50, 1, 500)
-					var (
-						msgs []chat.Message
-						err  error
-					)
-					if after > 0 {
-						msgs, err = s.Chat.List(ctx, after, limit)
-					} else {
-						msgs, err = s.Chat.Tail(ctx, limit)
-					}
-					if err != nil {
-						return nil, err
-					}
-					return map[string]any{"messages": msgs}, nil
-				},
-			}
+	if s.Chat != nil {
+		tools["chat_history"] = ToolFunc{
+			ToolName:        "chat_history",
+			ToolDescription: "列出最近的对话消息。参数：{after?: number, limit?: number (1..500)}",
+			Fn: func(ctx context.Context, args map[string]any) (any, error) {
+				after := int64(intArg(args, "after", 0, 0, 1<<31-1))
+				limit := intArg(args, "limit", 50, 1, 500)
+				var (
+					msgs []chat.Message
+					err  error
+				)
+				if after > 0 {
+					msgs, err = s.Chat.List(ctx, after, limit)
+				} else {
+					msgs, err = s.Chat.Tail(ctx, limit)
+				}
+				if err != nil {
+					return nil, err
+				}
+				return map[string]any{"messages": msgs}, nil
+			},
 		}
+	}
 
 	return tools
 }

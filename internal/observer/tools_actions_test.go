@@ -12,7 +12,7 @@ import (
 )
 
 type fakeRunner struct {
-	started []string
+	started  []string
 	canceled []string
 	startErr error
 	cancelOK bool
@@ -237,5 +237,76 @@ func TestTools_acceptanceUpdate_UpsertsAndMerges(t *testing.T) {
 	}
 	if m["ok"] != true {
 		t.Fatalf("expected ok=true, got %v", m["ok"])
+	}
+}
+
+func TestTools_taskOutputStats_IncludesHeadingCounts(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "controlccx.db")
+
+	conn, err := db.Open(ctx, db.Options{Path: dbPath})
+	if err != nil {
+		t.Fatalf("db open: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+
+	store := tasks.NewStore(conn)
+	task, err := store.CreateTask(ctx, tasks.CreateTaskInput{
+		WorkerType: tasks.WorkerClaudeCode,
+		Mode:       tasks.ModeNew,
+		Prompt:     "write something",
+		WorkDir:    ".",
+		SessionID:  "sess-1",
+	})
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	_, err = store.AppendLog(ctx, task.ID, tasks.LogAssistant, strings.Join([]string{
+		"# Title",
+		"## A",
+		"### B",
+		"1. First",
+		"1.1 Second",
+		"一、Third",
+		"第1章 Intro",
+		"",
+		"body",
+	}, "\n"))
+	if err != nil {
+		t.Fatalf("append log: %v", err)
+	}
+
+	svc := &Service{Store: store}
+	tools := svc.agentTools()
+
+	res, err := tools["task_output_stats"].Run(ctx, map[string]any{
+		"task_id": task.ID,
+	})
+	if err != nil {
+		t.Fatalf("task_output_stats: %v", err)
+	}
+	m, ok := res.(map[string]any)
+	if !ok {
+		t.Fatalf("unexpected result type: %T", res)
+	}
+	stats, ok := m["stats"].(map[string]any)
+	if !ok {
+		t.Fatalf("unexpected stats type: %T", m["stats"])
+	}
+
+	if stats["headings_markdown"] != 3 {
+		t.Fatalf("headings_markdown=%v want %v", stats["headings_markdown"], 3)
+	}
+	if stats["headings_numbered"] != 2 {
+		t.Fatalf("headings_numbered=%v want %v", stats["headings_numbered"], 2)
+	}
+	if stats["headings_chinese"] != 2 {
+		t.Fatalf("headings_chinese=%v want %v", stats["headings_chinese"], 2)
+	}
+	if stats["heading_lines"] != 7 {
+		t.Fatalf("heading_lines=%v want %v", stats["heading_lines"], 7)
+	}
+	if stats["sections"] != 7 {
+		t.Fatalf("sections=%v want %v", stats["sections"], 7)
 	}
 }
