@@ -4249,14 +4249,32 @@ watch(
                 rows="3"
                 placeholder="Continue with..."
               ></textarea>
-              <label
-                v-if="selectedSession?.worker_type === 'claude-code'"
-                class="resumeAutoApprove"
-                :title="'Adds --dangerously-skip-permissions (dangerous)'"
+              <div
+                v-if="resumeDriver === 'codex' || resumeDriver === 'claude-code'"
+                class="resumeSafetyControls"
               >
-                <input type="checkbox" v-model="claudeAutoApprove" />
-                <span>Auto-approve</span>
-              </label>
+                <label v-if="resumeExpanded" class="resumeSafetyLabel">
+                  Intent
+                  <select v-model="resumeTaskIntent">
+                    <option value="code">code</option>
+                    <option value="analyze">analyze</option>
+                    <option value="search-browse">search-browse</option>
+                    <option value="install">install</option>
+                  </select>
+                </label>
+                <label class="resumeSafetyLabel">
+                  Safety
+                  <select v-model="resumeSafetyPreset">
+                    <option
+                      v-for="p in safetyPresetsForDriver(resumeDriver)"
+                      :key="p.value"
+                      :value="p.value"
+                    >
+                      {{ p.value }}
+                    </option>
+                  </select>
+                </label>
+              </div>
               <button
                 type="button"
                 class="primary"
@@ -4264,7 +4282,10 @@ watch(
                 :disabled="
                   !resumePrompt.trim() ||
                   !selectedSession.session_id ||
-                  !!selectedSession.deleted_at
+                  !!selectedSession.deleted_at ||
+                  ((resumeDriver === 'codex' || resumeDriver === 'claude-code') &&
+                    isHighRiskPreset(resumeDriver, resumeSafetyPreset) &&
+                    !resumeHighRiskOptIn)
                 "
               >
                 Resume
@@ -4277,6 +4298,60 @@ watch(
               >
                 {{ resumeExpanded ? "▴" : "⋯" }}
               </button>
+            </div>
+            <div
+              v-if="resumeExpanded && (resumeDriver === 'codex' || resumeDriver === 'claude-code')"
+              class="tinyHint"
+            >
+              Recommended: <span class="mono">{{ recommendSafetyPreset(resumeDriver, resumeTaskIntent) }}</span>
+              <button
+                type="button"
+                class="inlineBtn"
+                @click="resumeSafetyPreset = recommendSafetyPreset(resumeDriver, resumeTaskIntent)"
+              >
+                Use
+              </button>
+            </div>
+            <div
+              v-if="resumeDriver === 'claude-code' && resumeSafetyPreset === 'search-browse'"
+              class="resumeSafetyExtra"
+            >
+              <label class="full">
+                WebFetch domains (allowlist)
+                <input
+                  v-model="resumeClaudeDomainsText"
+                  placeholder="docs.anthropic.com, api.github.com"
+                />
+              </label>
+              <div class="tinyHint">
+                Search/browse uses WebFetch allowlists. Downloads via <span class="mono">curl</span>/<span class="mono">wget</span> remain denied by default.
+              </div>
+            </div>
+            <div
+              v-else-if="resumeDriver === 'codex' && resumeSafetyPreset === 'search-browse'"
+              class="tinyHint"
+            >
+              Enables Codex <span class="mono">--search</span> (native web_search tool). Search/browse is distinct from downloading/executing scripts.
+            </div>
+            <div
+              v-if="isHighRiskPreset(resumeDriver, resumeSafetyPreset)"
+              class="resumeSafetyWarn"
+            >
+              <div class="tinyHint warn">
+                <template v-if="resumeDriver === 'codex' && resumeSafetyPreset === 'unsafe'">
+                  Runs Codex with <span class="mono">--dangerously-bypass-approvals-and-sandbox</span> (no sandbox).
+                </template>
+                <template v-else-if="resumeDriver === 'codex' && resumeSafetyPreset === 'danger-full-access'">
+                  Runs Codex with <span class="mono">--sandbox danger-full-access</span> (can access outside the workspace).
+                </template>
+                <template v-else-if="resumeDriver === 'claude-code' && resumeSafetyPreset === 'unsafe'">
+                  Runs Claude Code with <span class="mono">--dangerously-skip-permissions</span>. Recommended only for sandboxes with no internet access.
+                </template>
+              </div>
+              <label class="resumeSafetyOptIn">
+                <input type="checkbox" v-model="resumeHighRiskOptIn" />
+                <span>I understand and want to proceed</span>
+              </label>
             </div>
             <div v-if="selectedSession.deleted_at" class="tinyHint">
               session deleted：resume disabled
@@ -5791,7 +5866,7 @@ h2 {
   min-height: 0;
 }
 
-.newRunAutoApprove {
+.newRunSafety {
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
   background: var(--bg-subtle);
@@ -5800,67 +5875,54 @@ h2 {
   gap: 10px;
 }
 
-.newRunAutoApprove label.newRunAutoApproveRow {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  flex-direction: row;
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--text-main);
-  user-select: none;
+.newRunSafetyTitle {
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--text-sub);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
 }
 
-.newRunAutoApproveTitle {
+.newRunSafetyGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  align-items: end;
+}
+
+.newRunSafetyExtra {
+  border-top: 1px dashed rgba(148, 163, 184, 0.35);
+  padding-top: 10px;
+  display: grid;
+  gap: 8px;
+}
+
+.newRunSafetyWarn {
+  border-top: 1px solid rgba(148, 163, 184, 0.35);
+  padding-top: 10px;
+  display: grid;
+  gap: 8px;
+}
+
+.newRunSafetyOptIn {
   display: inline-flex;
   align-items: center;
   gap: 10px;
-  min-width: 0;
+  font-size: 13px;
+  font-weight: 700;
+  user-select: none;
 }
 
-.newRunSwitch {
-  -webkit-appearance: none;
-  appearance: none;
-  width: 46px;
-  height: 26px;
+.newRunSafetyOptIn input {
+  width: 18px;
+  height: 18px;
+}
+
+.inlineBtn {
+  padding: 2px 10px;
   border-radius: 999px;
-  background: rgba(148, 163, 184, 0.22);
-  border: 1px solid rgba(148, 163, 184, 0.45);
-  position: relative;
-  flex: 0 0 auto;
-  cursor: pointer;
-  transition: background-color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
-}
-
-.newRunSwitch::after {
-  content: "";
-  position: absolute;
-  top: 2px;
-  left: 2px;
-  width: 22px;
-  height: 22px;
-  border-radius: 999px;
-  background: var(--bg-panel);
-  border: 1px solid rgba(148, 163, 184, 0.35);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
-  transition: transform 0.15s ease, background-color 0.15s ease, border-color 0.15s ease;
-}
-
-.newRunSwitch:checked {
-  background: var(--color-primary-bg);
-  border-color: var(--color-primary);
-}
-
-.newRunSwitch:checked::after {
-  transform: translateX(20px);
-  background: var(--color-primary);
-  border-color: var(--color-primary);
-}
-
-.newRunSwitch:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 3px var(--color-primary-bg);
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .newRunHint {
@@ -7988,27 +8050,62 @@ h2 {
   min-height: 0;
 }
 
-.resumeAutoApprove {
+.resumeSafetyControls {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  height: 40px;
-  padding: 0 12px;
+  gap: 10px;
+  min-height: 40px;
+  padding: 6px 12px;
   border-radius: 999px;
   border: 1px solid rgba(148, 163, 184, 0.35);
   background: rgba(15, 23, 42, 0.12);
   color: var(--text-main);
-  opacity: 0.9;
+  opacity: 0.95;
+}
+
+.resumeSafetyLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 800;
   user-select: none;
 }
 
-.resumeAutoApprove input {
-  width: 18px;
-  height: 18px;
+.resumeSafetyLabel select {
+  height: 28px;
 }
 
-.resumeAutoApprove:hover {
-  opacity: 1;
+.resumeSafetyExtra {
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  border-radius: var(--radius-md);
+  background: rgba(15, 23, 42, 0.08);
+  padding: 10px 12px;
+  display: grid;
+  gap: 8px;
+}
+
+.resumeSafetyWarn {
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  border-radius: var(--radius-md);
+  background: rgba(239, 68, 68, 0.06);
+  padding: 10px 12px;
+  display: grid;
+  gap: 8px;
+}
+
+.resumeSafetyOptIn {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  font-weight: 800;
+  user-select: none;
+}
+
+.resumeSafetyOptIn input {
+  width: 18px;
+  height: 18px;
 }
 
 .resumeToggle {
