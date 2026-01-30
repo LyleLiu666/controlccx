@@ -17,7 +17,7 @@ This folder is intentionally organized so both humans and AI agents can quickly 
 - `web/src/styles/`: shared styles/tokens (migrate incrementally; do not rewrite everything at once)
 
 ## Where to Change What (target state)
-- Skills UI: `components/SkillsModal.vue` + `composables/useSkills.ts`
+- Skills UI: `components/SkillsPanel.vue` + `composables/useSkills.ts`
 - Secretary chat/drawer: `components/SecretaryDrawer.vue` + `composables/useSecretaryChat.ts`
 - Live feed: `components/LiveDrawer.vue` + `composables/useLiveFeed.ts`
 - Tasks + logs + trace: `composables/useTasks.ts` (and keep API calls in `api.ts`)
@@ -38,9 +38,8 @@ If backend code is touched:
 - `go test ./...`
 
 ## Manual Smoke Checklist (quick)
-- Open Skills modal, filter, page Next/Prev, enable/disable does not break UI
+- Open Skills page, filter, page Next/Prev, enable/disable does not break UI
 - Open Secretary drawer, long messages readable, input stays visible
 - Open Live, logs stream, wrap/pause works
 - Files modal: tree loads, preview/edit/save works
 - New Run modal: create run, blocked state shows guidance
-

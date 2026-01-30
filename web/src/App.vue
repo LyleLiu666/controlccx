@@ -57,7 +57,7 @@ import {
 import { computePopupPosition } from "./menuPosition";
 import { prettifyLogMessage } from "./logPretty";
 import { deriveRunActivity } from "./runActivity";
-import SkillsModal from "./components/SkillsModal.vue";
+import SkillsPanel from "./components/SkillsPanel.vue";
 import SecretaryDrawer from "./components/SecretaryDrawer.vue";
 import { useSkills } from "./composables/useSkills";
 import { useSecretaryChat } from "./composables/useSecretaryChat";
@@ -1695,6 +1695,19 @@ function openRuns() {
   runsOpen.value = true;
 }
 
+async function toggleSkillsPage() {
+  if (skillsOpen.value) {
+    skillsOpen.value = false;
+    return;
+  }
+  sessionsDrawerOpen.value = false;
+  await openSkills();
+}
+
+function closeSkillsPage() {
+  skillsOpen.value = false;
+}
+
 function dismissFeedCoach() {
   feedCoachDismissed.value = true;
   feedCoachOpen.value = false;
@@ -3145,6 +3158,10 @@ function onGlobalKeyDown(e: KeyboardEvent) {
       runsOpen.value = false;
       return;
     }
+    if (skillsOpen.value) {
+      skillsOpen.value = false;
+      return;
+    }
     if (secretaryOpen.value) {
       closeSecretary();
       return;
@@ -3357,7 +3374,7 @@ watch(
 	        <button type="button" class="primary" @click="openNewRun">
 	          New Run
 	        </button>
-	        <button type="button" class="settingsBtn" @click="openSkills">
+	        <button type="button" class="settingsBtn" @click="toggleSkillsPage">
 	          Skills
 	        </button>
 	        <button type="button" class="settingsBtn" @click="openAuthSettings">
@@ -3371,6 +3388,36 @@ watch(
     <div v-if="isPhone && sessionsDrawerOpen" class="sessionsOverlay" @click.self="sessionsDrawerOpen = false"></div>
 
     <div class="grid">
+      <section v-if="skillsOpen" class="panel skillsPagePanel">
+        <h2>
+          Skills
+          <span class="h2Spacer"></span>
+          <button type="button" class="h2Btn" @click="refreshSkills" :disabled="skillsLoading">
+            Refresh
+          </button>
+          <button type="button" class="h2Btn" @click="closeSkillsPage">Back</button>
+        </h2>
+
+        <SkillsPanel
+          :loading="skillsLoading"
+          :error="skillsError"
+          :data="skillsData"
+          v-model:filter="skillsFilter"
+          v-model:limit="skillsLimit"
+          :range-label="skillsRangeLabel"
+          :can-prev="skillsCanPrev"
+          :can-next="skillsCanNext"
+          :action-busy="skillsActionBusy"
+          :summarize-target="summarizeSkillTarget"
+          :badge-class="skillBadgeClass"
+          :make-key="skillsKey"
+          @prev-page="skillsPrevPage"
+          @next-page="skillsNextPage"
+          @toggle="onSkillsToggle"
+        />
+      </section>
+
+      <template v-else>
       <section
         v-if="!isPhone || sessionsDrawerOpen"
         class="panel sessionsPanel"
@@ -4098,6 +4145,7 @@ watch(
           </div>
         </div>
       </section>
+      </template>
     </div>
 
     <button
@@ -4911,27 +4959,6 @@ watch(
       </div>
     </div>
 
-    <SkillsModal
-      :open="skillsOpen"
-      :loading="skillsLoading"
-      :error="skillsError"
-      :data="skillsData"
-      v-model:filter="skillsFilter"
-      v-model:limit="skillsLimit"
-      :range-label="skillsRangeLabel"
-      :can-prev="skillsCanPrev"
-      :can-next="skillsCanNext"
-      :action-busy="skillsActionBusy"
-      :summarize-target="summarizeSkillTarget"
-      :badge-class="skillBadgeClass"
-      :make-key="skillsKey"
-      @close="skillsOpen = false"
-      @refresh="refreshSkills"
-      @prev-page="skillsPrevPage"
-      @next-page="skillsNextPage"
-      @toggle="onSkillsToggle"
-    />
-
     <div
       v-if="filesOpen"
       class="modalOverlay"
@@ -5571,8 +5598,14 @@ watch(
   container-type: inline-size;
 }
 
+.skillsPagePanel {
+  grid-column: 1 / -1;
+  max-height: calc(100vh - 110px);
+  max-height: calc(100dvh - 110px);
+}
+
 /* Sticky sidebars */
-.grid > section:first-child {
+.grid > .sessionsPanel {
   position: sticky;
   top: 90px; /* Header height + spacing */
   max-height: calc(100vh - 110px);
@@ -6567,6 +6600,11 @@ h2 {
   flex-direction: column;
   min-height: 0;
   overflow: hidden;
+}
+
+:deep(.skillsPageBody) {
+  flex: 1;
+  min-height: 0;
 }
 
 :deep(.skillsMeta) {
@@ -8829,7 +8867,7 @@ h2 {
     grid-template-columns: repeat(4, 1fr);
   }
   /* Disable sticky on mobile */
-  .grid > section:first-child {
+  .grid > .sessionsPanel {
     position: static;
     max-height: none;
   }
