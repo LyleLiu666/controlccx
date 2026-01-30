@@ -1739,6 +1739,11 @@ function openInNewTab(url: string) {
   }
 }
 
+function encodePathForQueryValue(path: string): string {
+  // Keep "/" readable in query string while still encoding other reserved chars safely.
+  return encodeURIComponent(path).replaceAll("%2F", "/");
+}
+
 async function openSkillsPage() {
   sessionsDrawerOpen.value = false;
   await Promise.all([openSkills(), refreshSkillVersions()]);
@@ -1815,7 +1820,7 @@ function applyRouteFromLocation() {
   const path = normalizeRoutePath(window.location.pathname);
   const restoreFilesRoute = () => {
     const base = (filesBase.value ?? "").trim() || ".";
-    navigateTo(`/files?base=${encodeURIComponent(base)}`, { replace: true });
+    navigateTo(`/files?base=${encodePathForQueryValue(base)}`, { replace: true });
   };
   if (path === "/skills") {
     if (filesOpen.value) {
@@ -2375,7 +2380,7 @@ function openWorkspaceFilesInNewTab() {
   const sess = selectedSession.value;
   if (!sess) return;
   const base = (sess.workdir ?? "").trim() || ".";
-  openInNewTab(`/files?base=${encodeURIComponent(base)}`);
+  openInNewTab(`/files?base=${encodePathForQueryValue(base)}`);
 }
 
 async function filesSave() {
