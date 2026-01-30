@@ -2,7 +2,7 @@
 import { computed } from "vue";
 import type { Skill, SkillsListResponse } from "../types";
 
-type SkillTarget = "claude" | "codex";
+type SkillTarget = "cursor" | "claude_code" | "codex";
 type SkillsSummary = {
   target: SkillTarget;
   status:
@@ -125,7 +125,8 @@ const skillsVisible = computed(() => props.data?.skills ?? []);
           <div class="skillsTable">
             <div class="skillsHead">
               <div>Skill</div>
-              <div>Claude</div>
+              <div>Cursor</div>
+              <div>Claude Code</div>
               <div>Codex</div>
             </div>
 
@@ -140,7 +141,7 @@ const skillsVisible = computed(() => props.data?.skills ?? []);
                 </div>
 
                 <div class="skillsCell">
-                  <template v-for="t in [summarizeTarget(s, 'claude')]" :key="t.target">
+                  <template v-for="t in [summarizeTarget(s, 'cursor')]" :key="t.target">
                     <span
                       class="pill skillStatus"
                       :class="badgeClass(t.status)"
@@ -151,32 +152,82 @@ const skillsVisible = computed(() => props.data?.skills ?? []);
                       type="button"
                       class="primary"
                       v-if="!t.enabled"
-                      @click="emit('toggle', s.name, 'claude', true)"
+                      @click="emit('toggle', s.name, 'cursor', true)"
                       :disabled="
-                        !t.canEnable || !!actionBusy.get(makeKey(s.name, 'claude'))
+                        !t.canEnable || !!actionBusy.get(makeKey(s.name, 'cursor'))
                       "
                       :title="
                         t.canEnable
-                          ? 'Enable for Claude'
+                          ? 'Enable for Cursor'
                           : 'Cannot enable: unmanaged entry exists in target root'
                       "
                     >
-                      {{ actionBusy.get(makeKey(s.name, "claude")) ? "..." : "Enable" }}
+                      {{ actionBusy.get(makeKey(s.name, "cursor")) ? "..." : "Enable" }}
                     </button>
                     <button
                       type="button"
                       v-else
-                      @click="emit('toggle', s.name, 'claude', false)"
+                      @click="emit('toggle', s.name, 'cursor', false)"
                       :disabled="
-                        !t.canDisable || !!actionBusy.get(makeKey(s.name, 'claude'))
+                        !t.canDisable || !!actionBusy.get(makeKey(s.name, 'cursor'))
                       "
                       :title="
                         t.canDisable
-                          ? 'Disable for Claude'
+                          ? 'Disable for Cursor'
                           : 'Cannot disable: unmanaged entry exists in target root'
                       "
                     >
-                      {{ actionBusy.get(makeKey(s.name, "claude")) ? "..." : "Disable" }}
+                      {{ actionBusy.get(makeKey(s.name, "cursor")) ? "..." : "Disable" }}
+                    </button>
+                  </template>
+                </div>
+
+                <div class="skillsCell">
+                  <template v-for="t in [summarizeTarget(s, 'claude_code')]" :key="t.target">
+                    <span
+                      class="pill skillStatus"
+                      :class="badgeClass(t.status)"
+                      :title="t.detail"
+                      >{{ t.status }}</span
+                    >
+                    <button
+                      type="button"
+                      class="primary"
+                      v-if="!t.enabled"
+                      @click="emit('toggle', s.name, 'claude_code', true)"
+                      :disabled="
+                        !t.canEnable ||
+                        !!actionBusy.get(makeKey(s.name, 'claude_code'))
+                      "
+                      :title="
+                        t.canEnable
+                          ? 'Enable for Claude Code'
+                          : 'Cannot enable: unmanaged entry exists in target root'
+                      "
+                    >
+                      {{
+                        actionBusy.get(makeKey(s.name, "claude_code")) ? "..." : "Enable"
+                      }}
+                    </button>
+                    <button
+                      type="button"
+                      v-else
+                      @click="emit('toggle', s.name, 'claude_code', false)"
+                      :disabled="
+                        !t.canDisable ||
+                        !!actionBusy.get(makeKey(s.name, 'claude_code'))
+                      "
+                      :title="
+                        t.canDisable
+                          ? 'Disable for Claude Code'
+                          : 'Cannot disable: unmanaged entry exists in target root'
+                      "
+                    >
+                      {{
+                        actionBusy.get(makeKey(s.name, "claude_code"))
+                          ? "..."
+                          : "Disable"
+                      }}
                     </button>
                   </template>
                 </div>
@@ -236,4 +287,3 @@ const skillsVisible = computed(() => props.data?.skills ?? []);
     </div>
   </div>
 </template>
-

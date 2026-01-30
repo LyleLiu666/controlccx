@@ -59,6 +59,7 @@ import { prettifyLogMessage } from "./logPretty";
 import { deriveRunActivity } from "./runActivity";
 import SkillsPanel from "./components/SkillsPanel.vue";
 import SkillsVersionsPanel from "./components/SkillsVersionsPanel.vue";
+import SkillsGovernancePanel from "./components/SkillsGovernancePanel.vue";
 import SecretaryDrawer from "./components/SecretaryDrawer.vue";
 import { useSkills } from "./composables/useSkills";
 import { useSkillVersions } from "./composables/useSkillVersions";
@@ -3539,18 +3540,22 @@ watch(
 	        </h2>
 
           <div class="skillsPageWrap">
-            <SkillsVersionsPanel
-              :loading="skillsVersionsLoading"
-              :error="skillsVersionsError"
-              :data="skillsVersionsData"
-              v-model:new-id="skillsVersionNewId"
-              v-model:new-note="skillsVersionNewNote"
-              :creating="skillsVersionsCreating"
-              :deleting="skillsVersionsDeleting"
-              @refresh="refreshSkillVersions"
-              @create="createSkillVersionFromForm"
-              @delete="deleteSkillVersionByID"
-            />
+            <div class="skillsLeftCol">
+              <SkillsGovernancePanel />
+
+              <SkillsVersionsPanel
+                :loading="skillsVersionsLoading"
+                :error="skillsVersionsError"
+                :data="skillsVersionsData"
+                v-model:new-id="skillsVersionNewId"
+                v-model:new-note="skillsVersionNewNote"
+                :creating="skillsVersionsCreating"
+                :deleting="skillsVersionsDeleting"
+                @refresh="refreshSkillVersions"
+                @create="createSkillVersionFromForm"
+                @delete="deleteSkillVersionByID"
+              />
+            </div>
 
             <SkillsPanel
               :loading="skillsLoading"
@@ -6817,7 +6822,7 @@ h2 {
 
 :deep(.skillsHead) {
   display: grid;
-  grid-template-columns: 1.4fr 1fr 1fr;
+  grid-template-columns: 1.4fr 1fr 1fr 1fr;
   gap: 12px;
   padding: 10px 12px;
   background: var(--bg-subtle);
@@ -6831,7 +6836,7 @@ h2 {
 
 :deep(.skillsRow) {
   display: grid;
-  grid-template-columns: 1.4fr 1fr 1fr;
+  grid-template-columns: 1.4fr 1fr 1fr 1fr;
   gap: 12px;
   padding: 12px;
   border-top: 1px solid var(--border-color);
@@ -6891,6 +6896,14 @@ h2 {
   overflow: hidden;
 }
 
+:deep(.skillsLeftCol) {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-height: 0;
+  overflow: hidden;
+}
+
 :deep(.skillsVersionsCard) {
   border: 1px solid var(--border-color);
   border-radius: 14px;
@@ -6938,6 +6951,101 @@ h2 {
   border-top: 1px solid var(--border-color);
   margin-top: 12px;
   padding-top: 12px;
+}
+
+:deep(.skillsGovernanceCard) {
+  border: 1px solid var(--border-color);
+  border-radius: 14px;
+  background: var(--bg-panel);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+  overflow: auto;
+}
+
+:deep(.skillsGovernanceHeader) {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+:deep(.skillsGovernanceHeaderBtns) {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+:deep(.skillsGovernanceTitle) {
+  font-weight: 800;
+}
+
+:deep(.skillsGovernanceTools) {
+  display: grid;
+  gap: 8px;
+}
+
+:deep(.skillsGovToolRow) {
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  gap: 10px;
+  align-items: center;
+}
+
+:deep(.skillsGovToolRoots) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+:deep(.skillsGovSection) {
+  border-top: 1px solid var(--border-color);
+  padding-top: 12px;
+}
+
+:deep(.skillsGovSectionTitle) {
+  font-weight: 800;
+  margin-bottom: 8px;
+}
+
+:deep(.skillsGovForm) {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto;
+  gap: 10px;
+  align-items: center;
+}
+
+:deep(.skillsGovForm input),
+:deep(.skillsGovForm select) {
+  width: 100%;
+  min-width: 0;
+}
+
+:deep(.skillsGovCheckbox) {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  white-space: nowrap;
+}
+
+:deep(.skillsGovCandidates) {
+  display: grid;
+  gap: 8px;
+  margin: 8px 0;
+}
+
+:deep(.skillsGovOnboardingList) {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+:deep(.skillsGovOnboardingRow) {
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  gap: 10px;
+  align-items: center;
 }
 
 :deep(.skillsVersionRow) {

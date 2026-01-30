@@ -97,7 +97,7 @@ func (a *API) handleSkillsLink(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name := strings.TrimSpace(body.Name)
-	target := skills.Target(strings.TrimSpace(body.Target))
+	target := normalizeSkillsTarget(body.Target)
 	if name == "" || target == "" {
 		http.Error(w, "name and target are required", http.StatusBadRequest)
 		return
@@ -127,7 +127,7 @@ func (a *API) handleSkillsUnlink(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name := strings.TrimSpace(body.Name)
-	target := skills.Target(strings.TrimSpace(body.Target))
+	target := normalizeSkillsTarget(body.Target)
 	if name == "" || target == "" {
 		http.Error(w, "name and target are required", http.StatusBadRequest)
 		return

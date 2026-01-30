@@ -112,4 +112,3 @@ func TestAPI_TraceAndLogQueryExport(t *testing.T) {
 		t.Fatalf("export should exclude filtered lines: %q", text)
 	}
 }
-

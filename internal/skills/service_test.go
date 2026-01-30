@@ -33,7 +33,7 @@ func TestService_ListAndLinkUnlink(t *testing.T) {
 	}
 
 	// Link to Claude target.
-	if err := svc.Link(ctx, "skill-creator", TargetClaude); err != nil {
+	if err := svc.Link(ctx, "skill-creator", TargetClaudeCode); err != nil {
 		t.Fatalf("link claude: %v", err)
 	}
 	claudePath := filepath.Join(home, ".claude", "skills", "skill-creator")
@@ -59,7 +59,7 @@ func TestService_ListAndLinkUnlink(t *testing.T) {
 	}
 
 	// Unlink should remove targets but keep source intact.
-	if err := svc.Unlink(ctx, "skill-creator", TargetClaude); err != nil {
+	if err := svc.Unlink(ctx, "skill-creator", TargetClaudeCode); err != nil {
 		t.Fatalf("unlink claude: %v", err)
 	}
 	if _, err := os.Lstat(claudePath); !os.IsNotExist(err) {
@@ -97,7 +97,7 @@ func TestService_BrokenLinkDetected(t *testing.T) {
 	}
 	foundBroken := false
 	for _, st := range out.Skills[0].Targets {
-		if st.Target == TargetClaude && st.Status == StatusBroken {
+		if st.Target == TargetClaudeCode && st.Status == StatusBroken {
 			foundBroken = true
 		}
 	}
@@ -124,7 +124,7 @@ func TestService_CopyFallback(t *testing.T) {
 		t.Fatalf("new service: %v", err)
 	}
 
-	if err := svc.Link(ctx, "skill-creator", TargetClaude); err != nil {
+	if err := svc.Link(ctx, "skill-creator", TargetClaudeCode); err != nil {
 		t.Fatalf("link: %v", err)
 	}
 	destDir := filepath.Join(home, ".claude", "skills", "skill-creator")
@@ -139,11 +139,55 @@ func TestService_CopyFallback(t *testing.T) {
 		t.Fatalf("expected copied file: %v", err)
 	}
 
-	if err := svc.Unlink(ctx, "skill-creator", TargetClaude); err != nil {
+	if err := svc.Unlink(ctx, "skill-creator", TargetClaudeCode); err != nil {
 		t.Fatalf("unlink: %v", err)
 	}
 	if _, err := os.Stat(destDir); !os.IsNotExist(err) {
 		t.Fatalf("expected removed, err=%v", err)
+	}
+}
+
+func TestService_SyncCursor_ForcesCopy_AndSupportsOverwrite(t *testing.T) {
+	ctx := context.Background()
+	home := t.TempDir()
+	sourceRoot := filepath.Join(home, ".agents", "skills")
+	mustMkdir(t, filepath.Join(sourceRoot, "demo"))
+	mustWrite(t, filepath.Join(sourceRoot, "demo", "README.md"), "hello\n")
+
+	cursorRoot := filepath.Join(home, ".cursor", "skills")
+	mustMkdir(t, filepath.Join(cursorRoot, "demo"))
+	mustWrite(t, filepath.Join(cursorRoot, "demo", "unmanaged.txt"), "x\n")
+
+	svc, err := NewService(Options{HomeDir: home, SourceRoots: []string{sourceRoot}})
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+
+	err = svc.Sync(ctx, "demo", TargetCursor, false)
+	if err == nil || !hasPrefix(err.Error(), errPrefixTargetExists) {
+		t.Fatalf("expected %s error, got=%v", errPrefixTargetExists, err)
+	}
+
+	if err := svc.Sync(ctx, "demo", TargetCursor, true); err != nil {
+		t.Fatalf("sync overwrite: %v", err)
+	}
+
+	dest := filepath.Join(cursorRoot, "demo")
+	fi, err := os.Lstat(dest)
+	if err != nil {
+		t.Fatalf("lstat dest: %v", err)
+	}
+	if fi.Mode()&os.ModeSymlink != 0 {
+		t.Fatalf("expected copy (not symlink) for cursor, mode=%v", fi.Mode())
+	}
+	if !fi.IsDir() {
+		t.Fatalf("expected dest dir, mode=%v", fi.Mode())
+	}
+	if _, err := os.Stat(filepath.Join(dest, managedMarkerFile)); err != nil {
+		t.Fatalf("expected marker file: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dest, "README.md")); err != nil {
+		t.Fatalf("expected copied file: %v", err)
 	}
 }
 
@@ -171,4 +215,3 @@ func assertSymlink(t *testing.T, path string) {
 		t.Fatalf("expected symlink at %s, mode=%v", path, fi.Mode())
 	}
 }
-

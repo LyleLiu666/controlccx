@@ -2,7 +2,7 @@ import { computed, ref, watch } from "vue";
 import type { Skill, SkillsListResponse } from "../types";
 import { fetchSkills, linkSkill, unlinkSkill } from "../api";
 
-type SkillTarget = "claude" | "codex";
+type SkillTarget = "cursor" | "claude_code" | "codex";
 type SkillsSummary = {
   target: SkillTarget;
   status:
@@ -200,4 +200,3 @@ export function useSkills() {
     skillBadgeClass,
   };
 }
-

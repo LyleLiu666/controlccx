@@ -14,8 +14,9 @@ import (
 type Target string
 
 const (
-	TargetClaude Target = "claude"
-	TargetCodex  Target = "codex"
+	TargetClaudeCode Target = "claude_code"
+	TargetCodex      Target = "codex"
+	TargetCursor     Target = "cursor"
 )
 
 type EntryStatus string
@@ -33,8 +34,8 @@ const (
 const managedMarkerFile = ".controlccx_skill_source"
 
 type TargetRoot struct {
-	Target Target  `json:"target"`
-	Root   string  `json:"root"`
+	Target Target `json:"target"`
+	Root   string `json:"root"`
 }
 
 type TargetState struct {
@@ -66,11 +67,11 @@ type Options struct {
 }
 
 type Service struct {
-	homeDir     string
-	sourceRoots []string
+	homeDir             string
+	sourceRoots         []string
 	sourceRootsResolved []string
-	targetRoots map[Target][]string
-	symlink     func(oldname, newname string) error
+	targetRoots         map[Target][]string
+	symlink             func(oldname, newname string) error
 }
 
 func NewService(opts Options) (*Service, error) {
@@ -108,6 +109,7 @@ func NewService(opts Options) (*Service, error) {
 	}
 
 	claudeRoot := filepath.Join(home, ".claude", "skills")
+	cursorRoot := filepath.Join(home, ".cursor", "skills")
 	codexRoots := []string{filepath.Join(home, ".codex", "skills")}
 	if strings.TrimSpace(opts.CodexHome) != "" {
 		ch := expandHome(strings.TrimSpace(opts.CodexHome), home)
@@ -132,12 +134,13 @@ func NewService(opts Options) (*Service, error) {
 	}
 
 	return &Service{
-		homeDir:     home,
-		sourceRoots: dedupePaths(normalizedRoots),
+		homeDir:             home,
+		sourceRoots:         dedupePaths(normalizedRoots),
 		sourceRootsResolved: dedupePaths(resolvedRoots),
 		targetRoots: map[Target][]string{
-			TargetClaude: {claudeRoot},
-			TargetCodex:  codexRoots,
+			TargetClaudeCode: {claudeRoot},
+			TargetCodex:      codexRoots,
+			TargetCursor:     {cursorRoot},
 		},
 		symlink: symlinkFn,
 	}, nil
@@ -245,6 +248,10 @@ func (s *Service) List(ctx context.Context) (ListResponse, error) {
 }
 
 func (s *Service) Link(ctx context.Context, name string, target Target) error {
+	return s.Sync(ctx, name, target, false)
+}
+
+func (s *Service) Sync(ctx context.Context, name string, target Target, overwrite bool) error {
 	_ = ctx
 	name = strings.TrimSpace(name)
 	if !isSafeName(name) {
@@ -261,7 +268,8 @@ func (s *Service) Link(ctx context.Context, name string, target Target) error {
 	}
 
 	for _, root := range roots {
-		if err := s.linkOne(root, name, sourcePath); err != nil {
+		forceCopy := target == TargetCursor
+		if err := s.linkOne(root, name, sourcePath, overwrite, forceCopy); err != nil {
 			return err
 		}
 	}
@@ -305,7 +313,7 @@ func (s *Service) resolveSourcePath(name string) (string, error) {
 	return filepath.Clean(candidates[0]), nil
 }
 
-func (s *Service) linkOne(targetRoot, name, sourcePath string) error {
+func (s *Service) linkOne(targetRoot, name, sourcePath string, overwrite bool, forceCopy bool) error {
 	targetRoot = filepath.Clean(targetRoot)
 	dest := filepath.Join(targetRoot, name)
 
@@ -326,31 +334,43 @@ func (s *Service) linkOne(targetRoot, name, sourcePath string) error {
 	// Handle existing dest.
 	if st, err := os.Lstat(dest); err == nil {
 		if st.Mode()&os.ModeSymlink != 0 {
-			// Only allow replacing a symlink if it points to allowed roots.
-			linkTo, _ := os.Readlink(dest)
-			if !isAllowedLinkTarget(targetRoot, linkTo, s.sourceRootsResolved) {
-				return fmt.Errorf("skills: target exists and is not managed: %s", dest)
+			if overwrite {
+				_ = os.Remove(dest)
+			} else {
+				// Only allow replacing a symlink if it points to allowed roots.
+				linkTo, _ := os.Readlink(dest)
+				if !isAllowedLinkTarget(targetRoot, linkTo, s.sourceRootsResolved) {
+					return errTargetExists(dest)
+				}
+				_ = os.Remove(dest)
 			}
-			_ = os.Remove(dest)
 		} else if st.IsDir() {
 			if isManagedCopy(dest) {
 				_ = os.RemoveAll(dest)
+			} else if overwrite {
+				_ = os.RemoveAll(dest)
 			} else {
-				return fmt.Errorf("skills: target exists and is a directory: %s", dest)
+				return errTargetExists(dest)
 			}
 		} else {
-			return fmt.Errorf("skills: target exists: %s", dest)
+			if overwrite {
+				_ = os.Remove(dest)
+			} else {
+				return errTargetExists(dest)
+			}
 		}
 	} else if err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("skills: stat target: %w", err)
 	}
 
-	linkTarget := sourcePath
-	if rel, err := filepath.Rel(targetRoot, sourcePath); err == nil {
-		linkTarget = rel
-	}
-	if err := s.symlink(linkTarget, dest); err == nil {
-		return nil
+	if !forceCopy {
+		linkTarget := sourcePath
+		if rel, err := filepath.Rel(targetRoot, sourcePath); err == nil {
+			linkTarget = rel
+		}
+		if err := s.symlink(linkTarget, dest); err == nil {
+			return nil
+		}
 	}
 
 	// Fallback: copy the directory and mark it as managed.

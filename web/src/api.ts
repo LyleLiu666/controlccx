@@ -13,6 +13,10 @@ import type {
   LogEntry,
   ToolsListResponse,
   SkillsListResponse,
+  SkillsToolsResponse,
+  OnboardingPlan,
+  ManagedSkill,
+  GitCandidatesResponse,
   SkillVersion,
   SkillVersionsListResponse,
   SystemInfo,
@@ -275,16 +279,68 @@ export async function fetchSkills(opts?: {
 
 export async function linkSkill(input: {
   name: string;
-  target: "claude" | "codex";
+  target: "cursor" | "claude_code" | "codex";
 }): Promise<{ ok: boolean }> {
   return postJSON<{ ok: boolean }>("/api/skills/link", input);
 }
 
 export async function unlinkSkill(input: {
   name: string;
-  target: "claude" | "codex";
+  target: "cursor" | "claude_code" | "codex";
 }): Promise<{ ok: boolean }> {
   return postJSON<{ ok: boolean }>("/api/skills/unlink", input);
+}
+
+export async function syncSkill(input: {
+  name: string;
+  target: "cursor" | "claude_code" | "codex";
+  overwrite?: boolean;
+}): Promise<{ ok: boolean }> {
+  return postJSON<{ ok: boolean }>("/api/skills/sync", input);
+}
+
+export async function fetchSkillsTools(): Promise<SkillsToolsResponse> {
+  return getJSON<SkillsToolsResponse>("/api/skills/tools");
+}
+
+export async function fetchSkillsOnboarding(): Promise<OnboardingPlan> {
+  return getJSON<OnboardingPlan>("/api/skills/onboarding");
+}
+
+export async function importExistingSkill(input: {
+  source_path: string;
+  name: string;
+  tool?: string;
+  overwrite?: boolean;
+}): Promise<ManagedSkill> {
+  return postJSON<ManagedSkill>("/api/skills/import", input);
+}
+
+export async function installSkillLocal(input: {
+  source_path: string;
+  name?: string;
+  overwrite?: boolean;
+}): Promise<ManagedSkill> {
+  return postJSON<ManagedSkill>("/api/skills/install/local", input);
+}
+
+export async function listGitSkillCandidates(input: {
+  repo_url: string;
+}): Promise<GitCandidatesResponse> {
+  return postJSON<GitCandidatesResponse>("/api/skills/git/candidates", input);
+}
+
+export async function installSkillGit(input: {
+  repo_url: string;
+  subpath?: string;
+  name?: string;
+  overwrite?: boolean;
+}): Promise<ManagedSkill> {
+  return postJSON<ManagedSkill>("/api/skills/install/git", input);
+}
+
+export async function updateManagedSkill(input: { name: string }): Promise<ManagedSkill> {
+  return postJSON<ManagedSkill>("/api/skills/update", input);
 }
 
 export async function fetchSkillVersions(): Promise<SkillVersionsListResponse> {

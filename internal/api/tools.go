@@ -70,4 +70,3 @@ func (a *API) handleToolsDelete(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, map[string]any{"ok": true})
 }
-

@@ -49,12 +49,12 @@ export type Task = {
 };
 
 export type SkillTargetRoot = {
-  target: "claude" | "codex";
+  target: "cursor" | "claude_code" | "codex";
   root: string;
 };
 
 export type SkillTargetState = {
-  target: "claude" | "codex";
+  target: "cursor" | "claude_code" | "codex";
   root: string;
   status:
     | "missing"
@@ -82,6 +82,64 @@ export type SkillsListResponse = {
   total?: number;
   offset?: number;
   limit?: number;
+};
+
+export type SkillsToolInfo = {
+  key: string;
+  display_name: string;
+  installed: boolean;
+  detect_paths?: string[];
+  skills_roots?: string[];
+};
+
+export type SkillsToolsResponse = {
+  tools: SkillsToolInfo[];
+};
+
+export type OnboardingVariant = {
+  tool: string;
+  root: string;
+  name: string;
+  path: string;
+  fingerprint?: string;
+  is_link?: boolean;
+  link_target?: string;
+};
+
+export type OnboardingGroup = {
+  name: string;
+  variants: OnboardingVariant[];
+  has_conflict: boolean;
+};
+
+export type OnboardingPlan = {
+  total_tools_scanned: number;
+  total_skills_found: number;
+  groups: OnboardingGroup[];
+};
+
+export type ManagedSkill = {
+  name: string;
+  path: string;
+  source_type?: string;
+  source_tool?: string;
+  source_ref?: string;
+  source_branch?: string;
+  source_subpath?: string;
+  source_revision?: string;
+  content_hash?: string;
+  created_at?: string;
+  updated_at?: string;
+};
+
+export type GitSkillCandidate = {
+  name: string;
+  description?: string;
+  subpath: string;
+};
+
+export type GitCandidatesResponse = {
+  candidates: GitSkillCandidate[];
 };
 
 export type SkillVersion = {
