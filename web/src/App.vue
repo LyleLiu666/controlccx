@@ -1776,19 +1776,12 @@ function encodePathForQueryValue(path: string): string {
 }
 
 async function openSkillsPage() {
+  navigateTo("/skills");
   sessionsDrawerOpen.value = false;
   await Promise.all([openSkills(), refreshSkillVersions()]);
 }
 
-function openSkillsInNewTab() {
-  if (typeof window === "undefined") return;
-  const path = normalizeRoutePath(window.location.pathname);
-  if (path === "/skills") {
-    void refreshSkillsPage();
-    return;
-  }
-  openInNewTab("/skills");
-}
+
 
 function closeSkillsPage() {
   skillsOpen.value = false;

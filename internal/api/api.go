@@ -575,16 +575,16 @@ func (a *API) handleTaskByID(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		explicitSafety := body.UnsafeAutomation ||
-			strings.TrimSpace(body.SafetyEnvelope) != "" ||
-			strings.TrimSpace(body.SafetyPreset) != "" ||
-			strings.TrimSpace(body.TaskIntent) != "" ||
-			strings.TrimSpace(body.CodexSandbox) != "" ||
-			strings.TrimSpace(body.CodexApprovalPolicy) != "" ||
-			body.CodexSearch ||
-			strings.TrimSpace(body.ClaudePermissionMode) != "" ||
-			body.ClaudeSandbox ||
-			len(body.ClaudeWebFetchDomains) > 0
+			// SafetyEnvelope is an autopilot hint (UI-level “one-time unlock”); it does not count as an explicit safety override.
+			explicitSafety := body.UnsafeAutomation ||
+				strings.TrimSpace(body.SafetyPreset) != "" ||
+				strings.TrimSpace(body.TaskIntent) != "" ||
+				strings.TrimSpace(body.CodexSandbox) != "" ||
+				strings.TrimSpace(body.CodexApprovalPolicy) != "" ||
+				body.CodexSearch ||
+				strings.TrimSpace(body.ClaudePermissionMode) != "" ||
+				body.ClaudeSandbox ||
+				len(body.ClaudeWebFetchDomains) > 0
 
 		unsafe := body.UnsafeAutomation
 		safetyEnvelope := strings.TrimSpace(body.SafetyEnvelope)

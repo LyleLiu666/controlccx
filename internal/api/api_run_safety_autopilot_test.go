@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -164,6 +165,7 @@ func TestAPI_ResumeTask_SafetyEnvelopeDoesNotOverridePreviousSafety(t *testing.T
 		Mode:               tasks.ModeNew,
 		Prompt:             "search-browse: find docs for xyz",
 		WorkDir:            ".",
+		SessionID:          "sess-123",
 		TaskIntent:         "search-browse",
 		SafetyPreset:       "search-browse",
 		CodexSandbox:       "workspace-write",
@@ -196,7 +198,8 @@ func TestAPI_ResumeTask_SafetyEnvelopeDoesNotOverridePreviousSafety(t *testing.T
 	}
 	defer resumeRes.Body.Close()
 	if resumeRes.StatusCode != http.StatusOK {
-		t.Fatalf("resume status=%d, want 200", resumeRes.StatusCode)
+		b, _ := io.ReadAll(resumeRes.Body)
+		t.Fatalf("resume status=%d, want 200; body=%s", resumeRes.StatusCode, strings.TrimSpace(string(b)))
 	}
 
 	var resumed tasks.Task
