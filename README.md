@@ -2,6 +2,10 @@
 
 Go + Vue “control center” for running multiple agent workers (Claude Code / Codex) asynchronously, with a built-in observer that can answer questions about current task state.
 
+## Vision（愿景）
+
+本项目只是一个让用户可以用得更舒服的盒子：我们不应该管太多，而是应该把 Claude Code 和 OpenAI Codex 用出最佳实践。
+
 ## One-command start
 
 ### Dev (API + UI, cross-platform)
