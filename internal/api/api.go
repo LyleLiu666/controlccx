@@ -16,6 +16,7 @@ import (
 	"controlccx/internal/chat"
 	"controlccx/internal/events"
 	"controlccx/internal/observer"
+	"controlccx/internal/runworkspace"
 	"controlccx/internal/skills"
 	"controlccx/internal/systeminfo"
 	"controlccx/internal/tasks"
@@ -450,6 +451,65 @@ func (a *API) handleTaskByID(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeJSON(w, map[string]any{"task": task, "invocation": inv})
+	case "workspace":
+		key := tasks.SessionKey(id, "")
+		if len(parts) == 2 {
+			if r.Method != http.MethodGet {
+				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+				return
+			}
+			ws, ok, err := a.Tasks.GetSessionWorkspace(r.Context(), key)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			if !ok {
+				writeJSON(w, map[string]any{"workspace": nil})
+				return
+			}
+			writeJSON(w, map[string]any{"workspace": ws})
+			return
+		}
+
+		if len(parts) < 3 {
+			http.NotFound(w, r)
+			return
+		}
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		svc := runworkspace.NewService(a.Tasks)
+		switch parts[2] {
+		case "merge":
+			if err := svc.Merge(r.Context(), key); err != nil {
+				var conflict *runworkspace.ConflictError
+				if errors.As(err, &conflict) {
+					writeJSONStatus(w, http.StatusConflict, conflict)
+					return
+				}
+				if strings.Contains(err.Error(), "workspace not found") {
+					http.Error(w, err.Error(), http.StatusNotFound)
+					return
+				}
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			writeJSON(w, map[string]any{"ok": true})
+		case "discard":
+			if err := svc.Discard(r.Context(), key); err != nil {
+				if strings.Contains(err.Error(), "workspace not found") {
+					http.Error(w, err.Error(), http.StatusNotFound)
+					return
+				}
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			writeJSON(w, map[string]any{"ok": true})
+		default:
+			http.NotFound(w, r)
+		}
 	case "resume":
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -487,21 +547,21 @@ func (a *API) handleTaskByID(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		newTask, err := a.Tasks.CreateTask(r.Context(), tasks.CreateTaskInput{
-			WorkerType:       prev.WorkerType,
-			Mode:             tasks.ModeResume,
-			UnsafeAutomation: body.UnsafeAutomation,
-			SafetyPreset:     body.SafetyPreset,
-			TaskIntent:       body.TaskIntent,
-			CodexSandbox:     body.CodexSandbox,
-			CodexApprovalPolicy: body.CodexApprovalPolicy,
-			CodexSearch:      body.CodexSearch,
-			ClaudePermissionMode: body.ClaudePermissionMode,
-			ClaudeSandbox:    body.ClaudeSandbox,
+			WorkerType:            prev.WorkerType,
+			Mode:                  tasks.ModeResume,
+			UnsafeAutomation:      body.UnsafeAutomation,
+			SafetyPreset:          body.SafetyPreset,
+			TaskIntent:            body.TaskIntent,
+			CodexSandbox:          body.CodexSandbox,
+			CodexApprovalPolicy:   body.CodexApprovalPolicy,
+			CodexSearch:           body.CodexSearch,
+			ClaudePermissionMode:  body.ClaudePermissionMode,
+			ClaudeSandbox:         body.ClaudeSandbox,
 			ClaudeWebFetchDomains: body.ClaudeWebFetchDomains,
-			Prompt:           body.Prompt,
-			WorkDir:          prev.WorkDir,
-			SessionID:        prev.SessionID,
-			Warning:          prev.Warning,
+			Prompt:                body.Prompt,
+			WorkDir:               prev.WorkDir,
+			SessionID:             prev.SessionID,
+			Warning:               prev.Warning,
 		})
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
@@ -677,6 +737,12 @@ func (a *API) handleEvents(w http.ResponseWriter, r *http.Request) {
 
 func writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(v)
+}
+
+func writeJSONStatus(w http.ResponseWriter, status int, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(v)
 }
 

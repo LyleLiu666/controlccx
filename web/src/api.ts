@@ -4,6 +4,7 @@ import type {
   AuthPatch,
   AuthStatus,
   ChatMessage,
+  ConflictError,
   FSDeleteResponse,
   FSEntriesResponse,
   FSListResponse,
@@ -12,6 +13,7 @@ import type {
   FSMkdirResponse,
   FSWriteResponse,
   LogEntry,
+  SessionWorkspace,
   ToolsListResponse,
   SkillsListResponse,
   SkillsToolsResponse,
@@ -120,6 +122,32 @@ export async function fetchLogs(taskId: string, after = 0, limit = 500): Promise
 
 export async function fetchTaskTrace(taskId: string): Promise<TaskTraceResponse> {
   return getJSON<TaskTraceResponse>(`/api/tasks/${taskId}/trace`);
+}
+
+export async function fetchTaskWorkspace(taskId: string): Promise<SessionWorkspace | null> {
+  const res = await getJSON<{ workspace: SessionWorkspace | null }>(`/api/tasks/${taskId}/workspace`);
+  return res.workspace ?? null;
+}
+
+export async function mergeTaskWorkspace(
+  taskId: string,
+): Promise<{ ok: true } | { ok: false; conflict: ConflictError }> {
+  const res = await fetch(`/api/tasks/${taskId}/workspace/merge`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: "{}",
+    credentials: "same-origin",
+  });
+  if (res.status === 409) {
+    const conflict = (await res.json()) as ConflictError;
+    return { ok: false, conflict };
+  }
+  if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
+  return (await res.json()) as { ok: true };
+}
+
+export async function discardTaskWorkspace(taskId: string): Promise<{ ok: boolean }> {
+  return postJSON<{ ok: boolean }>(`/api/tasks/${taskId}/workspace/discard`, {});
 }
 
 export async function fetchChat(after = 0, limit = 200): Promise<ChatMessage[]> {

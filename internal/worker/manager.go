@@ -18,6 +18,7 @@ import (
 	"controlccx/internal/config"
 	"controlccx/internal/events"
 	"controlccx/internal/execenv"
+	"controlccx/internal/runworkspace"
 	"controlccx/internal/tasks"
 	"controlccx/internal/tooling"
 )
@@ -113,6 +114,23 @@ func (m *Manager) run(ctx context.Context, task tasks.Task) error {
 		})
 		m.publishTaskUpdated(task.ID)
 		return err
+	}
+
+	if (driver == tasks.WorkerClaudeCode || driver == tasks.WorkerCodex) && m != nil && m.store != nil {
+		ws, err := runworkspace.NewService(m.store).EnsureForTask(ctx, task)
+		if err != nil {
+			m.appendLog(task.ID, tasks.LogSystem, fmt.Sprintf("workspace warning: %v", err))
+		} else if strings.TrimSpace(ws.RunWorkDir) != "" {
+			runTask := task
+			runTask.WorkDir = ws.RunWorkDir
+			if nextTool, nextDriver, err := m.buildToolCommand(runTask); err != nil {
+				m.appendLog(task.ID, tasks.LogSystem, fmt.Sprintf("workspace warning: failed to rebuild tool command: %v", err))
+			} else {
+				tool = nextTool
+				driver = nextDriver
+				m.appendLog(task.ID, tasks.LogSystem, fmt.Sprintf("workspace.active kind=%s run=%s", ws.Kind, ws.RunWorkDir))
+			}
+		}
 	}
 
 	if tool.Warning != "" {

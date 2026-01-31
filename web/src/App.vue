@@ -66,6 +66,7 @@ import ToolsSettingsModal from "./components/ToolsSettingsModal.vue";
 import { useSkills } from "./composables/useSkills";
 import { useSkillVersions } from "./composables/useSkillVersions";
 import { useSecretaryChat } from "./composables/useSecretaryChat";
+import { useTaskWorkspace } from "./composables/useTaskWorkspace";
 import { useTasks } from "./composables/useTasks";
 import { useLiveFeed } from "./composables/useLiveFeed";
 
@@ -220,6 +221,39 @@ const {
     chat.value = appendChatMessageUnique(chat.value, m);
   },
 });
+
+const {
+  workspace: runWorkspace,
+  loading: runWorkspaceLoading,
+  error: runWorkspaceError,
+  conflict: runWorkspaceConflict,
+  merge: mergeRunWorkspace,
+  discard: discardRunWorkspace,
+} = useTaskWorkspace(selectedTaskId);
+
+function conflictSummary(c: any): string {
+  if (!c) return "";
+  const msg = String(c.message ?? "").trim() || "conflict";
+  const list = Array.isArray(c.conflicts) ? c.conflicts.filter((x: any) => typeof x === "string" && x.trim()) : [];
+  if (!list.length) return msg;
+  const head = list.slice(0, 4).join(", ");
+  const tail = list.length > 4 ? ` +${list.length - 4} more` : "";
+  return `${msg}: ${head}${tail}`;
+}
+
+async function onMergeRunWorkspace() {
+  const ws = runWorkspace.value;
+  if (!ws || ws.status !== "active") return;
+  if (!confirm("Merge isolated workspace changes back into your base workdir/branch?")) return;
+  await mergeRunWorkspace();
+}
+
+async function onDiscardRunWorkspace() {
+  const ws = runWorkspace.value;
+  if (!ws || ws.status !== "active") return;
+  if (!confirm("Discard isolated workspace changes? (This deletes the run workspace folder.)")) return;
+  await discardRunWorkspace();
+}
 
 const selectedRunInstruction = computed(() => {
   const t = selectedTask.value;
@@ -4133,6 +4167,48 @@ watch(
                         Delete session
                       </button>
                     </div>
+                    <template v-if="runWorkspace">
+                      <div class="detailPopupWorkdir mono" :title="runWorkspace.run_workdir">
+                        Run workspace: {{ runWorkspace.run_workdir }}
+                      </div>
+                      <div class="detailMoreActions">
+                        <button
+                          type="button"
+                          @click="copyText(runWorkspace.run_workdir)"
+                          title="Copy run workspace dir"
+                        >
+                          Copy run dir
+                        </button>
+                        <button
+                          v-if="runWorkspace.status === 'active'"
+                          type="button"
+                          @click="onMergeRunWorkspace"
+                          :disabled="runWorkspaceLoading"
+                          title="Merge changes back"
+                        >
+                          Merge back
+                        </button>
+                        <button
+                          v-if="runWorkspace.status === 'active'"
+                          type="button"
+                          class="dangerBtn"
+                          @click="onDiscardRunWorkspace"
+                          :disabled="runWorkspaceLoading"
+                          title="Discard and delete run workspace"
+                        >
+                          Discard
+                        </button>
+                        <span class="tinyHint"
+                          >{{ runWorkspace.kind }} · {{ runWorkspace.status }}</span
+                        >
+                      </div>
+                      <div v-if="runWorkspaceConflict" class="tinyHint warn">
+                        {{ conflictSummary(runWorkspaceConflict) }}
+                      </div>
+                      <div v-else-if="runWorkspaceError" class="tinyHint warn">
+                        {{ runWorkspaceError }}
+                      </div>
+                    </template>
                     <div class="detailMoreGrid">
                       <div>
                         <span class="k">Session</span>
