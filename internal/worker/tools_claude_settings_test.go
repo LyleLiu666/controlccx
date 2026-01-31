@@ -56,7 +56,7 @@ func TestBuildToolCommand_Claude_NoNetwork_DeniesWebFetchAndCurl(t *testing.T) {
 	}
 }
 
-func TestBuildToolCommand_Claude_SearchBrowse_UsesWebFetchAllowlistAndDeniesCurlWget(t *testing.T) {
+func TestBuildToolCommand_Claude_SearchBrowse_AllowsWebFetchAndDeniesCurlWget(t *testing.T) {
 	cfg := config.Default()
 	task := tasks.Task{
 		WorkerType:            tasks.WorkerClaudeCode,
@@ -85,8 +85,8 @@ func TestBuildToolCommand_Claude_SearchBrowse_UsesWebFetchAllowlistAndDeniesCurl
 	}
 
 	allow := stringsFromAny(settings["permissions"], "allow")
-	if !contains(allow, "WebFetch(domain:docs.claude.com)") {
-		t.Fatalf("settings.permissions.allow=%v, expected WebFetch(domain:docs.claude.com)", allow)
+	if !contains(allow, "WebFetch") {
+		t.Fatalf("settings.permissions.allow=%v, expected WebFetch allowed", allow)
 	}
 }
 
@@ -136,4 +136,3 @@ func contains(items []string, want string) bool {
 	}
 	return false
 }
-

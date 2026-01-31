@@ -151,7 +151,8 @@ func claudeSettingsForTask(task tasks.Task) (string, bool) {
 		return "", false
 	}
 
-	isSearchBrowse := strings.TrimSpace(task.TaskIntent) == "search-browse" || strings.Contains(strings.ToLower(task.SafetyPreset), "search-browse") || len(task.ClaudeWebFetchDomains) > 0
+	preset := strings.ToLower(strings.TrimSpace(task.SafetyPreset))
+	noNetwork := strings.Contains(preset, "no-network")
 
 	type permissions struct {
 		Allow []string `json:"allow,omitempty"`
@@ -167,16 +168,11 @@ func claudeSettingsForTask(task tasks.Task) (string, bool) {
 			"Read(./secrets/**)",
 		},
 	}
-	if !isSearchBrowse {
+	if noNetwork {
 		p.Deny = append(p.Deny, "WebFetch")
 	} else {
-		for _, d := range task.ClaudeWebFetchDomains {
-			d = strings.TrimSpace(d)
-			if d == "" {
-				continue
-			}
-			p.Allow = append(p.Allow, "WebFetch(domain:"+d+")")
-		}
+		// Search/browse is considered low-risk. Allow WebFetch without requiring a domain allowlist.
+		p.Allow = append(p.Allow, "WebFetch")
 	}
 
 	type sandboxSettings struct {

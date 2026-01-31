@@ -419,10 +419,9 @@ const sessionActionsMenuEl = ref<HTMLDivElement | null>(null);
 const LS_KEY_AUTO_DELIVERY_FOREMAN = "controlccx.auto_delivery_foreman.v1";
 const LS_KEY_DELIVERY_FOREMAN_SEEN = "controlccx.delivery_foreman.seen_runs.v1";
 const LS_KEY_CLAUDE_AUTO_APPROVE_LEGACY = "controlccx.claude.auto_approve.v1";
+const LS_KEY_MIGRATE_CLAUDE_DEFAULT_SAFETY_PRESET = "controlccx.migrate.claude_default_safety_preset.v1";
 const LS_KEY_RUN_SAFETY_INTENT_BY_TOOL = "controlccx.run_safety.intent_by_tool.v1";
 const LS_KEY_RUN_SAFETY_PRESET_BY_TOOL = "controlccx.run_safety.preset_by_tool.v1";
-const LS_KEY_RUN_SAFETY_CLAUDE_DOMAINS_BY_TOOL =
-  "controlccx.run_safety.claude_webfetch_domains_by_tool.v1";
 const LS_KEY_ATTENTION_AUTOPILOT = "controlccx.attention_autopilot.v1";
 const LS_KEY_ATTENTION_AUTOPILOT_SEEN = "controlccx.attention_autopilot.seen.v1";
 
@@ -442,7 +441,6 @@ const attentionAutopilotNote = ref("");
 
 const runSafetyPresetByTool = ref<Record<string, string>>({});
 const runSafetyIntentByTool = ref<Record<string, string>>({});
-const runSafetyClaudeDomainsByTool = ref<Record<string, string>>({});
 
 function formatLogTime(ts: string): string {
   const s = (ts ?? "").trim();
@@ -1212,9 +1210,6 @@ const workspaceSelect = ref<string>(loadString(LS_KEY_WORKSPACE_FILTER));
 
   runSafetyIntentByTool.value = loadStringMap(LS_KEY_RUN_SAFETY_INTENT_BY_TOOL);
   runSafetyPresetByTool.value = loadStringMap(LS_KEY_RUN_SAFETY_PRESET_BY_TOOL);
-  runSafetyClaudeDomainsByTool.value = loadStringMap(
-    LS_KEY_RUN_SAFETY_CLAUDE_DOMAINS_BY_TOOL,
-  );
 
   // Back-compat: v1 Claude auto-approve was a single boolean toggle.
   const legacyClaudeAutoApprove = loadBool(LS_KEY_CLAUDE_AUTO_APPROVE_LEGACY, false);
@@ -1223,6 +1218,17 @@ const workspaceSelect = ref<string>(loadString(LS_KEY_WORKSPACE_FILTER));
       ...runSafetyPresetByTool.value,
       "claude-code": "unsafe",
     };
+  }
+  // Migration: older versions defaulted Claude Code runs to "no-network". The intended
+  // default is "search-browse" (WebFetch enabled) while still denying curl/wget.
+  if (!loadBool(LS_KEY_MIGRATE_CLAUDE_DEFAULT_SAFETY_PRESET, false)) {
+    if (runSafetyPresetByTool.value["claude-code"] === "no-network") {
+      runSafetyPresetByTool.value = {
+        ...runSafetyPresetByTool.value,
+        "claude-code": "search-browse",
+      };
+    }
+    saveBool(LS_KEY_MIGRATE_CLAUDE_DEFAULT_SAFETY_PRESET, true);
   }
 
   attentionAutopilotEnabled.value = loadBool(LS_KEY_ATTENTION_AUTOPILOT, true);
@@ -1327,11 +1333,6 @@ watch(
 watch(
   runSafetyPresetByTool,
   (v) => saveStringMap(LS_KEY_RUN_SAFETY_PRESET_BY_TOOL, v),
-  { deep: true },
-);
-watch(
-  runSafetyClaudeDomainsByTool,
-  (v) => saveStringMap(LS_KEY_RUN_SAFETY_CLAUDE_DOMAINS_BY_TOOL, v),
   { deep: true },
 );
 watch(attentionAutopilotEnabled, (v) => saveBool(LS_KEY_ATTENTION_AUTOPILOT, Boolean(v)));
@@ -1453,7 +1454,6 @@ async function onCreateTask(): Promise<boolean> {
     const driver = newRunDriver.value;
     const intent = newRunTaskIntent.value;
     const preset = newRunSafetyPreset.value;
-    const domainsText = newRunClaudeDomainsText.value;
 
     if (
       (driver === "claude-code" || driver === "codex") &&
@@ -1467,11 +1467,8 @@ async function onCreateTask(): Promise<boolean> {
     // Persist effective choices for future runs.
     setStringMapKey(runSafetyIntentByTool, newWorkerType.value, intent);
     setStringMapKey(runSafetyPresetByTool, newWorkerType.value, preset);
-    if (driver === "claude-code") {
-      setStringMapKey(runSafetyClaudeDomainsByTool, newWorkerType.value, domainsText);
-    }
 
-    const safety = buildRunSafetyPayload(driver, intent, preset, domainsText);
+    const safety = buildRunSafetyPayload(driver, intent, preset);
     const t = await createTask({
       worker_type: newWorkerType.value,
       prompt: newPrompt.value,
@@ -2191,12 +2188,11 @@ async function runAttentionAutopilotLoop() {
         const driver = toolDriverForWorkerType(sess.worker_type);
         const intent = normalizeTaskIntent(sess.latest.task_intent ?? "code");
         const preset = effectiveSafetyPresetForTask(driver, sess.latest);
-        const domainsText = (sess.latest.claude_webfetch_domains ?? []).join(", ");
         if (isHighRiskPreset(driver, preset)) {
           attentionAutopilotNote.value = `Autopilot skipped for ${short}: high-risk preset requires manual resume.`;
           continue;
         }
-        const safety = buildRunSafetyPayload(driver, intent, preset, domainsText);
+        const safety = buildRunSafetyPayload(driver, intent, preset);
         const nt = await resumeTaskWithOptions(sess.latest.id, { prompt: "continue", ...safety });
         upsertTask(nt);
         attentionAutopilotNote.value = `Autopilot: resume started for ${short}.`;
@@ -2267,13 +2263,11 @@ async function secretaryResumeSessionRun(s: SessionGroup) {
     const intent = normalizeTaskIntent(runSafetyIntentByTool.value[s.worker_type] ?? s.latest.task_intent ?? "code");
     const savedPreset = runSafetyPresetByTool.value[s.worker_type] ?? "";
     const preset = normalizeSafetyPreset(driver, intent, savedPreset || effectiveSafetyPresetForTask(driver, s.latest));
-    const domainsText =
-      runSafetyClaudeDomainsByTool.value[s.worker_type] ?? (s.latest.claude_webfetch_domains ?? []).join(", ");
     if (isHighRiskPreset(driver, preset)) {
       errorBanner.value = "该 run 需要高风险设置（需手动确认）；请在详情面板中 Resume 并勾选 opt-in。";
       return;
     }
-    const safety = buildRunSafetyPayload(driver, intent, preset, domainsText);
+    const safety = buildRunSafetyPayload(driver, intent, preset);
     const nt = await resumeTaskWithOptions(s.latest.id, { prompt: "continue", ...safety });
     upsertTask(nt);
     selectedTaskId.value = nt.id;
@@ -2302,7 +2296,6 @@ async function onResumeTask() {
     const driver = resumeDriver.value;
     const intent = resumeTaskIntent.value;
     const preset = resumeSafetyPreset.value;
-    const domainsText = resumeClaudeDomainsText.value;
     if (
       (driver === "claude-code" || driver === "codex") &&
       isHighRiskPreset(driver, preset) &&
@@ -2314,11 +2307,8 @@ async function onResumeTask() {
 
     setStringMapKey(runSafetyIntentByTool, sess.worker_type, intent);
     setStringMapKey(runSafetyPresetByTool, sess.worker_type, preset);
-    if (driver === "claude-code") {
-      setStringMapKey(runSafetyClaudeDomainsByTool, sess.worker_type, domainsText);
-    }
 
-    const safety = buildRunSafetyPayload(driver, intent, preset, domainsText);
+    const safety = buildRunSafetyPayload(driver, intent, preset);
     const nt = await resumeTaskWithOptions(sess.latest.id, { prompt: resumePrompt.value, ...safety });
     upsertTask(nt);
     selectedTaskId.value = nt.id;
@@ -2816,8 +2806,8 @@ function safetyPresetsForDriver(driver: ToolDriver): SafetyPresetOption[] {
   }
   if (driver === "claude-code") {
     return [
+      { value: "search-browse", label: "Search/browse (WebFetch enabled)", risk: "med" },
       { value: "no-network", label: "Sandboxed (no network)", risk: "low" },
-      { value: "search-browse", label: "Search/browse (WebFetch allowlist)", risk: "med" },
       { value: "unsafe", label: "UNSAFE (skip permissions)", risk: "high" },
     ];
   }
@@ -2832,9 +2822,9 @@ function recommendSafetyPreset(driver: ToolDriver, intent: TaskIntent): string {
     return "workspace-write";
   }
   if (driver === "claude-code") {
-    if (intent === "search-browse") return "search-browse";
     if (intent === "install") return "unsafe";
-    return "no-network";
+    // Default to "has network" because WebFetch is low-risk; the real risk is downloading/executing scripts.
+    return "search-browse";
   }
   return "";
 }
@@ -2853,22 +2843,6 @@ function isHighRiskPreset(driver: ToolDriver, preset: string): boolean {
   if (driver === "codex") return p === "danger-full-access" || p === "unsafe";
   if (driver === "claude-code") return p === "unsafe";
   return false;
-}
-
-function parseDomainList(text: string): string[] {
-  const raw = String(text ?? "")
-    .split(/[\s,]+/g)
-    .map((x) => x.trim())
-    .filter(Boolean);
-  const seen = new Set<string>();
-  const out: string[] = [];
-  for (const d of raw) {
-    const key = d.toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(d);
-  }
-  return out;
 }
 
 function setStringMapKey(map: { value: Record<string, string> }, key: string, value: string) {
@@ -2890,14 +2864,12 @@ type RunSafetyPayload = {
   codex_search?: boolean;
   claude_permission_mode?: string;
   claude_sandbox?: boolean;
-  claude_webfetch_domains?: string[];
 };
 
 function buildRunSafetyPayload(
   driver: ToolDriver,
   intent: TaskIntent,
   preset: string,
-  claudeDomainsText: string,
 ): RunSafetyPayload {
   const sp = String(preset ?? "").trim();
   const ti = normalizeTaskIntent(intent);
@@ -2935,13 +2907,10 @@ function buildRunSafetyPayload(
         claude_sandbox: true,
       };
     }
-    const isSearchBrowse = sp === "search-browse" || ti === "search-browse";
-    const domains = isSearchBrowse ? parseDomainList(claudeDomainsText) : [];
     return {
       safety_preset: sp,
       task_intent: ti,
       claude_sandbox: true,
-      claude_webfetch_domains: domains.length ? domains : undefined,
     };
   }
 
@@ -2962,7 +2931,8 @@ function effectiveSafetyPresetForTask(driver: ToolDriver, task: Task): string {
   if (driver === "claude-code") {
     if (String(task.task_intent ?? "").trim() === "search-browse") return "search-browse";
     if ((task.claude_webfetch_domains ?? []).length > 0) return "search-browse";
-    return "no-network";
+    // Default to "has network" to match the recommended preset.
+    return "search-browse";
   }
   return "";
 }
@@ -2975,10 +2945,6 @@ const newRunTaskIntent = computed<TaskIntent>({
 const newRunSafetyPreset = computed<string>({
   get: () => normalizeSafetyPreset(newRunDriver.value, newRunTaskIntent.value, runSafetyPresetByTool.value[newWorkerType.value] ?? ""),
   set: (value) => setStringMapKey(runSafetyPresetByTool, newWorkerType.value, value),
-});
-const newRunClaudeDomainsText = computed<string>({
-  get: () => runSafetyClaudeDomainsByTool.value[newWorkerType.value] ?? "",
-  set: (value) => setStringMapKey(runSafetyClaudeDomainsByTool, newWorkerType.value, value),
 });
 
 watch([newWorkerType, newRunTaskIntent, newRunSafetyPreset], () => {
@@ -3345,21 +3311,6 @@ const resumeSafetyPreset = computed<string>({
     const sess = selectedSession.value;
     if (!sess) return;
     setStringMapKey(runSafetyPresetByTool, sess.worker_type, value);
-  },
-});
-const resumeClaudeDomainsText = computed<string>({
-  get: () => {
-    const sess = selectedSession.value;
-    if (!sess) return "";
-    const saved = runSafetyClaudeDomainsByTool.value[sess.worker_type];
-    if (typeof saved === "string") return saved;
-    const d = sess.latest.claude_webfetch_domains ?? [];
-    return d.join(", ");
-  },
-  set: (value) => {
-    const sess = selectedSession.value;
-    if (!sess) return;
-    setStringMapKey(runSafetyClaudeDomainsByTool, sess.worker_type, value);
   },
 });
 
@@ -4390,18 +4341,9 @@ watch(
             </div>
             <div
               v-if="resumeDriver === 'claude-code' && resumeSafetyPreset === 'search-browse'"
-              class="resumeSafetyExtra"
+              class="tinyHint"
             >
-              <label class="full">
-                WebFetch domains (allowlist)
-                <input
-                  v-model="resumeClaudeDomainsText"
-                  placeholder="docs.anthropic.com, api.github.com"
-                />
-              </label>
-              <div class="tinyHint">
-                Search/browse uses WebFetch allowlists. Downloads via <span class="mono">curl</span>/<span class="mono">wget</span> remain denied by default.
-              </div>
+              Enables Claude Code WebFetch. Downloads via <span class="mono">curl</span>/<span class="mono">wget</span> remain denied by default.
             </div>
             <div
               v-else-if="resumeDriver === 'codex' && resumeSafetyPreset === 'search-browse'"
@@ -4994,18 +4936,9 @@ watch(
 
               <div
                 v-if="newRunDriver === 'claude-code' && newRunSafetyPreset === 'search-browse'"
-                class="newRunSafetyExtra"
+                class="tinyHint"
               >
-                <label class="full">
-                  WebFetch domains (allowlist)
-                  <input
-                    v-model="newRunClaudeDomainsText"
-                    placeholder="docs.anthropic.com, api.github.com"
-                  />
-                </label>
-                <div class="tinyHint">
-                  Search/browse uses WebFetch allowlists. Downloads via <span class="mono">curl</span>/<span class="mono">wget</span> remain denied by default.
-                </div>
+                Enables Claude Code WebFetch. Downloads via <span class="mono">curl</span>/<span class="mono">wget</span> remain denied by default.
               </div>
               <div
                 v-else-if="newRunDriver === 'codex' && newRunSafetyPreset === 'search-browse'"
@@ -9122,7 +9055,9 @@ h2 {
 
 @media (max-width: 1300px) {
   .grid {
-    grid-template-columns: 1fr;
+    grid-template-columns:
+      minmax(320px, 1fr)
+      minmax(480px, 2fr);
     gap: 16px;
   }
   :deep(.skillsPageWrap) {
@@ -9131,14 +9066,19 @@ h2 {
   :deep(.secretaryCards) {
     grid-template-columns: repeat(4, 1fr);
   }
-  /* Disable sticky on mobile */
-  .grid > .sessionsPanel {
-    position: static;
-    max-height: none;
-  }
 }
 
 @media (max-width: 900px) {
+  .grid {
+    grid-template-columns: 1fr;
+  }
+
+  /* Disable sticky when single-column */
+  .grid > .sessionsPanel:not(.sessionsDrawerPanel) {
+    position: static;
+    max-height: none;
+  }
+
   .sub {
     display: none;
   }
