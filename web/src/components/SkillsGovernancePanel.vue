@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { onMounted } from "vue";
+import { onMounted, reactive } from "vue";
 import { useSkillsGovernance } from "../composables/useSkillsGovernance";
 
-const gov = useSkillsGovernance();
+const gov = reactive(useSkillsGovernance());
 
 onMounted(() => {
   void gov.refreshTools();
