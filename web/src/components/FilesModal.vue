@@ -72,33 +72,32 @@ function isActiveNode(path: string): boolean {
 
 <template>
   <section class="panel filesPagePanel">
-    <h2>
-      Files
-      <span class="h2Spacer"></span>
-      <button
-        type="button"
-        class="h2Btn"
-        @click="emit('refreshRoot')"
-        :disabled="loading || !root"
-      >
-        Refresh
-      </button>
-      <button type="button" class="h2Btn" @click="emit('back')">Back</button>
-    </h2>
-
     <div class="filesPageBody">
+      <div class="filesTopRow">
+        <div class="mono filesRootPath" :title="root?.path">
+          {{ root?.path || (loading ? "Loading…" : "") }}
+        </div>
+        <div class="filesTopActions">
+          <button
+            type="button"
+            class="filesTopBtn"
+            @click="emit('refreshRoot')"
+            :disabled="loading || !root"
+          >
+            Refresh
+          </button>
+          <button type="button" class="filesTopBtn" @click="emit('back')">
+            Back
+          </button>
+        </div>
+      </div>
+      <div v-if="notice" class="tinyHint">{{ notice }}</div>
+
       <div v-if="error" class="modalError">
         {{ error }}
       </div>
       <div v-else-if="loading" class="loading">Loading...</div>
       <template v-else>
-        <div class="filesTopRow">
-          <div class="mono filesRootPath" :title="root?.path">
-            {{ root?.path }}
-          </div>
-          <div v-if="notice" class="tinyHint">{{ notice }}</div>
-        </div>
-
         <div class="filesSplit" :style="{ '--sidebar-width': sidebarWidth + 'px' }">
           <div class="filesTreePane">
             <div class="filesTreeActions">
@@ -114,9 +113,6 @@ function isActiveNode(path: string): boolean {
                 :disabled="!selectedPath || selectedPath === root?.path"
               >
                 Delete
-              </button>
-              <button type="button" @click="emit('refreshDir')" :disabled="!root">
-                Refresh
               </button>
             </div>
 
@@ -249,39 +245,6 @@ function isActiveNode(path: string): boolean {
   max-height: calc(100dvh - 110px);
 }
 
-h2 {
-  margin: 0;
-  padding: 16px 20px;
-  font-size: 15px;
-  font-weight: 700;
-  color: white;
-  background: linear-gradient(135deg, #0d9488 0%, #0891b2 100%);
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  text-shadow: 0 1px 2px rgba(0,0,0,0.1);
-}
-
-.h2Spacer {
-  flex: 1;
-}
-
-.h2Btn {
-  border: 1px solid rgba(255, 255, 255, 0.25);
-  background: rgba(255, 255, 255, 0.12);
-  color: rgba(255, 255, 255, 0.9);
-  font-weight: 800;
-  font-size: 12px;
-  border-radius: 999px;
-  padding: 6px 10px;
-}
-
-.h2Btn:hover {
-  border-color: rgba(255, 255, 255, 0.35);
-  background: rgba(255, 255, 255, 0.16);
-  color: white;
-}
-
 .filesPageBody {
   padding: 20px;
   display: flex;
@@ -298,6 +261,20 @@ h2 {
   align-items: center;
   gap: 12px;
   min-width: 0;
+}
+
+.filesTopActions {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.filesTopBtn {
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-weight: 800;
+  font-size: 12px;
 }
 
 .filesRootPath {
