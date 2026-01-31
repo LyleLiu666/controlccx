@@ -3633,7 +3633,7 @@ watch(
 	        <button type="button" class="primary" @click="openNewRun">
 	          New Run
 	        </button>
-	        <button type="button" class="settingsBtn" @click="openSkillsInNewTab">
+	        <button type="button" class="settingsBtn" @click="openSkillsPage">
 	          Skills
 	        </button>
 	        <button type="button" class="settingsBtn" @click="openAuthSettings">

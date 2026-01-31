@@ -16,6 +16,7 @@ import (
 	"controlccx/internal/chat"
 	"controlccx/internal/events"
 	"controlccx/internal/observer"
+	"controlccx/internal/runsafe"
 	"controlccx/internal/runworkspace"
 	"controlccx/internal/skills"
 	"controlccx/internal/systeminfo"
@@ -284,11 +285,37 @@ func (a *API) handleTasks(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+
+		// Run Safety Autopilot: fill safety options when the client did not explicitly set them.
+		driver := in.WorkerType
+		if a.Tools != nil {
+			if profile, ok := a.Tools.Resolve(string(in.WorkerType)); ok && strings.TrimSpace(string(profile.Driver)) != "" {
+				driver = tasks.WorkerType(strings.TrimSpace(string(profile.Driver)))
+			}
+		}
+		envelope := runsafe.SafetyEnvelope(strings.TrimSpace(in.SafetyEnvelope))
+		llm := runsafe.LLMBackend(nil)
+		if a.Observer != nil {
+			llm = a.Observer.LLM
+		}
+		in, ap := runsafe.ApplyAutopilot(r.Context(), in, runsafe.ApplyOptions{
+			Driver:   driver,
+			Envelope: envelope,
+			Classify: runsafe.ClassifyOptions{LLM: llm},
+		})
+
 		task, err := a.Tasks.CreateTask(r.Context(), in)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
+
+		if ap.Applied {
+			if audit := runsafe.FormatAuditLog(driver, ap.Decision, in, true); strings.TrimSpace(audit) != "" {
+				_, _ = a.Tasks.AppendLog(r.Context(), task.ID, tasks.LogSystem, audit)
+			}
+		}
+
 		if a.Hub != nil {
 			a.Hub.Publish(events.Event{Type: "task.created", Time: time.Now().UTC(), Payload: task})
 		}
@@ -518,6 +545,7 @@ func (a *API) handleTaskByID(w http.ResponseWriter, r *http.Request) {
 		var body struct {
 			Prompt                string   `json:"prompt"`
 			UnsafeAutomation      bool     `json:"unsafe_automation,omitempty"`
+			SafetyEnvelope        string   `json:"safety_envelope,omitempty"`
 			SafetyPreset          string   `json:"safety_preset,omitempty"`
 			TaskIntent            string   `json:"task_intent,omitempty"`
 			CodexSandbox          string   `json:"codex_sandbox,omitempty"`
@@ -546,26 +574,87 @@ func (a *API) handleTaskByID(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "task has no session_id to resume", http.StatusBadRequest)
 			return
 		}
-		newTask, err := a.Tasks.CreateTask(r.Context(), tasks.CreateTaskInput{
+
+		explicitSafety := body.UnsafeAutomation ||
+			strings.TrimSpace(body.SafetyEnvelope) != "" ||
+			strings.TrimSpace(body.SafetyPreset) != "" ||
+			strings.TrimSpace(body.TaskIntent) != "" ||
+			strings.TrimSpace(body.CodexSandbox) != "" ||
+			strings.TrimSpace(body.CodexApprovalPolicy) != "" ||
+			body.CodexSearch ||
+			strings.TrimSpace(body.ClaudePermissionMode) != "" ||
+			body.ClaudeSandbox ||
+			len(body.ClaudeWebFetchDomains) > 0
+
+		unsafe := body.UnsafeAutomation
+		safetyEnvelope := strings.TrimSpace(body.SafetyEnvelope)
+		safetyPreset := strings.TrimSpace(body.SafetyPreset)
+		taskIntent := strings.TrimSpace(body.TaskIntent)
+		codexSandbox := strings.TrimSpace(body.CodexSandbox)
+		codexApprovalPolicy := strings.TrimSpace(body.CodexApprovalPolicy)
+		codexSearch := body.CodexSearch
+		claudePermissionMode := strings.TrimSpace(body.ClaudePermissionMode)
+		claudeSandbox := body.ClaudeSandbox
+		claudeDomains := body.ClaudeWebFetchDomains
+
+		if !explicitSafety {
+			unsafe = prev.UnsafeAutomation
+			safetyPreset = strings.TrimSpace(prev.SafetyPreset)
+			taskIntent = strings.TrimSpace(prev.TaskIntent)
+			codexSandbox = strings.TrimSpace(prev.CodexSandbox)
+			codexApprovalPolicy = strings.TrimSpace(prev.CodexApprovalPolicy)
+			codexSearch = prev.CodexSearch
+			claudePermissionMode = strings.TrimSpace(prev.ClaudePermissionMode)
+			claudeSandbox = prev.ClaudeSandbox
+			claudeDomains = append([]string{}, prev.ClaudeWebFetchDomains...)
+		}
+
+		resumeIn := tasks.CreateTaskInput{
 			WorkerType:            prev.WorkerType,
 			Mode:                  tasks.ModeResume,
-			UnsafeAutomation:      body.UnsafeAutomation,
-			SafetyPreset:          body.SafetyPreset,
-			TaskIntent:            body.TaskIntent,
-			CodexSandbox:          body.CodexSandbox,
-			CodexApprovalPolicy:   body.CodexApprovalPolicy,
-			CodexSearch:           body.CodexSearch,
-			ClaudePermissionMode:  body.ClaudePermissionMode,
-			ClaudeSandbox:         body.ClaudeSandbox,
-			ClaudeWebFetchDomains: body.ClaudeWebFetchDomains,
+			UnsafeAutomation:      unsafe,
+			SafetyEnvelope:        safetyEnvelope,
+			SafetyPreset:          safetyPreset,
+			TaskIntent:            taskIntent,
+			CodexSandbox:          codexSandbox,
+			CodexApprovalPolicy:   codexApprovalPolicy,
+			CodexSearch:           codexSearch,
+			ClaudePermissionMode:  claudePermissionMode,
+			ClaudeSandbox:         claudeSandbox,
+			ClaudeWebFetchDomains: claudeDomains,
 			Prompt:                body.Prompt,
 			WorkDir:               prev.WorkDir,
 			SessionID:             prev.SessionID,
 			Warning:               prev.Warning,
+		}
+
+		driver := prev.WorkerType
+		if a.Tools != nil {
+			if profile, ok := a.Tools.Resolve(string(prev.WorkerType)); ok && strings.TrimSpace(string(profile.Driver)) != "" {
+				driver = tasks.WorkerType(strings.TrimSpace(string(profile.Driver)))
+			}
+		}
+		envelope := runsafe.SafetyEnvelope(strings.TrimSpace(resumeIn.SafetyEnvelope))
+		llm := runsafe.LLMBackend(nil)
+		if a.Observer != nil {
+			llm = a.Observer.LLM
+		}
+		resumeIn, ap := runsafe.ApplyAutopilot(r.Context(), resumeIn, runsafe.ApplyOptions{
+			Driver:   driver,
+			Envelope: envelope,
+			Classify: runsafe.ClassifyOptions{LLM: llm},
 		})
+
+		newTask, err := a.Tasks.CreateTask(r.Context(), resumeIn)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
+		}
+
+		if ap.Applied {
+			if audit := runsafe.FormatAuditLog(driver, ap.Decision, resumeIn, true); strings.TrimSpace(audit) != "" {
+				_, _ = a.Tasks.AppendLog(r.Context(), newTask.ID, tasks.LogSystem, audit)
+			}
 		}
 		if a.Hub != nil {
 			a.Hub.Publish(events.Event{Type: "task.created", Time: time.Now().UTC(), Payload: newTask})

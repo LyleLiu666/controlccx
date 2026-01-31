@@ -83,6 +83,9 @@ type CreateTaskInput struct {
 	WorkerType WorkerType `json:"worker_type"`
 	Mode       Mode       `json:"mode"`
 	UnsafeAutomation bool `json:"unsafe_automation,omitempty"`
+	// SafetyEnvelope is an optional autopilot hint (UI-level “one-time unlock”).
+	// It is not persisted; it only affects server-side defaults when run safety options are omitted.
+	SafetyEnvelope string `json:"safety_envelope,omitempty"`
 	SafetyPreset string   `json:"safety_preset,omitempty"`
 	TaskIntent   string   `json:"task_intent,omitempty"`
 	CodexSandbox string   `json:"codex_sandbox,omitempty"`
