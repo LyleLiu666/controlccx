@@ -259,3 +259,62 @@ func scanSessionWorkspace(row workspaceScanner) (SessionWorkspace, error) {
 	ws.WorkBranch = strings.TrimSpace(ws.WorkBranch)
 	return ws, nil
 }
+
+func migrateSessionWorkspaceKeyTx(tx *sql.Tx, fromKey, toKey string, nowMs int64) error {
+	fromKey = strings.TrimSpace(fromKey)
+	toKey = strings.TrimSpace(toKey)
+	if fromKey == "" || toKey == "" || fromKey == toKey {
+		return nil
+	}
+
+	var fromExists string
+	err := tx.QueryRow(`SELECT key FROM session_workspaces WHERE key = ?;`, fromKey).Scan(&fromExists)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		return fmt.Errorf("tasks: read session_workspaces(from): %w", err)
+	}
+
+	var toExists string
+	err = tx.QueryRow(`SELECT key FROM session_workspaces WHERE key = ?;`, toKey).Scan(&toExists)
+	if err == nil {
+		// Do not overwrite an existing workspace mapping; keep the first writer.
+		return nil
+	}
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("tasks: read session_workspaces(to): %w", err)
+	}
+
+	_, err = tx.Exec(`UPDATE session_workspaces SET key = ?, updated_at = ? WHERE key = ?;`, toKey, nowMs, fromKey)
+	if err != nil {
+		return fmt.Errorf("tasks: migrate session_workspaces key: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) MigrateSessionWorkspaceKey(ctx context.Context, fromKey, toKey string) error {
+	if s == nil || s.db == nil {
+		return errors.New("tasks: store not initialized")
+	}
+	fromKey = strings.TrimSpace(fromKey)
+	toKey = strings.TrimSpace(toKey)
+	if fromKey == "" || toKey == "" || fromKey == toKey {
+		return nil
+	}
+
+	nowMs := toMillis(s.now().UTC())
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("tasks: begin migrate session workspace: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if err := migrateSessionWorkspaceKeyTx(tx, fromKey, toKey, nowMs); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("tasks: commit migrate session workspace: %w", err)
+	}
+	return nil
+}

@@ -160,7 +160,7 @@ func (s *Service) EnsureForTask(ctx context.Context, task tasks.Task) (tasks.Ses
 }
 
 func taskWorkspaceKey(task tasks.Task) string {
-	return tasks.SessionKey(task.ID, "")
+	return tasks.SessionKey(task.ID, task.SessionID)
 }
 
 func absClean(path string) (string, error) {

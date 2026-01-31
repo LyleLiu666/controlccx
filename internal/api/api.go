@@ -479,7 +479,30 @@ func (a *API) handleTaskByID(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, map[string]any{"task": task, "invocation": inv})
 	case "workspace":
-		key := tasks.SessionKey(id, "")
+		task, err := a.Tasks.GetTask(r.Context(), id)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+
+		desiredKey := tasks.SessionKey(task.ID, task.SessionID)
+		key := desiredKey
+		// Backward-compatible: older runs stored workspaces under task-id keys (t:<taskID>).
+		// For session-scoped workspaces, migrate to s:<sessionID> when possible.
+		if strings.TrimSpace(task.SessionID) != "" {
+			if _, ok, err := a.Tasks.GetSessionWorkspace(r.Context(), desiredKey); err == nil && !ok {
+				legacyKey := tasks.SessionKey(task.ID, "")
+				if _, ok2, err := a.Tasks.GetSessionWorkspace(r.Context(), legacyKey); err == nil && ok2 {
+					_ = a.Tasks.MigrateSessionWorkspaceKey(r.Context(), legacyKey, desiredKey)
+					// Prefer the desired key if migration succeeded; otherwise fall back to legacy.
+					if _, ok3, err := a.Tasks.GetSessionWorkspace(r.Context(), desiredKey); err == nil && ok3 {
+						key = desiredKey
+					} else {
+						key = legacyKey
+					}
+				}
+			}
+		}
 		if len(parts) == 2 {
 			if r.Method != http.MethodGet {
 				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -573,6 +596,17 @@ func (a *API) handleTaskByID(w http.ResponseWriter, r *http.Request) {
 		if strings.TrimSpace(prev.SessionID) == "" {
 			http.Error(w, "task has no session_id to resume", http.StatusBadRequest)
 			return
+		}
+
+		// Ensure resume uses the same run workspace as the session origin when available.
+		// Claude Code resumes are scoped to the project directory; changing directories
+		// (e.g. new per-run workspaces) can make the session non-resumable.
+		desiredWSKey := tasks.SessionKey(prev.ID, prev.SessionID)
+		legacyWSKey := tasks.SessionKey(prev.ID, "")
+		if _, ok, err := a.Tasks.GetSessionWorkspace(r.Context(), desiredWSKey); err == nil && !ok {
+			if _, ok2, err := a.Tasks.GetSessionWorkspace(r.Context(), legacyWSKey); err == nil && ok2 {
+				_ = a.Tasks.MigrateSessionWorkspaceKey(r.Context(), legacyWSKey, desiredWSKey)
+			}
 		}
 
 			// SafetyEnvelope is an autopilot hint (UI-level “one-time unlock”); it does not count as an explicit safety override.

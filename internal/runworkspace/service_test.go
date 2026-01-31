@@ -144,3 +144,79 @@ func TestService_GitWorktree_Merge(t *testing.T) {
 		t.Fatalf("base=%q, want %q", strings.TrimSpace(string(got)), "changed")
 	}
 }
+
+func TestService_Resume_ReusesSessionWorkspaceAfterSessionIDSet(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "controlccx.db")
+
+	conn, err := db.Open(ctx, db.Options{Path: dbPath})
+	if err != nil {
+		t.Fatalf("db open: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+
+	store := tasks.NewStore(conn)
+
+	baseDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(baseDir, "a.txt"), []byte("hello\n"), 0o644); err != nil {
+		t.Fatalf("write base file: %v", err)
+	}
+
+	first, err := store.CreateTask(ctx, tasks.CreateTaskInput{
+		WorkerType: tasks.WorkerClaudeCode,
+		Mode:       tasks.ModeNew,
+		Prompt:     "x",
+		WorkDir:    baseDir,
+	})
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	svc := NewService(store)
+	ws1, err := svc.EnsureForTask(ctx, first)
+	if err != nil {
+		t.Fatalf("ensure: %v", err)
+	}
+	if ws1.Key != tasks.SessionKey(first.ID, "") {
+		t.Fatalf("ws1.key=%q, want %q", ws1.Key, tasks.SessionKey(first.ID, ""))
+	}
+
+	if err := store.SetSessionID(ctx, first.ID, "sess-1"); err != nil {
+		t.Fatalf("set session id: %v", err)
+	}
+
+	if _, ok, err := store.GetSessionWorkspace(ctx, tasks.SessionKey(first.ID, "")); err != nil || ok {
+		t.Fatalf("legacy workspace key should be migrated; ok=%v err=%v", ok, err)
+	}
+	wsMigrated, ok, err := store.GetSessionWorkspace(ctx, tasks.SessionKey(first.ID, "sess-1"))
+	if err != nil {
+		t.Fatalf("get migrated workspace: %v", err)
+	}
+	if !ok {
+		t.Fatalf("expected migrated workspace")
+	}
+	if wsMigrated.WorkspaceID != ws1.WorkspaceID {
+		t.Fatalf("workspace_id=%q, want %q", wsMigrated.WorkspaceID, ws1.WorkspaceID)
+	}
+
+	resume, err := store.CreateTask(ctx, tasks.CreateTaskInput{
+		WorkerType: tasks.WorkerClaudeCode,
+		Mode:       tasks.ModeResume,
+		Prompt:     "y",
+		WorkDir:    baseDir,
+		SessionID:  "sess-1",
+	})
+	if err != nil {
+		t.Fatalf("create resume task: %v", err)
+	}
+	ws2, err := svc.EnsureForTask(ctx, resume)
+	if err != nil {
+		t.Fatalf("ensure resume: %v", err)
+	}
+	if ws2.WorkspaceID != ws1.WorkspaceID {
+		t.Fatalf("resume workspace_id=%q, want %q", ws2.WorkspaceID, ws1.WorkspaceID)
+	}
+	if ws2.RunWorkDir != ws1.RunWorkDir {
+		t.Fatalf("resume run_workdir=%q, want %q", ws2.RunWorkDir, ws1.RunWorkDir)
+	}
+}

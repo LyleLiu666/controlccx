@@ -321,7 +321,11 @@ func (s *Store) FinishTask(ctx context.Context, id string, in FinishTaskInput) e
 	}
 
 	if strings.TrimSpace(prevSessionID) == "" && strings.TrimSpace(in.SessionID) != "" {
-		if err := migrateSessionMetaKeyTx(tx, SessionKey(id, ""), SessionKey(id, in.SessionID), toMillis(now)); err != nil {
+		nowMs := toMillis(now)
+		if err := migrateSessionMetaKeyTx(tx, SessionKey(id, ""), SessionKey(id, in.SessionID), nowMs); err != nil {
+			return err
+		}
+		if err := migrateSessionWorkspaceKeyTx(tx, SessionKey(id, ""), SessionKey(id, in.SessionID), nowMs); err != nil {
 			return err
 		}
 	}
@@ -365,7 +369,11 @@ func (s *Store) SetSessionID(ctx context.Context, id, sessionID string) error {
 		return fmt.Errorf("tasks: set session_id: %w", err)
 	}
 
-	if err := migrateSessionMetaKeyTx(tx, SessionKey(id, ""), SessionKey(id, sessionID), toMillis(now)); err != nil {
+	nowMs := toMillis(now)
+	if err := migrateSessionMetaKeyTx(tx, SessionKey(id, ""), SessionKey(id, sessionID), nowMs); err != nil {
+		return err
+	}
+	if err := migrateSessionWorkspaceKeyTx(tx, SessionKey(id, ""), SessionKey(id, sessionID), nowMs); err != nil {
 		return err
 	}
 
