@@ -32,6 +32,7 @@ This folder is intentionally organized so both humans and AI agents can quickly 
 ## Verification (required)
 Run after every meaningful change:
 - `pnpm -C web build`
+- `pnpm -C web test`
 - `pnpm smoke`
 
 If backend code is touched:

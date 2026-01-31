@@ -7,6 +7,7 @@
     "dev": "concurrently -k \"go run ./cmd/controlccx-server --addr 127.0.0.1:5174\" \"pnpm -C web dev\"",
     "build": "node scripts/build.mjs",
     "start": "node scripts/start.mjs",
+    "test": "go test ./... && pnpm -C web test",
     "smoke": "node scripts/smoke.mjs"
   },
   "devDependencies": {

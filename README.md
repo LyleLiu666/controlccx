@@ -30,6 +30,12 @@ pnpm start
 - macOS/Linux: `./start.sh`
 - Windows (PowerShell): `powershell -ExecutionPolicy Bypass -File .\\start.ps1`
 
+## Tests
+
+```bash
+pnpm test
+```
+
 ## Configuration
 
 Default data dir: `~/.controlccx/`
