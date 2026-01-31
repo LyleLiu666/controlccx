@@ -56,6 +56,15 @@ import {
 import { computePopupPosition } from "./menuPosition";
 import { prettifyLogMessage } from "./logPretty";
 import { deriveRunActivity } from "./runActivity";
+import type { RunSafetyPayload, TaskIntent } from "./runSafety";
+import {
+  buildRunSafetyPayload,
+  effectiveSafetyPresetForTask,
+  isHighRiskPreset,
+  normalizeSafetyPreset,
+  normalizeTaskIntent,
+  safetyPresetsForDriver,
+} from "./runSafety";
 import SkillsPanel from "./components/SkillsPanel.vue";
 import SkillsVersionsPanel from "./components/SkillsVersionsPanel.vue";
 import SkillsGovernancePanel from "./components/SkillsGovernancePanel.vue";
@@ -78,8 +87,6 @@ const newWorkdir = ref<string>(".");
 const newPrompt = ref<string>("");
 const newRunOpen = ref(false);
 const newRunPromptEl = ref<HTMLTextAreaElement | null>(null);
-
-type TaskIntent = "analyze" | "code" | "search-browse" | "install";
 
 const newRunSafetyOverride = ref(false);
 const newRunHighRiskOptIn = ref(false);
@@ -956,7 +963,15 @@ async function replaySelectedRun() {
     selectedTaskId.value = next.id;
     await loadLogs(next.id);
   } catch (e: any) {
-    errorBanner.value = e?.message ?? String(e);
+    const msg = e?.message ?? String(e);
+    if (attentionAutopilotIsNoConversationFound(msg)) {
+      stopAttentionAutopilotForSession(sessionKeyForTask(s.latest));
+      errorBanner.value =
+        "Resume 失败：Claude 找不到该 session（No conversation found）。建议：直接 New Run 重新开始；或检查 Claude Code 会话是否被清理/禁用持久化。原始错误：" +
+        msg;
+      return;
+    }
+    errorBanner.value = msg;
   }
 }
 
@@ -2396,7 +2411,15 @@ async function onCancelTask() {
   try {
     await cancelTask(selectedTaskId.value);
   } catch (e: any) {
-    errorBanner.value = e?.message ?? String(e);
+    const msg = e?.message ?? String(e);
+    if (attentionAutopilotIsNoConversationFound(msg)) {
+      stopAttentionAutopilotForSession(sessionKeyForTask(sess.latest));
+      errorBanner.value =
+        "Resume 失败：Claude 找不到该 session（No conversation found）。建议：直接 New Run 重新开始；或检查 Claude Code 会话是否被清理/禁用持久化。原始错误：" +
+        msg;
+      return;
+    }
+    errorBanner.value = msg;
   }
 }
 
@@ -2984,65 +3007,6 @@ function toolDriverForWorkerType(workerType: string): ToolDriver {
   return "exec";
 }
 
-function normalizeTaskIntent(raw: string): TaskIntent {
-  const v = String(raw ?? "").trim();
-  if (v === "analyze" || v === "code" || v === "search-browse" || v === "install") return v;
-  return "code";
-}
-
-type SafetyPresetOption = { value: string; label: string; risk: "low" | "med" | "high" | "extreme" };
-
-function safetyPresetsForDriver(driver: ToolDriver): SafetyPresetOption[] {
-  if (driver === "codex") {
-    return [
-      { value: "workspace-write", label: "Workspace write (sandboxed)", risk: "low" },
-      { value: "read-only", label: "Read-only (sandboxed)", risk: "low" },
-      { value: "search-browse", label: "Search/browse (sandbox + web search)", risk: "med" },
-      { value: "danger-full-access", label: "Full access (sandbox: danger-full-access)", risk: "high" },
-      { value: "unsafe", label: "UNSAFE (no sandbox/approvals)", risk: "extreme" },
-    ];
-  }
-  if (driver === "claude-code") {
-    return [
-      { value: "search-browse", label: "Search/browse (WebFetch enabled)", risk: "med" },
-      { value: "no-network", label: "Sandboxed (no network)", risk: "low" },
-      { value: "unsafe", label: "UNSAFE (skip permissions)", risk: "high" },
-    ];
-  }
-  return [];
-}
-
-function recommendSafetyPreset(driver: ToolDriver, intent: TaskIntent): string {
-  if (driver === "codex") {
-    if (intent === "analyze") return "read-only";
-    if (intent === "search-browse") return "search-browse";
-    if (intent === "install") return "danger-full-access";
-    return "workspace-write";
-  }
-  if (driver === "claude-code") {
-    if (intent === "install") return "unsafe";
-    // Default to "has network" because WebFetch is low-risk; the real risk is downloading/executing scripts.
-    return "search-browse";
-  }
-  return "";
-}
-
-function normalizeSafetyPreset(driver: ToolDriver, intent: TaskIntent, raw: string): string {
-  const v = String(raw ?? "").trim();
-  const allowed = safetyPresetsForDriver(driver).map((p) => p.value);
-  if (allowed.includes(v)) return v;
-  const rec = recommendSafetyPreset(driver, intent);
-  if (allowed.includes(rec)) return rec;
-  return allowed[0] ?? "";
-}
-
-function isHighRiskPreset(driver: ToolDriver, preset: string): boolean {
-  const p = String(preset ?? "").trim();
-  if (driver === "codex") return p === "danger-full-access" || p === "unsafe";
-  if (driver === "claude-code") return p === "unsafe";
-  return false;
-}
-
 function isHighRiskAllowedByInstallUnlock(driver: ToolDriver, preset: string): boolean {
   if (!runSafetyInstallUnlock.value) return false;
   const p = String(preset ?? "").trim();
@@ -3061,91 +3025,8 @@ function setStringMapKey(map: { value: Record<string, string> }, key: string, va
   map.value = next;
 }
 
-type RunSafetyPayload = {
-  unsafe_automation?: boolean;
-  safety_envelope?: string;
-  safety_preset?: string;
-  task_intent?: string;
-  codex_sandbox?: string;
-  codex_approval_policy?: string;
-  codex_search?: boolean;
-  claude_permission_mode?: string;
-  claude_sandbox?: boolean;
-};
-
 function buildSafetyEnvelopePayload(): Pick<RunSafetyPayload, "safety_envelope"> {
   return runSafetyInstallUnlock.value ? { safety_envelope: "install-enabled" } : {};
-}
-
-function buildRunSafetyPayload(
-  driver: ToolDriver,
-  intent: TaskIntent,
-  preset: string,
-): RunSafetyPayload {
-  const sp = String(preset ?? "").trim();
-  const ti = normalizeTaskIntent(intent);
-
-  if (driver === "codex") {
-    if (sp === "unsafe") {
-      return {
-        unsafe_automation: true,
-        safety_preset: sp,
-        task_intent: ti,
-      };
-    }
-    const sandbox =
-      sp === "search-browse"
-        ? "workspace-write"
-        : sp === "read-only" || sp === "workspace-write" || sp === "danger-full-access"
-          ? sp
-          : "workspace-write";
-    return {
-      safety_preset: sp,
-      task_intent: ti,
-      codex_sandbox: sandbox,
-      codex_approval_policy: "never",
-      codex_search: sp === "search-browse" || undefined,
-    };
-  }
-
-  if (driver === "claude-code") {
-    if (sp === "unsafe") {
-      // Keep sandbox enabled (when supported) even in unsafe mode.
-      return {
-        unsafe_automation: true,
-        safety_preset: sp,
-        task_intent: ti,
-        claude_sandbox: true,
-      };
-    }
-    return {
-      safety_preset: sp,
-      task_intent: ti,
-      claude_sandbox: true,
-    };
-  }
-
-  return {};
-}
-
-function effectiveSafetyPresetForTask(driver: ToolDriver, task: Task): string {
-  const explicit = String(task.safety_preset ?? "").trim();
-  if (explicit) return explicit;
-  if (task.unsafe_automation) return "unsafe";
-
-  if (driver === "codex") {
-    if (task.codex_search) return "search-browse";
-    const sb = String(task.codex_sandbox ?? "").trim();
-    if (sb) return sb;
-    return "workspace-write";
-  }
-  if (driver === "claude-code") {
-    if (String(task.task_intent ?? "").trim() === "search-browse") return "search-browse";
-    if ((task.claude_webfetch_domains ?? []).length > 0) return "search-browse";
-    // Default to "has network" to match the recommended preset.
-    return "search-browse";
-  }
-  return "";
 }
 
 const newRunDriver = computed<ToolDriver>(() => toolDriverForWorkerType(newWorkerType.value));

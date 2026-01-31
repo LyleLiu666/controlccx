@@ -656,7 +656,15 @@ func (m *Manager) consumeStdout(task tasks.Task, driver tasks.WorkerType, stdout
 
 func isApprovalRequiredLine(line []byte) bool {
 	s := strings.ToLower(string(line))
-	return strings.Contains(s, "requires approval")
+	if strings.Contains(s, "requires approval") {
+		return true
+	}
+	// Claude Code sometimes emits a "requested permissions" message instead of "requires approval".
+	// Example: "Claude requested permissions to write to index.html, but you haven't granted it yet."
+	if strings.Contains(s, "requested permissions") || strings.Contains(s, "requested permission") {
+		return true
+	}
+	return false
 }
 
 type resumeFailureState struct {

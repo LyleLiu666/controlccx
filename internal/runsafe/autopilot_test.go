@@ -52,6 +52,9 @@ func TestApplyAutopilot_Claude_Analyze(t *testing.T) {
 	if out.SafetyPreset != "no-network" {
 		t.Fatalf("safety_preset=%q, want %q", out.SafetyPreset, "no-network")
 	}
+	if out.ClaudePermissionMode != "acceptEdits" {
+		t.Fatalf("claude_permission_mode=%q, want %q", out.ClaudePermissionMode, "acceptEdits")
+	}
 	if !out.ClaudeSandbox {
 		t.Fatalf("claude_sandbox=%v, want true", out.ClaudeSandbox)
 	}
@@ -81,6 +84,9 @@ func TestApplyAutopilot_Claude_Install_RequiresUnlock(t *testing.T) {
 	if out.SafetyPreset != "no-network" {
 		t.Fatalf("safety_preset=%q, want %q", out.SafetyPreset, "no-network")
 	}
+	if out.ClaudePermissionMode != "acceptEdits" {
+		t.Fatalf("claude_permission_mode=%q, want %q", out.ClaudePermissionMode, "acceptEdits")
+	}
 	if out.UnsafeAutomation {
 		t.Fatalf("unsafe_automation=%v, want false", out.UnsafeAutomation)
 	}
@@ -91,5 +97,8 @@ func TestApplyAutopilot_Claude_Install_RequiresUnlock(t *testing.T) {
 	})
 	if unlocked.SafetyPreset != "unsafe" || !unlocked.UnsafeAutomation {
 		t.Fatalf("unlock preset/unsafe=%q/%v, want unsafe/true", unlocked.SafetyPreset, unlocked.UnsafeAutomation)
+	}
+	if unlocked.ClaudePermissionMode != "" {
+		t.Fatalf("unlock claude_permission_mode=%q, want empty", unlocked.ClaudePermissionMode)
 	}
 }

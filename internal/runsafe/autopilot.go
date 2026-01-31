@@ -115,6 +115,12 @@ func applyClaudeAutopilot(in *tasks.CreateTaskInput, decision Decision, env Safe
 		// "code" defaults to no-network; allow users to opt into search-browse when needed.
 		in.SafetyPreset = "no-network"
 	}
+
+	// Non-interactive Claude runs cannot respond to interactive approval prompts.
+	// Accept file edits by default unless the run explicitly bypasses all permissions.
+	if !in.UnsafeAutomation && strings.TrimSpace(in.SafetyPreset) != "unsafe" {
+		in.ClaudePermissionMode = "acceptEdits"
+	}
 }
 
 func FormatAuditLog(driver tasks.WorkerType, decision Decision, in tasks.CreateTaskInput, applied bool) string {
