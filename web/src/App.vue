@@ -5345,79 +5345,7 @@ watch(
 	                    <span class="tinyHint">Allows downloads/installers (higher risk)</span>
 	                  </label>
 
-	                  <template v-if="newRunShowManualSafety && !runSafetyAutopilotEnabled">
-	                    <div class="newRunSafetyGrid">
-	                      <label>
-	                        Task intent
-	                        <select v-model="newRunTaskIntent">
-	                          <option value="code">code</option>
-	                          <option value="analyze">analyze</option>
-	                          <option value="search-browse">search-browse</option>
-	                          <option value="install">install</option>
-	                        </select>
-	                      </label>
-	                      <label>
-	                        Safety preset
-	                        <select v-model="newRunSafetyPreset">
-	                          <option
-	                            v-for="p in safetyPresetsForDriver(newRunDriver)"
-	                            :key="p.value"
-	                            :value="p.value"
-	                          >
-	                            {{ p.value }}
-	                          </option>
-	                        </select>
-	                      </label>
-	                    </div>
-	                    <div class="tinyHint">
-	                      Recommended:
-	                      <span class="mono">{{ recommendSafetyPreset(newRunDriver, newRunTaskIntent) }}</span>
-	                      <button
-	                        type="button"
-	                        class="inlineBtn"
-	                        @click="newRunSafetyPreset = recommendSafetyPreset(newRunDriver, newRunTaskIntent)"
-	                      >
-	                        Use
-	                      </button>
-	                    </div>
-
-	                    <div
-	                      v-if="newRunDriver === 'claude-code' && newRunSafetyPreset === 'search-browse'"
-	                      class="tinyHint"
-	                    >
-	                      Enables Claude Code WebFetch. Downloads via <span class="mono">curl</span>/<span class="mono">wget</span> remain denied by default.
-	                    </div>
-	                    <div
-	                      v-else-if="newRunDriver === 'codex' && newRunSafetyPreset === 'search-browse'"
-	                      class="tinyHint"
-	                    >
-	                      Enables Codex <span class="mono">--search</span> (native web_search tool). Search/browse is distinct from downloading/executing scripts.
-	                    </div>
-
-	                    <div
-	                      v-if="isHighRiskPreset(newRunDriver, newRunSafetyPreset)"
-	                      class="newRunSafetyWarn"
-	                    >
-	                      <div class="tinyHint warn">
-	                        <template v-if="newRunDriver === 'codex' && newRunSafetyPreset === 'unsafe'">
-	                          Runs Codex with <span class="mono">--dangerously-bypass-approvals-and-sandbox</span> (no sandbox).
-	                        </template>
-	                        <template v-else-if="newRunDriver === 'codex' && newRunSafetyPreset === 'danger-full-access'">
-	                          Runs Codex with <span class="mono">--sandbox danger-full-access</span> (can access outside the workspace).
-	                        </template>
-	                        <template v-else-if="newRunDriver === 'claude-code' && newRunSafetyPreset === 'unsafe'">
-	                          Runs Claude Code with <span class="mono">--dangerously-skip-permissions</span>. Recommended only for sandboxes with no internet access.
-	                        </template>
-	                      </div>
-	                      <label class="newRunSafetyOptIn">
-	                        <input type="checkbox" v-model="newRunHighRiskOptIn" />
-	                        <span>I understand and want to proceed</span>
-	                      </label>
-	                    </div>
-	                  </template>
-
-	                  <details class="newRunSafetyAdvanced">
-	                    <summary>Advanced</summary>
+	                  <div class="newRunSafetyAdvanced">
 	                    <div class="newRunSafetyAdvancedGrid">
 	                      <label class="full">
 	                        <input type="checkbox" v-model="runSafetyAutopilotEnabled" />
@@ -5429,7 +5357,7 @@ watch(
 	                      </label>
 	                    </div>
 
-	                    <template v-if="newRunShowManualSafety && runSafetyAutopilotEnabled">
+	                    <template v-if="newRunShowManualSafety">
 	                      <div class="newRunSafetyGrid">
 	                        <label>
 	                          Task intent
@@ -5499,7 +5427,7 @@ watch(
 	                        </label>
 	                      </div>
 	                    </template>
-	                  </details>
+	                  </div>
 	                </div>
 
 	                <div class="newRunHint">
