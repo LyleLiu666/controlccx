@@ -13,6 +13,7 @@ import type {
   FSListEntry,
   FSRoot,
   LogEntry,
+  SessionWorkspace,
   Tool,
   ToolDriver,
   ToolsListResponse,
@@ -280,6 +281,7 @@ const {
     // Fire-and-forget; avoid blocking SSE handling.
     void maybeTriggerDeliveryForeman(prev, next);
     maybeTriggerAttentionAutopilot(prev, next);
+    void maybePromptWorkspaceMerge(prev, next);
   },
   onChatMessage: (m) => {
     chat.value = appendChatMessageUnique(chat.value, m);
@@ -291,6 +293,7 @@ const {
   loading: runWorkspaceLoading,
   error: runWorkspaceError,
   conflict: runWorkspaceConflict,
+  refresh: refreshRunWorkspace,
   merge: mergeRunWorkspace,
   discard: discardRunWorkspace,
 } = useTaskWorkspace(selectedTaskId);
@@ -490,6 +493,7 @@ const LS_KEY_RUN_SAFETY_AUTOPILOT = "controlccx.run_safety.autopilot.v1";
 const LS_KEY_RUN_SAFETY_INSTALL_UNLOCK = "controlccx.run_safety.install_unlock.v1";
 const LS_KEY_ATTENTION_AUTOPILOT = "controlccx.attention_autopilot.v1";
 const LS_KEY_ATTENTION_AUTOPILOT_SEEN = "controlccx.attention_autopilot.seen.v1";
+const LS_KEY_WORKSPACE_MERGE_PROMPT_SEEN = "controlccx.workspace.merge_prompt_seen.v1";
 
 const autoDeliveryForeman = ref<boolean>(true);
 const deliveryForemanSeenRuns = ref<Set<string>>(new Set());
@@ -504,6 +508,13 @@ const attentionAutopilotQueue = ref<string[]>([]);
 const attentionAutopilotQueued = new Set<string>();
 const attentionAutopilotSeen = ref<Record<string, string>>({});
 const attentionAutopilotNote = ref("");
+
+const workspaceMergePromptSeenRuns = ref<Set<string>>(new Set());
+const workspaceMergePromptOpen = ref(false);
+const workspaceMergePromptBusy = ref(false);
+const workspaceMergePromptError = ref("");
+const workspaceMergePromptRunID = ref("");
+const workspaceMergePromptWorkspace = ref<SessionWorkspace | null>(null);
 
 const runSafetyPresetByTool = ref<Record<string, string>>({});
 const runSafetyIntentByTool = ref<Record<string, string>>({});
@@ -1275,6 +1286,7 @@ const workspaceSelect = ref<string>(loadString(LS_KEY_WORKSPACE_FILTER));
 
   autoDeliveryForeman.value = loadBool(LS_KEY_AUTO_DELIVERY_FOREMAN, true);
   deliveryForemanSeenRuns.value = new Set(loadStringArray(LS_KEY_DELIVERY_FOREMAN_SEEN));
+  workspaceMergePromptSeenRuns.value = new Set(loadStringArray(LS_KEY_WORKSPACE_MERGE_PROMPT_SEEN));
 
   runSafetyIntentByTool.value = loadStringMap(LS_KEY_RUN_SAFETY_INTENT_BY_TOOL);
   runSafetyPresetByTool.value = loadStringMap(LS_KEY_RUN_SAFETY_PRESET_BY_TOOL);
@@ -1424,6 +1436,9 @@ function desiredOutputTabForTask(t: Task | null): "result" | "logs" {
 watch(selectedTaskId, () => {
   const t = selectedTask.value;
   if (!t) return;
+  if (workspaceMergePromptOpen.value && workspaceMergePromptRunID.value !== selectedTaskId.value) {
+    closeWorkspaceMergePrompt();
+  }
   outputTab.value = desiredOutputTabForTask(t);
   logShowAssistant.value = true;
   logShowStdout.value = true;
@@ -2018,6 +2033,75 @@ function showDeliveryForemanToast(message: string) {
   window.setTimeout(() => {
     if (deliveryForemanToast.value === message) deliveryForemanToastOpen.value = false;
   }, 10_000);
+}
+
+function persistWorkspaceMergePromptSeen(runID: string) {
+  const id = (runID ?? "").trim();
+  if (!id) return;
+  if (workspaceMergePromptSeenRuns.value.has(id)) return;
+  const next = new Set(workspaceMergePromptSeenRuns.value);
+  next.add(id);
+  // Limit growth to keep localStorage small.
+  const arr = Array.from(next).slice(-800);
+  workspaceMergePromptSeenRuns.value = new Set(arr);
+  saveStringArray(LS_KEY_WORKSPACE_MERGE_PROMPT_SEEN, arr);
+}
+
+function closeWorkspaceMergePrompt() {
+  workspaceMergePromptOpen.value = false;
+  workspaceMergePromptBusy.value = false;
+  workspaceMergePromptError.value = "";
+  workspaceMergePromptRunID.value = "";
+  workspaceMergePromptWorkspace.value = null;
+}
+
+async function confirmWorkspaceMergePrompt() {
+  const runID = workspaceMergePromptRunID.value.trim();
+  const ws = workspaceMergePromptWorkspace.value;
+  if (!runID || !ws || ws.status !== "active" || selectedTaskId.value !== runID) {
+    closeWorkspaceMergePrompt();
+    return;
+  }
+  workspaceMergePromptBusy.value = true;
+  workspaceMergePromptError.value = "";
+  try {
+    await mergeRunWorkspace();
+    if (runWorkspaceConflict.value) return; // keep modal open for user to read the conflict summary
+    closeWorkspaceMergePrompt();
+  } catch (e: any) {
+    workspaceMergePromptError.value = e?.message ?? String(e);
+  } finally {
+    workspaceMergePromptBusy.value = false;
+  }
+}
+
+async function maybePromptWorkspaceMerge(prev: Task | undefined, next: Task) {
+  if (!prev || !next?.id) return;
+  if (workspaceMergePromptOpen.value) return;
+  if (workspaceMergePromptSeenRuns.value.has(next.id)) return;
+
+  const prevStatus = prev?.status ?? "";
+  const nextStatus = next.status ?? "";
+  if (isTerminalStatus(prevStatus) || !isTerminalStatus(nextStatus)) return;
+  if (!(prevStatus === "running" || prevStatus === "queued" || prevStatus === "")) return;
+
+  // Non-disruptive: only prompt for the currently selected run.
+  if (selectedTaskId.value !== next.id) return;
+
+  try {
+    await refreshRunWorkspace();
+  } catch {
+    // ignore fetch errors
+  }
+  const ws2 = runWorkspace.value;
+  if (!ws2 || ws2.status !== "active") return;
+
+  workspaceMergePromptRunID.value = next.id;
+  workspaceMergePromptWorkspace.value = ws2;
+  workspaceMergePromptError.value = "";
+  workspaceMergePromptBusy.value = false;
+  workspaceMergePromptOpen.value = true;
+  persistWorkspaceMergePromptSeen(next.id);
 }
 
 async function buildDeliveryForemanPrompt(t: Task): Promise<string> {
@@ -4692,6 +4776,46 @@ watch(
             </div>
 
             <div v-if="outputTab === 'result'" class="resultPanel">
+              <div
+                v-if="runWorkspace && runWorkspace.status === 'active'"
+                class="runWorkspaceBanner"
+              >
+                <div class="tinyHint">
+                  Isolated run workspace:
+                  <span class="mono" :title="runWorkspace.run_workdir">{{
+                    workdirLabelForSession(runWorkspace.run_workdir)
+                  }}</span>
+                  · Base workdir:
+                  <span class="mono" :title="selectedTask?.workdir">{{
+                    workdirLabelForSession(selectedTask?.workdir ?? '')
+                  }}</span>
+                  · 工具把 run workspace 当作“当前目录”输出属正常现象
+                </div>
+                <div class="runWorkspaceBannerActions">
+                  <button
+                    type="button"
+                    @click="setWorkspace(runWorkspace.run_workdir)"
+                    title="Focus run workspace"
+                  >
+                    Focus run dir
+                  </button>
+                  <button
+                    type="button"
+                    @click="copyText(runWorkspace.run_workdir)"
+                    title="Copy run workspace dir"
+                  >
+                    Copy run dir
+                  </button>
+                  <button
+                    type="button"
+                    @click="copyText(selectedTask?.workdir ?? '')"
+                    :disabled="!selectedTask?.workdir"
+                    title="Copy base workdir"
+                  >
+                    Copy base dir
+                  </button>
+                </div>
+              </div>
               <div v-if="!selectedResultText" class="empty">
                 {{
                   selectedTask?.status === "running" ||
@@ -4920,11 +5044,11 @@ watch(
 		      @startResize="startLiveResize"
 		    />
 
-	    <div v-if="runsOpen" class="modalOverlay" @click.self="runsOpen = false">
-	      <div class="modal runsModal">
-	        <div class="modalHeader">
-	          <div class="modalTitle">
-	            Runs <span class="runsCount">{{ selectedSession?.runs.length ?? 0 }}</span>
+		    <div v-if="runsOpen" class="modalOverlay" @click.self="runsOpen = false">
+		      <div class="modal runsModal">
+		        <div class="modalHeader">
+		          <div class="modalTitle">
+		            Runs <span class="runsCount">{{ selectedSession?.runs.length ?? 0 }}</span>
 	          </div>
 	          <button class="iconBtn" type="button" @click="runsOpen = false">✕</button>
 	        </div>
@@ -4957,14 +5081,72 @@ watch(
 	        <div class="modalFooter">
 	          <button type="button" @click="runsOpen = false">Close</button>
 	        </div>
-	      </div>
-	    </div>
+		      </div>
+		    </div>
 
-      <div
-        v-if="workspaceRenameOpen"
-        class="modalOverlay"
-        @click.self="closeWorkspaceRename"
-      >
+        <div
+          v-if="workspaceMergePromptOpen"
+          class="modalOverlay"
+          @click.self="closeWorkspaceMergePrompt"
+        >
+          <div class="modal smallModal">
+            <div class="modalHeader">
+              <div class="modalTitle">Merge run workspace</div>
+              <button class="iconBtn" type="button" @click="closeWorkspaceMergePrompt">
+                ✕
+              </button>
+            </div>
+            <div class="modalBody">
+              <div v-if="workspaceMergePromptError" class="modalError">
+                {{ workspaceMergePromptError }}
+              </div>
+              <div class="confirmText">
+                This run used an isolated workspace. Merge changes back into your base workdir/branch?
+              </div>
+              <div
+                v-if="workspaceMergePromptWorkspace"
+                class="tinyHint"
+                style="overflow-wrap: anywhere"
+              >
+                base_workdir:
+                <span class="mono">{{ workspaceMergePromptWorkspace.base_workdir }}</span>
+              </div>
+              <div
+                v-if="workspaceMergePromptWorkspace"
+                class="tinyHint"
+                style="overflow-wrap: anywhere"
+              >
+                run_workdir:
+                <span class="mono">{{ workspaceMergePromptWorkspace.run_workdir }}</span>
+              </div>
+              <div v-if="runWorkspaceConflict" class="modalError">
+                {{ conflictSummary(runWorkspaceConflict) }}
+              </div>
+              <div class="tinyHint">
+                Tip: you can also merge later from the session “⋯” menu.
+              </div>
+            </div>
+            <div class="modalFooter">
+              <button type="button" @click="closeWorkspaceMergePrompt" :disabled="workspaceMergePromptBusy">
+                Not now
+              </button>
+              <button
+                type="button"
+                class="primary"
+                @click="confirmWorkspaceMergePrompt"
+                :disabled="workspaceMergePromptBusy"
+              >
+                {{ workspaceMergePromptBusy ? "Merging..." : "Merge back" }}
+              </button>
+            </div>
+          </div>
+        </div>
+
+	      <div
+	        v-if="workspaceRenameOpen"
+	        class="modalOverlay"
+	        @click.self="closeWorkspaceRename"
+	      >
         <div class="modal smallModal">
           <div class="modalHeader">
             <div class="modalTitle">Rename Workspace</div>
@@ -8730,18 +8912,32 @@ h2 {
   flex: 1;
 }
 
-.resultPanel, .logsPanel, .tracePanel {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
+  .resultPanel, .logsPanel, .tracePanel {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
 
-.traceBox {
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-md);
-  padding: 14px 16px;
+  .runWorkspaceBanner {
+    border: 1px dashed var(--border-color);
+    border-radius: var(--radius-md);
+    padding: 10px 12px;
+    background: var(--bg-panel);
+  }
+
+  .runWorkspaceBannerActions {
+    display: flex;
+    gap: 10px;
+    margin-top: 8px;
+    flex-wrap: wrap;
+  }
+
+  .traceBox {
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    padding: 14px 16px;
   background: var(--bg-panel);
   flex: 1;
   overflow: auto;

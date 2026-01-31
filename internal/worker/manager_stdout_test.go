@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -179,6 +180,74 @@ func TestManager_consumeStdout_Codex_StoresRawStdout(t *testing.T) {
 	}
 	if assistantCount != 1 {
 		t.Fatalf("assistant_count=%d, want 1", assistantCount)
+	}
+
+	updated, err := store.GetTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if updated.SessionID != "thr-1" {
+		t.Fatalf("session_id=%q, want %q", updated.SessionID, "thr-1")
+	}
+	if strings.TrimSpace(sid) != "thr-1" {
+		t.Fatalf("sid=%q, want %q", sid, "thr-1")
+	}
+}
+
+func TestManager_consumeStdout_Codex_KeepsWorkspaceGreeting(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "controlccx.db")
+
+	conn, err := db.Open(ctx, db.Options{Path: dbPath})
+	if err != nil {
+		t.Fatalf("db open: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+
+	store := tasks.NewStore(conn)
+	task, err := store.CreateTask(ctx, tasks.CreateTaskInput{
+		WorkerType: tasks.WorkerCodex,
+		Mode:       tasks.ModeNew,
+		Prompt:     "x",
+		WorkDir:    ".",
+	})
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	m := &Manager{cfg: config.Default(), store: store}
+
+	var (
+		sidMu sync.Mutex
+		sid   string
+	)
+	greeting := "I notice you're currently in (/tmp/.ccx/workspaces/abc/copy) directory."
+	out := strings.Join([]string{
+		fmt.Sprintf(`{"type":"item.completed","thread_id":"thr-1","item":{"type":"agent_message","text":%q}}`, greeting),
+		`{"type":"item.completed","thread_id":"thr-1","item":{"type":"agent_message","text":"real answer"}}`,
+	}, "\n")
+
+	m.consumeStdout(task, tasks.WorkerCodex, strings.NewReader(out), &sidMu, &sid, func() {}, &resumeFailureState{}, &blockedState{})
+
+	logs, err := store.ListLogs(ctx, task.ID, 0, 2000)
+	if err != nil {
+		t.Fatalf("list logs: %v", err)
+	}
+
+	var assistant []string
+	for _, l := range logs {
+		if l.Stream == tasks.LogAssistant {
+			assistant = append(assistant, l.Message)
+		}
+	}
+	if len(assistant) != 2 {
+		t.Fatalf("assistant_count=%d, want 2", len(assistant))
+	}
+	if assistant[0] != greeting {
+		t.Fatalf("assistant[0]=%q, want %q", assistant[0], greeting)
+	}
+	if assistant[1] != "real answer" {
+		t.Fatalf("assistant[1]=%q, want %q", assistant[1], "real answer")
 	}
 
 	updated, err := store.GetTask(ctx, task.ID)

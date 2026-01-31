@@ -239,3 +239,273 @@ function isActiveNode(path: string): boolean {
   </section>
 </template>
 
+<style scoped>
+/* Note: App.vue styles are scoped and don't reach into this component.
+   Keep Files page layout styles co-located here. */
+
+.filesPagePanel {
+  grid-column: 1 / -1;
+  max-height: calc(100vh - 110px);
+  max-height: calc(100dvh - 110px);
+}
+
+h2 {
+  margin: 0;
+  padding: 16px 20px;
+  font-size: 15px;
+  font-weight: 700;
+  color: white;
+  background: linear-gradient(135deg, #0d9488 0%, #0891b2 100%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.1);
+}
+
+.h2Spacer {
+  flex: 1;
+}
+
+.h2Btn {
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  background: rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.9);
+  font-weight: 800;
+  font-size: 12px;
+  border-radius: 999px;
+  padding: 6px 10px;
+}
+
+.h2Btn:hover {
+  border-color: rgba(255, 255, 255, 0.35);
+  background: rgba(255, 255, 255, 0.16);
+  color: white;
+}
+
+.filesPageBody {
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.filesTopRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.filesRootPath {
+  font-size: 12px;
+  color: var(--text-sub);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.filesSplit {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: var(--sidebar-width, 340px) 12px 1fr;
+  gap: 0;
+}
+
+.filesResizer {
+  width: 100%;
+  cursor: col-resize;
+  background: transparent;
+  display: flex;
+  justify-content: center;
+  transition: background 0.2s;
+}
+
+.filesResizer:hover,
+.filesResizer.resizing {
+  background: rgba(148, 163, 184, 0.25);
+}
+
+.filesTreePane,
+.filesEditorPane {
+  border: 1px solid var(--border-color);
+  border-radius: 14px;
+  background: rgba(0, 0, 0, 0.02);
+  padding: 10px;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+:global(:root[data-theme="dark"]) .filesTreePane,
+:global(:root[data-theme="dark"]) .filesEditorPane {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.filesTreeActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.filesTreeList {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 4px 2px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.filesNode {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  text-align: left;
+  border-radius: 10px;
+  padding: 8px 10px;
+}
+
+.filesNode:hover {
+  background: rgba(13, 148, 136, 0.08);
+}
+
+.filesNode.active {
+  background: var(--color-primary-bg);
+  border: 1px solid rgba(13, 148, 136, 0.35);
+}
+
+.filesNodeTwisty {
+  width: 14px;
+  color: var(--text-sub);
+  flex: 0 0 auto;
+}
+
+.filesNodeIcon {
+  width: 18px;
+  flex: 0 0 auto;
+}
+
+.filesNodeName {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.filesNodeMeta {
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: var(--text-sub);
+}
+
+.filesEditorHeader {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.filesEditorPath {
+  font-size: 12px;
+  font-family: var(--font-mono);
+  color: var(--text-sub);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.filesEditorEdit {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.filesEditorEdit textarea {
+  flex: 1;
+  min-height: 0;
+  resize: none;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.outputTabs {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+  flex: 0 0 auto;
+}
+
+.tabBtn {
+  padding: 6px 12px;
+  border-radius: 999px;
+}
+
+.tabBtn.active {
+  border-color: var(--color-primary);
+  background: var(--color-primary-bg);
+  color: var(--color-primary);
+}
+
+.tabSpacer {
+  flex: 1;
+}
+
+.resultBox {
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 16px;
+  background: var(--bg-panel);
+  color: var(--text-main);
+  flex: 1;
+  overflow: auto;
+  font-size: 13px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  font-family: var(--font-main);
+  box-shadow: inset 0 2px 4px rgba(0,0,0,0.03);
+}
+
+.filePreviewBox,
+.fileCodeBox {
+  flex: 1;
+  min-height: 0;
+}
+
+.fileCodeBox {
+  white-space: normal;
+  padding: 0;
+}
+
+.fileCodeBox pre {
+  margin: 0;
+  padding: 14px 16px;
+  min-height: 100%;
+  overflow: auto;
+  background: transparent;
+}
+
+@media (max-width: 860px) {
+  .filesSplit {
+    grid-template-columns: 1fr;
+  }
+  .filesTreePane {
+    max-height: 240px;
+  }
+  .filesResizer {
+    display: none;
+  }
+}
+</style>
