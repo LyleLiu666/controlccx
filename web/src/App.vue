@@ -80,10 +80,12 @@ const newRunPromptEl = ref<HTMLTextAreaElement | null>(null);
 
 type TaskIntent = "analyze" | "code" | "search-browse" | "install";
 
+const newRunSafetyOverride = ref(false);
 const newRunHighRiskOptIn = ref(false);
 
 const resumePrompt = ref<string>("");
 const resumeExpanded = ref(true);
+const resumeSafetyOverride = ref(false);
 const resumeHighRiskOptIn = ref(false);
 const errorBanner = ref<string>("");
 const {
@@ -422,6 +424,8 @@ const LS_KEY_CLAUDE_AUTO_APPROVE_LEGACY = "controlccx.claude.auto_approve.v1";
 const LS_KEY_MIGRATE_CLAUDE_DEFAULT_SAFETY_PRESET = "controlccx.migrate.claude_default_safety_preset.v1";
 const LS_KEY_RUN_SAFETY_INTENT_BY_TOOL = "controlccx.run_safety.intent_by_tool.v1";
 const LS_KEY_RUN_SAFETY_PRESET_BY_TOOL = "controlccx.run_safety.preset_by_tool.v1";
+const LS_KEY_RUN_SAFETY_AUTOPILOT = "controlccx.run_safety.autopilot.v1";
+const LS_KEY_RUN_SAFETY_INSTALL_UNLOCK = "controlccx.run_safety.install_unlock.v1";
 const LS_KEY_ATTENTION_AUTOPILOT = "controlccx.attention_autopilot.v1";
 const LS_KEY_ATTENTION_AUTOPILOT_SEEN = "controlccx.attention_autopilot.seen.v1";
 
@@ -441,6 +445,8 @@ const attentionAutopilotNote = ref("");
 
 const runSafetyPresetByTool = ref<Record<string, string>>({});
 const runSafetyIntentByTool = ref<Record<string, string>>({});
+const runSafetyAutopilotEnabled = ref<boolean>(true);
+const runSafetyInstallUnlock = ref<boolean>(false);
 
 function formatLogTime(ts: string): string {
   const s = (ts ?? "").trim();
@@ -1210,6 +1216,8 @@ const workspaceSelect = ref<string>(loadString(LS_KEY_WORKSPACE_FILTER));
 
   runSafetyIntentByTool.value = loadStringMap(LS_KEY_RUN_SAFETY_INTENT_BY_TOOL);
   runSafetyPresetByTool.value = loadStringMap(LS_KEY_RUN_SAFETY_PRESET_BY_TOOL);
+  runSafetyAutopilotEnabled.value = loadBool(LS_KEY_RUN_SAFETY_AUTOPILOT, true);
+  runSafetyInstallUnlock.value = loadBool(LS_KEY_RUN_SAFETY_INSTALL_UNLOCK, false);
 
   // Back-compat: v1 Claude auto-approve was a single boolean toggle.
   const legacyClaudeAutoApprove = loadBool(LS_KEY_CLAUDE_AUTO_APPROVE_LEGACY, false);
@@ -1335,6 +1343,8 @@ watch(
   (v) => saveStringMap(LS_KEY_RUN_SAFETY_PRESET_BY_TOOL, v),
   { deep: true },
 );
+watch(runSafetyAutopilotEnabled, (v) => saveBool(LS_KEY_RUN_SAFETY_AUTOPILOT, Boolean(v)));
+watch(runSafetyInstallUnlock, (v) => saveBool(LS_KEY_RUN_SAFETY_INSTALL_UNLOCK, Boolean(v)));
 watch(attentionAutopilotEnabled, (v) => saveBool(LS_KEY_ATTENTION_AUTOPILOT, Boolean(v)));
 watch(theme, (v) => saveString(LS_KEY_THEME, v));
 watch(liveScope, (v) => saveString(LS_KEY_FEED_SCOPE, v));
@@ -1359,6 +1369,7 @@ watch(selectedTaskId, () => {
   logShowSystem.value = true;
   logSearch.value = "";
   resumeExpanded.value = false;
+  resumeSafetyOverride.value = false;
 });
 
 watch(outputTab, (v) => {
@@ -1452,27 +1463,35 @@ async function onCreateTask(): Promise<boolean> {
   errorBanner.value = "";
   try {
     const driver = newRunDriver.value;
-    const intent = newRunTaskIntent.value;
-    const preset = newRunSafetyPreset.value;
+    const envelope = buildSafetyEnvelopePayload();
+    const useAutopilot = runSafetyAutopilotEnabled.value && !newRunSafetyOverride.value;
 
-    if (
-      (driver === "claude-code" || driver === "codex") &&
-      isHighRiskPreset(driver, preset) &&
-      !newRunHighRiskOptIn.value
-    ) {
-      errorBanner.value = "High-risk preset requires explicit opt-in.";
-      return false;
-    }
+    const safety = useAutopilot
+      ? {}
+      : (() => {
+          const intent = newRunTaskIntent.value;
+          const preset = newRunSafetyPreset.value;
 
-    // Persist effective choices for future runs.
-    setStringMapKey(runSafetyIntentByTool, newWorkerType.value, intent);
-    setStringMapKey(runSafetyPresetByTool, newWorkerType.value, preset);
+          if (
+            (driver === "claude-code" || driver === "codex") &&
+            isHighRiskPreset(driver, preset) &&
+            !newRunHighRiskOptIn.value
+          ) {
+            throw new Error("High-risk preset requires explicit opt-in.");
+          }
 
-    const safety = buildRunSafetyPayload(driver, intent, preset);
+          // Persist effective choices for future runs.
+          setStringMapKey(runSafetyIntentByTool, newWorkerType.value, intent);
+          setStringMapKey(runSafetyPresetByTool, newWorkerType.value, preset);
+
+          return buildRunSafetyPayload(driver, intent, preset);
+        })();
+
     const t = await createTask({
       worker_type: newWorkerType.value,
       prompt: newPrompt.value,
       workdir: newWorkdir.value,
+      ...envelope,
       ...safety,
     });
     upsertTask(t);
@@ -1635,6 +1654,8 @@ async function confirmSessionDelete() {
 
 function openNewRun() {
   newRunOpen.value = true;
+  newRunSafetyOverride.value = false;
+  newRunHighRiskOptIn.value = false;
   if (!toolsList.value.length) void refreshTools();
 }
 
@@ -2287,22 +2308,37 @@ async function onResumeTask() {
   errorBanner.value = "";
   try {
     const driver = resumeDriver.value;
-    const intent = resumeTaskIntent.value;
-    const preset = resumeSafetyPreset.value;
-    if (
-      (driver === "claude-code" || driver === "codex") &&
-      isHighRiskPreset(driver, preset) &&
-      !resumeHighRiskOptIn.value
-    ) {
-      errorBanner.value = "High-risk preset requires explicit opt-in.";
-      return;
-    }
+    const envelope = buildSafetyEnvelopePayload();
+    const useAutopilot = runSafetyAutopilotEnabled.value && !resumeSafetyOverride.value;
 
-    setStringMapKey(runSafetyIntentByTool, sess.worker_type, intent);
-    setStringMapKey(runSafetyPresetByTool, sess.worker_type, preset);
+    const payload = useAutopilot
+      ? (() => {
+          const preset = effectiveSafetyPresetForTask(driver, sess.latest);
+          if (isHighRiskPreset(driver, preset)) {
+            if (!isHighRiskAllowedByInstallUnlock(driver, preset)) {
+              throw new Error("High-risk preset requires manual opt-in (Advanced).");
+            }
+          }
+          return envelope;
+        })()
+      : (() => {
+          const intent = resumeTaskIntent.value;
+          const preset = resumeSafetyPreset.value;
+          if (
+            (driver === "claude-code" || driver === "codex") &&
+            isHighRiskPreset(driver, preset) &&
+            !resumeHighRiskOptIn.value
+          ) {
+            throw new Error("High-risk preset requires explicit opt-in.");
+          }
 
-    const safety = buildRunSafetyPayload(driver, intent, preset);
-    const nt = await resumeTaskWithOptions(sess.latest.id, { prompt: resumePrompt.value, ...safety });
+          setStringMapKey(runSafetyIntentByTool, sess.worker_type, intent);
+          setStringMapKey(runSafetyPresetByTool, sess.worker_type, preset);
+
+          return { ...envelope, ...buildRunSafetyPayload(driver, intent, preset) };
+        })();
+
+    const nt = await resumeTaskWithOptions(sess.latest.id, { prompt: resumePrompt.value, ...payload });
     upsertTask(nt);
     selectedTaskId.value = nt.id;
     resumePrompt.value = "";
@@ -2838,6 +2874,14 @@ function isHighRiskPreset(driver: ToolDriver, preset: string): boolean {
   return false;
 }
 
+function isHighRiskAllowedByInstallUnlock(driver: ToolDriver, preset: string): boolean {
+  if (!runSafetyInstallUnlock.value) return false;
+  const p = String(preset ?? "").trim();
+  if (driver === "codex") return p === "danger-full-access";
+  if (driver === "claude-code") return p === "unsafe";
+  return false;
+}
+
 function setStringMapKey(map: { value: Record<string, string> }, key: string, value: string) {
   const k = String(key ?? "").trim();
   if (!k) return;
@@ -2850,6 +2894,7 @@ function setStringMapKey(map: { value: Record<string, string> }, key: string, va
 
 type RunSafetyPayload = {
   unsafe_automation?: boolean;
+  safety_envelope?: string;
   safety_preset?: string;
   task_intent?: string;
   codex_sandbox?: string;
@@ -2858,6 +2903,10 @@ type RunSafetyPayload = {
   claude_permission_mode?: string;
   claude_sandbox?: boolean;
 };
+
+function buildSafetyEnvelopePayload(): Pick<RunSafetyPayload, "safety_envelope"> {
+  return runSafetyInstallUnlock.value ? { safety_envelope: "install-enabled" } : {};
+}
 
 function buildRunSafetyPayload(
   driver: ToolDriver,
@@ -2936,9 +2985,19 @@ const newRunTaskIntent = computed<TaskIntent>({
   set: (value) => setStringMapKey(runSafetyIntentByTool, newWorkerType.value, value),
 });
 const newRunSafetyPreset = computed<string>({
-  get: () => normalizeSafetyPreset(newRunDriver.value, newRunTaskIntent.value, runSafetyPresetByTool.value[newWorkerType.value] ?? ""),
+  get: () =>
+    normalizeSafetyPreset(
+      newRunDriver.value,
+      newRunTaskIntent.value,
+      runSafetyPresetByTool.value[newWorkerType.value] ?? "",
+    ),
   set: (value) => setStringMapKey(runSafetyPresetByTool, newWorkerType.value, value),
 });
+
+const newRunUseAutopilot = computed<boolean>(
+  () => runSafetyAutopilotEnabled.value && !newRunSafetyOverride.value,
+);
+const newRunShowManualSafety = computed<boolean>(() => !newRunUseAutopilot.value);
 
 watch([newWorkerType, newRunTaskIntent, newRunSafetyPreset], () => {
   newRunHighRiskOptIn.value = false;
@@ -3307,13 +3366,34 @@ const resumeSafetyPreset = computed<string>({
   },
 });
 
+const resumeUseAutopilot = computed<boolean>(
+  () => runSafetyAutopilotEnabled.value && !resumeSafetyOverride.value,
+);
+const resumeShowManualSafety = computed<boolean>(() => !resumeUseAutopilot.value);
+const resumeAutopilotHighRiskBlocked = computed<boolean>(() => {
+  if (!resumeUseAutopilot.value) return false;
+  const sess = selectedSession.value;
+  if (!sess) return false;
+  const driver = resumeDriver.value;
+  const preset = effectiveSafetyPresetForTask(driver, sess.latest);
+  if (!isHighRiskPreset(driver, preset)) return false;
+  return !isHighRiskAllowedByInstallUnlock(driver, preset);
+});
+
 watch([selectedSessionKey, resumeTaskIntent, resumeSafetyPreset], () => {
   resumeHighRiskOptIn.value = false;
 });
 
-watch(selectedSessionKey, () => {
-  void refreshAcceptance();
-}, { immediate: true });
+watch(
+  selectedSessionKey,
+  () => {
+    // Default to autopilot on session switches; advanced overrides are per-run.
+    resumeSafetyOverride.value = false;
+    resumeHighRiskOptIn.value = false;
+    void refreshAcceptance();
+  },
+  { immediate: true },
+);
 
 let acceptancePollTimer: number | null = null;
 watch(
@@ -4021,14 +4101,27 @@ watch(
                   v-if="acceptanceState"
                   class="pill acceptance"
                   :title="`Acceptance ${acceptanceState.status} · ${acceptanceState.current_gate || '(no gate)'} · ${acceptanceState.summary || ''}`"
-                >
-                  Acc {{ acceptanceState.iteration }}/{{ acceptanceState.max_iterations }}
-                </span>
-                <span class="pill kind">{{ selectedSession.worker_type }}</span>
-                <button
-                  type="button"
-                  class="detailMini detailMiniBtn"
-                  @click="openRuns"
+	                >
+	                  Acc {{ acceptanceState.iteration }}/{{ acceptanceState.max_iterations }}
+	                </span>
+	                <span class="pill kind">{{ selectedSession.worker_type }}</span>
+	                <span
+	                  v-if="
+	                    toolDriverForWorkerType(selectedSession.worker_type) === 'codex' ||
+	                    toolDriverForWorkerType(selectedSession.worker_type) === 'claude-code'
+	                  "
+	                  class="pill safety"
+	                  :title="`Safety: ${normalizeTaskIntent(selectedSession.latest.task_intent ?? 'code')}/${effectiveSafetyPresetForTask(toolDriverForWorkerType(selectedSession.worker_type), selectedSession.latest)}`"
+	                >
+	                  Safety
+	                  {{
+	                    normalizeTaskIntent(selectedSession.latest.task_intent ?? "code")
+	                  }}/{{ effectiveSafetyPresetForTask(toolDriverForWorkerType(selectedSession.worker_type), selectedSession.latest) }}
+	                </span>
+	                <button
+	                  type="button"
+	                  class="detailMini detailMiniBtn"
+	                  @click="openRuns"
                   title="Open runs"
                 >
                   {{ selectedSession.runs.length }} runs
@@ -4201,14 +4294,14 @@ watch(
             </div>
           </div>
 
-          <div v-if="selectedTask?.status === 'blocked'" class="blockedHint">
-            <div class="text">
-              Blocked: requires approval · 可尝试开启
-              <span class="mono">workers.unsafe_automation</span> 后重试（危险）
-            </div>
-            <div class="actions">
-              <button
-                type="button"
+	          <div v-if="selectedTask?.status === 'blocked'" class="blockedHint">
+	            <div class="text">
+	              Blocked: requires approval · Try enabling <span class="mono">Install unlock</span> (one-time) or set
+	              <span class="mono">workers.unsafe_automation</span> and retry (dangerous).
+	            </div>
+	            <div class="actions">
+	              <button
+	                type="button"
                 @click="copyText('workers:\\n  unsafe_automation: true\\n')"
                 title="Copy config snippet"
               >
@@ -4269,45 +4362,39 @@ watch(
                 rows="3"
                 placeholder="Continue with..."
               ></textarea>
-              <div
-                v-if="resumeDriver === 'codex' || resumeDriver === 'claude-code'"
-                class="resumeSafetyControls"
-              >
-                <label v-if="resumeExpanded" class="resumeSafetyLabel">
-                  Intent
-                  <select v-model="resumeTaskIntent">
-                    <option value="code">code</option>
-                    <option value="analyze">analyze</option>
-                    <option value="search-browse">search-browse</option>
-                    <option value="install">install</option>
-                  </select>
-                </label>
-                <label class="resumeSafetyLabel">
-                  Safety
-                  <select v-model="resumeSafetyPreset">
-                    <option
-                      v-for="p in safetyPresetsForDriver(resumeDriver)"
-                      :key="p.value"
-                      :value="p.value"
-                    >
-                      {{ p.value }}
-                    </option>
-                  </select>
-                </label>
-              </div>
+	              <div
+	                v-if="resumeDriver === 'codex' || resumeDriver === 'claude-code'"
+	                class="resumeSafetyControls"
+	              >
+	                <span class="pill" :class="resumeUseAutopilot ? 'low' : 'warn'">{{
+	                  resumeUseAutopilot ? "Auto" : "Manual"
+	                }}</span>
+	                <span class="mono">
+	                  <template v-if="resumeShowManualSafety">
+	                    {{ resumeTaskIntent }}/{{ resumeSafetyPreset }}
+	                  </template>
+	                  <template v-else-if="selectedSession">
+	                    {{
+	                      normalizeTaskIntent(selectedSession.latest.task_intent ?? "code")
+	                    }}/{{ effectiveSafetyPresetForTask(resumeDriver, selectedSession.latest) }}
+	                  </template>
+	                </span>
+	              </div>
               <button
                 type="button"
                 class="primary"
                 @click="onResumeTask"
-                :disabled="
-                  !resumePrompt.trim() ||
-                  !selectedSession.session_id ||
-                  !!selectedSession.deleted_at ||
-                  ((resumeDriver === 'codex' || resumeDriver === 'claude-code') &&
-                    isHighRiskPreset(resumeDriver, resumeSafetyPreset) &&
-                    !resumeHighRiskOptIn)
-                "
-              >
+	                :disabled="
+	                  !resumePrompt.trim() ||
+	                  !selectedSession.session_id ||
+	                  !!selectedSession.deleted_at ||
+	                  (resumeShowManualSafety &&
+	                    (resumeDriver === 'codex' || resumeDriver === 'claude-code') &&
+	                    isHighRiskPreset(resumeDriver, resumeSafetyPreset) &&
+	                    !resumeHighRiskOptIn) ||
+	                  resumeAutopilotHighRiskBlocked
+	                "
+	              >
                 Resume
               </button>
               <button
@@ -4319,51 +4406,103 @@ watch(
                 {{ resumeExpanded ? "▴" : "⋯" }}
               </button>
             </div>
-            <div
-              v-if="resumeExpanded && (resumeDriver === 'codex' || resumeDriver === 'claude-code')"
-              class="tinyHint"
-            >
-              Recommended: <span class="mono">{{ recommendSafetyPreset(resumeDriver, resumeTaskIntent) }}</span>
-              <button
-                type="button"
-                class="inlineBtn"
-                @click="resumeSafetyPreset = recommendSafetyPreset(resumeDriver, resumeTaskIntent)"
-              >
-                Use
-              </button>
-            </div>
-            <div
-              v-if="resumeDriver === 'claude-code' && resumeSafetyPreset === 'search-browse'"
-              class="tinyHint"
-            >
-              Enables Claude Code WebFetch. Downloads via <span class="mono">curl</span>/<span class="mono">wget</span> remain denied by default.
-            </div>
-            <div
-              v-else-if="resumeDriver === 'codex' && resumeSafetyPreset === 'search-browse'"
-              class="tinyHint"
-            >
-              Enables Codex <span class="mono">--search</span> (native web_search tool). Search/browse is distinct from downloading/executing scripts.
-            </div>
-            <div
-              v-if="isHighRiskPreset(resumeDriver, resumeSafetyPreset)"
-              class="resumeSafetyWarn"
-            >
-              <div class="tinyHint warn">
-                <template v-if="resumeDriver === 'codex' && resumeSafetyPreset === 'unsafe'">
-                  Runs Codex with <span class="mono">--dangerously-bypass-approvals-and-sandbox</span> (no sandbox).
-                </template>
-                <template v-else-if="resumeDriver === 'codex' && resumeSafetyPreset === 'danger-full-access'">
-                  Runs Codex with <span class="mono">--sandbox danger-full-access</span> (can access outside the workspace).
-                </template>
-                <template v-else-if="resumeDriver === 'claude-code' && resumeSafetyPreset === 'unsafe'">
-                  Runs Claude Code with <span class="mono">--dangerously-skip-permissions</span>. Recommended only for sandboxes with no internet access.
-                </template>
-              </div>
-              <label class="resumeSafetyOptIn">
-                <input type="checkbox" v-model="resumeHighRiskOptIn" />
-                <span>I understand and want to proceed</span>
-              </label>
-            </div>
+	            <div
+	              v-if="resumeExpanded && (resumeDriver === 'codex' || resumeDriver === 'claude-code')"
+	              class="resumeSafetyExtra"
+	            >
+	              <div class="resumeSafetyExtraGrid">
+	                <label class="full">
+	                  <input type="checkbox" v-model="runSafetyInstallUnlock" />
+	                  <span class="mono">Install unlock</span>
+	                  <span class="tinyHint">Allows downloads/installers (higher risk)</span>
+	                </label>
+	                <label class="full">
+	                  <input type="checkbox" v-model="runSafetyAutopilotEnabled" />
+	                  <span>Safety autopilot (recommended)</span>
+	                </label>
+	                <label v-if="runSafetyAutopilotEnabled" class="full">
+	                  <input type="checkbox" v-model="resumeSafetyOverride" />
+	                  <span>Override autopilot (manual intent/preset)</span>
+	                </label>
+	              </div>
+
+	              <template v-if="resumeShowManualSafety">
+	                <div class="resumeSafetyGrid">
+	                  <label class="resumeSafetyLabel">
+	                    Intent
+	                    <select v-model="resumeTaskIntent">
+	                      <option value="code">code</option>
+	                      <option value="analyze">analyze</option>
+	                      <option value="search-browse">search-browse</option>
+	                      <option value="install">install</option>
+	                    </select>
+	                  </label>
+	                  <label class="resumeSafetyLabel">
+	                    Safety
+	                    <select v-model="resumeSafetyPreset">
+	                      <option
+	                        v-for="p in safetyPresetsForDriver(resumeDriver)"
+	                        :key="p.value"
+	                        :value="p.value"
+	                      >
+	                        {{ p.value }}
+	                      </option>
+	                    </select>
+	                  </label>
+	                </div>
+	                <div class="tinyHint">
+	                  Recommended:
+	                  <span class="mono">{{ recommendSafetyPreset(resumeDriver, resumeTaskIntent) }}</span>
+	                  <button
+	                    type="button"
+	                    class="inlineBtn"
+	                    @click="resumeSafetyPreset = recommendSafetyPreset(resumeDriver, resumeTaskIntent)"
+	                  >
+	                    Use
+	                  </button>
+	                </div>
+	                <div
+	                  v-if="resumeDriver === 'claude-code' && resumeSafetyPreset === 'search-browse'"
+	                  class="tinyHint"
+	                >
+	                  Enables Claude Code WebFetch. Downloads via <span class="mono">curl</span>/<span class="mono">wget</span> remain denied by default.
+	                </div>
+	                <div
+	                  v-else-if="resumeDriver === 'codex' && resumeSafetyPreset === 'search-browse'"
+	                  class="tinyHint"
+	                >
+	                  Enables Codex <span class="mono">--search</span> (native web_search tool). Search/browse is distinct from downloading/executing scripts.
+	                </div>
+	                <div
+	                  v-if="isHighRiskPreset(resumeDriver, resumeSafetyPreset)"
+	                  class="resumeSafetyWarn"
+	                >
+	                  <div class="tinyHint warn">
+	                    <template v-if="resumeDriver === 'codex' && resumeSafetyPreset === 'unsafe'">
+	                      Runs Codex with <span class="mono">--dangerously-bypass-approvals-and-sandbox</span> (no sandbox).
+	                    </template>
+	                    <template v-else-if="resumeDriver === 'codex' && resumeSafetyPreset === 'danger-full-access'">
+	                      Runs Codex with <span class="mono">--sandbox danger-full-access</span> (can access outside the workspace).
+	                    </template>
+	                    <template v-else-if="resumeDriver === 'claude-code' && resumeSafetyPreset === 'unsafe'">
+	                      Runs Claude Code with <span class="mono">--dangerously-skip-permissions</span>. Recommended only for sandboxes with no internet access.
+	                    </template>
+	                  </div>
+	                  <label class="resumeSafetyOptIn">
+	                    <input type="checkbox" v-model="resumeHighRiskOptIn" />
+	                    <span>I understand and want to proceed</span>
+	                  </label>
+	                </div>
+	              </template>
+	              <template v-else>
+	                <div v-if="resumeAutopilotHighRiskBlocked" class="tinyHint warn">
+	                  High-risk run detected. Enable <span class="mono">Install unlock</span> or use manual override.
+	                </div>
+	                <div class="tinyHint">
+	                  Uses last run’s safety settings.
+	                </div>
+	              </template>
+	            </div>
             <div v-if="selectedSession.deleted_at" class="tinyHint">
               session deleted：resume disabled
             </div>
@@ -4888,79 +5027,189 @@ watch(
               driver: <span class="mono">{{ newTool.driver }}</span> · cmd:
               <span class="mono">{{ newTool.command }}</span>
             </div>
-            <div
-              v-if="newRunDriver === 'codex' || newRunDriver === 'claude-code'"
-              class="newRunSafety full"
-            >
-              <div class="newRunSafetyTitle">Safety</div>
-              <div class="newRunSafetyGrid">
-                <label>
-                  Task intent
-                  <select v-model="newRunTaskIntent">
-                    <option value="code">code</option>
-                    <option value="analyze">analyze</option>
-                    <option value="search-browse">search-browse</option>
-                    <option value="install">install</option>
-                  </select>
-                </label>
-                <label>
-                  Safety preset
-                  <select v-model="newRunSafetyPreset">
-                    <option
-                      v-for="p in safetyPresetsForDriver(newRunDriver)"
-                      :key="p.value"
-                      :value="p.value"
-                    >
-                      {{ p.value }}
-                    </option>
-                  </select>
-                </label>
-              </div>
-              <div class="tinyHint">
-                Recommended: <span class="mono">{{ recommendSafetyPreset(newRunDriver, newRunTaskIntent) }}</span>
-                <button
-                  type="button"
-                  class="inlineBtn"
-                  @click="newRunSafetyPreset = recommendSafetyPreset(newRunDriver, newRunTaskIntent)"
-                >
-                  Use
-                </button>
-              </div>
+	            <div
+	              v-if="newRunDriver === 'codex' || newRunDriver === 'claude-code'"
+	              class="newRunSafety full"
+	            >
+	              <div class="newRunSafetyTitle">Safety</div>
+	              <div class="newRunSafetyAutoRow">
+	                <span
+	                  class="pill"
+	                  :class="runSafetyAutopilotEnabled ? 'low' : 'warn'"
+	                  >Autopilot</span
+	                >
+	                <span class="tinyHint">
+	                  <template v-if="runSafetyAutopilotEnabled">
+	                    Infers intent from the prompt and applies best-practice sandbox defaults.
+	                  </template>
+	                  <template v-else>
+	                    Autopilot disabled: choose intent/preset below.
+	                  </template>
+	                </span>
+	              </div>
 
-              <div
-                v-if="newRunDriver === 'claude-code' && newRunSafetyPreset === 'search-browse'"
-                class="tinyHint"
-              >
-                Enables Claude Code WebFetch. Downloads via <span class="mono">curl</span>/<span class="mono">wget</span> remain denied by default.
-              </div>
-              <div
-                v-else-if="newRunDriver === 'codex' && newRunSafetyPreset === 'search-browse'"
-                class="tinyHint"
-              >
-                Enables Codex <span class="mono">--search</span> (native web_search tool). Search/browse is distinct from downloading/executing scripts.
-              </div>
+	              <label class="newRunSafetyUnlock">
+	                <input type="checkbox" v-model="runSafetyInstallUnlock" />
+	                <span class="mono">Install unlock</span>
+	                <span class="tinyHint">Allows downloads/installers (higher risk)</span>
+	              </label>
 
-              <div
-                v-if="isHighRiskPreset(newRunDriver, newRunSafetyPreset)"
-                class="newRunSafetyWarn"
-              >
-                <div class="tinyHint warn">
-                  <template v-if="newRunDriver === 'codex' && newRunSafetyPreset === 'unsafe'">
-                    Runs Codex with <span class="mono">--dangerously-bypass-approvals-and-sandbox</span> (no sandbox).
-                  </template>
-                  <template v-else-if="newRunDriver === 'codex' && newRunSafetyPreset === 'danger-full-access'">
-                    Runs Codex with <span class="mono">--sandbox danger-full-access</span> (can access outside the workspace).
-                  </template>
-                  <template v-else-if="newRunDriver === 'claude-code' && newRunSafetyPreset === 'unsafe'">
-                    Runs Claude Code with <span class="mono">--dangerously-skip-permissions</span>. Recommended only for sandboxes with no internet access.
-                  </template>
-                </div>
-                <label class="newRunSafetyOptIn">
-                  <input type="checkbox" v-model="newRunHighRiskOptIn" />
-                  <span>I understand and want to proceed</span>
-                </label>
-              </div>
-            </div>
+	              <template v-if="newRunShowManualSafety && !runSafetyAutopilotEnabled">
+	                <div class="newRunSafetyGrid">
+	                  <label>
+	                    Task intent
+	                    <select v-model="newRunTaskIntent">
+	                      <option value="code">code</option>
+	                      <option value="analyze">analyze</option>
+	                      <option value="search-browse">search-browse</option>
+	                      <option value="install">install</option>
+	                    </select>
+	                  </label>
+	                  <label>
+	                    Safety preset
+	                    <select v-model="newRunSafetyPreset">
+	                      <option
+	                        v-for="p in safetyPresetsForDriver(newRunDriver)"
+	                        :key="p.value"
+	                        :value="p.value"
+	                      >
+	                        {{ p.value }}
+	                      </option>
+	                    </select>
+	                  </label>
+	                </div>
+	                <div class="tinyHint">
+	                  Recommended:
+	                  <span class="mono">{{ recommendSafetyPreset(newRunDriver, newRunTaskIntent) }}</span>
+	                  <button
+	                    type="button"
+	                    class="inlineBtn"
+	                    @click="newRunSafetyPreset = recommendSafetyPreset(newRunDriver, newRunTaskIntent)"
+	                  >
+	                    Use
+	                  </button>
+	                </div>
+
+	                <div
+	                  v-if="newRunDriver === 'claude-code' && newRunSafetyPreset === 'search-browse'"
+	                  class="tinyHint"
+	                >
+	                  Enables Claude Code WebFetch. Downloads via <span class="mono">curl</span>/<span class="mono">wget</span> remain denied by default.
+	                </div>
+	                <div
+	                  v-else-if="newRunDriver === 'codex' && newRunSafetyPreset === 'search-browse'"
+	                  class="tinyHint"
+	                >
+	                  Enables Codex <span class="mono">--search</span> (native web_search tool). Search/browse is distinct from downloading/executing scripts.
+	                </div>
+
+	                <div
+	                  v-if="isHighRiskPreset(newRunDriver, newRunSafetyPreset)"
+	                  class="newRunSafetyWarn"
+	                >
+	                  <div class="tinyHint warn">
+	                    <template v-if="newRunDriver === 'codex' && newRunSafetyPreset === 'unsafe'">
+	                      Runs Codex with <span class="mono">--dangerously-bypass-approvals-and-sandbox</span> (no sandbox).
+	                    </template>
+	                    <template v-else-if="newRunDriver === 'codex' && newRunSafetyPreset === 'danger-full-access'">
+	                      Runs Codex with <span class="mono">--sandbox danger-full-access</span> (can access outside the workspace).
+	                    </template>
+	                    <template v-else-if="newRunDriver === 'claude-code' && newRunSafetyPreset === 'unsafe'">
+	                      Runs Claude Code with <span class="mono">--dangerously-skip-permissions</span>. Recommended only for sandboxes with no internet access.
+	                    </template>
+	                  </div>
+	                  <label class="newRunSafetyOptIn">
+	                    <input type="checkbox" v-model="newRunHighRiskOptIn" />
+	                    <span>I understand and want to proceed</span>
+	                  </label>
+	                </div>
+	              </template>
+
+	              <details class="newRunSafetyAdvanced">
+	                <summary>Advanced</summary>
+	                <div class="newRunSafetyAdvancedGrid">
+	                  <label class="full">
+	                    <input type="checkbox" v-model="runSafetyAutopilotEnabled" />
+	                    <span>Safety autopilot (recommended)</span>
+	                  </label>
+	                  <label v-if="runSafetyAutopilotEnabled" class="full">
+	                    <input type="checkbox" v-model="newRunSafetyOverride" />
+	                    <span>Override autopilot (manual intent/preset)</span>
+	                  </label>
+	                </div>
+
+	                <template v-if="newRunShowManualSafety && runSafetyAutopilotEnabled">
+	                  <div class="newRunSafetyGrid">
+	                    <label>
+	                      Task intent
+	                      <select v-model="newRunTaskIntent">
+	                        <option value="code">code</option>
+	                        <option value="analyze">analyze</option>
+	                        <option value="search-browse">search-browse</option>
+	                        <option value="install">install</option>
+	                      </select>
+	                    </label>
+	                    <label>
+	                      Safety preset
+	                      <select v-model="newRunSafetyPreset">
+	                        <option
+	                          v-for="p in safetyPresetsForDriver(newRunDriver)"
+	                          :key="p.value"
+	                          :value="p.value"
+	                        >
+	                          {{ p.value }}
+	                        </option>
+	                      </select>
+	                    </label>
+	                  </div>
+	                  <div class="tinyHint">
+	                    Recommended:
+	                    <span class="mono">{{ recommendSafetyPreset(newRunDriver, newRunTaskIntent) }}</span>
+	                    <button
+	                      type="button"
+	                      class="inlineBtn"
+	                      @click="newRunSafetyPreset = recommendSafetyPreset(newRunDriver, newRunTaskIntent)"
+	                    >
+	                      Use
+	                    </button>
+	                  </div>
+
+	                  <div
+	                    v-if="newRunDriver === 'claude-code' && newRunSafetyPreset === 'search-browse'"
+	                    class="tinyHint"
+	                  >
+	                    Enables Claude Code WebFetch. Downloads via <span class="mono">curl</span>/<span class="mono">wget</span> remain denied by default.
+	                  </div>
+	                  <div
+	                    v-else-if="newRunDriver === 'codex' && newRunSafetyPreset === 'search-browse'"
+	                    class="tinyHint"
+	                  >
+	                    Enables Codex <span class="mono">--search</span> (native web_search tool). Search/browse is distinct from downloading/executing scripts.
+	                  </div>
+
+	                  <div
+	                    v-if="isHighRiskPreset(newRunDriver, newRunSafetyPreset)"
+	                    class="newRunSafetyWarn"
+	                  >
+	                    <div class="tinyHint warn">
+	                      <template v-if="newRunDriver === 'codex' && newRunSafetyPreset === 'unsafe'">
+	                        Runs Codex with <span class="mono">--dangerously-bypass-approvals-and-sandbox</span> (no sandbox).
+	                      </template>
+	                      <template v-else-if="newRunDriver === 'codex' && newRunSafetyPreset === 'danger-full-access'">
+	                        Runs Codex with <span class="mono">--sandbox danger-full-access</span> (can access outside the workspace).
+	                      </template>
+	                      <template v-else-if="newRunDriver === 'claude-code' && newRunSafetyPreset === 'unsafe'">
+	                        Runs Claude Code with <span class="mono">--dangerously-skip-permissions</span>. Recommended only for sandboxes with no internet access.
+	                      </template>
+	                    </div>
+	                    <label class="newRunSafetyOptIn">
+	                      <input type="checkbox" v-model="newRunHighRiskOptIn" />
+	                      <span>I understand and want to proceed</span>
+	                    </label>
+	                  </div>
+	                </template>
+	              </details>
+	            </div>
             <label>
               Workdir
               <div class="workdirRow">
@@ -4998,17 +5247,18 @@ watch(
             type="button"
             class="primary"
             @click="onCreateTaskFromModal"
-            :disabled="
-              !newPrompt.trim() ||
-              !newWorkdir.trim() ||
-              !!missingAuthText ||
-              ((newRunDriver === 'codex' || newRunDriver === 'claude-code') &&
-                isHighRiskPreset(newRunDriver, newRunSafetyPreset) &&
-                !newRunHighRiskOptIn)
-            "
-          >
-            Start
-          </button>
+	            :disabled="
+	              !newPrompt.trim() ||
+	              !newWorkdir.trim() ||
+	              !!missingAuthText ||
+	              (newRunShowManualSafety &&
+	                (newRunDriver === 'codex' || newRunDriver === 'claude-code') &&
+	                isHighRiskPreset(newRunDriver, newRunSafetyPreset) &&
+	                !newRunHighRiskOptIn)
+	            "
+	          >
+	            Start
+	          </button>
         </div>
       </div>
     </div>
@@ -5890,6 +6140,61 @@ h2 {
   grid-template-columns: 1fr 1fr;
   gap: 12px;
   align-items: end;
+}
+
+.newRunSafetyAutoRow {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.newRunSafetyUnlock {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  font-weight: 700;
+  user-select: none;
+  flex-wrap: wrap;
+}
+
+.newRunSafetyUnlock input {
+  width: 18px;
+  height: 18px;
+}
+
+.newRunSafetyAdvanced {
+  border-top: 1px dashed rgba(148, 163, 184, 0.35);
+  padding-top: 10px;
+  display: grid;
+  gap: 10px;
+}
+
+.newRunSafetyAdvanced summary {
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 800;
+  user-select: none;
+}
+
+.newRunSafetyAdvancedGrid {
+  display: grid;
+  gap: 8px;
+}
+
+.newRunSafetyAdvancedGrid label {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  font-weight: 700;
+  user-select: none;
+}
+
+.newRunSafetyAdvancedGrid input {
+  width: 18px;
+  height: 18px;
 }
 
 .newRunSafetyExtra {
@@ -7202,6 +7507,25 @@ h2 {
   border-color: rgba(245, 158, 11, 0.25);
 }
 
+:deep(.pill.low) {
+  background: rgba(16, 185, 129, 0.14);
+  color: #047857;
+  border-color: rgba(16, 185, 129, 0.25);
+}
+
+:global(:root[data-theme="dark"]) :deep(.pill.low) {
+  color: #6ee7b7;
+}
+
+:deep(.pill.safety) {
+  background: rgba(59, 130, 246, 0.12);
+  color: var(--text-sub);
+  border-color: rgba(59, 130, 246, 0.22);
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 700;
+}
+
 :global(:root[data-theme="dark"]) .pill.warn {
   color: #fbbf24;
 }
@@ -8056,6 +8380,7 @@ h2 {
   display: inline-flex;
   align-items: center;
   gap: 10px;
+  flex-wrap: wrap;
   min-height: 40px;
   padding: 6px 12px;
   border-radius: 999px;
@@ -8085,6 +8410,33 @@ h2 {
   padding: 10px 12px;
   display: grid;
   gap: 8px;
+}
+
+.resumeSafetyExtraGrid {
+  display: grid;
+  gap: 8px;
+}
+
+.resumeSafetyExtraGrid label {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  font-weight: 700;
+  user-select: none;
+  flex-wrap: wrap;
+}
+
+.resumeSafetyExtraGrid input {
+  width: 18px;
+  height: 18px;
+}
+
+.resumeSafetyGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  align-items: end;
 }
 
 .resumeSafetyWarn {

@@ -65,6 +65,13 @@ Workers inherit environment variables from the ControlCCX server process. You ca
 
 部分 worker（尤其是 Claude Code）在调用工具/执行敏感动作时会要求 approval。ControlCCX 计划使用“驾驶室 + 秘书（Secretary）”的三档审批策略：
 
+### Run Safety Autopilot（默认推荐）
+
+默认开启：ControlCCX 会根据 prompt 推断任务意图（`analyze` / `code` / `search-browse` / `install`），并为 Claude Code / Codex 自动选择更稳妥的 sandbox/permissions 组合，尽量减少弹窗和人工选择。
+
+- “Install unlock”（一次性解锁，高风险）：仅当你明确勾选后，系统才会把 `install` 类任务升级到更宽松/危险的模式（例如 Codex 的 `danger-full-access`、Claude 的 `--dangerously-skip-permissions`）。
+- 未解锁时，`install` 任务会回退到更保守的 sandbox 默认值。
+
 1) Level 1（直通）：完全不需要审批，全部自动通过（效率最高、风险最高）。
    - 适用：你明确接受风险，希望不中断。
    - 风险：可能在未提示的情况下执行危险命令（例如删除文件、远端 push、安装脚本）。

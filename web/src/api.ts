@@ -67,6 +67,7 @@ export async function createTask(input: {
   prompt: string;
   workdir: string;
   unsafe_automation?: boolean;
+  safety_envelope?: string;
   safety_preset?: string;
   task_intent?: string;
   codex_sandbox?: string;
@@ -92,6 +93,7 @@ export async function resumeTaskWithOptions(
   input: {
     prompt: string;
     unsafe_automation?: boolean;
+    safety_envelope?: string;
     safety_preset?: string;
     task_intent?: string;
     codex_sandbox?: string;
