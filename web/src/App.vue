@@ -88,6 +88,68 @@ const resumeExpanded = ref(true);
 const resumeSafetyOverride = ref(false);
 const resumeHighRiskOptIn = ref(false);
 const errorBanner = ref<string>("");
+
+const highRiskConfirmOpen = ref(false);
+const highRiskConfirmTitle = ref("");
+const highRiskConfirmMessage = ref("");
+const highRiskConfirmDetail = ref("");
+const highRiskConfirmConfirmLabel = ref("Continue");
+const highRiskConfirmBusy = ref(false);
+let highRiskConfirmResolve: ((ok: boolean) => void) | null = null;
+
+function highRiskPresetSummary(driver: ToolDriver, preset: string): string {
+  const d = String(driver ?? "").trim();
+  const p = String(preset ?? "").trim();
+  if (d === "codex" && p === "unsafe") {
+    return "Codex: --dangerously-bypass-approvals-and-sandbox (no sandbox)";
+  }
+  if (d === "codex" && p === "danger-full-access") {
+    return "Codex: --sandbox danger-full-access (can access outside workspace)";
+  }
+  if (d === "claude-code" && p === "unsafe") {
+    return "Claude Code: --dangerously-skip-permissions";
+  }
+  if (d && p) return `${d}: ${p}`;
+  if (d) return d;
+  return "";
+}
+
+function requestHighRiskConfirm(opts: {
+  title: string;
+  message: string;
+  detail?: string;
+  confirmLabel?: string;
+}): Promise<boolean> {
+  if (highRiskConfirmOpen.value) return Promise.resolve(false);
+  highRiskConfirmTitle.value = String(opts.title ?? "").trim() || "Confirm";
+  highRiskConfirmMessage.value = String(opts.message ?? "").trim();
+  highRiskConfirmDetail.value = String(opts.detail ?? "").trim();
+  highRiskConfirmConfirmLabel.value = String(opts.confirmLabel ?? "").trim() || "Continue";
+  highRiskConfirmBusy.value = false;
+  highRiskConfirmOpen.value = true;
+  return new Promise((resolve) => {
+    highRiskConfirmResolve = resolve;
+  });
+}
+
+function closeHighRiskConfirm(ok: boolean) {
+  if (!highRiskConfirmOpen.value) return;
+  highRiskConfirmOpen.value = false;
+  highRiskConfirmBusy.value = false;
+  const resolve = highRiskConfirmResolve;
+  highRiskConfirmResolve = null;
+  resolve?.(ok);
+}
+
+async function confirmHighRiskConfirm() {
+  if (highRiskConfirmBusy.value) return;
+  highRiskConfirmBusy.value = true;
+  closeHighRiskConfirm(true);
+}
+
+function cancelHighRiskConfirm() {
+  closeHighRiskConfirm(false);
+}
 const {
   chat,
   chatInput,
@@ -1463,29 +1525,36 @@ async function onCreateTask(): Promise<boolean> {
   errorBanner.value = "";
   try {
     const driver = newRunDriver.value;
-    const envelope = buildSafetyEnvelopePayload();
     const useAutopilot = runSafetyAutopilotEnabled.value && !newRunSafetyOverride.value;
 
-    const safety = useAutopilot
-      ? {}
-      : (() => {
-          const intent = newRunTaskIntent.value;
-          const preset = newRunSafetyPreset.value;
+    let safety: RunSafetyPayload = {};
+    if (!useAutopilot) {
+      const intent = newRunTaskIntent.value;
+      const preset = newRunSafetyPreset.value;
 
-          if (
-            (driver === "claude-code" || driver === "codex") &&
-            isHighRiskPreset(driver, preset) &&
-            !newRunHighRiskOptIn.value
-          ) {
-            throw new Error("High-risk preset requires explicit opt-in.");
-          }
+      if (
+        (driver === "claude-code" || driver === "codex") &&
+        isHighRiskPreset(driver, preset) &&
+        !newRunHighRiskOptIn.value
+      ) {
+        const ok = await requestHighRiskConfirm({
+          title: "高风险确认",
+          message: "该运行需要高风险设置（权限更大）。继续吗？",
+          detail: highRiskPresetSummary(driver, preset),
+          confirmLabel: "继续（我已知晓）",
+        });
+        if (!ok) return false;
+        newRunHighRiskOptIn.value = true;
+      }
 
-          // Persist effective choices for future runs.
-          setStringMapKey(runSafetyIntentByTool, newWorkerType.value, intent);
-          setStringMapKey(runSafetyPresetByTool, newWorkerType.value, preset);
+      // Persist effective choices for future runs.
+      setStringMapKey(runSafetyIntentByTool, newWorkerType.value, intent);
+      setStringMapKey(runSafetyPresetByTool, newWorkerType.value, preset);
 
-          return buildRunSafetyPayload(driver, intent, preset);
-        })();
+      safety = buildRunSafetyPayload(driver, intent, preset);
+    }
+
+    const envelope = buildSafetyEnvelopePayload();
 
     const t = await createTask({
       worker_type: newWorkerType.value,
@@ -2278,8 +2347,13 @@ async function secretaryResumeSessionRun(s: SessionGroup) {
     const savedPreset = runSafetyPresetByTool.value[s.worker_type] ?? "";
     const preset = normalizeSafetyPreset(driver, intent, savedPreset || effectiveSafetyPresetForTask(driver, s.latest));
     if (isHighRiskPreset(driver, preset)) {
-      errorBanner.value = "该 run 需要高风险设置（需手动确认）；请在详情面板中 Resume 并勾选 opt-in。";
-      return;
+      const ok = await requestHighRiskConfirm({
+        title: "高风险确认",
+        message: "该 resume 需要高风险设置（权限更大）。继续吗？",
+        detail: highRiskPresetSummary(driver, preset),
+        confirmLabel: "继续 Resume（我已知晓）",
+      });
+      if (!ok) return;
     }
     const safety = buildRunSafetyPayload(driver, intent, preset);
     const nt = await resumeTaskWithOptions(s.latest.id, { prompt: "continue", ...safety });
@@ -2308,35 +2382,46 @@ async function onResumeTask() {
   errorBanner.value = "";
   try {
     const driver = resumeDriver.value;
-    const envelope = buildSafetyEnvelopePayload();
     const useAutopilot = runSafetyAutopilotEnabled.value && !resumeSafetyOverride.value;
 
-    const payload = useAutopilot
-      ? (() => {
-          const preset = effectiveSafetyPresetForTask(driver, sess.latest);
-          if (isHighRiskPreset(driver, preset)) {
-            if (!isHighRiskAllowedByInstallUnlock(driver, preset)) {
-              throw new Error("High-risk preset requires manual opt-in (Advanced).");
-            }
-          }
-          return envelope;
-        })()
-      : (() => {
-          const intent = resumeTaskIntent.value;
-          const preset = resumeSafetyPreset.value;
-          if (
-            (driver === "claude-code" || driver === "codex") &&
-            isHighRiskPreset(driver, preset) &&
-            !resumeHighRiskOptIn.value
-          ) {
-            throw new Error("High-risk preset requires explicit opt-in.");
-          }
+    let payload: RunSafetyPayload = {};
+    if (useAutopilot) {
+      const preset = effectiveSafetyPresetForTask(driver, sess.latest);
+      if (isHighRiskPreset(driver, preset) && !isHighRiskAllowedByInstallUnlock(driver, preset)) {
+        const ok = await requestHighRiskConfirm({
+          title: "需要解锁安装/下载",
+          message: "这个任务需要允许下载/安装（风险更高）。点一次「继续」即可放行。",
+          detail: highRiskPresetSummary(driver, preset),
+          confirmLabel: "继续（解锁并运行）",
+        });
+        if (!ok) return;
+        runSafetyInstallUnlock.value = true;
+      }
+      payload = buildSafetyEnvelopePayload();
+    } else {
+      const intent = resumeTaskIntent.value;
+      const preset = resumeSafetyPreset.value;
+      if (
+        (driver === "claude-code" || driver === "codex") &&
+        isHighRiskPreset(driver, preset) &&
+        !resumeHighRiskOptIn.value
+      ) {
+        const ok = await requestHighRiskConfirm({
+          title: "高风险确认",
+          message: "该 resume 需要高风险设置（权限更大）。继续吗？",
+          detail: highRiskPresetSummary(driver, preset),
+          confirmLabel: "继续 Resume（我已知晓）",
+        });
+        if (!ok) return;
+        resumeHighRiskOptIn.value = true;
+      }
 
-          setStringMapKey(runSafetyIntentByTool, sess.worker_type, intent);
-          setStringMapKey(runSafetyPresetByTool, sess.worker_type, preset);
+      setStringMapKey(runSafetyIntentByTool, sess.worker_type, intent);
+      setStringMapKey(runSafetyPresetByTool, sess.worker_type, preset);
 
-          return { ...envelope, ...buildRunSafetyPayload(driver, intent, preset) };
-        })();
+      const envelope = buildSafetyEnvelopePayload();
+      payload = { ...envelope, ...buildRunSafetyPayload(driver, intent, preset) };
+    }
 
     const nt = await resumeTaskWithOptions(sess.latest.id, { prompt: resumePrompt.value, ...payload });
     upsertTask(nt);
@@ -4384,16 +4469,7 @@ watch(
                 type="button"
                 class="primary"
                 @click="onResumeTask"
-	                :disabled="
-	                  !resumePrompt.trim() ||
-	                  !selectedSession.session_id ||
-	                  !!selectedSession.deleted_at ||
-	                  (resumeShowManualSafety &&
-	                    (resumeDriver === 'codex' || resumeDriver === 'claude-code') &&
-	                    isHighRiskPreset(resumeDriver, resumeSafetyPreset) &&
-	                    !resumeHighRiskOptIn) ||
-	                  resumeAutopilotHighRiskBlocked
-	                "
+                :disabled="!resumePrompt.trim() || !selectedSession.session_id || !!selectedSession.deleted_at || highRiskConfirmOpen"
 	              >
                 Resume
               </button>
@@ -5247,18 +5323,42 @@ watch(
             type="button"
             class="primary"
             @click="onCreateTaskFromModal"
-	            :disabled="
-	              !newPrompt.trim() ||
-	              !newWorkdir.trim() ||
-	              !!missingAuthText ||
-	              (newRunShowManualSafety &&
-	                (newRunDriver === 'codex' || newRunDriver === 'claude-code') &&
-	                isHighRiskPreset(newRunDriver, newRunSafetyPreset) &&
-	                !newRunHighRiskOptIn)
-	            "
+            :disabled="!newPrompt.trim() || !newWorkdir.trim() || !!missingAuthText || highRiskConfirmOpen"
 	          >
 	            Start
 	          </button>
+        </div>
+      </div>
+    </div>
+
+    <div
+      v-if="highRiskConfirmOpen"
+      class="modalOverlay"
+      @click.self="cancelHighRiskConfirm"
+    >
+      <div class="modal smallModal">
+        <div class="modalHeader">
+          <div class="modalTitle">{{ highRiskConfirmTitle }}</div>
+          <button class="iconBtn" type="button" @click="cancelHighRiskConfirm">
+            ✕
+          </button>
+        </div>
+        <div class="modalBody">
+          <div class="confirmText">{{ highRiskConfirmMessage }}</div>
+          <div v-if="highRiskConfirmDetail" class="tinyHint warn mono">
+            {{ highRiskConfirmDetail }}
+          </div>
+        </div>
+        <div class="modalFooter">
+          <button type="button" @click="cancelHighRiskConfirm">Cancel</button>
+          <button
+            type="button"
+            class="dangerBtn"
+            @click="confirmHighRiskConfirm"
+            :disabled="highRiskConfirmBusy"
+          >
+            {{ highRiskConfirmConfirmLabel }}
+          </button>
         </div>
       </div>
     </div>
