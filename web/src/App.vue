@@ -177,6 +177,7 @@ const {
 });
 
 const theme = ref<"light" | "dark">("light");
+const headerMoreEl = ref<HTMLDetailsElement | null>(null);
 
 const authInfo = ref<AuthInfo | null>(null);
 const authStatus = computed<AuthStatus | null>(
@@ -251,6 +252,7 @@ const logSearch = ref("");
 const sessionSearch = ref("");
 const sessionsLimit = ref(40);
 const sessionsShowDeleted = ref(false);
+const homeRunBusy = ref(false);
 
 const filePreviewOpen = ref(false);
 const filePreviewRawPath = ref("");
@@ -286,6 +288,7 @@ const {
   reconnectEvents,
 } = useTasks({
   showDeleted: sessionsShowDeleted,
+  autoSelectFirst: false,
   onTaskUpsert: (prev, next) => {
     // Fire-and-forget; avoid blocking SSE handling.
     void maybeTriggerDeliveryForeman(prev, next);
@@ -1623,6 +1626,7 @@ async function onCreateTask(): Promise<boolean> {
 
 async function onSelectTask(id: string) {
   closeSessionActionsMenu();
+  sessionsDrawerOpen.value = false;
   await selectTask(id, {
     closeMobileDrawer: isPhone.value ? () => { sessionsDrawerOpen.value = false; } : undefined,
     closeRunsModal: () => { runsOpen.value = false; },
@@ -1777,6 +1781,24 @@ function openNewRun() {
 
 function closeNewRun() {
   newRunOpen.value = false;
+}
+
+function goHome() {
+  closeSessionActionsMenu();
+  runsOpen.value = false;
+  sessionsDrawerOpen.value = false;
+  selectedTaskId.value = "";
+}
+
+async function runFromHome() {
+  if (homeRunBusy.value) return;
+  homeRunBusy.value = true;
+  try {
+    const ok = await onCreateTask();
+    if (ok) sessionsDrawerOpen.value = false;
+  } finally {
+    homeRunBusy.value = false;
+  }
 }
 
 function closeSessionActionsMenu() {
@@ -2026,8 +2048,47 @@ function dismissFeedCoach() {
   feedCoachOpen.value = false;
 }
 
+function closeHeaderMoreMenu() {
+  const el = headerMoreEl.value;
+  if (!el) return;
+  try {
+    el.open = false;
+  } catch {
+    // ignore
+  }
+}
+
+function onHeaderMoreDocumentMouseDown(e: MouseEvent) {
+  const el = headerMoreEl.value;
+  if (!el || !el.open) return;
+  const target = e.target as Node | null;
+  if (!target) return;
+  if (el.contains(target)) return;
+  closeHeaderMoreMenu();
+}
+
 function toggleTheme() {
   applyTheme(theme.value === "dark" ? "light" : "dark");
+}
+
+function onToggleThemeFromMenu() {
+  toggleTheme();
+  closeHeaderMoreMenu();
+}
+
+function onOpenLiveFromMenu() {
+  openLive();
+  closeHeaderMoreMenu();
+}
+
+function onOpenSkillsFromMenu() {
+  void openSkillsPage();
+  closeHeaderMoreMenu();
+}
+
+function onOpenSettingsFromMenu() {
+  openAuthSettings();
+  closeHeaderMoreMenu();
 }
 
 function openSecretaryForForeman() {
@@ -3343,6 +3404,7 @@ onMounted(async () => {
   window.addEventListener("keydown", onGlobalKeyDown);
   window.addEventListener("popstate", onRoutePopState);
   document.addEventListener("mousedown", onSessionActionsMenuDocumentMouseDown, true);
+  document.addEventListener("mousedown", onHeaderMoreDocumentMouseDown, true);
   window.addEventListener("keydown", onSessionActionsMenuKeyDown, true);
   window.addEventListener("resize", closeSessionActionsMenu, true);
   window.addEventListener("scroll", closeSessionActionsMenu, true);
@@ -3377,6 +3439,7 @@ onBeforeUnmount(() => {
   window.removeEventListener("keydown", onGlobalKeyDown);
   window.removeEventListener("popstate", onRoutePopState);
   document.removeEventListener("mousedown", onSessionActionsMenuDocumentMouseDown, true);
+  document.removeEventListener("mousedown", onHeaderMoreDocumentMouseDown, true);
   window.removeEventListener("keydown", onSessionActionsMenuKeyDown, true);
   window.removeEventListener("resize", closeSessionActionsMenu, true);
   window.removeEventListener("scroll", closeSessionActionsMenu, true);
@@ -3719,6 +3782,14 @@ function onGlobalKeyDown(e: KeyboardEvent) {
       liveOpen.value = false;
       return;
     }
+    if (headerMoreEl.value?.open) {
+      closeHeaderMoreMenu();
+      return;
+    }
+    if (sessionsDrawerOpen.value) {
+      sessionsDrawerOpen.value = false;
+      return;
+    }
     return;
   }
 
@@ -3833,43 +3904,51 @@ watch(
     <header class="header">
       <div class="headerLeft">
         <button
-          v-if="isPhone"
           type="button"
           class="menuBtn"
-          @click="sessionsDrawerOpen = true"
-          title="Sessions"
-          aria-label="Open sessions"
+          @click="sessionsDrawerOpen = !sessionsDrawerOpen"
+          :title="sessionsDrawerOpen ? 'Close sessions' : 'Open sessions'"
+          :aria-label="sessionsDrawerOpen ? 'Close sessions' : 'Open sessions'"
         >
-          <span class="menuIcon" aria-hidden="true">≡</span>
+          <span class="menuIcon" aria-hidden="true">{{
+            sessionsDrawerOpen ? "✕" : "≡"
+          }}</span>
         </button>
-        <div class="title">ControlCCX</div>
+        <button type="button" class="titleBtn" @click="goHome" title="Home">
+          ControlCCX
+        </button>
       </div>
       <div class="headerRight">
         <div class="sub" v-if="systemInfo">
           {{ systemInfo.os }}/{{ systemInfo.arch }} ·
           {{ systemInfo.hostname }} · Go {{ systemInfo.go_version }}
         </div>
-        <button type="button" class="themeBtn" @click="toggleTheme">
-          {{ theme === "dark" ? "Day" : "Night" }}
-        </button>
-        <button
-          type="button"
-          class="liveBtn"
-          @click="openLive"
-          :title="anyRunning ? 'Open Live Feed (L · running)' : 'Open Live Feed (L)'"
-        >
-          <span v-if="anyRunning" class="liveDot" aria-hidden="true">●</span>
-          Live
-        </button>
 	        <button type="button" class="primary" @click="openNewRun">
 	          New Run
 	        </button>
-	        <button type="button" class="settingsBtn" @click="openSkillsPage">
-	          Skills
-	        </button>
-	        <button type="button" class="settingsBtn" @click="openAuthSettings">
-	          Settings
-	        </button>
+          <details ref="headerMoreEl" class="headerMore">
+            <summary class="headerMoreBtn" title="More" aria-label="More">⋯</summary>
+            <div class="headerMorePopup">
+              <button type="button" class="headerMoreItem" @click="onToggleThemeFromMenu">
+                {{ theme === "dark" ? "Day" : "Night" }}
+              </button>
+              <button
+                type="button"
+                class="headerMoreItem"
+                @click="onOpenLiveFromMenu"
+                :title="anyRunning ? 'Open Live Feed (L · running)' : 'Open Live Feed (L)'"
+              >
+                <span v-if="anyRunning" class="liveDot" aria-hidden="true">●</span>
+                Live
+              </button>
+              <button type="button" class="headerMoreItem" @click="onOpenSkillsFromMenu">
+                Skills
+              </button>
+              <button type="button" class="headerMoreItem" @click="onOpenSettingsFromMenu">
+                Settings
+              </button>
+            </div>
+          </details>
 	      </div>
 	    </header>
 
@@ -3877,7 +3956,7 @@ watch(
 
     <div v-if="isPhone && sessionsDrawerOpen" class="sessionsOverlay" @click.self="sessionsDrawerOpen = false"></div>
 
-    <div class="grid">
+    <div class="grid" :class="{ gridSingle: !sessionsDrawerOpen }">
 	      <section v-if="skillsOpen" class="panel skillsPagePanel">
 	        <h2>
 	          Skills
@@ -3969,7 +4048,7 @@ watch(
 
       <template v-else>
       <section
-        v-if="!isPhone || sessionsDrawerOpen"
+        v-if="sessionsDrawerOpen"
         class="panel sessionsPanel"
         :class="{ sessionsDrawerPanel: isPhone }"
       >
@@ -3980,7 +4059,6 @@ watch(
             >{{ pagedSessions.length }} / {{ filteredSessions.length }}</span
           >
           <button
-            v-if="isPhone"
             type="button"
             class="h2Btn"
             @click="sessionsDrawerOpen = false"
@@ -4233,8 +4311,70 @@ watch(
       </section>
 
       <section class="panel">
-        <div v-if="!selectedSession" class="empty">Select a session</div>
-          <div v-else class="detail">
+        <div v-if="!selectedSession" class="detail homeStart">
+          <div class="homeHero">
+            <div class="homeTitle">Start a new run</div>
+            <div class="homeSub">
+              History is hidden by default. Open Sessions only when you need it.
+            </div>
+          </div>
+
+          <div v-if="anyRunning" class="homeStatus">
+            <div class="homeStatusText">
+              <span class="pill running">running</span>
+              <span class="tinyHint">There are runs in progress.</span>
+            </div>
+            <div class="homeStatusActions">
+              <button type="button" @click="openLive">Open Live</button>
+              <button type="button" @click="sessionsDrawerOpen = true">
+                Open Sessions
+              </button>
+            </div>
+          </div>
+
+          <div class="form homeForm">
+            <label class="full">
+              Workdir
+              <div class="workdirRow">
+                <input v-model="newWorkdir" placeholder="." />
+                <button type="button" @click="openDirPicker">Browse</button>
+              </div>
+            </label>
+            <div v-if="missingAuthText" class="authHint full">
+              <div class="text">{{ missingAuthText }}</div>
+              <button type="button" @click="openAuthSettings">
+                Auth Settings
+              </button>
+            </div>
+            <label class="full">
+              Prompt
+              <textarea
+                v-model="newPrompt"
+                rows="8"
+                placeholder="Describe the task to run..."
+                @keydown.meta.enter.prevent="runFromHome"
+                @keydown.ctrl.enter.prevent="runFromHome"
+              ></textarea>
+              <div class="tinyHint">Tip: Ctrl/Cmd + Enter to run.</div>
+            </label>
+
+            <div class="homeActions full">
+              <button
+                type="button"
+                class="primary"
+                @click="runFromHome"
+                :disabled="!newPrompt.trim() || highRiskConfirmOpen || homeRunBusy"
+              >
+                Run
+              </button>
+              <button type="button" @click="openNewRun">Advanced…</button>
+              <button type="button" @click="sessionsDrawerOpen = true">
+                Sessions
+              </button>
+            </div>
+          </div>
+        </div>
+        <div v-else class="detail">
           <div class="detailHeader compact">
             <div class="detailTop">
               <div class="detailTopLeft">
@@ -5888,6 +6028,87 @@ watch(
   letter-spacing: -0.02em;
 }
 
+.titleBtn {
+  border: none;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 800;
+  font-size: 20px;
+  background: linear-gradient(135deg, #0d9488 0%, #0ea5e9 100%);
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  letter-spacing: -0.02em;
+}
+
+.titleBtn:hover {
+  opacity: 0.92;
+}
+
+.titleBtn:focus-visible {
+  outline: 2px solid rgba(14, 165, 233, 0.55);
+  outline-offset: 3px;
+  border-radius: 10px;
+}
+
+.homeStart {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.homeHero {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.homeTitle {
+  font-size: 18px;
+  font-weight: 800;
+  color: var(--text-main);
+}
+
+.homeSub {
+  color: var(--text-sub);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.homeStatus {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+}
+
+.homeStatusText {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.homeStatusActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.homeActions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
 .sub {
   color: var(--text-sub);
   font-size: 12px;
@@ -5931,6 +6152,68 @@ watch(
   font-weight: 900;
   font-size: 18px;
   line-height: 1;
+}
+
+.headerMore {
+  position: relative;
+}
+
+.headerMoreBtn {
+  list-style: none;
+  border: 1px solid var(--border-color);
+  background: var(--bg-panel);
+  color: var(--text-main);
+  border-radius: 12px;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+}
+
+.headerMoreBtn::-webkit-details-marker {
+  display: none;
+}
+
+.headerMoreBtn:hover {
+  background: var(--bg-subtle);
+  color: var(--color-primary);
+}
+
+.headerMorePopup {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 10px);
+  min-width: 180px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 8px;
+  box-shadow: var(--shadow-lg);
+  z-index: 160;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.headerMoreItem {
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  background: var(--bg-subtle);
+  color: var(--text-main);
+  font-weight: 700;
+  font-size: 13px;
+  text-align: left;
+  border-radius: 12px;
+  padding: 10px 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.headerMoreItem:hover {
+  border-color: rgba(45, 212, 191, 0.35);
+  color: var(--color-primary);
 }
 
 .themeBtn {
@@ -6002,6 +6285,10 @@ watch(
   max-width: 3200px;
   margin: 0 auto;
   align-items: start; /* Important for sticky to work */
+}
+
+.grid.gridSingle {
+  grid-template-columns: 1fr;
 }
 
 .panel {
