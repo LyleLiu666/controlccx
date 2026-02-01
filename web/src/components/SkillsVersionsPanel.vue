@@ -30,42 +30,49 @@ const newNoteModel = computed({
 });
 
 const versions = computed(() => props.data?.versions ?? []);
+
+function confirmDelete(id: string) {
+  const v = String(id ?? "").trim();
+  if (!v) return;
+  if (!window.confirm(`确认删除版本「${v}」？此操作不可撤销。`)) return;
+  emit("delete", v);
+}
 </script>
 
 <template>
   <div class="skillsVersionsCard">
     <div class="skillsVersionsHeader">
-      <div class="skillsVersionsTitle">Versions</div>
+      <div class="skillsVersionsTitle">版本快照</div>
       <button type="button" class="headerMiniBtn" @click="emit('refresh')" :disabled="loading">
-        Refresh
+        刷新
       </button>
     </div>
 
     <div v-if="error" class="modalError">{{ error }}</div>
-    <div v-else-if="loading" class="loading">Loading...</div>
+    <div v-else-if="loading" class="loading">加载中…</div>
     <template v-else>
       <div class="skillsVersionsMeta tinyHint">
         <div>
-          Root: <span class="mono">{{ data?.versions_root ?? "" }}</span>
+          根目录：<span class="mono">{{ data?.versions_root ?? "" }}</span>
         </div>
         <div>
-          Source: <span class="mono">{{ data?.source_root ?? "" }}</span>
+          来源：<span class="mono">{{ data?.source_root ?? "" }}</span>
         </div>
       </div>
 
       <div class="skillsVersionsCreate">
-        <input v-model="newIdModel" placeholder="version id (optional) e.g. 20260130-01" />
-        <input v-model="newNoteModel" placeholder="note (optional)" />
+        <input v-model="newIdModel" placeholder="版本 ID（可选）例如：20260130-01" />
+        <input v-model="newNoteModel" placeholder="备注（可选）" />
         <button type="button" class="primary" @click="emit('create')" :disabled="creating">
-          {{ creating ? "Creating..." : "Snapshot" }}
+          {{ creating ? "创建中…" : "生成快照" }}
         </button>
       </div>
       <div class="tinyHint">
-        Leave version id empty to auto-generate (e.g. <span class="mono">YYYYMMDD-01</span>).
+        版本 ID 留空会自动生成（例如 <span class="mono">YYYYMMDD-01</span>）。
       </div>
 
       <div class="skillsVersionsList">
-        <div v-if="!versions.length" class="empty">No versions</div>
+        <div v-if="!versions.length" class="empty">暂无版本</div>
         <div v-else>
           <div v-for="v in versions" :key="v.id" class="skillsVersionRow">
             <div class="skillsVersionMain">
@@ -77,11 +84,11 @@ const versions = computed(() => props.data?.versions ?? []);
               <button
                 type="button"
                 class="dangerBtn"
-                @click="emit('delete', v.id)"
+                @click="confirmDelete(v.id)"
                 :disabled="!!deleting.get(v.id)"
-                title="Delete version"
+                title="删除版本"
               >
-                {{ deleting.get(v.id) ? "..." : "Delete" }}
+                {{ deleting.get(v.id) ? "…" : "删除" }}
               </button>
             </div>
           </div>
@@ -90,4 +97,3 @@ const versions = computed(() => props.data?.versions ?? []);
     </template>
   </div>
 </template>
-

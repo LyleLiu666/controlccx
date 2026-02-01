@@ -3959,7 +3959,7 @@ watch(
     <div class="grid" :class="{ gridSingle: !sessionsDrawerOpen }">
 	      <section v-if="skillsOpen" class="panel skillsPagePanel">
 	        <h2>
-	          Skills
+	          技能
 	          <span class="h2Spacer"></span>
 	          <button
               type="button"
@@ -3967,9 +3967,9 @@ watch(
               @click="refreshSkillsPage"
               :disabled="skillsLoading || skillsVersionsLoading"
             >
-	            Refresh
+	            刷新
 	          </button>
-	          <button type="button" class="h2Btn" @click="closeSkillsPage">Back</button>
+	          <button type="button" class="h2Btn" @click="closeSkillsPage">返回</button>
 	        </h2>
 
           <div class="skillsPageWrap">
@@ -7406,7 +7406,29 @@ h2 {
 :deep(.skillsMeta) {
   display: grid;
   gap: 6px;
-  margin-bottom: 10px;
+  margin-top: 8px;
+}
+
+:deep(.skillsMetaDetails) {
+  border: 1px solid var(--border-color);
+  border-radius: 14px;
+  padding: 10px 12px;
+  background: var(--bg-subtle);
+}
+
+:deep(.skillsMetaDetails > summary) {
+  cursor: pointer;
+  list-style: none;
+  font-weight: 800;
+  color: var(--text-main);
+}
+
+:deep(.skillsMetaDetails > summary::-webkit-details-marker) {
+  display: none;
+}
+
+:deep(.skillsMetaDetails[open] > summary) {
+  margin-bottom: 8px;
 }
 
 :deep(.skillsToolbar) {
@@ -7482,6 +7504,28 @@ h2 {
   gap: 10px;
   align-items: center;
   flex-wrap: wrap;
+}
+
+:deep(.skillActionBtn) {
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-1px);
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+
+:deep(.skillsRow:hover .skillActionBtn),
+:deep(.skillsRow:focus-within .skillActionBtn) {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
+}
+
+@media (max-width: 720px) {
+  :deep(.skillActionBtn) {
+    opacity: 1;
+    pointer-events: auto;
+    transform: none;
+  }
 }
 
 :deep(.skillStatus) {
@@ -7610,6 +7654,66 @@ h2 {
 :deep(.skillsGovernanceTools) {
   display: grid;
   gap: 8px;
+}
+
+:deep(.skillsGovIntro) {
+  line-height: 1.4;
+}
+
+:deep(.skillsGovDetails) {
+  border: 1px solid var(--border-color);
+  border-radius: 14px;
+  padding: 10px 12px;
+  background: var(--bg-subtle);
+}
+
+:deep(.skillsGovDetails > summary) {
+  cursor: pointer;
+  list-style: none;
+  font-weight: 800;
+  color: var(--text-main);
+}
+
+:deep(.skillsGovDetails > summary::-webkit-details-marker) {
+  display: none;
+}
+
+:deep(.skillsGovDetails[open] > summary) {
+  margin-bottom: 10px;
+}
+
+:deep(.skillsGovTabs) {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 6px 0 10px;
+}
+
+:deep(.skillsGovTab) {
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  background: var(--bg-panel);
+  color: var(--text-sub);
+  font-weight: 800;
+  font-size: 12px;
+  border-radius: 999px;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+
+:deep(.skillsGovTab:hover) {
+  border-color: rgba(45, 212, 191, 0.35);
+  color: var(--color-primary);
+}
+
+:deep(.skillsGovTab.active) {
+  border-color: rgba(20, 184, 166, 0.45);
+  background: rgba(20, 184, 166, 0.08);
+  color: var(--color-primary);
+}
+
+:deep(.skillsGovOp) {
+  display: grid;
+  gap: 10px;
 }
 
 :deep(.skillsGovToolRow) {

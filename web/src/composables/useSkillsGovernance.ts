@@ -105,7 +105,7 @@ export function useSkillsGovernance() {
         source_path: importSourcePath.value.trim(),
         overwrite: importOverwrite.value,
       });
-      actionInfo.value = `Imported: ${res.name}`;
+      actionInfo.value = `已接管技能：${res.name}`;
       await refreshOnboarding();
     } catch (e: any) {
       actionError.value = e?.message ?? String(e);
@@ -124,7 +124,7 @@ export function useSkillsGovernance() {
         name: localName.value.trim() || undefined,
         overwrite: localOverwrite.value,
       });
-      actionInfo.value = `Installed (local): ${res.name}`;
+      actionInfo.value = `本地安装完成：${res.name}`;
     } catch (e: any) {
       actionError.value = e?.message ?? String(e);
     } finally {
@@ -164,7 +164,7 @@ export function useSkillsGovernance() {
         name: gitName.value.trim() || undefined,
         overwrite: gitOverwrite.value,
       });
-      actionInfo.value = `Installed (git): ${res.name}`;
+      actionInfo.value = `Git 安装完成：${res.name}`;
     } catch (e: any) {
       actionError.value = e?.message ?? String(e);
     } finally {
@@ -182,7 +182,7 @@ export function useSkillsGovernance() {
         target: syncTarget.value,
         overwrite: syncOverwrite.value,
       });
-      actionInfo.value = `Synced: ${syncName.value.trim()} -> ${syncTarget.value}`;
+      actionInfo.value = `已同步：${syncName.value.trim()} → ${syncTarget.value}`;
     } catch (e: any) {
       actionError.value = e?.message ?? String(e);
     } finally {
@@ -196,7 +196,7 @@ export function useSkillsGovernance() {
     resetActionMessages();
     try {
       const res = await updateManagedSkill({ name: updateName.value.trim() });
-      actionInfo.value = `Updated: ${res.name}`;
+      actionInfo.value = `已更新：${res.name}`;
     } catch (e: any) {
       actionError.value = e?.message ?? String(e);
     } finally {
@@ -254,4 +254,3 @@ export function useSkillsGovernance() {
     runUpdate,
   };
 }
-

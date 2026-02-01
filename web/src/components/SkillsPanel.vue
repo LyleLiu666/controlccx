@@ -53,30 +53,68 @@ const limitModel = computed({
   set: (value: number) => emit("update:limit", value),
 });
 const skillsVisible = computed(() => props.data?.skills ?? []);
+
+function statusLabel(status: SkillsSummary["status"]): string {
+  switch (status) {
+    case "missing":
+      return "缺失";
+    case "linked":
+      return "已关联";
+    case "copied":
+      return "已复制";
+    case "present":
+      return "已存在";
+    case "external":
+      return "外部";
+    case "broken":
+      return "异常";
+    case "conflict":
+      return "冲突";
+    case "partial":
+      return "部分";
+    default:
+      return String(status).toUpperCase();
+  }
+}
+
+function enableTitle(target: SkillTarget, canEnable: boolean): string {
+  const t = target === "claude_code" ? "Claude Code" : target === "codex" ? "Codex" : "Cursor";
+  if (canEnable) return `为 ${t} 启用`;
+  return `无法启用：目标目录存在未托管的同名条目（请先处理冲突/外部/已存在）`;
+}
+
+function disableTitle(target: SkillTarget, canDisable: boolean): string {
+  const t = target === "claude_code" ? "Claude Code" : target === "codex" ? "Codex" : "Cursor";
+  if (canDisable) return `为 ${t} 禁用`;
+  return `无法禁用：目标目录存在未托管的同名条目（请先处理冲突/外部/已存在）`;
+}
 </script>
 
 <template>
   <div class="skillsBody skillsPageBody skillsPanelBody">
     <div v-if="error" class="modalError">{{ error }}</div>
-    <div v-else-if="loading" class="loading">Loading...</div>
+    <div v-else-if="loading" class="loading">加载中…</div>
     <template v-else>
-      <div class="skillsMeta">
-        <div class="tinyHint">
-          Sources:
-          <span class="mono">{{ (data?.source_roots ?? []).join(" · ") }}</span>
+      <details class="skillsMetaDetails">
+        <summary>路径详情</summary>
+        <div class="skillsMeta">
+          <div class="tinyHint">
+            来源：
+            <span class="mono">{{ (data?.source_roots ?? []).join(" · ") }}</span>
+          </div>
+          <div class="tinyHint">
+            目标：
+            <span class="mono">{{
+              (data?.targets ?? []).map((t) => `${t.target}:${t.root}`).join(" · ")
+            }}</span>
+          </div>
         </div>
-        <div class="tinyHint">
-          Targets:
-          <span class="mono">{{
-            (data?.targets ?? []).map((t) => `${t.target}:${t.root}`).join(" · ")
-          }}</span>
-        </div>
-      </div>
+      </details>
 
       <div class="skillsToolbar">
-        <input v-model="filterModel" placeholder="Filter skills..." />
+        <input v-model="filterModel" placeholder="搜索技能（名称/路径）…" />
         <label class="skillsLimit">
-          <span class="tinyHint">Page</span>
+          <span class="tinyHint">每页</span>
           <select v-model.number="limitModel" :disabled="loading">
             <option :value="50">50</option>
             <option :value="100">100</option>
@@ -90,24 +128,24 @@ const skillsVisible = computed(() => props.data?.skills ?? []);
             type="button"
             @click="emit('prevPage')"
             :disabled="loading || !canPrev"
-            title="Previous page"
+            title="上一页"
           >
-            Prev
+            上一页
           </button>
           <button
             type="button"
             @click="emit('nextPage')"
             :disabled="loading || !canNext"
-            title="Next page"
+            title="下一页"
           >
-            Next
+            下一页
           </button>
         </div>
       </div>
 
       <div class="skillsTable">
         <div class="skillsHead">
-          <div>Skill</div>
+          <div>技能</div>
           <div>Cursor</div>
           <div>Claude Code</div>
           <div>Codex</div>
@@ -120,7 +158,7 @@ const skillsVisible = computed(() => props.data?.skills ?? []);
               <div class="tinyHint mono" v-if="s.source" :title="s.source">
                 {{ s.source }}
               </div>
-              <div class="tinyHint warn" v-else>missing source</div>
+              <div class="tinyHint warn" v-else>缺少来源（source）</div>
             </div>
 
             <div class="skillsCell">
@@ -129,33 +167,27 @@ const skillsVisible = computed(() => props.data?.skills ?? []);
                   class="pill mono skillStatus"
                   :class="badgeClass(t.status)"
                   :title="t.detail"
-                  >{{ t.status.toUpperCase() }}</span
+                  >{{ statusLabel(t.status) }}</span
                 >
                 <button
                   type="button"
+                  class="skillActionBtn"
                   v-if="!t.enabled"
                   @click="emit('toggle', s.name, 'cursor', true)"
                   :disabled="!t.canEnable || !!actionBusy.get(makeKey(s.name, 'cursor'))"
-                  :title="
-                    t.canEnable
-                      ? 'Enable for Cursor'
-                      : 'Cannot enable: unmanaged entry exists in a Cursor root'
-                  "
+                  :title="enableTitle('cursor', t.canEnable)"
                 >
-                  {{ actionBusy.get(makeKey(s.name, "cursor")) ? "..." : "Enable" }}
+                  {{ actionBusy.get(makeKey(s.name, "cursor")) ? "…" : "启用" }}
                 </button>
                 <button
                   type="button"
+                  class="skillActionBtn"
                   v-else
                   @click="emit('toggle', s.name, 'cursor', false)"
                   :disabled="!t.canDisable || !!actionBusy.get(makeKey(s.name, 'cursor'))"
-                  :title="
-                    t.canDisable
-                      ? 'Disable for Cursor'
-                      : 'Cannot disable: unmanaged entry exists in a Cursor root'
-                  "
+                  :title="disableTitle('cursor', t.canDisable)"
                 >
-                  {{ actionBusy.get(makeKey(s.name, "cursor")) ? "..." : "Disable" }}
+                  {{ actionBusy.get(makeKey(s.name, "cursor")) ? "…" : "禁用" }}
                 </button>
               </template>
             </div>
@@ -166,33 +198,27 @@ const skillsVisible = computed(() => props.data?.skills ?? []);
                   class="pill mono skillStatus"
                   :class="badgeClass(t.status)"
                   :title="t.detail"
-                  >{{ t.status.toUpperCase() }}</span
+                  >{{ statusLabel(t.status) }}</span
                 >
                 <button
                   type="button"
+                  class="skillActionBtn"
                   v-if="!t.enabled"
                   @click="emit('toggle', s.name, 'claude_code', true)"
                   :disabled="!t.canEnable || !!actionBusy.get(makeKey(s.name, 'claude_code'))"
-                  :title="
-                    t.canEnable
-                      ? 'Enable for Claude Code'
-                      : 'Cannot enable: unmanaged entry exists in a Claude Code root'
-                  "
+                  :title="enableTitle('claude_code', t.canEnable)"
                 >
-                  {{ actionBusy.get(makeKey(s.name, "claude_code")) ? "..." : "Enable" }}
+                  {{ actionBusy.get(makeKey(s.name, "claude_code")) ? "…" : "启用" }}
                 </button>
                 <button
                   type="button"
+                  class="skillActionBtn"
                   v-else
                   @click="emit('toggle', s.name, 'claude_code', false)"
                   :disabled="!t.canDisable || !!actionBusy.get(makeKey(s.name, 'claude_code'))"
-                  :title="
-                    t.canDisable
-                      ? 'Disable for Claude Code'
-                      : 'Cannot disable: unmanaged entry exists in a Claude Code root'
-                  "
+                  :title="disableTitle('claude_code', t.canDisable)"
                 >
-                  {{ actionBusy.get(makeKey(s.name, "claude_code")) ? "..." : "Disable" }}
+                  {{ actionBusy.get(makeKey(s.name, "claude_code")) ? "…" : "禁用" }}
                 </button>
               </template>
             </div>
@@ -203,39 +229,33 @@ const skillsVisible = computed(() => props.data?.skills ?? []);
                   class="pill mono skillStatus"
                   :class="badgeClass(t.status)"
                   :title="t.detail"
-                  >{{ t.status.toUpperCase() }}</span
+                  >{{ statusLabel(t.status) }}</span
                 >
                 <button
                   type="button"
+                  class="skillActionBtn"
                   v-if="!t.enabled"
                   @click="emit('toggle', s.name, 'codex', true)"
                   :disabled="!t.canEnable || !!actionBusy.get(makeKey(s.name, 'codex'))"
-                  :title="
-                    t.canEnable
-                      ? 'Enable for Codex'
-                      : 'Cannot enable: unmanaged entry exists in a Codex root'
-                  "
+                  :title="enableTitle('codex', t.canEnable)"
                 >
-                  {{ actionBusy.get(makeKey(s.name, "codex")) ? "..." : "Enable" }}
+                  {{ actionBusy.get(makeKey(s.name, "codex")) ? "…" : "启用" }}
                 </button>
                 <button
                   type="button"
+                  class="skillActionBtn"
                   v-else
                   @click="emit('toggle', s.name, 'codex', false)"
                   :disabled="!t.canDisable || !!actionBusy.get(makeKey(s.name, 'codex'))"
-                  :title="
-                    t.canDisable
-                      ? 'Disable for Codex'
-                      : 'Cannot disable: unmanaged entry exists in a Codex root'
-                  "
+                  :title="disableTitle('codex', t.canDisable)"
                 >
-                  {{ actionBusy.get(makeKey(s.name, "codex")) ? "..." : "Disable" }}
+                  {{ actionBusy.get(makeKey(s.name, "codex")) ? "…" : "禁用" }}
                 </button>
               </template>
             </div>
           </div>
 
-          <div v-if="!skillsVisible.length" class="empty">No skills</div>
+          <div v-if="!skillsVisible.length" class="empty">暂无技能</div>
         </div>
       </div>
     </template>
