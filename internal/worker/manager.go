@@ -193,8 +193,8 @@ func (m *Manager) run(ctx context.Context, task tasks.Task) error {
 		m.consumeLines(task, driver, tasks.LogStderr, stderr, cancel, resumeFailure, blockedState)
 	}()
 
-	waitErr := cmd.Wait()
 	wg.Wait()
+	waitErr := cmd.Wait()
 
 	exitCode := exitCode(waitErr)
 	status := tasks.StatusSucceeded

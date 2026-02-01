@@ -227,6 +227,14 @@ func TestManager_run_ClaudeCode_RequestedPermissions_BecomesBlocked(t *testing.T
 		t.Fatalf("get task: %v", err)
 	}
 	if updated.Status != tasks.StatusBlocked {
-		t.Fatalf("status=%q, want %q (warning=%q error=%q)", updated.Status, tasks.StatusBlocked, updated.Warning, updated.Error)
+		logs, _ := store.ListLogs(ctx, task.ID, 0, 2000)
+		var tail []string
+		for _, l := range logs {
+			tail = append(tail, string(l.Stream)+": "+l.Message)
+		}
+		if len(tail) > 20 {
+			tail = tail[len(tail)-20:]
+		}
+		t.Fatalf("status=%q, want %q (warning=%q error=%q logs_tail=%q)", updated.Status, tasks.StatusBlocked, updated.Warning, updated.Error, tail)
 	}
 }

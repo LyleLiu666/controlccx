@@ -3,8 +3,10 @@ package worker
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
+	"os"
 )
 
 const (
@@ -46,10 +48,21 @@ func readLineWithLimit(reader *bufio.Reader, maxBytes int) ([]byte, bool, error)
 }
 
 func isEOF(err error) bool {
-	return err == io.EOF
+	if err == nil {
+		return false
+	}
+	// exec.Cmd may close StdoutPipe/StderrPipe once Wait() returns. Depending on timing,
+	// readers can observe os.ErrClosed instead of io.EOF. Treat both as EOF to avoid
+	// dropping the last output lines.
+	if errors.Is(err, io.EOF) {
+		return true
+	}
+	if errors.Is(err, os.ErrClosed) {
+		return true
+	}
+	return false
 }
 
 func formatReadError(err error) error {
 	return fmt.Errorf("worker: read output: %w", err)
 }
-
