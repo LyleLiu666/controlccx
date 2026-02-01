@@ -178,6 +178,7 @@ const {
 const theme = ref<"light" | "dark">("light");
 const headerMoreEl = ref<HTMLDetailsElement | null>(null);
 const skillsGovernanceOpen = ref(false);
+const skillsGovernancePrefill = ref<{ name?: string } | null>(null);
 const skillVersionsOpen = ref(false);
 const skillVersionsSkill = ref("");
 const skillVersionsHasSource = ref(false);
@@ -233,8 +234,14 @@ const {
 
 watch(skillsOpen, (open) => {
   if (!open) skillsGovernanceOpen.value = false;
+  if (!open) skillsGovernancePrefill.value = null;
   if (!open) skillVersionsOpen.value = false;
 });
+
+function openSkillsGovernance(prefill?: { name?: string }) {
+  skillsGovernancePrefill.value = prefill?.name ? { name: prefill.name } : null;
+  skillsGovernanceOpen.value = true;
+}
 
 function openSkillVersions(name: string, hasSource: boolean) {
   skillVersionsSkill.value = String(name ?? "").trim();
@@ -3983,13 +3990,13 @@ watch(
               :summarize-target="summarizeSkillTarget"
               :badge-class="skillBadgeClass"
               :make-key="skillsKey"
-              @refresh="refreshSkills"
-              @openGovernance="skillsGovernanceOpen = true"
-              @prev-page="skillsPrevPage"
-              @next-page="skillsNextPage"
-              @toggle="onSkillsToggle"
-              @openVersions="openSkillVersions"
-            />
+	              @refresh="refreshSkills"
+	              @openGovernance="openSkillsGovernance"
+	              @prev-page="skillsPrevPage"
+	              @next-page="skillsNextPage"
+	              @toggle="onSkillsToggle"
+	              @openVersions="openSkillVersions"
+	            />
           </div>
 	      </section>
 
@@ -5699,10 +5706,11 @@ watch(
 		      @save="saveTool"
 		    />
 
-        <SkillsGovernanceModal
-          :open="skillsGovernanceOpen"
-          @close="skillsGovernanceOpen = false"
-        />
+	        <SkillsGovernanceModal
+	          :open="skillsGovernanceOpen"
+	          :prefill="skillsGovernancePrefill"
+	          @close="skillsGovernanceOpen = false"
+	        />
 
         <SkillVersionsModal
           :open="skillVersionsOpen"

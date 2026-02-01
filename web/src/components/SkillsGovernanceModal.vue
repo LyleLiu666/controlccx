@@ -1,15 +1,17 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from "vue";
 import { useSkillsGovernance } from "../composables/useSkillsGovernance";
+import { detectSkillInstallKind, normalizeGitRepoURL } from "../skillInstall";
 
-const props = defineProps<{ open: boolean }>();
+const props = defineProps<{ open: boolean; prefill?: { name?: string } | null }>();
 
 const emit = defineEmits<{
   (e: "close"): void;
 }>();
 
 const gov = reactive(useSkillsGovernance());
-const op = ref<"local" | "git" | "import" | "sync" | "update">("local");
+const op = ref<"local" | "git">("local");
+const advancedOp = ref<"import" | "sync" | "update">("import");
 
 const canImportExisting = computed(
   () => !!gov.importName.trim() && !!gov.importSourcePath.trim(),
@@ -18,6 +20,44 @@ const canInstallLocal = computed(() => !!gov.localSourcePath.trim());
 const canInstallGit = computed(() => !!gov.gitRepoURL.trim());
 const canSync = computed(() => !!gov.syncName.trim());
 const canUpdate = computed(() => !!gov.updateName.trim());
+
+let switchingInstallOp = false;
+watch(
+  () => gov.localSourcePath,
+  (value) => {
+    if (switchingInstallOp) return;
+    if (op.value !== "local") return;
+    if (detectSkillInstallKind(value) !== "git") return;
+    switchingInstallOp = true;
+    gov.gitRepoURL = value;
+    gov.localSourcePath = "";
+    op.value = "git";
+    switchingInstallOp = false;
+  },
+);
+watch(
+  () => gov.gitRepoURL,
+  (value) => {
+    if (switchingInstallOp) return;
+    if (op.value !== "git") return;
+    if (detectSkillInstallKind(value) !== "local") return;
+    switchingInstallOp = true;
+    gov.localSourcePath = value;
+    gov.gitRepoURL = "";
+    op.value = "local";
+    switchingInstallOp = false;
+  },
+);
+
+async function listGitCandidates() {
+  gov.gitRepoURL = normalizeGitRepoURL(gov.gitRepoURL);
+  await gov.runListGitCandidates();
+}
+
+async function installGit() {
+  gov.gitRepoURL = normalizeGitRepoURL(gov.gitRepoURL);
+  await gov.runInstallGit();
+}
 
 const didInit = ref(false);
 watch(
@@ -30,13 +70,27 @@ watch(
   },
   { immediate: true },
 );
+
+watch(
+  () => [props.open, props.prefill?.name],
+  ([open, name]) => {
+    if (!open) return;
+    const n = String(name ?? "").trim();
+    if (!n) return;
+    gov.localName = n;
+    gov.gitName = n;
+    gov.importName = n;
+    gov.syncName = n;
+    gov.updateName = n;
+  },
+);
 </script>
 
 <template>
   <div v-show="open" class="modalOverlay" @click.self="emit('close')">
     <div class="modal skillsGovModal" role="dialog" aria-modal="true">
       <div class="modalHeader">
-        <div class="modalTitle">技能导入 / 安装 / 同步</div>
+        <div class="modalTitle">技能管理</div>
         <button
           type="button"
           class="headerMiniBtn"
@@ -70,8 +124,8 @@ watch(
 
         <div class="skillsGovPrimary">
           <div class="skillsGovPrimaryHeader">
-            <div class="skillsGovPrimaryTitle">导入 / 安装 / 同步</div>
-            <div class="tinyHint">先把技能纳入来源库，再在右侧启用到目标工具。</div>
+            <div class="skillsGovPrimaryTitle">添加技能（常用）</div>
+            <div class="tinyHint">从本地目录或 Git 仓库导入到来源库，再在列表里启用到目标工具。</div>
           </div>
 
           <div class="skillsGovTabs">
@@ -90,30 +144,6 @@ watch(
               @click="op = 'git'"
             >
               Git 安装
-            </button>
-            <button
-              type="button"
-              class="skillsGovTab"
-              :class="{ active: op === 'import' }"
-              @click="op = 'import'"
-            >
-              接管已有技能
-            </button>
-            <button
-              type="button"
-              class="skillsGovTab"
-              :class="{ active: op === 'sync' }"
-              @click="op = 'sync'"
-            >
-              同步到目标
-            </button>
-            <button
-              type="button"
-              class="skillsGovTab"
-              :class="{ active: op === 'update' }"
-              @click="op = 'update'"
-            >
-              从源更新
             </button>
           </div>
 
@@ -153,7 +183,7 @@ watch(
 
           <div v-else-if="op === 'git'" class="skillsGovOp">
             <div class="skillsGovSectionTitle">Git 安装</div>
-            <div class="tinyHint">从 Git 仓库安装技能（支持 GitHub URL）。</div>
+            <div class="tinyHint">从 Git 仓库安装技能（支持 GitHub URL，支持输入 owner/repo）。</div>
             <div class="skillsGovFields">
               <div class="skillsGovField">
                 <div class="skillsGovFieldLabel">
@@ -164,7 +194,7 @@ watch(
                   <button
                     type="button"
                     class="skillsGovSecondaryBtn"
-                    @click="gov.runListGitCandidates"
+                    @click="listGitCandidates"
                     :disabled="gov.gitCandidatesLoading || !canInstallGit"
                     :title="canInstallGit ? '列出候选子路径（如需要）' : '请先填写仓库地址'"
                   >
@@ -194,7 +224,7 @@ watch(
                 <button
                   type="button"
                   class="primary skillsGovPrimaryBtn"
-                  @click="gov.runInstallGit"
+                  @click="installGit"
                   :disabled="gov.installingGit || !canInstallGit"
                   :title="canInstallGit ? '安装' : '请先填写仓库地址'"
                 >
@@ -206,8 +236,38 @@ watch(
               </div>
             </div>
           </div>
+        </div>
 
-          <div v-else-if="op === 'import'" class="skillsGovOp">
+        <details class="skillsGovDetails">
+          <summary class="skillsGovSummary">高级操作（接管 / 同步 / 从源更新）</summary>
+          <div class="skillsGovTabs">
+            <button
+              type="button"
+              class="skillsGovTab"
+              :class="{ active: advancedOp === 'import' }"
+              @click="advancedOp = 'import'"
+            >
+              接管已有技能
+            </button>
+            <button
+              type="button"
+              class="skillsGovTab"
+              :class="{ active: advancedOp === 'sync' }"
+              @click="advancedOp = 'sync'"
+            >
+              同步到目标
+            </button>
+            <button
+              type="button"
+              class="skillsGovTab"
+              :class="{ active: advancedOp === 'update' }"
+              @click="advancedOp = 'update'"
+            >
+              从源更新
+            </button>
+          </div>
+
+          <div v-if="advancedOp === 'import'" class="skillsGovOp">
             <div class="skillsGovSectionTitle">接管已有技能</div>
             <div class="tinyHint">把某个现有目录纳入管理（不会改动你的原始目录结构）。</div>
             <div class="skillsGovFields">
@@ -245,7 +305,7 @@ watch(
             </div>
           </div>
 
-          <div v-else-if="op === 'sync'" class="skillsGovOp">
+          <div v-else-if="advancedOp === 'sync'" class="skillsGovOp">
             <div class="skillsGovSectionTitle">同步到目标</div>
             <div class="tinyHint">把已纳管的技能同步到目标工具（用于接管/覆盖某个目标目录）。</div>
             <div class="skillsGovFields">
@@ -281,7 +341,7 @@ watch(
             </div>
           </div>
 
-          <div v-else-if="op === 'update'" class="skillsGovOp">
+          <div v-else class="skillsGovOp">
             <div class="skillsGovSectionTitle">从源更新</div>
             <div class="tinyHint">从来源更新一个已纳管技能（例如 Git 仓库拉取更新）。</div>
             <div class="skillsGovFields">
@@ -304,7 +364,7 @@ watch(
               </div>
             </div>
           </div>
-        </div>
+        </details>
 
         <details class="skillsGovDetails">
           <summary class="skillsGovSummary">环境检查</summary>
@@ -364,4 +424,3 @@ watch(
     </div>
   </div>
 </template>
-

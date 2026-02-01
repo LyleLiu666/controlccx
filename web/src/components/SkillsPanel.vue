@@ -37,7 +37,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: "refresh"): void;
-  (e: "openGovernance"): void;
+  (e: "openGovernance", prefill?: { name?: string }): void;
   (e: "prevPage"): void;
   (e: "nextPage"): void;
   (e: "toggle", name: string, target: SkillTarget, enable: boolean): void;
@@ -191,7 +191,17 @@ function disableTitle(target: SkillTarget, canDisable: boolean): string {
               <div class="tinyHint mono" v-if="s.source" :title="s.source">
                 {{ s.source }}
               </div>
-              <div class="tinyHint warn" v-else>缺少来源（请先添加/导入/接管）</div>
+              <div class="tinyHint warn" v-else>
+                缺少来源（请先添加/导入/接管）
+                <button
+                  type="button"
+                  class="skillActionBtn"
+                  @click="emit('openGovernance', { name: s.name })"
+                  title="为该技能添加来源（本地/Git/接管）"
+                >
+                  添加来源
+                </button>
+              </div>
             </div>
 
             <div class="skillsCell">
