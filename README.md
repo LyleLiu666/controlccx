@@ -105,3 +105,15 @@ Workers inherit environment variables from the ControlCCX server process. You ca
 ## Resume (断点接续)
 
 Tasks and logs are persisted in SQLite. If the server exits while tasks are running, those tasks will appear as `interrupted` on next startup. You can resume by starting a new run using the persisted session/thread ID (UI has a “Resume” action when `session_id` exists).
+
+### Claude Code: session 不可恢复（No conversation found）
+
+Claude Code 的 session 由 Claude 自己在本机维护。某些情况下（例如更换工作目录作用域、Claude 侧清理会话、登录上下文变化等），会出现：
+
+```
+No conversation found with session ID: ...
+```
+
+此时 Resume 无法继续。ControlCCX 提供一个降级路径（Rehydrate）：把该 session 下已持久化的 prompt/assistant 输出拼接成上下文，用 **New Run（mode=new）** 开一个新的会话继续任务（不会复用旧 `session_id`）。
+
+注意：如果该会话存在隔离工作区（Run Workspace）且状态为 `active`，请先在 UI 的 Workspace 面板执行 Merge，把改动合并回 `base_workdir`，再进行 Rehydrate，避免丢改动。
