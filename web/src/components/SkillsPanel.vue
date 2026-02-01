@@ -77,10 +77,14 @@ function statusLabel(status: SkillsSummary["status"]): string {
   }
 }
 
-function enableTitle(target: SkillTarget, canEnable: boolean): string {
+function enableTitle(skill: Skill, target: SkillTarget, canEnable: boolean): string {
   const t = target === "claude_code" ? "Claude Code" : target === "codex" ? "Codex" : "Cursor";
   if (canEnable) return `为 ${t} 启用`;
-  return `无法启用：目标目录存在未托管的同名条目（请先处理冲突/外部/已存在）`;
+  const hasSource = !!(skill.source && skill.source.trim());
+  if (!hasSource) {
+    return `无法启用：缺少来源（source）。请先在左侧「导入/安装/同步」把技能纳入来源库，再启用到 ${t}。`;
+  }
+  return `无法启用：目标目录存在未托管的同名条目（冲突/外部/已存在）。请先处理或接管，再启用到 ${t}。`;
 }
 
 function disableTitle(target: SkillTarget, canDisable: boolean): string {
@@ -166,7 +170,7 @@ function disableTitle(target: SkillTarget, canDisable: boolean): string {
               <div class="tinyHint mono" v-if="s.source" :title="s.source">
                 {{ s.source }}
               </div>
-              <div class="tinyHint warn" v-else>缺少来源（source）</div>
+              <div class="tinyHint warn" v-else>缺少来源（请先在左侧导入/接管）</div>
             </div>
 
             <div class="skillsCell">
@@ -183,7 +187,7 @@ function disableTitle(target: SkillTarget, canDisable: boolean): string {
                   v-if="!t.enabled"
                   @click="emit('toggle', s.name, 'cursor', true)"
                   :disabled="!t.canEnable || !!actionBusy.get(makeKey(s.name, 'cursor'))"
-                  :title="enableTitle('cursor', t.canEnable)"
+                  :title="enableTitle(s, 'cursor', t.canEnable)"
                 >
                   {{ actionBusy.get(makeKey(s.name, "cursor")) ? "…" : "启用" }}
                 </button>
@@ -214,7 +218,7 @@ function disableTitle(target: SkillTarget, canDisable: boolean): string {
                   v-if="!t.enabled"
                   @click="emit('toggle', s.name, 'claude_code', true)"
                   :disabled="!t.canEnable || !!actionBusy.get(makeKey(s.name, 'claude_code'))"
-                  :title="enableTitle('claude_code', t.canEnable)"
+                  :title="enableTitle(s, 'claude_code', t.canEnable)"
                 >
                   {{ actionBusy.get(makeKey(s.name, "claude_code")) ? "…" : "启用" }}
                 </button>
@@ -245,7 +249,7 @@ function disableTitle(target: SkillTarget, canDisable: boolean): string {
                   v-if="!t.enabled"
                   @click="emit('toggle', s.name, 'codex', true)"
                   :disabled="!t.canEnable || !!actionBusy.get(makeKey(s.name, 'codex'))"
-                  :title="enableTitle('codex', t.canEnable)"
+                  :title="enableTitle(s, 'codex', t.canEnable)"
                 >
                   {{ actionBusy.get(makeKey(s.name, "codex")) ? "…" : "启用" }}
                 </button>
