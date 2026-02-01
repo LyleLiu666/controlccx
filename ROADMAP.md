@@ -3,7 +3,7 @@
 This repo uses OpenSpec for detailed change proposals, but `openspec/` is intentionally gitignored.
 This `ROADMAP.md` is the tracked, public snapshot of “what’s left” in dependency order (地基 → 上层).
 
-Last updated: 2026-01-31
+Last updated: 2026-02-01
 
 ## Status
 
@@ -19,6 +19,16 @@ Last updated: 2026-01-31
 - (none)
 
 ## Next (foundation → upper layers)
+
+See `VISION.md` for the “why” and the user-experience driven priorities.
+
+### Foundations (next)
+These reduce cognitive load, improve continuity, speed, and safety.
+- `add-conversation-id` — CCX-managed stable conversation/thread; decouple from provider `session_id`
+- `add-continue-cta` — unify Resume/Rehydrate/Merge guidance into 1 primary “Continue” action
+- `add-next-action-engine` — conversation-level state machine + recommended next action (CTA + reason)
+- `expand-secretary-level-2-3` — full decision + escalation + audit trail loop
+- `add-context-snapshots` — summarize/trim context for rehydrate + long threads (speed + stability)
 
 ### Upper layers (queue)
 These are valuable, but should follow the foundations above:
