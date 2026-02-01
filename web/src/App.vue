@@ -4890,39 +4890,52 @@ watch(
                 class="runWorkspaceBanner"
               >
                 <div class="tinyHint">
-                  Isolated run workspace:
+                  隔离运行目录：
                   <span class="mono" :title="runWorkspace.run_workdir">{{
                     workdirLabelForSession(runWorkspace.run_workdir)
                   }}</span>
-                  · Base workdir:
+                  · 基础工作目录：
                   <span class="mono" :title="selectedTask?.workdir">{{
                     workdirLabelForSession(selectedTask?.workdir ?? '')
                   }}</span>
                   · 工具把 run workspace 当作“当前目录”输出属正常现象
                 </div>
                 <div class="runWorkspaceBannerActions">
-                  <button
-                    type="button"
-                    @click="setWorkspace(runWorkspace.run_workdir)"
-                    title="Focus run workspace"
-                  >
-                    Focus run dir
-                  </button>
-                  <button
-                    type="button"
-                    @click="copyText(runWorkspace.run_workdir)"
-                    title="Copy run workspace dir"
-                  >
-                    Copy run dir
-                  </button>
-                  <button
-                    type="button"
-                    @click="copyText(selectedTask?.workdir ?? '')"
-                    :disabled="!selectedTask?.workdir"
-                    title="Copy base workdir"
-                  >
-                    Copy base dir
-                  </button>
+                  <details class="detailMore compact">
+                    <summary title="目录操作" aria-label="目录操作">⋯</summary>
+                    <div class="detailMorePopup">
+                      <div class="detailPopupWorkdir mono" :title="runWorkspace.run_workdir">
+                        运行目录：{{ runWorkspace.run_workdir }}
+                      </div>
+                      <div class="detailPopupWorkdir mono" :title="selectedTask?.workdir ?? ''">
+                        基础目录：{{ selectedTask?.workdir || "(未设置)" }}
+                      </div>
+                      <div class="detailMoreActions">
+                        <button
+                          type="button"
+                          @click="setWorkspace(runWorkspace.run_workdir)"
+                          title="切换到运行目录"
+                        >
+                          切换到运行目录
+                        </button>
+                        <button
+                          type="button"
+                          @click="copyText(runWorkspace.run_workdir)"
+                          title="复制运行目录"
+                        >
+                          复制运行目录
+                        </button>
+                        <button
+                          type="button"
+                          @click="copyText(selectedTask?.workdir ?? '')"
+                          :disabled="!selectedTask?.workdir"
+                          title="复制基础目录"
+                        >
+                          复制基础目录
+                        </button>
+                      </div>
+                    </div>
+                  </details>
                 </div>
               </div>
               <div v-if="!selectedResultText" class="empty">
@@ -9410,12 +9423,14 @@ h2 {
     background: var(--bg-panel);
   }
 
-  .runWorkspaceBannerActions {
-    display: flex;
-    gap: 10px;
-    margin-top: 8px;
-    flex-wrap: wrap;
-  }
+	  .runWorkspaceBannerActions {
+	    display: flex;
+	    gap: 10px;
+	    margin-top: 8px;
+	    flex-wrap: wrap;
+	    justify-content: flex-end;
+	    align-items: center;
+	  }
 
   .traceBox {
     border: 1px solid var(--border-color);
