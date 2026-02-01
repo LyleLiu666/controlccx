@@ -325,14 +325,14 @@ function conflictSummary(c: any): string {
 async function onMergeRunWorkspace() {
   const ws = runWorkspace.value;
   if (!ws || ws.status !== "active") return;
-  if (!confirm("Merge isolated workspace changes back into your base workdir/branch?")) return;
+  if (!confirm("确认将隔离工作区的改动合并回 base_workdir 吗？")) return;
   await mergeRunWorkspace();
 }
 
 async function onDiscardRunWorkspace() {
   const ws = runWorkspace.value;
   if (!ws || ws.status !== "active") return;
-  if (!confirm("Discard isolated workspace changes? (This deletes the run workspace folder.)")) return;
+  if (!confirm("确认丢弃隔离工作区的改动吗？（会删除 run_workdir 目录，且不可恢复）")) return;
   await discardRunWorkspace();
 }
 
@@ -5203,7 +5203,7 @@ watch(
         >
           <div class="modal smallModal">
             <div class="modalHeader">
-              <div class="modalTitle">Merge run workspace</div>
+              <div class="modalTitle">合并隔离工作区</div>
               <button class="iconBtn" type="button" @click="closeWorkspaceMergePrompt">
                 ✕
               </button>
@@ -5213,14 +5213,14 @@ watch(
                 {{ workspaceMergePromptError }}
               </div>
               <div class="confirmText">
-                This run used an isolated workspace. Merge changes back into your base workdir/branch?
+                该 run 使用了隔离工作区。是否将改动合并回 <span class="mono">base_workdir</span>？
               </div>
               <div
                 v-if="workspaceMergePromptWorkspace"
                 class="tinyHint"
                 style="overflow-wrap: anywhere"
               >
-                base_workdir:
+                base_workdir：
                 <span class="mono">{{ workspaceMergePromptWorkspace.base_workdir }}</span>
               </div>
               <div
@@ -5228,19 +5228,19 @@ watch(
                 class="tinyHint"
                 style="overflow-wrap: anywhere"
               >
-                run_workdir:
+                run_workdir：
                 <span class="mono">{{ workspaceMergePromptWorkspace.run_workdir }}</span>
               </div>
               <div v-if="runWorkspaceConflict" class="modalError">
                 {{ conflictSummary(runWorkspaceConflict) }}
               </div>
               <div class="tinyHint">
-                Tip: you can also merge later from the session “⋯” menu.
+                提示：你也可以稍后在 Session 的“⋯”菜单里执行 Merge。
               </div>
             </div>
             <div class="modalFooter">
               <button type="button" @click="closeWorkspaceMergePrompt" :disabled="workspaceMergePromptBusy">
-                Not now
+                暂不
               </button>
               <button
                 type="button"
@@ -5248,7 +5248,7 @@ watch(
                 @click="confirmWorkspaceMergePrompt"
                 :disabled="workspaceMergePromptBusy"
               >
-                {{ workspaceMergePromptBusy ? "Merging..." : "Merge back" }}
+                {{ workspaceMergePromptBusy ? "合并中..." : "合并回 base_workdir" }}
               </button>
             </div>
           </div>
@@ -5280,7 +5280,7 @@ watch(
                 class="tinyHint"
                 style="overflow-wrap: anywhere"
               >
-                base_workdir:
+                base_workdir：
                 <span class="mono">{{ rehydratePromptWorkspace.base_workdir }}</span>
               </div>
               <div class="tinyHint">

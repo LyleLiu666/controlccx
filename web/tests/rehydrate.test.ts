@@ -18,3 +18,15 @@ test("shouldOfferRehydrateForTask gates on manual claude resume missing-session 
   assert.equal(shouldOfferRehydrateForTask({ ...base, worker_type: "codex" }, "manual"), false);
   assert.equal(shouldOfferRehydrateForTask({ ...base, error: "boom" }, "manual"), false);
 });
+
+test("shouldOfferRehydrateForTask also matches warning field", () => {
+  const base = {
+    worker_type: "claude-code",
+    mode: "resume",
+    status: "failed",
+    error: "",
+    warning: "resume failed: No conversation found with session ID: abc",
+  } as any;
+
+  assert.equal(shouldOfferRehydrateForTask(base, "manual"), true);
+});
