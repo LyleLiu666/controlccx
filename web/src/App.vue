@@ -967,7 +967,7 @@ async function copyFilteredLogs() {
 async function replaySelectedRun() {
   const t = selectedTask.value;
   if (!t) return;
-  if (!confirm("Replay this run (create a new task with the same tool/workdir/prompt)?")) return;
+  if (!confirm("确认重放该 run 吗？（将使用相同的 tool/workdir/prompt 创建一个新任务）")) return;
   errorBanner.value = "";
   try {
     const next = await createTask({
@@ -1964,7 +1964,7 @@ async function refreshSkillsPage() {
 
 async function openFilesForBase(base: string) {
   const b = (base ?? "").trim() || ".";
-  if (filesDirty.value && !window.confirm("Discard unsaved changes?")) return;
+  if (filesDirty.value && !window.confirm("放弃未保存的更改？")) return;
 
   filesOpen.value = true;
   filesLoading.value = true;
@@ -2789,7 +2789,7 @@ function resetFilesState() {
 }
 
 function closeFiles() {
-  if (filesDirty.value && !window.confirm("Discard unsaved changes?")) return;
+  if (filesDirty.value && !window.confirm("放弃未保存的更改？")) return;
   filesOpen.value = false;
   resetFilesState();
 }
@@ -2888,7 +2888,7 @@ async function openFilesFile(path: string, base?: string) {
     filesFileOriginal.value = res.content ?? "";
     filesView.value = "preview";
     if (filesFileTruncated.value) {
-      filesNotice.value = "File truncated (edit disabled to avoid data loss).";
+      filesNotice.value = "文件内容过大已截断（为避免数据丢失，已禁用编辑）。";
     }
   } catch (e: any) {
     filesFileError.value = e?.message ?? String(e);
@@ -2903,7 +2903,7 @@ async function onFilesNodeClick(node: FileNode) {
     filesDirty.value &&
     filesSelectedKind.value === "file" &&
     node.path !== filesSelectedPath.value &&
-    !window.confirm("Discard unsaved changes?")
+    !window.confirm("放弃未保存的更改？")
   ) {
     return;
   }
@@ -2939,7 +2939,7 @@ async function filesSave() {
   if (!filesSelectedPath.value) return;
   if (!filesDirty.value) return;
   if (filesFileTruncated.value) {
-    filesNotice.value = "Cannot save: file was truncated during read.";
+    filesNotice.value = "无法保存：读取时文件内容已被截断。";
     return;
   }
   filesSaving.value = true;
@@ -2948,7 +2948,7 @@ async function filesSave() {
   try {
     await fsWrite({ path: filesSelectedPath.value, content: filesFileContent.value });
     filesFileOriginal.value = filesFileContent.value;
-    filesNotice.value = "Saved.";
+    filesNotice.value = "已保存。";
     await refreshFilesDir(dirnameForBase(filesSelectedPath.value));
   } catch (e: any) {
     filesFileError.value = e?.message ?? String(e);
@@ -2960,16 +2960,16 @@ async function filesSave() {
 async function filesNewFile() {
   const root = filesRoot.value;
   if (!root) return;
-  if (filesDirty.value && !window.confirm("Discard unsaved changes?")) return;
+  if (filesDirty.value && !window.confirm("放弃未保存的更改？")) return;
   const dir = targetDirForFilesOps();
-  const name = (window.prompt("New file name") ?? "").trim();
+  const name = (window.prompt("请输入新文件名") ?? "").trim();
   if (!name) return;
   const path = joinPath(dir, name);
 
   const parent = findFilesNode(root, dir);
   if (parent && parent.kind === "dir") {
     const exists = parent.children.some((c) => c.name === name);
-    if (exists && !window.confirm("File exists. Overwrite?")) return;
+    if (exists && !window.confirm("文件已存在，确认覆盖吗？")) return;
   }
 
   filesNotice.value = "";
@@ -2978,7 +2978,7 @@ async function filesNewFile() {
     await fsWrite({ path, content: "" });
     await refreshFilesDir(dir);
     await openFilesFile(path);
-    filesNotice.value = "Created.";
+    filesNotice.value = "已创建。";
   } catch (e: any) {
     filesError.value = e?.message ?? String(e);
   }
@@ -2988,7 +2988,7 @@ async function filesNewFolder() {
   const root = filesRoot.value;
   if (!root) return;
   const dir = targetDirForFilesOps();
-  const name = (window.prompt("New folder name") ?? "").trim();
+  const name = (window.prompt("请输入新文件夹名") ?? "").trim();
   if (!name) return;
   const path = joinPath(dir, name);
 
@@ -2997,7 +2997,7 @@ async function filesNewFolder() {
   try {
     await fsMkdir({ path, recursive: true });
     await refreshFilesDir(dir);
-    filesNotice.value = "Created.";
+    filesNotice.value = "已创建。";
   } catch (e: any) {
     filesError.value = e?.message ?? String(e);
   }
@@ -3010,12 +3010,12 @@ async function filesDeleteSelected() {
   const kind = filesSelectedKind.value;
   if (!path || !kind) return;
   if (path === root.path) return;
-  if (filesDirty.value && !window.confirm("Discard unsaved changes?")) return;
+  if (filesDirty.value && !window.confirm("放弃未保存的更改？")) return;
 
-  const label = kind === "dir" ? "folder" : "file";
+  const label = kind === "dir" ? "文件夹" : "文件";
   const recursive = kind === "dir";
   const ok = window.confirm(
-    `Delete ${label}?\n${path}${recursive ? "\n(recursive)" : ""}`,
+    `确认删除${label}？\n${path}${recursive ? "\n（递归删除）" : ""}`,
   );
   if (!ok) return;
 
@@ -3023,7 +3023,7 @@ async function filesDeleteSelected() {
   filesNotice.value = "";
   try {
     await fsDelete({ path, recursive });
-    filesNotice.value = "Deleted.";
+    filesNotice.value = "已删除。";
     const parent = dirnameForBase(path);
     await refreshFilesDir(parent);
     filesSelectedPath.value = parent;
