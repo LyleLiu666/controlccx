@@ -107,6 +107,25 @@ export async function resumeTaskWithOptions(
   return postJSON<Task>(`/api/tasks/${id}/resume`, input);
 }
 
+export async function rehydrateTaskWithOptions(
+  id: string,
+  input: {
+    prompt?: string;
+    unsafe_automation?: boolean;
+    safety_envelope?: string;
+    safety_preset?: string;
+    task_intent?: string;
+    codex_sandbox?: string;
+    codex_approval_policy?: string;
+    codex_search?: boolean;
+    claude_permission_mode?: string;
+    claude_sandbox?: boolean;
+    claude_webfetch_domains?: string[];
+  } = {},
+): Promise<Task> {
+  return postJSON<Task>(`/api/tasks/${id}/rehydrate`, input);
+}
+
 export async function renameSession(key: string, title: string): Promise<{ ok: boolean }> {
   return postJSON(`/api/sessions/${encodeURIComponent(key)}/rename`, { title });
 }

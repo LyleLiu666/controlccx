@@ -40,6 +40,7 @@ import {
   deleteTool,
   renameSession,
   resumeTaskWithOptions,
+  rehydrateTaskWithOptions,
   sendChat,
   upsertTool,
   updateAuth,
@@ -53,6 +54,7 @@ import {
   attentionAutopilotShouldAttempt,
   attentionAutopilotStopForSession,
 } from "./attentionAutopilot";
+import { shouldOfferRehydrateForTask, type ResumeOrigin } from "./rehydrate";
 import { computePopupPosition } from "./menuPosition";
 import { prettifyLogMessage } from "./logPretty";
 import { deriveRunActivity } from "./runActivity";
@@ -289,6 +291,7 @@ const {
     void maybeTriggerDeliveryForeman(prev, next);
     maybeTriggerAttentionAutopilot(prev, next);
     void maybePromptWorkspaceMerge(prev, next);
+    void maybePromptRehydrate(prev, next);
   },
   onChatMessage: (m) => {
     chat.value = appendChatMessageUnique(chat.value, m);
@@ -501,6 +504,7 @@ const LS_KEY_RUN_SAFETY_INSTALL_UNLOCK = "controlccx.run_safety.install_unlock.v
 const LS_KEY_ATTENTION_AUTOPILOT = "controlccx.attention_autopilot.v1";
 const LS_KEY_ATTENTION_AUTOPILOT_SEEN = "controlccx.attention_autopilot.seen.v1";
 const LS_KEY_WORKSPACE_MERGE_PROMPT_SEEN = "controlccx.workspace.merge_prompt_seen.v1";
+const LS_KEY_REHYDRATE_PROMPT_SEEN = "controlccx.rehydrate_prompt_seen.v1";
 
 const autoDeliveryForeman = ref<boolean>(true);
 const deliveryForemanSeenRuns = ref<Set<string>>(new Set());
@@ -516,12 +520,21 @@ const attentionAutopilotQueued = new Set<string>();
 const attentionAutopilotSeen = ref<Record<string, string>>({});
 const attentionAutopilotNote = ref("");
 
+const resumeOriginByRunID = new Map<string, ResumeOrigin>();
+
 const workspaceMergePromptSeenRuns = ref<Set<string>>(new Set());
 const workspaceMergePromptOpen = ref(false);
 const workspaceMergePromptBusy = ref(false);
 const workspaceMergePromptError = ref("");
 const workspaceMergePromptRunID = ref("");
 const workspaceMergePromptWorkspace = ref<SessionWorkspace | null>(null);
+
+const rehydratePromptSeenRuns = ref<Set<string>>(new Set());
+const rehydratePromptOpen = ref(false);
+const rehydratePromptBusy = ref(false);
+const rehydratePromptError = ref("");
+const rehydratePromptRunID = ref("");
+const rehydratePromptWorkspace = ref<SessionWorkspace | null>(null);
 
 const runSafetyPresetByTool = ref<Record<string, string>>({});
 const runSafetyIntentByTool = ref<Record<string, string>>({});
@@ -1302,6 +1315,7 @@ const workspaceSelect = ref<string>(loadString(LS_KEY_WORKSPACE_FILTER));
   autoDeliveryForeman.value = loadBool(LS_KEY_AUTO_DELIVERY_FOREMAN, true);
   deliveryForemanSeenRuns.value = new Set(loadStringArray(LS_KEY_DELIVERY_FOREMAN_SEEN));
   workspaceMergePromptSeenRuns.value = new Set(loadStringArray(LS_KEY_WORKSPACE_MERGE_PROMPT_SEEN));
+  rehydratePromptSeenRuns.value = new Set(loadStringArray(LS_KEY_REHYDRATE_PROMPT_SEEN));
 
   runSafetyIntentByTool.value = loadStringMap(LS_KEY_RUN_SAFETY_INTENT_BY_TOOL);
   runSafetyPresetByTool.value = loadStringMap(LS_KEY_RUN_SAFETY_PRESET_BY_TOOL);
@@ -1453,6 +1467,9 @@ watch(selectedTaskId, () => {
   if (!t) return;
   if (workspaceMergePromptOpen.value && workspaceMergePromptRunID.value !== selectedTaskId.value) {
     closeWorkspaceMergePrompt();
+  }
+  if (rehydratePromptOpen.value && rehydratePromptRunID.value !== selectedTaskId.value) {
+    closeRehydratePrompt();
   }
   outputTab.value = desiredOutputTabForTask(t);
   logShowAssistant.value = true;
@@ -2062,12 +2079,32 @@ function persistWorkspaceMergePromptSeen(runID: string) {
   saveStringArray(LS_KEY_WORKSPACE_MERGE_PROMPT_SEEN, arr);
 }
 
+function persistRehydratePromptSeen(runID: string) {
+  const id = (runID ?? "").trim();
+  if (!id) return;
+  if (rehydratePromptSeenRuns.value.has(id)) return;
+  const next = new Set(rehydratePromptSeenRuns.value);
+  next.add(id);
+  // Limit growth to keep localStorage small.
+  const arr = Array.from(next).slice(-800);
+  rehydratePromptSeenRuns.value = new Set(arr);
+  saveStringArray(LS_KEY_REHYDRATE_PROMPT_SEEN, arr);
+}
+
 function closeWorkspaceMergePrompt() {
   workspaceMergePromptOpen.value = false;
   workspaceMergePromptBusy.value = false;
   workspaceMergePromptError.value = "";
   workspaceMergePromptRunID.value = "";
   workspaceMergePromptWorkspace.value = null;
+}
+
+function closeRehydratePrompt() {
+  rehydratePromptOpen.value = false;
+  rehydratePromptBusy.value = false;
+  rehydratePromptError.value = "";
+  rehydratePromptRunID.value = "";
+  rehydratePromptWorkspace.value = null;
 }
 
 async function confirmWorkspaceMergePrompt() {
@@ -2087,6 +2124,42 @@ async function confirmWorkspaceMergePrompt() {
     workspaceMergePromptError.value = e?.message ?? String(e);
   } finally {
     workspaceMergePromptBusy.value = false;
+  }
+}
+
+async function confirmRehydratePrompt() {
+  const runID = rehydratePromptRunID.value.trim();
+  if (!runID || selectedTaskId.value !== runID) {
+    closeRehydratePrompt();
+    return;
+  }
+  if (rehydratePromptBusy.value) return;
+
+  rehydratePromptBusy.value = true;
+  rehydratePromptError.value = "";
+  try {
+    try {
+      await refreshRunWorkspace();
+    } catch {
+      // ignore workspace fetch errors (server will re-check on rehydrate)
+    }
+    const ws = runWorkspace.value;
+    rehydratePromptWorkspace.value = ws;
+    if (ws && ws.status === "active") {
+      rehydratePromptError.value = "请先在 Workspace 面板点击「Merge」把隔离工作区的改动合并回 base_workdir，然后再继续。";
+      return;
+    }
+
+    const nt = await rehydrateTaskWithOptions(runID, { prompt: "continue" });
+    upsertTask(nt);
+    selectedTaskId.value = nt.id;
+    await loadLogs(nt.id);
+    outputTab.value = "logs";
+    closeRehydratePrompt();
+  } catch (e: any) {
+    rehydratePromptError.value = e?.message ?? String(e);
+  } finally {
+    rehydratePromptBusy.value = false;
   }
 }
 
@@ -2117,6 +2190,38 @@ async function maybePromptWorkspaceMerge(prev: Task | undefined, next: Task) {
   workspaceMergePromptBusy.value = false;
   workspaceMergePromptOpen.value = true;
   persistWorkspaceMergePromptSeen(next.id);
+}
+
+async function maybePromptRehydrate(prev: Task | undefined, next: Task) {
+  if (!prev || !next?.id) return;
+  if (rehydratePromptOpen.value) return;
+  if (rehydratePromptSeenRuns.value.has(next.id)) return;
+
+  const prevStatus = prev?.status ?? "";
+  const nextStatus = next.status ?? "";
+  if (isTerminalStatus(prevStatus) || !isTerminalStatus(nextStatus)) return;
+  if (!(prevStatus === "running" || prevStatus === "queued" || prevStatus === "")) return;
+
+  const origin = resumeOriginByRunID.get(next.id) ?? "";
+  if (!shouldOfferRehydrateForTask(next, origin)) return;
+
+  // Non-disruptive: only prompt for the currently selected run (manual resume).
+  if (selectedTaskId.value !== next.id) return;
+
+  try {
+    await refreshRunWorkspace();
+  } catch {
+    // ignore
+  }
+  rehydratePromptWorkspace.value = runWorkspace.value;
+  rehydratePromptRunID.value = next.id;
+  rehydratePromptError.value = "";
+  rehydratePromptBusy.value = false;
+  rehydratePromptOpen.value = true;
+  persistRehydratePromptSeen(next.id);
+
+  // Avoid unbounded growth.
+  resumeOriginByRunID.delete(next.id);
 }
 
 async function buildDeliveryForemanPrompt(t: Task): Promise<string> {
@@ -2376,13 +2481,14 @@ async function runAttentionAutopilotLoop() {
         }
         const safety = buildRunSafetyPayload(driver, intent, preset);
         const nt = await resumeTaskWithOptions(sess.latest.id, { prompt: "continue", ...safety });
+        resumeOriginByRunID.set(nt.id, "autopilot");
         upsertTask(nt);
         attentionAutopilotNote.value = `Autopilot: resume started for ${short}.`;
       } catch (e: any) {
         const msg = e?.message ?? String(e);
         if (attentionAutopilotIsNoConversationFound(msg)) {
           stopAttentionAutopilotForSession(key);
-          attentionAutopilotNote.value = `Autopilot stopped for ${short}: session not found. Start a new run instead.`;
+          attentionAutopilotNote.value = `Autopilot 已停止：${short} 在 Claude 侧已不存在。建议：新建会话继续。`;
         } else {
           attentionAutopilotNote.value = `Autopilot: resume failed for ${short}: ${msg}`;
         }
@@ -2464,6 +2570,7 @@ async function secretaryResumeSessionRun(s: SessionGroup) {
     }
     const safety = buildRunSafetyPayload(driver, intent, preset);
     const nt = await resumeTaskWithOptions(s.latest.id, { prompt: "continue", ...safety });
+    resumeOriginByRunID.set(nt.id, "manual");
     upsertTask(nt);
     selectedTaskId.value = nt.id;
     await loadLogs(nt.id);
@@ -2531,6 +2638,7 @@ async function onResumeTask() {
     }
 
     const nt = await resumeTaskWithOptions(sess.latest.id, { prompt: resumePrompt.value, ...payload });
+    resumeOriginByRunID.set(nt.id, "manual");
     upsertTask(nt);
     selectedTaskId.value = nt.id;
     resumePrompt.value = "";
@@ -5018,6 +5126,56 @@ watch(
                 :disabled="workspaceMergePromptBusy"
               >
                 {{ workspaceMergePromptBusy ? "Merging..." : "Merge back" }}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div
+          v-if="rehydratePromptOpen"
+          class="modalOverlay"
+          @click.self="closeRehydratePrompt"
+        >
+          <div class="modal smallModal">
+            <div class="modalHeader">
+              <div class="modalTitle">无法恢复该会话</div>
+              <button class="iconBtn" type="button" @click="closeRehydratePrompt">✕</button>
+            </div>
+            <div class="modalBody">
+              <div v-if="rehydratePromptError" class="modalError">
+                {{ rehydratePromptError }}
+              </div>
+              <div class="confirmText">
+                Claude Code 找不到该 session（No conversation found）。你可以新建一个会话，把历史上下文带过去继续。
+              </div>
+              <div v-if="rehydratePromptWorkspace?.status === 'active'" class="modalError">
+                检测到该会话仍有隔离工作区处于 <span class="mono">active</span>。为避免丢改动，请先在
+                Workspace 面板点击「Merge」把改动合并回 <span class="mono">base_workdir</span>，然后再继续。
+              </div>
+              <div
+                v-if="rehydratePromptWorkspace"
+                class="tinyHint"
+                style="overflow-wrap: anywhere"
+              >
+                base_workdir:
+                <span class="mono">{{ rehydratePromptWorkspace.base_workdir }}</span>
+              </div>
+              <div class="tinyHint">
+                说明：该操作会创建一个新的 <span class="mono">mode=new</span> run（不会复用旧
+                <span class="mono">session_id</span>）。
+              </div>
+            </div>
+            <div class="modalFooter">
+              <button type="button" @click="closeRehydratePrompt" :disabled="rehydratePromptBusy">
+                取消
+              </button>
+              <button
+                type="button"
+                class="primary"
+                @click="confirmRehydratePrompt"
+                :disabled="rehydratePromptBusy || rehydratePromptWorkspace?.status === 'active'"
+              >
+                {{ rehydratePromptBusy ? "创建中..." : "新建会话继续（带上下文）" }}
               </button>
             </div>
           </div>
