@@ -70,6 +70,7 @@ import {
 import SkillsPanel from "./components/SkillsPanel.vue";
 import SkillsVersionsPanel from "./components/SkillsVersionsPanel.vue";
 import SkillsGovernancePanel from "./components/SkillsGovernancePanel.vue";
+import SkillsGovernanceModal from "./components/SkillsGovernanceModal.vue";
 import SecretaryDrawer from "./components/SecretaryDrawer.vue";
 import LiveDrawer from "./components/LiveDrawer.vue";
 import FilesModal from "./components/FilesModal.vue";
@@ -178,6 +179,7 @@ const {
 
 const theme = ref<"light" | "dark">("light");
 const headerMoreEl = ref<HTMLDetailsElement | null>(null);
+const skillsGovernanceOpen = ref(false);
 
 const authInfo = ref<AuthInfo | null>(null);
 const authStatus = computed<AuthStatus | null>(
@@ -240,6 +242,10 @@ const {
   createSkillVersionFromForm,
   deleteSkillVersionByID,
 } = useSkillVersions();
+
+watch(skillsOpen, (open) => {
+  if (!open) skillsGovernanceOpen.value = false;
+});
 
 const outputTab = ref<"result" | "logs" | "trace">("result");
 const resultPreviewTab = ref<"markdown" | "raw" | "html">("markdown");
@@ -1952,6 +1958,7 @@ async function openSkillsPage() {
 
 
 function closeSkillsPage() {
+  skillsGovernanceOpen.value = false;
   skillsOpen.value = false;
   navigateTo("/");
 }
@@ -3967,14 +3974,14 @@ watch(
 
     <div class="grid" :class="{ gridSingle: !sessionsDrawerOpen }">
 	      <section v-if="skillsOpen" class="panel skillsPagePanel">
-          <div class="skillsPageWrap">
-            <div class="skillsLeftCol">
-              <SkillsGovernancePanel />
-
-              <SkillsVersionsPanel
-                :loading="skillsVersionsLoading"
-                :error="skillsVersionsError"
-                :data="skillsVersionsData"
+	          <div class="skillsPageWrap">
+	            <div class="skillsLeftCol">
+	              <SkillsGovernancePanel @open="skillsGovernanceOpen = true" />
+	
+	              <SkillsVersionsPanel
+	                :loading="skillsVersionsLoading"
+	                :error="skillsVersionsError"
+	                :data="skillsVersionsData"
                 v-model:new-id="skillsVersionNewId"
                 v-model:new-note="skillsVersionNewNote"
                 :creating="skillsVersionsCreating"
@@ -5683,11 +5690,11 @@ watch(
 	      @clearStored="clearStoredAuth"
 	    />
 
-	    <ToolsSettingsModal
-	      :open="toolsSettingsOpen"
-	      :loading="toolsLoading"
-	      :saving="toolsSaving"
-	      :error="toolsError"
+		    <ToolsSettingsModal
+		      :open="toolsSettingsOpen"
+		      :loading="toolsLoading"
+		      :saving="toolsSaving"
+		      :error="toolsError"
 	      :tools="toolsList"
 	      v-model:editID="toolEditID"
 	      v-model:editDriver="toolEditDriver"
@@ -5699,12 +5706,17 @@ watch(
 	      @refresh="refreshTools"
 	      @selectTool="loadToolIntoEditor"
 	      @delete="deleteToolOverride"
-	      @save="saveTool"
-	    />
+		      @save="saveTool"
+		    />
 
-	    <div
-	      v-if="filePreviewOpen"
-	      class="modalOverlay"
+        <SkillsGovernanceModal
+          :open="skillsGovernanceOpen"
+          @close="skillsGovernanceOpen = false"
+        />
+	
+		    <div
+		      v-if="filePreviewOpen"
+		      class="modalOverlay"
 	      @click.self="closeFilePreview"
 	    >
       <div class="modal fileModal">
@@ -7569,6 +7581,26 @@ h2 {
   overflow: hidden;
 }
 
+:deep(.skillsGovLauncherCard) {
+  border: 1px solid var(--border-color);
+  border-radius: 14px;
+  background: var(--bg-panel);
+  padding: 16px;
+  display: grid;
+  gap: 10px;
+}
+
+:deep(.skillsGovLauncherHeader) {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+:deep(.skillsGovLauncherTitle) {
+  font-weight: 900;
+}
+
 :deep(.skillsVersionsCard) {
   border: 1px solid var(--border-color);
   border-radius: 14px;
@@ -7978,6 +8010,17 @@ h2 {
 .filesModal {
   width: min(1180px, 96vw);
   height: min(780px, 92vh);
+}
+
+:deep(.skillsGovModal) {
+  width: min(1180px, 96vw);
+  height: min(820px, 92vh);
+}
+
+:deep(.skillsGovModalBody) {
+  overflow: auto;
+  display: grid;
+  gap: 14px;
 }
 
 .fileModalBody {
