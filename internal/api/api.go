@@ -597,6 +597,28 @@ func (a *API) handleTaskByID(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "task has no session_id to resume", http.StatusBadRequest)
 			return
 		}
+		// Single-flight: avoid creating multiple overlapping resume runs for the same session.
+		// This prevents "resume storms" (e.g. double-clicking Resume, autopilot+manual overlap).
+		if a.Tasks != nil {
+			sid := strings.TrimSpace(prev.SessionID)
+			all, err := a.Tasks.ListTasksWithOptions(r.Context(), 500, tasks.ListTasksOptions{IncludeDeleted: true})
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			for _, t := range all {
+				if t.ID == prev.ID {
+					continue
+				}
+				if strings.TrimSpace(t.SessionID) != sid {
+					continue
+				}
+				if t.Status == tasks.StatusRunning || t.Status == tasks.StatusQueued {
+					http.Error(w, "session already has a running task (task_id="+t.ID+" status="+string(t.Status)+")", http.StatusConflict)
+					return
+				}
+			}
+		}
 
 		// Ensure resume uses the same run workspace as the session origin when available.
 		// Claude Code resumes are scoped to the project directory; changing directories
@@ -609,16 +631,16 @@ func (a *API) handleTaskByID(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-			// SafetyEnvelope is an autopilot hint (UI-level “one-time unlock”); it does not count as an explicit safety override.
-			explicitSafety := body.UnsafeAutomation ||
-				strings.TrimSpace(body.SafetyPreset) != "" ||
-				strings.TrimSpace(body.TaskIntent) != "" ||
-				strings.TrimSpace(body.CodexSandbox) != "" ||
-				strings.TrimSpace(body.CodexApprovalPolicy) != "" ||
-				body.CodexSearch ||
-				strings.TrimSpace(body.ClaudePermissionMode) != "" ||
-				body.ClaudeSandbox ||
-				len(body.ClaudeWebFetchDomains) > 0
+		// SafetyEnvelope is an autopilot hint (UI-level “one-time unlock”); it does not count as an explicit safety override.
+		explicitSafety := body.UnsafeAutomation ||
+			strings.TrimSpace(body.SafetyPreset) != "" ||
+			strings.TrimSpace(body.TaskIntent) != "" ||
+			strings.TrimSpace(body.CodexSandbox) != "" ||
+			strings.TrimSpace(body.CodexApprovalPolicy) != "" ||
+			body.CodexSearch ||
+			strings.TrimSpace(body.ClaudePermissionMode) != "" ||
+			body.ClaudeSandbox ||
+			len(body.ClaudeWebFetchDomains) > 0
 
 		unsafe := body.UnsafeAutomation
 		safetyEnvelope := strings.TrimSpace(body.SafetyEnvelope)
