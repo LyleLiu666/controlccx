@@ -3918,14 +3918,14 @@ watch(
           type="button"
           class="menuBtn"
           @click="sessionsDrawerOpen = !sessionsDrawerOpen"
-          :title="sessionsDrawerOpen ? 'Close sessions' : 'Open sessions'"
-          :aria-label="sessionsDrawerOpen ? 'Close sessions' : 'Open sessions'"
+          :title="sessionsDrawerOpen ? '关闭会话列表' : '打开会话列表'"
+          :aria-label="sessionsDrawerOpen ? '关闭会话列表' : '打开会话列表'"
         >
           <span class="menuIcon" aria-hidden="true">{{
             sessionsDrawerOpen ? "✕" : "≡"
           }}</span>
         </button>
-        <button type="button" class="titleBtn" @click="goHome" title="Home">
+        <button type="button" class="titleBtn" @click="goHome" title="主页">
           ControlCCX
         </button>
       </div>
@@ -3935,28 +3935,28 @@ watch(
           {{ systemInfo.hostname }} · Go {{ systemInfo.go_version }}
         </div>
 	        <button type="button" class="primary" @click="openNewRun">
-	          New Run
+	          新建运行
 	        </button>
           <details ref="headerMoreEl" class="headerMore">
-            <summary class="headerMoreBtn" title="More" aria-label="More">⋯</summary>
+            <summary class="headerMoreBtn" title="更多" aria-label="更多">⋯</summary>
             <div class="headerMorePopup">
               <button type="button" class="headerMoreItem" @click="onToggleThemeFromMenu">
-                {{ theme === "dark" ? "Day" : "Night" }}
+                {{ theme === "dark" ? "白天" : "夜间" }}
               </button>
               <button
                 type="button"
                 class="headerMoreItem"
                 @click="onOpenLiveFromMenu"
-                :title="anyRunning ? 'Open Live Feed (L · running)' : 'Open Live Feed (L)'"
+                :title="anyRunning ? '打开实时（L · 运行中）' : '打开实时（L）'"
               >
                 <span v-if="anyRunning" class="liveDot" aria-hidden="true">●</span>
-                Live
+                实时
               </button>
               <button type="button" class="headerMoreItem" @click="onOpenSkillsFromMenu">
-                Skills
+                技能
               </button>
               <button type="button" class="headerMoreItem" @click="onOpenSettingsFromMenu">
-                Settings
+                设置
               </button>
             </div>
           </details>
@@ -4296,49 +4296,49 @@ watch(
       <section class="panel">
         <div v-if="!selectedSession" class="detail homeStart">
           <div class="homeHero">
-            <div class="homeTitle">Start a new run</div>
+            <div class="homeTitle">开始新任务</div>
             <div class="homeSub">
-              History is hidden by default. Open Sessions only when you need it.
+              默认不展示历史记录；需要时点击左上角「≡」打开会话列表。
             </div>
           </div>
 
           <div v-if="anyRunning" class="homeStatus">
             <div class="homeStatusText">
-              <span class="pill running">running</span>
-              <span class="tinyHint">There are runs in progress.</span>
+              <span class="pill running">运行中</span>
+              <span class="tinyHint">有任务正在运行。</span>
             </div>
             <div class="homeStatusActions">
-              <button type="button" @click="openLive">Open Live</button>
+              <button type="button" @click="openLive">打开实时</button>
               <button type="button" @click="sessionsDrawerOpen = true">
-                Open Sessions
+                打开会话列表
               </button>
             </div>
           </div>
 
           <div class="form homeForm">
             <label class="full">
-              Workdir
+              工作目录
               <div class="workdirRow">
                 <input v-model="newWorkdir" placeholder="." />
-                <button type="button" @click="openDirPicker">Browse</button>
+                <button type="button" @click="openDirPicker">选择</button>
               </div>
             </label>
             <div v-if="missingAuthText" class="authHint full">
               <div class="text">{{ missingAuthText }}</div>
               <button type="button" @click="openAuthSettings">
-                Auth Settings
+                认证设置
               </button>
             </div>
             <label class="full">
-              Prompt
+              任务描述
               <textarea
                 v-model="newPrompt"
                 rows="8"
-                placeholder="Describe the task to run..."
+                placeholder="描述你要做的事情…"
                 @keydown.meta.enter.prevent="runFromHome"
                 @keydown.ctrl.enter.prevent="runFromHome"
               ></textarea>
-              <div class="tinyHint">Tip: Ctrl/Cmd + Enter to run.</div>
+              <div class="tinyHint">提示：Ctrl/Cmd + Enter 运行。</div>
             </label>
 
             <div class="homeActions full">
@@ -4348,12 +4348,9 @@ watch(
                 @click="runFromHome"
                 :disabled="!newPrompt.trim() || highRiskConfirmOpen || homeRunBusy"
               >
-                Run
+                运行
               </button>
-              <button type="button" @click="openNewRun">Advanced…</button>
-              <button type="button" @click="sessionsDrawerOpen = true">
-                Sessions
-              </button>
+              <button type="button" @click="openNewRun">高级设置…</button>
             </div>
           </div>
         </div>
