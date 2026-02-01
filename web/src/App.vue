@@ -1947,7 +1947,7 @@ function encodePathForQueryValue(path: string): string {
 async function openSkillsPage() {
   navigateTo("/skills");
   sessionsDrawerOpen.value = false;
-  await Promise.all([openSkills(), refreshSkillVersions()]);
+  await openSkills();
 }
 
 
@@ -1959,7 +1959,7 @@ function closeSkillsPage() {
 }
 
 async function refreshSkillsPage() {
-  await Promise.all([refreshSkills(), refreshSkillVersions()]);
+  await refreshSkills();
 }
 
 async function openFilesForBase(base: string) {
