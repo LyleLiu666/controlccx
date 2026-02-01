@@ -60,6 +60,20 @@ func (s *Service) EnsureForTask(ctx context.Context, task tasks.Task) (tasks.Ses
 	} else if ok && existing.Status == tasks.WorkspaceStatusActive {
 		return existing, nil
 	}
+	// Backward-compatible: older runs stored workspaces under task-id keys (t:<taskID>)
+	// without migrating to session keys (s:<sessionID>). When resuming, try to recover an
+	// existing legacy workspace to keep Claude Code sessions resumable (they are scoped to
+	// the project directory).
+	if strings.HasPrefix(key, "s:") {
+		sid := strings.TrimSpace(strings.TrimPrefix(key, "s:"))
+		if sid != "" {
+			if ws, ok, err := s.recoverLegacyWorkspaceForSession(ctx, sid); err != nil {
+				return tasks.SessionWorkspace{}, err
+			} else if ok && ws.Status == tasks.WorkspaceStatusActive {
+				return ws, nil
+			}
+		}
+	}
 
 	baseWorkDir, err := absClean(task.WorkDir)
 	if err != nil {
@@ -161,6 +175,66 @@ func (s *Service) EnsureForTask(ctx context.Context, task tasks.Task) (tasks.Ses
 
 func taskWorkspaceKey(task tasks.Task) string {
 	return tasks.SessionKey(task.ID, task.SessionID)
+}
+
+func (s *Service) recoverLegacyWorkspaceForSession(ctx context.Context, sessionID string) (tasks.SessionWorkspace, bool, error) {
+	if s == nil || s.Store == nil {
+		return tasks.SessionWorkspace{}, false, errors.New("runworkspace: store is required")
+	}
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return tasks.SessionWorkspace{}, false, nil
+	}
+
+	desiredKey := tasks.SessionKey("", sessionID)
+	if ws, ok, err := s.Store.GetSessionWorkspace(ctx, desiredKey); err != nil {
+		return tasks.SessionWorkspace{}, false, err
+	} else if ok {
+		return ws, true, nil
+	}
+
+	all, err := s.Store.ListTasksWithOptions(ctx, 500, tasks.ListTasksOptions{IncludeDeleted: true})
+	if err != nil {
+		return tasks.SessionWorkspace{}, false, err
+	}
+
+	for _, t := range all {
+		if strings.TrimSpace(t.SessionID) != sessionID {
+			continue
+		}
+
+		legacyKey := tasks.SessionKey(t.ID, "")
+		ws, ok, err := s.Store.GetSessionWorkspace(ctx, legacyKey)
+		if err != nil {
+			return tasks.SessionWorkspace{}, false, err
+		}
+		if !ok {
+			continue
+		}
+
+		// Skip missing workdirs (best-effort; keep searching).
+		if strings.TrimSpace(ws.RunWorkDir) != "" {
+			if info, err := os.Stat(ws.RunWorkDir); err != nil || !info.IsDir() {
+				continue
+			}
+		}
+
+		if err := s.Store.MigrateSessionWorkspaceKey(ctx, legacyKey, desiredKey); err != nil {
+			return tasks.SessionWorkspace{}, false, err
+		}
+
+		// Prefer the migrated session key mapping.
+		if migrated, ok, err := s.Store.GetSessionWorkspace(ctx, desiredKey); err != nil {
+			return tasks.SessionWorkspace{}, false, err
+		} else if ok {
+			return migrated, true, nil
+		}
+
+		// If migration didn't stick (race/overwrite avoidance), still return the legacy mapping.
+		return ws, true, nil
+	}
+
+	return tasks.SessionWorkspace{}, false, nil
 }
 
 func absClean(path string) (string, error) {
