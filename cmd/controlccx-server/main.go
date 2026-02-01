@@ -104,6 +104,10 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	perSkillVersionsSvc, err := skills.NewPerSkillVersionsService(skills.PerSkillVersionsOptions{})
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	apiSvc := &api.API{
 		Tasks:         taskStore,
@@ -114,6 +118,7 @@ func main() {
 		Auth:          authStore,
 		Skills:        skillsSvc,
 		SkillVersions: skillVersionsSvc,
+		SkillVersionsBySkill: perSkillVersionsSvc,
 		Tools:         toolsSvc,
 	}
 

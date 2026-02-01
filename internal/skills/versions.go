@@ -110,7 +110,7 @@ func (s *VersionsService) List(ctx context.Context) (VersionsListResponse, error
 			continue
 		}
 		v := Version{ID: name}
-		if m, err := s.readManifest(filepath.Join(s.versionsRoot, name)); err == nil {
+		if m, err := readVersionManifest(filepath.Join(s.versionsRoot, name)); err == nil {
 			v.CreatedAt = m.CreatedAt
 			v.Note = m.Note
 		}
@@ -163,7 +163,7 @@ func (s *VersionsService) Create(ctx context.Context, input CreateVersionInput) 
 	}
 
 	createdAt := s.now().UTC().Format(time.RFC3339)
-	if err := s.writeManifest(tmpDir, versionManifest{
+	if err := writeVersionManifest(tmpDir, versionManifest{
 		ID:         id,
 		CreatedAt:  createdAt,
 		Note:       strings.TrimSpace(input.Note),
@@ -258,9 +258,10 @@ type versionManifest struct {
 	CreatedAt  string `json:"created_at"`
 	Note       string `json:"note,omitempty"`
 	SourceRoot string `json:"source_root"`
+	Skill      string `json:"skill,omitempty"`
 }
 
-func (s *VersionsService) writeManifest(dir string, m versionManifest) error {
+func writeVersionManifest(dir string, m versionManifest) error {
 	data, err := json.MarshalIndent(m, "", "  ")
 	if err != nil {
 		return fmt.Errorf("skills: marshal version manifest: %w", err)
@@ -272,7 +273,7 @@ func (s *VersionsService) writeManifest(dir string, m versionManifest) error {
 	return nil
 }
 
-func (s *VersionsService) readManifest(dir string) (versionManifest, error) {
+func readVersionManifest(dir string) (versionManifest, error) {
 	path := filepath.Join(filepath.Clean(dir), versionsManifestFile)
 	data, err := os.ReadFile(path)
 	if err != nil {

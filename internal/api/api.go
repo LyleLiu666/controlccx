@@ -37,6 +37,7 @@ type API struct {
 	Auth          *auth.Store
 	Skills        *skills.Service
 	SkillVersions *skills.VersionsService
+	SkillVersionsBySkill *skills.PerSkillVersionsService
 	Tools         *tooling.Service
 }
 
@@ -64,6 +65,7 @@ func (a *API) Handler() http.Handler {
 	mux.HandleFunc("/api/skills/versions", a.handleSkillVersions)
 	mux.HandleFunc("/api/skills/versions/create", a.handleSkillVersionsCreate)
 	mux.HandleFunc("/api/skills/versions/delete", a.handleSkillVersionsDelete)
+	mux.HandleFunc("/api/skills/", a.handleSkillScopedRoutes)
 	mux.HandleFunc("/api/fs/roots", a.handleFSRoots)
 	mux.HandleFunc("/api/fs/list", a.handleFSList)
 	mux.HandleFunc("/api/fs/read", a.handleFSRead)
