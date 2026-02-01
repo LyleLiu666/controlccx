@@ -140,6 +140,14 @@ function disableTitle(target: SkillTarget, canDisable: boolean): string {
           >
             下一页
           </button>
+          <button
+            type="button"
+            @click="emit('refresh')"
+            :disabled="loading"
+            title="刷新"
+          >
+            刷新
+          </button>
         </div>
       </div>
 

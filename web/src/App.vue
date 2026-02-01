@@ -1788,6 +1788,15 @@ function goHome() {
   runsOpen.value = false;
   sessionsDrawerOpen.value = false;
   selectedTaskId.value = "";
+  if (skillsOpen.value) {
+    closeSkillsPage();
+    return;
+  }
+  if (filesOpen.value) {
+    closeFilesPage();
+    return;
+  }
+  navigateTo("/");
 }
 
 async function runFromHome() {
@@ -3958,20 +3967,6 @@ watch(
 
     <div class="grid" :class="{ gridSingle: !sessionsDrawerOpen }">
 	      <section v-if="skillsOpen" class="panel skillsPagePanel">
-	        <h2>
-	          技能
-	          <span class="h2Spacer"></span>
-	          <button
-              type="button"
-              class="h2Btn"
-              @click="refreshSkillsPage"
-              :disabled="skillsLoading || skillsVersionsLoading"
-            >
-	            刷新
-	          </button>
-	          <button type="button" class="h2Btn" @click="closeSkillsPage">返回</button>
-	        </h2>
-
           <div class="skillsPageWrap">
             <div class="skillsLeftCol">
               <SkillsGovernancePanel />
@@ -4003,6 +3998,7 @@ watch(
               :summarize-target="summarizeSkillTarget"
               :badge-class="skillBadgeClass"
               :make-key="skillsKey"
+              @refresh="refreshSkills"
               @prev-page="skillsPrevPage"
               @next-page="skillsNextPage"
               @toggle="onSkillsToggle"
