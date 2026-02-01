@@ -7554,7 +7554,7 @@ h2 {
 
 :deep(.skillsPageWrap) {
   display: grid;
-  grid-template-columns: minmax(360px, 480px) 1fr;
+  grid-template-columns: minmax(420px, 600px) 1fr;
   gap: 16px;
   padding: 20px;
   min-height: 0;
@@ -7685,6 +7685,30 @@ h2 {
   margin: 6px 0 10px;
 }
 
+:deep(.skillsGovPrimary) {
+  border: 1px solid rgba(45, 212, 191, 0.18);
+  border-radius: 16px;
+  padding: 12px;
+  background: linear-gradient(
+    180deg,
+    rgba(20, 184, 166, 0.12) 0%,
+    rgba(15, 23, 42, 0.08) 70%,
+    rgba(15, 23, 42, 0.02) 100%
+  );
+  display: grid;
+  gap: 10px;
+}
+
+:deep(.skillsGovPrimaryHeader) {
+  display: grid;
+  gap: 4px;
+}
+
+:deep(.skillsGovPrimaryTitle) {
+  font-weight: 900;
+  letter-spacing: 0.2px;
+}
+
 :deep(.skillsGovTab) {
   border: 1px solid rgba(148, 163, 184, 0.22);
   background: var(--bg-panel);
@@ -7710,10 +7734,6 @@ h2 {
 :deep(.skillsGovOp) {
   display: grid;
   gap: 12px;
-  padding: 12px;
-  border: 1px solid rgba(148, 163, 184, 0.18);
-  border-radius: 14px;
-  background: rgba(15, 23, 42, 0.18);
 }
 
 :deep(.skillsGovToolRow) {

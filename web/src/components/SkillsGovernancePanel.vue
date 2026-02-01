@@ -44,60 +44,13 @@ onMounted(() => {
     <div v-if="gov.actionError" class="modalError">操作失败：{{ gov.actionError }}</div>
     <div v-else-if="gov.actionInfo" class="tinyHint">{{ gov.actionInfo }}</div>
 
-    <details class="skillsGovDetails">
-      <summary class="skillsGovSummary">环境检查</summary>
-      <div v-if="gov.toolsError" class="modalError">{{ gov.toolsError }}</div>
-      <div v-else-if="gov.toolsLoading" class="loading">加载中…</div>
-      <template v-else>
-        <div class="skillsGovernanceTools">
-          <div v-for="t in gov.tools" :key="t.key" class="skillsGovToolRow">
-            <div class="mono">{{ t.key }}</div>
-            <span class="pill mono skillStatus" :class="t.installed ? 'ok' : 'dim'">
-              {{ t.installed ? "已安装" : "未安装" }}
-            </span>
-            <div class="tinyHint mono skillsGovToolRoots" :title="(t.skills_roots ?? []).join('\n')">
-              {{ (t.skills_roots ?? []).join(" · ") }}
-            </div>
-          </div>
+    <div class="skillsGovPrimary">
+      <div class="skillsGovPrimaryHeader">
+        <div class="skillsGovPrimaryTitle">导入 / 安装 / 同步</div>
+        <div class="tinyHint">
+          高频操作：先把技能纳入来源库，再在右侧启用到目标工具。
         </div>
-      </template>
-      <div class="tinyHint">
-        注：这里展示的是各工具扫描到的 skills 根目录。未安装时，右侧可能无法启用对应目标。
       </div>
-    </details>
-
-    <details class="skillsGovDetails">
-      <summary class="skillsGovSummary">扫描结果（可接管/冲突提示）</summary>
-      <div v-if="gov.onboardingError" class="modalError">{{ gov.onboardingError }}</div>
-      <div v-else-if="gov.onboardingLoading" class="loading">扫描中…</div>
-      <template v-else>
-        <div class="tinyHint" v-if="gov.onboarding">
-          扫描工具：<span class="mono">{{ gov.onboarding.total_tools_scanned }}</span>
-          · 发现技能：<span class="mono">{{ gov.onboarding.total_skills_found }}</span>
-          · 组：<span class="mono">{{ gov.onboarding.groups.length }}</span>
-        </div>
-        <div v-if="gov.hasOnboarding" class="skillsGovOnboardingList">
-          <div
-            v-for="g in gov.onboarding?.groups ?? []"
-            :key="g.name"
-            class="skillsGovOnboardingRow"
-          >
-            <div class="mono">{{ g.name }}</div>
-            <span class="pill mono skillStatus" :class="g.has_conflict ? 'warn' : 'ok'">
-              {{ g.has_conflict ? "冲突" : "正常" }}
-            </span>
-            <div class="tinyHint mono" :title="g.variants.map((v) => `${v.tool}:${v.path}`).join('\n')">
-              {{ g.variants.length }} 个变体
-            </div>
-          </div>
-        </div>
-        <div v-else class="tinyHint">暂无可接管技能（或已全部纳管）。</div>
-      </template>
-    </details>
-
-    <details class="skillsGovDetails" open>
-      <summary class="skillsGovSummary">导入 / 安装 / 同步</summary>
-
       <div class="skillsGovTabs">
         <button type="button" class="skillsGovTab" :class="{ active: op === 'local' }" @click="op = 'local'">
           本地安装
@@ -306,6 +259,57 @@ onMounted(() => {
           </div>
         </div>
       </div>
+    </div>
+
+    <details class="skillsGovDetails">
+      <summary class="skillsGovSummary">环境检查</summary>
+      <div v-if="gov.toolsError" class="modalError">{{ gov.toolsError }}</div>
+      <div v-else-if="gov.toolsLoading" class="loading">加载中…</div>
+      <template v-else>
+        <div class="skillsGovernanceTools">
+          <div v-for="t in gov.tools" :key="t.key" class="skillsGovToolRow">
+            <div class="mono">{{ t.key }}</div>
+            <span class="pill mono skillStatus" :class="t.installed ? 'ok' : 'dim'">
+              {{ t.installed ? "已安装" : "未安装" }}
+            </span>
+            <div class="tinyHint mono skillsGovToolRoots" :title="(t.skills_roots ?? []).join('\n')">
+              {{ (t.skills_roots ?? []).join(" · ") }}
+            </div>
+          </div>
+        </div>
+      </template>
+      <div class="tinyHint">
+        注：这里展示的是各工具扫描到的 skills 根目录。未安装时，右侧可能无法启用对应目标。
+      </div>
+    </details>
+
+    <details class="skillsGovDetails">
+      <summary class="skillsGovSummary">扫描结果（可接管/冲突提示）</summary>
+      <div v-if="gov.onboardingError" class="modalError">{{ gov.onboardingError }}</div>
+      <div v-else-if="gov.onboardingLoading" class="loading">扫描中…</div>
+      <template v-else>
+        <div class="tinyHint" v-if="gov.onboarding">
+          扫描工具：<span class="mono">{{ gov.onboarding.total_tools_scanned }}</span>
+          · 发现技能：<span class="mono">{{ gov.onboarding.total_skills_found }}</span>
+          · 组：<span class="mono">{{ gov.onboarding.groups.length }}</span>
+        </div>
+        <div v-if="gov.hasOnboarding" class="skillsGovOnboardingList">
+          <div
+            v-for="g in gov.onboarding?.groups ?? []"
+            :key="g.name"
+            class="skillsGovOnboardingRow"
+          >
+            <div class="mono">{{ g.name }}</div>
+            <span class="pill mono skillStatus" :class="g.has_conflict ? 'warn' : 'ok'">
+              {{ g.has_conflict ? "冲突" : "正常" }}
+            </span>
+            <div class="tinyHint mono" :title="g.variants.map((v) => `${v.tool}:${v.path}`).join('\n')">
+              {{ g.variants.length }} 个变体
+            </div>
+          </div>
+        </div>
+        <div v-else class="tinyHint">暂无可接管技能（或已全部纳管）。</div>
+      </template>
     </details>
   </div>
 </template>
