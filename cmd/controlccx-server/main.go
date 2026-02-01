@@ -170,6 +170,20 @@ func spaOrFallback(fsys fs.FS) http.Handler {
 	indexExists := fsExists(fsys, "index.html")
 	fileServer := http.FileServer(http.FS(fsys))
 
+	serveIndex := func(w http.ResponseWriter, r *http.Request) {
+		b, err := fs.ReadFile(fsys, "index.html")
+		if err != nil {
+			http.Error(w, "controlccx: failed to read index.html", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		if r.Method == http.MethodHead {
+			return
+		}
+		_, _ = w.Write(b)
+	}
+
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -187,12 +201,11 @@ func spaOrFallback(fsys fs.FS) http.Handler {
 			missingUIHandler().ServeHTTP(w, r)
 			return
 		}
-		// SPA fallback.
-		r2 := new(http.Request)
-		*r2 = *r
-		r2.URL = newCopyURL(r.URL)
-		r2.URL.Path = "/index.html"
-		fileServer.ServeHTTP(w, r2)
+		// SPA fallback: return index.html while keeping the original URL (so client-side routing works).
+		//
+		// NOTE: we cannot delegate to http.FileServer with URL.Path="/index.html" because it will
+		// issue a 301 redirect to "./" for index.html requests, which breaks deep links like "/skills".
+		serveIndex(w, r)
 	})
 }
 
