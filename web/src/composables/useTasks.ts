@@ -1,14 +1,17 @@
 import { computed, onBeforeUnmount, ref, type Ref } from "vue";
 import type { ChatMessage, LogEntry, ServerEvent, Task, TaskTraceResponse } from "../types";
 import { fetchLogs, fetchTaskTrace, fetchTasks } from "../api";
+import { deriveNextSelectedTaskId } from "../taskSelection";
 
 export type UseTasksOptions = {
   showDeleted: Ref<boolean>;
   onTaskUpsert?: (prev: Task | undefined, next: Task) => void;
   onChatMessage?: (msg: ChatMessage) => void;
+  autoSelectFirst?: boolean;
 };
 
 export function useTasks(opts: UseTasksOptions) {
+  const autoSelectFirst = opts.autoSelectFirst ?? true;
   const tasks = ref<Map<string, Task>>(new Map());
   const selectedTaskId = ref<string>("");
   const logsByTask = ref<Map<string, LogEntry[]>>(new Map());
@@ -45,7 +48,7 @@ export function useTasks(opts: UseTasksOptions) {
     const next = new Map(tasks.value);
     next.set(task.id, task);
     tasks.value = next;
-    if (!selectedTaskId.value) selectedTaskId.value = task.id;
+    if (!selectedTaskId.value && autoSelectFirst) selectedTaskId.value = task.id;
   }
 
   function appendLog(entry: LogEntry) {
@@ -61,11 +64,11 @@ export function useTasks(opts: UseTasksOptions) {
     for (const t of list) next.set(t.id, t);
     tasks.value = next;
 
-    if (selectedTaskId.value && !tasks.value.has(selectedTaskId.value)) {
-      selectedTaskId.value = list[0]?.id ?? "";
-    } else if (!selectedTaskId.value) {
-      selectedTaskId.value = list[0]?.id ?? "";
-    }
+    selectedTaskId.value = deriveNextSelectedTaskId({
+      current: selectedTaskId.value,
+      candidates: list,
+      autoSelectFirst,
+    });
     return list;
   }
 
@@ -199,4 +202,3 @@ export function useTasks(opts: UseTasksOptions) {
     reconnectEvents,
   };
 }
-
