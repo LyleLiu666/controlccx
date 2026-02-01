@@ -20,6 +20,7 @@ import type {
   OnboardingPlan,
   ManagedSkill,
   GitCandidatesResponse,
+  PerSkillVersionsListResponse,
   SkillVersion,
   SkillVersionsListResponse,
   SystemInfo,
@@ -430,4 +431,28 @@ export async function createSkillVersion(input: {
 
 export async function deleteSkillVersion(input: { id: string }): Promise<{ ok: boolean }> {
   return postJSON<{ ok: boolean }>("/api/skills/versions/delete", input);
+}
+
+export async function fetchSkillVersionsBySkill(name: string): Promise<PerSkillVersionsListResponse> {
+  const n = String(name ?? "").trim();
+  return getJSON<PerSkillVersionsListResponse>(`/api/skills/${encodeURIComponent(n)}/versions`);
+}
+
+export async function createSkillVersionBySkill(
+  name: string,
+  input: {
+    id?: string;
+    note?: string;
+  },
+): Promise<SkillVersion> {
+  const n = String(name ?? "").trim();
+  return postJSON<SkillVersion>(`/api/skills/${encodeURIComponent(n)}/versions/create`, input);
+}
+
+export async function deleteSkillVersionBySkill(
+  name: string,
+  input: { id: string },
+): Promise<{ ok: boolean }> {
+  const n = String(name ?? "").trim();
+  return postJSON<{ ok: boolean }>(`/api/skills/${encodeURIComponent(n)}/versions/delete`, input);
 }

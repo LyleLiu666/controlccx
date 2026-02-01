@@ -204,6 +204,14 @@ export type SkillVersionsListResponse = {
   versions: SkillVersion[];
 };
 
+export type PerSkillVersionsListResponse = {
+  skill: string;
+  source_root: string;
+  skill_source: string;
+  versions_root: string;
+  versions: SkillVersion[];
+};
+
 export type LogEntry = {
   id: number;
   task_id: string;

@@ -37,9 +37,11 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: "refresh"): void;
+  (e: "openGovernance"): void;
   (e: "prevPage"): void;
   (e: "nextPage"): void;
   (e: "toggle", name: string, target: SkillTarget, enable: boolean): void;
+  (e: "openVersions", name: string, hasSource: boolean): void;
   (e: "update:filter", value: string): void;
   (e: "update:limit", value: number): void;
 }>();
@@ -82,7 +84,7 @@ function enableTitle(skill: Skill, target: SkillTarget, canEnable: boolean): str
   if (canEnable) return `为 ${t} 启用`;
   const hasSource = !!(skill.source && skill.source.trim());
   if (!hasSource) {
-    return `无法启用：缺少来源（source）。请先在左侧「导入/安装/同步」把技能纳入来源库，再启用到 ${t}。`;
+    return `无法启用：缺少来源（source）。请先把技能导入/安装到来源库，再启用到 ${t}。`;
   }
   return `无法启用：目标目录存在未托管的同名条目（冲突/外部/已存在）。请先处理或接管，再启用到 ${t}。`;
 }
@@ -130,6 +132,15 @@ function disableTitle(target: SkillTarget, canDisable: boolean): string {
           <span class="tinyHint mono">{{ rangeLabel }}</span>
           <button
             type="button"
+            class="primary"
+            @click="emit('openGovernance')"
+            :disabled="loading"
+            title="添加技能（本地/Git/接管/同步/从源更新）"
+          >
+            添加技能
+          </button>
+          <button
+            type="button"
             @click="emit('prevPage')"
             :disabled="loading || !canPrev"
             title="上一页"
@@ -166,11 +177,21 @@ function disableTitle(target: SkillTarget, canDisable: boolean): string {
         <div class="skillsRows">
           <div v-for="s in skillsVisible" :key="s.name" class="skillsRow">
             <div class="skillsName">
-              <div class="mono">{{ s.name }}</div>
+              <div class="skillsNameTop">
+                <div class="mono">{{ s.name }}</div>
+                <button
+                  type="button"
+                  class="skillActionBtn"
+                  @click="emit('openVersions', s.name, !!(s.source && s.source.trim()))"
+                  title="管理该技能的版本快照"
+                >
+                  版本
+                </button>
+              </div>
               <div class="tinyHint mono" v-if="s.source" :title="s.source">
                 {{ s.source }}
               </div>
-              <div class="tinyHint warn" v-else>缺少来源（请先在左侧导入/接管）</div>
+              <div class="tinyHint warn" v-else>缺少来源（请先添加/导入/接管）</div>
             </div>
 
             <div class="skillsCell">

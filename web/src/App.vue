@@ -68,16 +68,14 @@ import {
   safetyPresetsForDriver,
 } from "./runSafety";
 import SkillsPanel from "./components/SkillsPanel.vue";
-import SkillsVersionsPanel from "./components/SkillsVersionsPanel.vue";
-import SkillsGovernancePanel from "./components/SkillsGovernancePanel.vue";
 import SkillsGovernanceModal from "./components/SkillsGovernanceModal.vue";
+import SkillVersionsModal from "./components/SkillVersionsModal.vue";
 import SecretaryDrawer from "./components/SecretaryDrawer.vue";
 import LiveDrawer from "./components/LiveDrawer.vue";
 import FilesModal from "./components/FilesModal.vue";
 import AuthSettingsModal from "./components/AuthSettingsModal.vue";
 import ToolsSettingsModal from "./components/ToolsSettingsModal.vue";
 import { useSkills } from "./composables/useSkills";
-import { useSkillVersions } from "./composables/useSkillVersions";
 import { useSecretaryChat } from "./composables/useSecretaryChat";
 import { useTaskWorkspace } from "./composables/useTaskWorkspace";
 import { useTasks } from "./composables/useTasks";
@@ -180,6 +178,9 @@ const {
 const theme = ref<"light" | "dark">("light");
 const headerMoreEl = ref<HTMLDetailsElement | null>(null);
 const skillsGovernanceOpen = ref(false);
+const skillVersionsOpen = ref(false);
+const skillVersionsSkill = ref("");
+const skillVersionsHasSource = ref(false);
 
 const authInfo = ref<AuthInfo | null>(null);
 const authStatus = computed<AuthStatus | null>(
@@ -230,22 +231,16 @@ const {
   skillBadgeClass,
 } = useSkills();
 
-const {
-  skillsVersionsLoading,
-  skillsVersionsError,
-  skillsVersionsData,
-  skillsVersionNewId,
-  skillsVersionNewNote,
-  skillsVersionsCreating,
-  skillsVersionsDeleting,
-  refreshSkillVersions,
-  createSkillVersionFromForm,
-  deleteSkillVersionByID,
-} = useSkillVersions();
-
 watch(skillsOpen, (open) => {
   if (!open) skillsGovernanceOpen.value = false;
+  if (!open) skillVersionsOpen.value = false;
 });
+
+function openSkillVersions(name: string, hasSource: boolean) {
+  skillVersionsSkill.value = String(name ?? "").trim();
+  skillVersionsHasSource.value = !!hasSource;
+  skillVersionsOpen.value = true;
+}
 
 const outputTab = ref<"result" | "logs" | "trace">("result");
 const resultPreviewTab = ref<"markdown" | "raw" | "html">("markdown");
@@ -3975,23 +3970,6 @@ watch(
     <div class="grid" :class="{ gridSingle: !sessionsDrawerOpen }">
 	      <section v-if="skillsOpen" class="panel skillsPagePanel">
 	          <div class="skillsPageWrap">
-	            <div class="skillsLeftCol">
-	              <SkillsGovernancePanel @open="skillsGovernanceOpen = true" />
-	
-	              <SkillsVersionsPanel
-	                :loading="skillsVersionsLoading"
-	                :error="skillsVersionsError"
-	                :data="skillsVersionsData"
-                v-model:new-id="skillsVersionNewId"
-                v-model:new-note="skillsVersionNewNote"
-                :creating="skillsVersionsCreating"
-                :deleting="skillsVersionsDeleting"
-                @refresh="refreshSkillVersions"
-                @create="createSkillVersionFromForm"
-                @delete="deleteSkillVersionByID"
-              />
-            </div>
-
             <SkillsPanel
               :loading="skillsLoading"
               :error="skillsError"
@@ -4006,9 +3984,11 @@ watch(
               :badge-class="skillBadgeClass"
               :make-key="skillsKey"
               @refresh="refreshSkills"
+              @openGovernance="skillsGovernanceOpen = true"
               @prev-page="skillsPrevPage"
               @next-page="skillsNextPage"
               @toggle="onSkillsToggle"
+              @openVersions="openSkillVersions"
             />
           </div>
 	      </section>
@@ -5712,6 +5692,13 @@ watch(
         <SkillsGovernanceModal
           :open="skillsGovernanceOpen"
           @close="skillsGovernanceOpen = false"
+        />
+
+        <SkillVersionsModal
+          :open="skillVersionsOpen"
+          :skill="skillVersionsSkill"
+          :has-source="skillVersionsHasSource"
+          @close="skillVersionsOpen = false"
         />
 	
 		    <div
@@ -7502,6 +7489,17 @@ h2 {
   min-width: 0;
 }
 
+:deep(.skillsNameTop) {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+:deep(.skillsNameTop .mono) {
+  flex: 1;
+  min-width: 0;
+}
+
 :deep(.skillsName .mono) {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -7565,50 +7563,11 @@ h2 {
 }
 
 :deep(.skillsPageWrap) {
-  display: grid;
-  grid-template-columns: minmax(420px, 600px) 1fr;
-  gap: 16px;
+  display: flex;
+  flex-direction: column;
   padding: 20px;
   min-height: 0;
   overflow: hidden;
-}
-
-:deep(.skillsLeftCol) {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  min-height: 0;
-  overflow: hidden;
-}
-
-:deep(.skillsGovLauncherCard) {
-  border: 1px solid var(--border-color);
-  border-radius: 14px;
-  background: var(--bg-panel);
-  padding: 16px;
-  display: grid;
-  gap: 10px;
-}
-
-:deep(.skillsGovLauncherHeader) {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-}
-
-:deep(.skillsGovLauncherTitle) {
-  font-weight: 900;
-}
-
-:deep(.skillsVersionsCard) {
-  border: 1px solid var(--border-color);
-  border-radius: 14px;
-  background: var(--bg-panel);
-  padding: 16px;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
 }
 
 :deep(.skillsVersionsHeader) {
@@ -10227,9 +10186,6 @@ h2 {
       minmax(320px, 1fr)
       minmax(480px, 2fr);
     gap: 16px;
-  }
-  :deep(.skillsPageWrap) {
-    grid-template-columns: 1fr;
   }
   :deep(.secretaryCards) {
     grid-template-columns: repeat(4, 1fr);
