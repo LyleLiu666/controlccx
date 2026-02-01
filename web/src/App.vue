@@ -7709,7 +7709,11 @@ h2 {
 
 :deep(.skillsGovOp) {
   display: grid;
-  gap: 10px;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 14px;
+  background: rgba(15, 23, 42, 0.18);
 }
 
 :deep(.skillsGovToolRow) {
@@ -7734,17 +7738,71 @@ h2 {
   margin-bottom: 8px;
 }
 
-:deep(.skillsGovForm) {
+:deep(.skillsGovFields) {
   display: grid;
-  grid-template-columns: 1fr 1fr auto;
+  gap: 10px;
+}
+
+:deep(.skillsGovField) {
+  display: grid;
+  gap: 6px;
+}
+
+:deep(.skillsGovFieldLabel) {
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--text-main);
+}
+
+:deep(.skillsGovReq) {
+  color: rgb(244, 63, 94);
+  font-weight: 900;
+}
+
+:deep(.skillsGovField input),
+:deep(.skillsGovField select) {
+  width: 100%;
+  min-width: 0;
+}
+
+:deep(.skillsGovRow) {
+  display: grid;
+  grid-template-columns: 1fr auto;
   gap: 10px;
   align-items: center;
 }
 
-:deep(.skillsGovForm input),
-:deep(.skillsGovForm select) {
-  width: 100%;
-  min-width: 0;
+:deep(.skillsGovActions) {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 2px;
+}
+
+:deep(.skillsGovSecondaryBtn) {
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  background: rgba(2, 6, 23, 0.15);
+  color: var(--text-main);
+  font-weight: 800;
+  border-radius: 12px;
+  padding: 8px 10px;
+  white-space: nowrap;
+}
+
+:deep(.skillsGovSecondaryBtn:hover) {
+  border-color: rgba(45, 212, 191, 0.35);
+  color: var(--color-primary);
+}
+
+:deep(.skillsGovSecondaryBtn:disabled) {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+:deep(.skillsGovPrimaryBtn) {
+  min-width: 112px;
 }
 
 :deep(.skillsGovCheckbox) {
@@ -7752,12 +7810,20 @@ h2 {
   gap: 8px;
   align-items: center;
   white-space: nowrap;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  background: rgba(2, 6, 23, 0.12);
+  padding: 6px 10px;
+  border-radius: 999px;
 }
 
 :deep(.skillsGovCandidates) {
   display: grid;
   gap: 8px;
   margin: 8px 0;
+  padding: 10px 12px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 14px;
+  background: rgba(15, 23, 42, 0.12);
 }
 
 :deep(.skillsGovOnboardingList) {
