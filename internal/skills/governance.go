@@ -155,6 +155,8 @@ func (s *Service) scanToolSkillsRoot(toolKey string, root string) ([]OnboardingV
 		return nil, fmt.Errorf("skills: read tool root %q: %w", root, err)
 	}
 
+	allowedRoots := s.resolveSourceRoots()
+
 	var out []OnboardingVariant
 	for _, e := range entries {
 		name := strings.TrimSpace(e.Name())
@@ -187,7 +189,7 @@ func (s *Service) scanToolSkillsRoot(toolKey string, root string) ([]OnboardingV
 			continue
 		}
 		if isLink {
-			if resolved, err := filepath.EvalSymlinks(full); err == nil && isWithinAnyRoot(filepath.Clean(resolved), s.sourceRootsResolved) {
+			if resolved, err := filepath.EvalSymlinks(full); err == nil && isWithinAnyRoot(filepath.Clean(resolved), allowedRoots) {
 				continue
 			}
 		}
@@ -436,6 +438,18 @@ type InstallGitInput struct {
 	Overwrite bool   `json:"overwrite,omitempty"`
 }
 
+type InstallGitBatchItem struct {
+	Subpath string `json:"subpath"`
+	Name    string `json:"name,omitempty"`
+}
+
+type InstallGitBatchInput struct {
+	RepoURL   string                `json:"repo_url"`
+	Skills    []InstallGitBatchItem `json:"skills"`
+	Targets   []Target              `json:"targets,omitempty"`
+	Overwrite bool                  `json:"overwrite,omitempty"`
+}
+
 func (s *Service) InstallGit(ctx context.Context, input InstallGitInput) (ManagedSkill, error) {
 	if s == nil {
 		return ManagedSkill{}, fmt.Errorf("skills: service is nil")
@@ -568,6 +582,173 @@ func (s *Service) InstallGit(ctx context.Context, input InstallGitInput) (Manage
 		CreatedAt:      m.CreatedAt,
 		UpdatedAt:      m.UpdatedAt,
 	}, nil
+}
+
+func (s *Service) InstallGitBatch(ctx context.Context, input InstallGitBatchInput) ([]ManagedSkill, error) {
+	if s == nil {
+		return nil, fmt.Errorf("skills: service is nil")
+	}
+
+	repoURL := strings.TrimSpace(input.RepoURL)
+	if repoURL == "" {
+		return nil, fmt.Errorf("skills: repo url is required")
+	}
+	if len(input.Skills) == 0 {
+		return nil, fmt.Errorf("skills: skills list is required")
+	}
+
+	parsed := parseGitSource(repoURL)
+	cloneURL := strings.TrimSpace(parsed.cloneURL)
+	if cloneURL == "" {
+		cloneURL = repoURL
+	}
+
+	repoDir, rev, err := cloneToTemp(ctx, cloneURL, parsed.branch)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = os.RemoveAll(repoDir) }()
+
+	root, err := s.canonicalRoot()
+	if err != nil {
+		return nil, err
+	}
+
+	seenNames := make(map[string]bool, len(input.Skills))
+	items := make([]InstallGitBatchItem, 0, len(input.Skills))
+	for _, it := range input.Skills {
+		subpath := strings.TrimSpace(it.Subpath)
+		if subpath == "" {
+			return nil, fmt.Errorf("skills: subpath is required")
+		}
+		subpath = strings.ReplaceAll(subpath, "\\", "/")
+		if subpath == "" {
+			subpath = "."
+		}
+
+		name := strings.TrimSpace(it.Name)
+		if name == "" {
+			if subpath != "." {
+				name = filepath.Base(filepath.Clean(filepath.FromSlash(subpath)))
+			} else {
+				name = deriveNameFromRepoURL(cloneURL)
+			}
+		}
+		if !isSafeName(name) {
+			return nil, fmt.Errorf("skills: invalid skill name")
+		}
+		if seenNames[name] {
+			return nil, fmt.Errorf("skills: duplicate skill name: %s", name)
+		}
+		seenNames[name] = true
+
+		items = append(items, InstallGitBatchItem{Subpath: subpath, Name: name})
+	}
+
+	// Preflight destination collisions to fail fast (before any deletes/writes).
+	for _, it := range items {
+		dest := filepath.Join(root, it.Name)
+		if _, err := os.Stat(dest); err == nil {
+			if !input.Overwrite {
+				return nil, errTargetExists(dest)
+			}
+			continue
+		} else if err != nil && !os.IsNotExist(err) {
+			return nil, fmt.Errorf("skills: stat dest: %w", err)
+		}
+	}
+
+	installed := make([]ManagedSkill, 0, len(items))
+	for _, it := range items {
+		subpath := it.Subpath
+		if strings.TrimSpace(subpath) == "" {
+			subpath = "."
+		}
+
+		copySrc, err := safeRepoSubpath(repoDir, subpath)
+		if err != nil {
+			return nil, err
+		}
+		if st, err := os.Stat(copySrc); err != nil || !st.IsDir() {
+			return nil, fmt.Errorf("skills: path not found in repo: %s", subpath)
+		}
+		if _, err := os.Stat(filepath.Join(copySrc, "SKILL.md")); err != nil {
+			return nil, fmt.Errorf("skills: no SKILL.md at: %s", subpath)
+		}
+
+		tmp, err := os.MkdirTemp(root, ".tmp-controlccx-skill-install-")
+		if err != nil {
+			return nil, fmt.Errorf("skills: create temp install dir: %w", err)
+		}
+
+		if err := copyDirFiltered(copySrc, tmp, fingerprintIgnoreNames); err != nil {
+			_ = os.RemoveAll(tmp)
+			return nil, err
+		}
+
+		fp, _ := dirFingerprint(tmp)
+		if err := writeManagedManifest(tmp, ManagedSkillManifest{
+			Name:           it.Name,
+			SourceType:     sourceTypeGit,
+			SourceRef:      repoURL,
+			SourceBranch:   parsed.branch,
+			SourceSubpath:  subpath,
+			SourceRevision: rev,
+			ContentHash:    fp,
+		}); err != nil {
+			_ = os.RemoveAll(tmp)
+			return nil, err
+		}
+		fp, _ = dirFingerprint(tmp)
+
+		dest := filepath.Join(root, it.Name)
+		if _, err := os.Stat(dest); err == nil {
+			if !input.Overwrite {
+				return nil, errTargetExists(dest)
+			}
+			if err := os.RemoveAll(dest); err != nil {
+				return nil, fmt.Errorf("skills: overwrite remove dest: %w", err)
+			}
+		} else if err != nil && !os.IsNotExist(err) {
+			_ = os.RemoveAll(tmp)
+			return nil, fmt.Errorf("skills: stat dest: %w", err)
+		}
+
+		if err := os.Rename(tmp, dest); err != nil {
+			_ = os.RemoveAll(tmp)
+			return nil, fmt.Errorf("skills: finalize install: %w", err)
+		}
+
+		m, _ := readManagedManifest(dest)
+		installed = append(installed, ManagedSkill{
+			Name:           it.Name,
+			Path:           dest,
+			SourceType:     m.SourceType,
+			SourceTool:     m.SourceTool,
+			SourceRef:      m.SourceRef,
+			SourceBranch:   m.SourceBranch,
+			SourceSubpath:  m.SourceSubpath,
+			SourceRevision: m.SourceRevision,
+			ContentHash:    m.ContentHash,
+			CreatedAt:      m.CreatedAt,
+			UpdatedAt:      m.UpdatedAt,
+		})
+	}
+
+	// Optional: sync each installed skill into selected targets.
+	for _, tgt := range input.Targets {
+		t := Target(strings.TrimSpace(string(tgt)))
+		if t == "" {
+			continue
+		}
+		for _, sk := range installed {
+			if err := s.Sync(ctx, sk.Name, t, input.Overwrite); err != nil {
+				return nil, err
+			}
+		}
+	}
+
+	return installed, nil
 }
 
 func (s *Service) UpdateManagedSkill(ctx context.Context, name string) (ManagedSkill, error) {

@@ -16,7 +16,7 @@ func TestService_GitInstall_MultiSkillsRequiresSelection_AndUpdate(t *testing.T)
 
 	ctx := context.Background()
 	home := t.TempDir()
-	sourceRoot := filepath.Join(home, ".agents", "skills")
+	sourceRoot := filepath.Join(home, ".agent", "skills")
 	svc, err := NewService(Options{HomeDir: home, SourceRoots: []string{sourceRoot}})
 	if err != nil {
 		t.Fatalf("new service: %v", err)
@@ -88,7 +88,7 @@ func TestService_GitInstall_RejectsSubpathTraversal(t *testing.T) {
 
 	ctx := context.Background()
 	home := t.TempDir()
-	sourceRoot := filepath.Join(home, ".agents", "skills")
+	sourceRoot := filepath.Join(home, ".agent", "skills")
 	svc, err := NewService(Options{HomeDir: home, SourceRoots: []string{sourceRoot}})
 	if err != nil {
 		t.Fatalf("new service: %v", err)
@@ -117,7 +117,7 @@ func TestService_GitInstall_AllowsExplicitRootSelection_InMultiSkillRepo(t *test
 
 	ctx := context.Background()
 	home := t.TempDir()
-	sourceRoot := filepath.Join(home, ".agents", "skills")
+	sourceRoot := filepath.Join(home, ".agent", "skills")
 	svc, err := NewService(Options{HomeDir: home, SourceRoots: []string{sourceRoot}})
 	if err != nil {
 		t.Fatalf("new service: %v", err)
@@ -156,7 +156,7 @@ func TestService_GitInstall_MultiSkillsRequiresSelection_PluginsLayout(t *testin
 
 	ctx := context.Background()
 	home := t.TempDir()
-	sourceRoot := filepath.Join(home, ".agents", "skills")
+	sourceRoot := filepath.Join(home, ".agent", "skills")
 	svc, err := NewService(Options{HomeDir: home, SourceRoots: []string{sourceRoot}})
 	if err != nil {
 		t.Fatalf("new service: %v", err)
@@ -204,7 +204,7 @@ func TestService_GitInstall_AutoSelectsSingleSkill_FromPluginsLayout(t *testing.
 
 	ctx := context.Background()
 	home := t.TempDir()
-	sourceRoot := filepath.Join(home, ".agents", "skills")
+	sourceRoot := filepath.Join(home, ".agent", "skills")
 	svc, err := NewService(Options{HomeDir: home, SourceRoots: []string{sourceRoot}})
 	if err != nil {
 		t.Fatalf("new service: %v", err)
@@ -243,4 +243,108 @@ func git(t *testing.T, dir string, args ...string) {
 	if err != nil {
 		t.Fatalf("git %v: %v\n%s", args, err, string(out))
 	}
+}
+
+func TestListGitCandidates_ScansRepoForSkillMD_OuterMostOnly(t *testing.T) {
+	repoDir := t.TempDir()
+
+	// Should not traverse git internals.
+	mustMkdir(t, filepath.Join(repoDir, ".git"))
+	mustWrite(t, filepath.Join(repoDir, ".git", "SKILL.md"), "---\nname: ignored\n---\n")
+
+	mustMkdir(t, filepath.Join(repoDir, "agent", "skills", "brainstorming"))
+	mustWrite(
+		t,
+		filepath.Join(repoDir, "agent", "skills", "brainstorming", "SKILL.md"),
+		"---\nname: Brainstorming\ndescription: x\n---\n",
+	)
+	mustMkdir(t, filepath.Join(repoDir, "agent", "skills", "brainstorming", "nested"))
+	mustWrite(t, filepath.Join(repoDir, "agent", "skills", "brainstorming", "nested", "SKILL.md"), "---\nname: Nested\n---\n")
+
+	mustMkdir(t, filepath.Join(repoDir, "misc"))
+	mustWrite(t, filepath.Join(repoDir, "misc", "SKILL.md"), "---\nname: Misc\n---\n")
+
+	cands, err := listGitCandidates(repoDir, "")
+	if err != nil {
+		t.Fatalf("list candidates: %v", err)
+	}
+	seen := make(map[string]GitSkillCandidate, len(cands))
+	for _, c := range cands {
+		seen[c.Subpath] = c
+	}
+	if _, ok := seen["agent/skills/brainstorming"]; !ok {
+		t.Fatalf("expected brainstorming candidate, got=%v", cands)
+	}
+	if _, ok := seen["agent/skills/brainstorming/nested"]; ok {
+		t.Fatalf("expected nested to be filtered out, got=%v", cands)
+	}
+	if _, ok := seen["misc"]; !ok {
+		t.Fatalf("expected misc candidate, got=%v", cands)
+	}
+	if _, ok := seen[".git"]; ok {
+		t.Fatalf("expected .git to be skipped, got=%v", cands)
+	}
+
+	cands, err = listGitCandidates(repoDir, "agent/skills")
+	if err != nil {
+		t.Fatalf("list candidates under subpath: %v", err)
+	}
+	if len(cands) != 1 || cands[0].Subpath != "agent/skills/brainstorming" {
+		t.Fatalf("expected only brainstorming under agent/skills, got=%v", cands)
+	}
+}
+
+func TestService_InstallGitBatch_InstallsMultipleAndSyncsTargets(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+
+	ctx := context.Background()
+	home := t.TempDir()
+	sourceRoot := filepath.Join(home, ".agent", "skills")
+	svc, err := NewService(Options{HomeDir: home, SourceRoots: []string{sourceRoot}})
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+
+	repo := filepath.Join(home, "repo-batch")
+	mustMkdir(t, repo)
+	git(t, repo, "init")
+	git(t, repo, "config", "user.email", "test@example.com")
+	git(t, repo, "config", "user.name", "Test")
+
+	mustMkdir(t, filepath.Join(repo, "agent", "skills", "a"))
+	mustWrite(t, filepath.Join(repo, "agent", "skills", "a", "SKILL.md"), "---\nname: A\n---\n")
+	mustMkdir(t, filepath.Join(repo, "agent", "skills", "b"))
+	mustWrite(t, filepath.Join(repo, "agent", "skills", "b", "SKILL.md"), "---\nname: B\n---\n")
+	git(t, repo, "add", ".")
+	git(t, repo, "commit", "-m", "init")
+
+	installed, err := svc.InstallGitBatch(ctx, InstallGitBatchInput{
+		RepoURL: repo,
+		Skills: []InstallGitBatchItem{
+			{Subpath: "agent/skills/a", Name: "skill-a"},
+			{Subpath: "agent/skills/b", Name: "skill-b"},
+		},
+		Targets:   []Target{TargetClaudeCode, TargetCodex},
+		Overwrite: false,
+	})
+	if err != nil {
+		t.Fatalf("batch install: %v", err)
+	}
+	if len(installed) != 2 {
+		t.Fatalf("installed=%v", installed)
+	}
+	if _, err := os.Stat(filepath.Join(sourceRoot, "skill-a", "SKILL.md")); err != nil {
+		t.Fatalf("expected skill-a installed: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(sourceRoot, "skill-b", "SKILL.md")); err != nil {
+		t.Fatalf("expected skill-b installed: %v", err)
+	}
+
+	// Verify sync created links in target roots.
+	assertSymlink(t, filepath.Join(home, ".claude", "skills", "skill-a"))
+	assertSymlink(t, filepath.Join(home, ".claude", "skills", "skill-b"))
+	assertSymlink(t, filepath.Join(home, ".codex", "skills", "skill-a"))
+	assertSymlink(t, filepath.Join(home, ".codex", "skills", "skill-b"))
 }

@@ -11,7 +11,7 @@ func TestService_OnboardingPlan_GroupsAndDetectsConflicts(t *testing.T) {
 	home := t.TempDir()
 
 	// Canonical store (not required for scanning, but used as source root).
-	sourceRoot := filepath.Join(home, ".agents", "skills")
+	sourceRoot := filepath.Join(home, ".agent", "skills")
 	mustMkdir(t, sourceRoot)
 
 	// Cursor

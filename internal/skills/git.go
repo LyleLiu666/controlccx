@@ -3,8 +3,10 @@ package skills
 import (
 	"context"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"runtime"
 	"sort"
@@ -227,123 +229,152 @@ func listGitCandidates(repoDir string, parsedSubpath string) ([]GitSkillCandidat
 		return nil, fmt.Errorf("skills: list git candidates: empty repo dir")
 	}
 
-	// If a folder URL is provided, treat it as a single candidate.
-	if strings.TrimSpace(parsedSubpath) != "" {
-		dir, err := safeRepoSubpath(repoDir, parsedSubpath)
-		if err != nil {
-			return nil, err
-		}
-		if fi, err := os.Stat(dir); err == nil && fi.IsDir() {
-			skillMD := filepath.Join(dir, "SKILL.md")
-			name := filepath.Base(dir)
-			desc := ""
-			if n, d, ok := parseSkillFrontMatter(skillMD); ok {
-				name, desc = n, d
-			}
-			if _, err := os.Stat(skillMD); err == nil {
-				return []GitSkillCandidate{{Name: name, Description: desc, Subpath: parsedSubpath}}, nil
-			}
-		}
+	scanRoot, err := safeRepoSubpath(repoDir, parsedSubpath)
+	if err != nil {
+		return nil, err
+	}
+	if fi, err := os.Stat(scanRoot); err != nil || !fi.IsDir() {
 		return nil, nil
 	}
 
-	var out []GitSkillCandidate
+	ignoreDirs := map[string]bool{
+		".git":         true,
+		".hg":          true,
+		".svn":         true,
+		".ccx":         true,
+		"node_modules": true,
+		"__pycache__":  true,
+		".venv":        true,
+		"venv":         true,
+	}
 
-	// Root-level
-	if _, err := os.Stat(filepath.Join(repoDir, "SKILL.md")); err == nil {
-		name := "root-skill"
+	var out []GitSkillCandidate
+	if err := filepath.WalkDir(scanRoot, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			if ignoreDirs[d.Name()] {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if d.Name() != "SKILL.md" {
+			return nil
+		}
+
+		dir := filepath.Dir(p)
+		rel, err := filepath.Rel(repoDir, dir)
+		if err != nil {
+			return nil
+		}
+		subpath := filepath.ToSlash(rel)
+		if subpath == "" {
+			subpath = "."
+		}
+		subpath = strings.TrimPrefix(subpath, "./")
+		if subpath == "" {
+			subpath = "."
+		}
+
+		name := filepath.Base(dir)
+		if subpath == "." {
+			name = "root-skill"
+		}
 		desc := ""
-		if n, d, ok := parseSkillFrontMatter(filepath.Join(repoDir, "SKILL.md")); ok {
+		if n, d, ok := parseSkillFrontMatter(p); ok {
 			name, desc = n, d
 		}
-		out = append(out, GitSkillCandidate{Name: name, Description: desc, Subpath: "."})
+		out = append(out, GitSkillCandidate{
+			Name:        name,
+			Description: desc,
+			Subpath:     subpath,
+		})
+		return nil
+	}); err != nil {
+		return nil, err
 	}
 
-	for _, base := range []string{
-		"skills",
-		"skills/.curated",
-		"skills/.experimental",
-		"skills/.system",
-	} {
-		baseDir := filepath.Join(repoDir, filepath.FromSlash(base))
-		entries, err := os.ReadDir(baseDir)
-		if err != nil {
-			continue
-		}
-		for _, e := range entries {
-			if !e.IsDir() {
-				continue
-			}
-			p := filepath.Join(baseDir, e.Name())
-			skillMD := filepath.Join(p, "SKILL.md")
-			if _, err := os.Stat(skillMD); err != nil {
-				continue
-			}
-
-			name := e.Name()
-			desc := ""
-			if n, d, ok := parseSkillFrontMatter(skillMD); ok {
-				name, desc = n, d
-			}
-
-			rel, err := filepath.Rel(repoDir, p)
-			if err != nil {
-				continue
-			}
-			out = append(out, GitSkillCandidate{
-				Name:        name,
-				Description: desc,
-				Subpath:     filepath.ToSlash(rel),
-			})
-		}
-	}
-
-	// Plugin-based repos: plugins/<plugin>/skills/<skill>/SKILL.md
-	pluginsDir := filepath.Join(repoDir, "plugins")
-	pluginEntries, err := os.ReadDir(pluginsDir)
-	if err == nil {
-		for _, plugin := range pluginEntries {
-			if !plugin.IsDir() {
-				continue
-			}
-			skillsDir := filepath.Join(pluginsDir, plugin.Name(), "skills")
-			skillEntries, err := os.ReadDir(skillsDir)
-			if err != nil {
-				continue
-			}
-			for _, skill := range skillEntries {
-				if !skill.IsDir() {
-					continue
-				}
-				p := filepath.Join(skillsDir, skill.Name())
-				skillMD := filepath.Join(p, "SKILL.md")
-				if _, err := os.Stat(skillMD); err != nil {
-					continue
-				}
-
-				name := skill.Name()
-				desc := ""
-				if n, d, ok := parseSkillFrontMatter(skillMD); ok {
-					name, desc = n, d
-				}
-
-				rel, err := filepath.Rel(repoDir, p)
-				if err != nil {
-					continue
-				}
-				out = append(out, GitSkillCandidate{
-					Name:        name,
-					Description: desc,
-					Subpath:     filepath.ToSlash(rel),
-				})
-			}
-		}
-	}
-
-	// Stable order by Name, then Subpath.
+	out = filterOutNestedGitCandidates(out)
 	sortGitCandidates(out)
 	out = dedupeGitCandidates(out)
 	return out, nil
+}
+
+func cleanCandidateSubpath(subpath string) string {
+	s := strings.TrimSpace(subpath)
+	if s == "" || s == "." {
+		return "."
+	}
+	s = strings.ReplaceAll(s, "\\", "/")
+	s = strings.TrimPrefix(s, "./")
+	s = path.Clean(s)
+	if s == "." {
+		return "."
+	}
+	return s
+}
+
+func isCandidateNested(child, parent string) bool {
+	child = cleanCandidateSubpath(child)
+	parent = cleanCandidateSubpath(parent)
+	if child == "." || child == parent {
+		return false
+	}
+	if parent == "." {
+		return true
+	}
+	return strings.HasPrefix(child, parent+"/")
+}
+
+func filterOutNestedGitCandidates(cands []GitSkillCandidate) []GitSkillCandidate {
+	if len(cands) == 0 {
+		return cands
+	}
+
+	type item struct {
+		c     GitSkillCandidate
+		path  string
+		depth int
+	}
+	items := make([]item, 0, len(cands))
+	for _, c := range cands {
+		p := cleanCandidateSubpath(c.Subpath)
+		if p == "" {
+			p = "."
+		}
+		depth := 0
+		if p != "." {
+			depth = len(strings.Split(p, "/"))
+		}
+		c.Subpath = p
+		items = append(items, item{c: c, path: p, depth: depth})
+	}
+
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].depth == items[j].depth {
+			return items[i].path < items[j].path
+		}
+		return items[i].depth < items[j].depth
+	})
+
+	var kept []GitSkillCandidate
+	var keptPaths []string
+	for _, it := range items {
+		nested := false
+		for _, p := range keptPaths {
+			if isCandidateNested(it.path, p) {
+				nested = true
+				break
+			}
+		}
+		if nested {
+			continue
+		}
+		kept = append(kept, it.c)
+		keptPaths = append(keptPaths, it.path)
+	}
+	return kept
 }
 
 func isMultiSkillRepo(repoDir string) bool {

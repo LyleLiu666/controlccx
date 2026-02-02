@@ -20,7 +20,7 @@ test("summarizeSkillTarget enables enable when source exists and no blockers", (
   const summary = summarizeSkillTarget(
     {
       name: "code-review-excellence",
-      source: "/Users/demo/.agents/skills/code-review-excellence",
+      source: "/Users/demo/.agent/skills/code-review-excellence",
       targets: [{ target: "cursor", root: "/tmp/cursor/skills", status: "missing" }],
     } as any,
     "cursor",
@@ -33,7 +33,7 @@ test("summarizeSkillTarget disables enable when target has unmanaged entry", () 
   const summary = summarizeSkillTarget(
     {
       name: "code-review-excellence",
-      source: "/Users/demo/.agents/skills/code-review-excellence",
+      source: "/Users/demo/.agent/skills/code-review-excellence",
       targets: [{ target: "cursor", root: "/tmp/cursor/skills", status: "present" }],
     } as any,
     "cursor",

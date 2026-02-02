@@ -16,7 +16,7 @@ import (
 
 func TestAPI_SkillsGovernance_ToolsOnboardingInstallSyncUpdate(t *testing.T) {
 	home := t.TempDir()
-	sourceRoot := filepath.Join(home, ".agents", "skills")
+	sourceRoot := filepath.Join(home, ".agent", "skills")
 	mustMkdirAll(t, filepath.Join(sourceRoot, "demo"))
 	mustWriteFile(t, filepath.Join(sourceRoot, "demo", "SKILL.md"), "v1\n")
 

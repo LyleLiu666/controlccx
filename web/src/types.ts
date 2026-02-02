@@ -169,6 +169,22 @@ export type GitCandidatesResponse = {
   candidates: GitSkillCandidate[];
 };
 
+export type InstallGitBatchItem = {
+  subpath: string;
+  name?: string;
+};
+
+export type InstallGitBatchInput = {
+  repo_url: string;
+  skills: InstallGitBatchItem[];
+  targets?: Array<"cursor" | "claude_code" | "codex">;
+  overwrite?: boolean;
+};
+
+export type InstallGitBatchResponse = {
+  installed: ManagedSkill[];
+};
+
 export type SkillVersion = {
   id: string;
   created_at?: string;

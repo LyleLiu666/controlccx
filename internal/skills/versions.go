@@ -52,7 +52,7 @@ func NewVersionsService(opts VersionsOptions) (*VersionsService, error) {
 
 	sourceRoot := strings.TrimSpace(opts.SourceRoot)
 	if sourceRoot == "" {
-		sourceRoot = filepath.Join(home, ".agents", "skills")
+		sourceRoot = filepath.Join(home, ".agent", "skills")
 	} else {
 		sourceRoot = expandHome(sourceRoot, home)
 		if !filepath.IsAbs(sourceRoot) {
@@ -63,7 +63,7 @@ func NewVersionsService(opts VersionsOptions) (*VersionsService, error) {
 
 	versionsRoot := strings.TrimSpace(opts.VersionsRoot)
 	if versionsRoot == "" {
-		versionsRoot = filepath.Join(home, ".agents", "skills_versions")
+		versionsRoot = filepath.Join(home, ".agent", "skills_versions")
 	} else {
 		versionsRoot = expandHome(versionsRoot, home)
 		if !filepath.IsAbs(versionsRoot) {

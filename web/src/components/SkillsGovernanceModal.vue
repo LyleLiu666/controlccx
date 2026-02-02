@@ -20,6 +20,13 @@ const canInstallLocal = computed(() => !!gov.localSourcePath.trim());
 const canInstallGit = computed(() => !!gov.gitRepoURL.trim());
 const canSync = computed(() => !!gov.syncName.trim());
 const canUpdate = computed(() => !!gov.updateName.trim());
+const gitSelectedCount = computed(() => (gov.gitCandidates ?? []).filter((c) => c.selected).length);
+const gitAllSelected = computed(
+  () => (gov.gitCandidates?.length ?? 0) > 0 && gitSelectedCount.value === gov.gitCandidates.length,
+);
+const gitTargetTools = computed(() =>
+  (gov.tools ?? []).filter((t) => t.key === "cursor" || t.key === "claude_code" || t.key === "codex"),
+);
 
 let switchingInstallOp = false;
 watch(
@@ -54,9 +61,15 @@ async function listGitCandidates() {
   await gov.runListGitCandidates();
 }
 
-async function installGit() {
+function setGitSelectAll(checked: boolean) {
+  for (const c of gov.gitCandidates ?? []) {
+    c.selected = checked;
+  }
+}
+
+async function installGitSelected() {
   gov.gitRepoURL = normalizeGitRepoURL(gov.gitRepoURL);
-  await gov.runInstallGit();
+  await gov.runInstallGitBatch();
 }
 
 const didInit = ref(false);
@@ -78,7 +91,6 @@ watch(
     const n = String(name ?? "").trim();
     if (!n) return;
     gov.localName = n;
-    gov.gitName = n;
     gov.importName = n;
     gov.syncName = n;
     gov.updateName = n;
@@ -204,17 +216,48 @@ watch(
               </div>
               <div v-if="gov.gitCandidatesError" class="modalError">{{ gov.gitCandidatesError }}</div>
               <div v-else-if="gov.gitCandidates.length" class="skillsGovCandidates">
-                <label class="tinyHint">候选子路径</label>
-                <select v-model="gov.gitSubpath">
-                  <option value="">（使用仓库 URL 的默认路径）</option>
-                  <option v-for="c in gov.gitCandidates" :key="c.subpath" :value="c.subpath">
-                    {{ c.name }} · {{ c.subpath }}
-                  </option>
-                </select>
-              </div>
-              <div class="skillsGovField">
-                <div class="skillsGovFieldLabel">技能名（可选）</div>
-                <input v-model="gov.gitName" placeholder="留空则自动推断" />
+                <div class="skillsGovCandidatesHeader">
+                  <label class="tinyHint">
+                    候选技能（已选 {{ gitSelectedCount }} / {{ gov.gitCandidates.length }}）
+                  </label>
+                  <label class="skillsGovCheckbox">
+                    <input
+                      type="checkbox"
+                      :checked="gitAllSelected"
+                      @change="setGitSelectAll(($event.target as HTMLInputElement).checked)"
+                    />
+                    全选
+                  </label>
+                </div>
+                <div class="skillsGovCandidateList">
+                  <div v-for="c in gov.gitCandidates" :key="c.subpath" class="skillsGovCandidateRow">
+                    <input type="checkbox" v-model="c.selected" />
+                    <div class="skillsGovCandidateBody">
+                      <input
+                        v-model="c.name"
+                        class="skillsGovCandidateName"
+                        :placeholder="c.default_name || '技能名'"
+                      />
+                      <div class="tinyHint mono">{{ c.subpath }}</div>
+                      <div v-if="c.description" class="tinyHint">{{ c.description }}</div>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="skillsGovField">
+                  <div class="skillsGovFieldLabel">同步到目标（可选）</div>
+                  <div class="skillsGovTargets">
+                    <label v-for="t in gitTargetTools" :key="t.key" class="skillsGovCheckbox">
+                      <input
+                        type="checkbox"
+                        :value="t.key"
+                        v-model="gov.gitTargets"
+                        :disabled="!t.installed"
+                      />
+                      {{ t.display_name }}<span v-if="!t.installed" class="tinyHint">（未检测到）</span>
+                    </label>
+                  </div>
+                </div>
               </div>
               <div class="skillsGovActions">
                 <label class="skillsGovCheckbox">
@@ -224,15 +267,15 @@ watch(
                 <button
                   type="button"
                   class="primary skillsGovPrimaryBtn"
-                  @click="installGit"
-                  :disabled="gov.installingGit || !canInstallGit"
-                  :title="canInstallGit ? '安装' : '请先填写仓库地址'"
+                  @click="installGitSelected"
+                  :disabled="gov.installingGit || !canInstallGit || gitSelectedCount === 0"
+                  :title="canInstallGit ? '批量安装所选' : '请先填写仓库地址'"
                 >
-                  {{ gov.installingGit ? "安装中…" : "安装" }}
+                  {{ gov.installingGit ? "安装中…" : "安装所选" }}
                 </button>
               </div>
               <div class="tinyHint">
-                若提示 <span class="mono">MULTI_SKILLS|...</span>，请先点“列出候选”，再选择子路径安装。
+                若提示 <span class="mono">MULTI_SKILLS|...</span>，请先点“列出候选”，再勾选要安装的技能。
               </div>
             </div>
           </div>

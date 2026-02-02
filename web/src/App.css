@@ -1915,6 +1915,49 @@ h2 {
   background: rgba(15, 23, 42, 0.12);
 }
 
+:deep(.skillsGovCandidatesHeader) {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+:deep(.skillsGovCandidateList) {
+  display: grid;
+  gap: 10px;
+}
+
+:deep(.skillsGovCandidateRow) {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 10px;
+  align-items: start;
+  padding: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  border-radius: 12px;
+  background: rgba(2, 6, 23, 0.08);
+}
+
+:deep(.skillsGovCandidateRow input[type="checkbox"]) {
+  margin-top: 4px;
+}
+
+:deep(.skillsGovCandidateBody) {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+:deep(.skillsGovCandidateName) {
+  width: 100%;
+}
+
+:deep(.skillsGovTargets) {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 :deep(.skillsGovOnboardingList) {
   display: grid;
   gap: 8px;

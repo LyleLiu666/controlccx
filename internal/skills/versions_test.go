@@ -11,7 +11,7 @@ import (
 func TestVersionsService_ListCreateDelete(t *testing.T) {
 	ctx := context.Background()
 	home := t.TempDir()
-	sourceRoot := filepath.Join(home, ".agents", "skills")
+	sourceRoot := filepath.Join(home, ".agent", "skills")
 	mustMkdir(t, filepath.Join(sourceRoot, "skill-a"))
 	mustWrite(t, filepath.Join(sourceRoot, "skill-a", "README.md"), "a\n")
 
@@ -40,7 +40,7 @@ func TestVersionsService_ListCreateDelete(t *testing.T) {
 	if v1.ID != "20260130-01" {
 		t.Fatalf("id=%q", v1.ID)
 	}
-	wantPath := filepath.Join(home, ".agents", "skills_versions", "20260130-01")
+	wantPath := filepath.Join(home, ".agent", "skills_versions", "20260130-01")
 	if _, err := os.Stat(filepath.Join(wantPath, "skill-a", "README.md")); err != nil {
 		t.Fatalf("expected snapshot file: %v", err)
 	}

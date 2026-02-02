@@ -45,7 +45,7 @@ func NewPerSkillVersionsService(opts PerSkillVersionsOptions) (*PerSkillVersions
 
 	sourceRoot := strings.TrimSpace(opts.SourceRoot)
 	if sourceRoot == "" {
-		sourceRoot = filepath.Join(home, ".agents", "skills")
+		sourceRoot = filepath.Join(home, ".agent", "skills")
 	} else {
 		sourceRoot = expandHome(sourceRoot, home)
 		if !filepath.IsAbs(sourceRoot) {
@@ -56,7 +56,7 @@ func NewPerSkillVersionsService(opts PerSkillVersionsOptions) (*PerSkillVersions
 
 	versionsRoot := strings.TrimSpace(opts.VersionsRoot)
 	if versionsRoot == "" {
-		versionsRoot = filepath.Join(home, ".agents", "skills_versions", "by_skill")
+		versionsRoot = filepath.Join(home, ".agent", "skills_versions", "by_skill")
 	} else {
 		versionsRoot = expandHome(versionsRoot, home)
 		if !filepath.IsAbs(versionsRoot) {
@@ -252,4 +252,3 @@ func (s *PerSkillVersionsService) resolveSkillSource(skill string) (string, erro
 	}
 	return resolved, nil
 }
-

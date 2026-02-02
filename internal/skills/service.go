@@ -67,11 +67,10 @@ type Options struct {
 }
 
 type Service struct {
-	homeDir             string
-	sourceRoots         []string
-	sourceRootsResolved []string
-	targetRoots         map[Target][]string
-	symlink             func(oldname, newname string) error
+	homeDir     string
+	sourceRoots []string
+	targetRoots map[Target][]string
+	symlink     func(oldname, newname string) error
 }
 
 func NewService(opts Options) (*Service, error) {
@@ -87,7 +86,7 @@ func NewService(opts Options) (*Service, error) {
 
 	sourceRoots := opts.SourceRoots
 	if len(sourceRoots) == 0 {
-		sourceRoots = []string{filepath.Join(home, ".agents", "skills")}
+		sourceRoots = []string{filepath.Join(home, ".agent", "skills")}
 	}
 	var normalizedRoots []string
 	for _, r := range sourceRoots {
@@ -97,15 +96,6 @@ func NewService(opts Options) (*Service, error) {
 		}
 		p = filepath.Clean(p)
 		normalizedRoots = append(normalizedRoots, p)
-	}
-
-	resolvedRoots := make([]string, 0, len(normalizedRoots))
-	for _, r := range normalizedRoots {
-		rr := r
-		if v, err := filepath.EvalSymlinks(r); err == nil {
-			rr = v
-		}
-		resolvedRoots = append(resolvedRoots, filepath.Clean(rr))
 	}
 
 	claudeRoot := filepath.Join(home, ".claude", "skills")
@@ -134,9 +124,8 @@ func NewService(opts Options) (*Service, error) {
 	}
 
 	return &Service{
-		homeDir:             home,
-		sourceRoots:         dedupePaths(normalizedRoots),
-		sourceRootsResolved: dedupePaths(resolvedRoots),
+		homeDir:     home,
+		sourceRoots: dedupePaths(normalizedRoots),
 		targetRoots: map[Target][]string{
 			TargetClaudeCode: {claudeRoot},
 			TargetCodex:      codexRoots,
@@ -175,13 +164,14 @@ func (s *Service) List(ctx context.Context) (ListResponse, error) {
 		}
 	}
 
+	resolvedSourceRoots := s.resolveSourceRoots()
 	targetEntries := make(map[Target]map[string]map[string]TargetState) // target->root->name->state
 	for tgt, roots := range s.targetRoots {
 		if targetEntries[tgt] == nil {
 			targetEntries[tgt] = make(map[string]map[string]TargetState)
 		}
 		for _, root := range roots {
-			m, err := scanTargetRoot(root, tgt, s.sourceRootsResolved)
+			m, err := scanTargetRoot(root, tgt, resolvedSourceRoots)
 			if err != nil {
 				return ListResponse{}, err
 			}
@@ -313,6 +303,24 @@ func (s *Service) resolveSourcePath(name string) (string, error) {
 	return filepath.Clean(candidates[0]), nil
 }
 
+func (s *Service) resolveSourceRoots() []string {
+	if s == nil {
+		return nil
+	}
+	roots := make([]string, 0, len(s.sourceRoots)*2)
+	for _, root := range s.sourceRoots {
+		root = filepath.Clean(root)
+		if root == "" {
+			continue
+		}
+		roots = append(roots, root)
+		if resolved, err := filepath.EvalSymlinks(root); err == nil && strings.TrimSpace(resolved) != "" {
+			roots = append(roots, filepath.Clean(resolved))
+		}
+	}
+	return dedupePaths(roots)
+}
+
 func (s *Service) linkOne(targetRoot, name, sourcePath string, overwrite bool, forceCopy bool) error {
 	targetRoot = filepath.Clean(targetRoot)
 	dest := filepath.Join(targetRoot, name)
@@ -327,7 +335,8 @@ func (s *Service) linkOne(targetRoot, name, sourcePath string, overwrite bool, f
 		return fmt.Errorf("skills: resolve source: %w", err)
 	}
 	resolvedSource = filepath.Clean(resolvedSource)
-	if !isWithinAnyRoot(resolvedSource, s.sourceRootsResolved) {
+	resolvedRoots := s.resolveSourceRoots()
+	if !isWithinAnyRoot(resolvedSource, resolvedRoots) {
 		return fmt.Errorf("skills: source not under allowed roots: %s", resolvedSource)
 	}
 
@@ -339,7 +348,7 @@ func (s *Service) linkOne(targetRoot, name, sourcePath string, overwrite bool, f
 			} else {
 				// Only allow replacing a symlink if it points to allowed roots.
 				linkTo, _ := os.Readlink(dest)
-				if !isAllowedLinkTarget(targetRoot, linkTo, s.sourceRootsResolved) {
+				if !isAllowedLinkTarget(targetRoot, linkTo, resolvedRoots) {
 					return errTargetExists(dest)
 				}
 				_ = os.Remove(dest)
@@ -399,7 +408,7 @@ func (s *Service) unlinkOne(targetRoot, name string) error {
 		if err != nil {
 			return fmt.Errorf("skills: readlink: %w", err)
 		}
-		if !isAllowedLinkTarget(targetRoot, linkTo, s.sourceRootsResolved) {
+		if !isAllowedLinkTarget(targetRoot, linkTo, s.resolveSourceRoots()) {
 			return fmt.Errorf("skills: refuse to unlink unmanaged link: %s", dest)
 		}
 		return os.Remove(dest)

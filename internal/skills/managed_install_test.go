@@ -10,7 +10,7 @@ import (
 func TestService_InstallLocal_AndUpdateFromSource(t *testing.T) {
 	ctx := context.Background()
 	home := t.TempDir()
-	sourceRoot := filepath.Join(home, ".agents", "skills")
+	sourceRoot := filepath.Join(home, ".agent", "skills")
 
 	localSrc := filepath.Join(home, "src-skill")
 	mustMkdir(t, localSrc)
@@ -61,7 +61,7 @@ func TestService_InstallLocal_AndUpdateFromSource(t *testing.T) {
 func TestService_InstallLocal_TargetExists_ErrorPrefix(t *testing.T) {
 	ctx := context.Background()
 	home := t.TempDir()
-	sourceRoot := filepath.Join(home, ".agents", "skills")
+	sourceRoot := filepath.Join(home, ".agent", "skills")
 	mustMkdir(t, filepath.Join(sourceRoot, "demo"))
 
 	localSrc := filepath.Join(home, "src-skill")

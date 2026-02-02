@@ -19,7 +19,7 @@ func TestAPI_SkillVersions(t *testing.T) {
 	home := t.TempDir()
 
 	// Seed a source root with one skill.
-	sourceRoot := filepath.Join(home, ".agents", "skills")
+	sourceRoot := filepath.Join(home, ".agent", "skills")
 	mustMkdirAll(t, filepath.Join(sourceRoot, "skill-a"))
 	mustWriteFile(t, filepath.Join(sourceRoot, "skill-a", "README.md"), "a\n")
 

@@ -190,6 +190,74 @@ func (a *API) handleSkillsInstallGit(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, out)
 }
 
+func (a *API) handleSkillsInstallGitBatch(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if a.Skills == nil {
+		http.Error(w, "skills service not configured", http.StatusNotImplemented)
+		return
+	}
+
+	var body struct {
+		RepoURL string `json:"repo_url"`
+		Skills  []struct {
+			Subpath string `json:"subpath"`
+			Name    string `json:"name,omitempty"`
+		} `json:"skills"`
+		Targets   []string `json:"targets,omitempty"`
+		Overwrite bool     `json:"overwrite,omitempty"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+	repoURL := strings.TrimSpace(body.RepoURL)
+	if repoURL == "" {
+		http.Error(w, "repo_url is required", http.StatusBadRequest)
+		return
+	}
+	if len(body.Skills) == 0 {
+		http.Error(w, "skills is required", http.StatusBadRequest)
+		return
+	}
+
+	items := make([]skills.InstallGitBatchItem, 0, len(body.Skills))
+	for _, it := range body.Skills {
+		subpath := strings.TrimSpace(it.Subpath)
+		if subpath == "" {
+			http.Error(w, "subpath is required", http.StatusBadRequest)
+			return
+		}
+		items = append(items, skills.InstallGitBatchItem{
+			Subpath: subpath,
+			Name:    strings.TrimSpace(it.Name),
+		})
+	}
+
+	var targets []skills.Target
+	for _, raw := range body.Targets {
+		tgt := normalizeSkillsTarget(raw)
+		if tgt == "" {
+			continue
+		}
+		targets = append(targets, tgt)
+	}
+
+	out, err := a.Skills.InstallGitBatch(r.Context(), skills.InstallGitBatchInput{
+		RepoURL:   repoURL,
+		Skills:    items,
+		Targets:   targets,
+		Overwrite: body.Overwrite,
+	})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	writeJSON(w, map[string]any{"installed": out})
+}
+
 func (a *API) handleSkillsUpdate(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)

@@ -11,7 +11,7 @@ import (
 func TestService_ListAndLinkUnlink(t *testing.T) {
 	ctx := context.Background()
 	home := t.TempDir()
-	sourceRoot := filepath.Join(home, ".agents", "skills")
+	sourceRoot := filepath.Join(home, ".agent", "skills")
 	mustMkdir(t, filepath.Join(sourceRoot, "skill-creator"))
 	mustWrite(t, filepath.Join(sourceRoot, "skill-creator", "README.md"), "hello\n")
 
@@ -73,7 +73,7 @@ func TestService_ListAndLinkUnlink(t *testing.T) {
 func TestService_BrokenLinkDetected(t *testing.T) {
 	ctx := context.Background()
 	home := t.TempDir()
-	sourceRoot := filepath.Join(home, ".agents", "skills")
+	sourceRoot := filepath.Join(home, ".agent", "skills")
 	mustMkdir(t, sourceRoot)
 
 	svc, err := NewService(Options{HomeDir: home, SourceRoots: []string{sourceRoot}})
@@ -109,7 +109,7 @@ func TestService_BrokenLinkDetected(t *testing.T) {
 func TestService_CopyFallback(t *testing.T) {
 	ctx := context.Background()
 	home := t.TempDir()
-	sourceRoot := filepath.Join(home, ".agents", "skills")
+	sourceRoot := filepath.Join(home, ".agent", "skills")
 	mustMkdir(t, filepath.Join(sourceRoot, "skill-creator"))
 	mustWrite(t, filepath.Join(sourceRoot, "skill-creator", "README.md"), "hello\n")
 
@@ -150,7 +150,7 @@ func TestService_CopyFallback(t *testing.T) {
 func TestService_SyncCursor_ForcesCopy_AndSupportsOverwrite(t *testing.T) {
 	ctx := context.Background()
 	home := t.TempDir()
-	sourceRoot := filepath.Join(home, ".agents", "skills")
+	sourceRoot := filepath.Join(home, ".agent", "skills")
 	mustMkdir(t, filepath.Join(sourceRoot, "demo"))
 	mustWrite(t, filepath.Join(sourceRoot, "demo", "README.md"), "hello\n")
 

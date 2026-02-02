@@ -59,6 +59,7 @@ func (a *API) Handler() http.Handler {
 	mux.HandleFunc("/api/skills/install/local", a.handleSkillsInstallLocal)
 	mux.HandleFunc("/api/skills/git/candidates", a.handleSkillsGitCandidates)
 	mux.HandleFunc("/api/skills/install/git", a.handleSkillsInstallGit)
+	mux.HandleFunc("/api/skills/install/git/batch", a.handleSkillsInstallGitBatch)
 	mux.HandleFunc("/api/skills/update", a.handleSkillsUpdate)
 	mux.HandleFunc("/api/skills/versions", a.handleSkillVersions)
 	mux.HandleFunc("/api/skills/versions/create", a.handleSkillVersionsCreate)

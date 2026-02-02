@@ -18,6 +18,8 @@ import type {
   OnboardingPlan,
   ManagedSkill,
   GitCandidatesResponse,
+  InstallGitBatchInput,
+  InstallGitBatchResponse,
   PerSkillVersionsListResponse,
   SkillVersion,
   SkillVersionsListResponse,
@@ -411,6 +413,10 @@ export async function installSkillGit(input: {
   overwrite?: boolean;
 }): Promise<ManagedSkill> {
   return postJSON<ManagedSkill>("/api/skills/install/git", input);
+}
+
+export async function installSkillGitBatch(input: InstallGitBatchInput): Promise<InstallGitBatchResponse> {
+  return postJSON<InstallGitBatchResponse>("/api/skills/install/git/batch", input);
 }
 
 export async function updateManagedSkill(input: { name: string }): Promise<ManagedSkill> {

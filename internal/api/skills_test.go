@@ -16,7 +16,7 @@ import (
 func TestAPI_Skills_ListLinkUnlink(t *testing.T) {
 	ctx := context.Background()
 	home := t.TempDir()
-	sourceRoot := filepath.Join(home, ".agents", "skills")
+	sourceRoot := filepath.Join(home, ".agent", "skills")
 	mustMkdirAll(t, filepath.Join(sourceRoot, "skill-creator"))
 
 	svc, err := skills.NewService(skills.Options{
@@ -77,7 +77,7 @@ func TestAPI_Skills_ListLinkUnlink(t *testing.T) {
 
 func TestAPI_Skills_ListPagingAndFilter(t *testing.T) {
 	home := t.TempDir()
-	sourceRoot := filepath.Join(home, ".agents", "skills")
+	sourceRoot := filepath.Join(home, ".agent", "skills")
 	mustMkdirAll(t, filepath.Join(sourceRoot, "skill-creator"))
 	mustMkdirAll(t, filepath.Join(sourceRoot, "skill-one"))
 	mustMkdirAll(t, filepath.Join(sourceRoot, "skill-two"))

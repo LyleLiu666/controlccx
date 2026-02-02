@@ -1,6 +1,6 @@
 import { computed, ref } from "vue";
 import type {
-  GitSkillCandidate,
+  InstallGitBatchItem,
   OnboardingPlan,
   SkillsToolInfo,
 } from "../types";
@@ -8,7 +8,7 @@ import {
   fetchSkillsOnboarding,
   fetchSkillsTools,
   importExistingSkill,
-  installSkillGit,
+  installSkillGitBatch,
   installSkillLocal,
   listGitSkillCandidates,
   syncSkill,
@@ -44,12 +44,19 @@ export function useSkillsGovernance() {
 
   // Git install
   const gitRepoURL = ref("");
-  const gitSubpath = ref("");
-  const gitName = ref("");
   const gitOverwrite = ref(false);
+  const gitTargets = ref<SkillTarget[]>([]);
   const gitCandidatesLoading = ref(false);
   const gitCandidatesError = ref("");
-  const gitCandidates = ref<GitSkillCandidate[]>([]);
+  const gitCandidates = ref<
+    Array<{
+      subpath: string;
+      description?: string;
+      selected: boolean;
+      name: string;
+      default_name: string;
+    }>
+  >([]);
   const installingGit = ref(false);
 
   // Sync
@@ -138,13 +145,15 @@ export function useSkillsGovernance() {
     gitCandidatesLoading.value = true;
     try {
       const res = await listGitSkillCandidates({ repo_url: gitRepoURL.value.trim() });
-      gitCandidates.value = res.candidates ?? [];
-      if (gitCandidates.value.length === 1) {
-        gitSubpath.value = gitCandidates.value[0].subpath;
-        if (!gitName.value.trim()) {
-          gitName.value = gitCandidates.value[0].name;
-        }
-      }
+      const cands = res.candidates ?? [];
+      const autoSelect = cands.length === 1;
+      gitCandidates.value = cands.map((c) => ({
+        subpath: c.subpath,
+        description: c.description,
+        selected: autoSelect,
+        name: c.name,
+        default_name: c.name,
+      }));
     } catch (e: any) {
       gitCandidatesError.value = e?.message ?? String(e);
       gitCandidates.value = [];
@@ -153,18 +162,28 @@ export function useSkillsGovernance() {
     }
   }
 
-  async function runInstallGit() {
+  async function runInstallGitBatch() {
     if (installingGit.value) return;
     installingGit.value = true;
     resetActionMessages();
     try {
-      const res = await installSkillGit({
+      const selected = gitCandidates.value.filter((c) => c.selected);
+      if (selected.length === 0) {
+        actionError.value = "请先选择至少一个候选技能"
+        return;
+      }
+      const skills: InstallGitBatchItem[] = selected.map((c) => ({
+        subpath: c.subpath,
+        name: c.name.trim() || undefined,
+      }));
+      const res = await installSkillGitBatch({
         repo_url: gitRepoURL.value.trim(),
-        subpath: gitSubpath.value.trim() || undefined,
-        name: gitName.value.trim() || undefined,
+        skills,
+        targets: gitTargets.value,
         overwrite: gitOverwrite.value,
       });
-      actionInfo.value = `Git 安装完成：${res.name}`;
+      const names = (res.installed ?? []).map((s) => s?.name).filter(Boolean);
+      actionInfo.value = names.length ? `Git 安装完成：${names.join(", ")}` : "Git 安装完成";
     } catch (e: any) {
       actionError.value = e?.message ?? String(e);
     } finally {
@@ -228,9 +247,8 @@ export function useSkillsGovernance() {
     installingLocal,
 
     gitRepoURL,
-    gitSubpath,
-    gitName,
     gitOverwrite,
+    gitTargets,
     gitCandidatesLoading,
     gitCandidatesError,
     gitCandidates,
@@ -249,7 +267,7 @@ export function useSkillsGovernance() {
     runImportExisting,
     runInstallLocal,
     runListGitCandidates,
-    runInstallGit,
+    runInstallGitBatch,
     runSync,
     runUpdate,
   };
