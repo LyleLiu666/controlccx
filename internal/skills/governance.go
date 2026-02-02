@@ -451,13 +451,43 @@ func (s *Service) InstallGit(ctx context.Context, input InstallGitInput) (Manage
 		cloneURL = repoURL
 	}
 
-	subpath := strings.TrimSpace(input.Subpath)
+	repoDir, rev, err := cloneToTemp(ctx, cloneURL, parsed.branch)
+	if err != nil {
+		return ManagedSkill{}, err
+	}
+	defer func() { _ = os.RemoveAll(repoDir) }()
+
 	parsedSubpath := strings.TrimSpace(parsed.subpath)
+	userProvidedSubpath := strings.TrimSpace(input.Subpath) != "" || parsedSubpath != ""
+
+	subpath := strings.TrimSpace(input.Subpath)
 	if subpath == "" {
 		subpath = parsedSubpath
 	}
 	if subpath == "" {
 		subpath = "."
+	}
+
+	// If the user provides the repo root (no subpath), be smarter:
+	// - 0 candidates → error (no skills found)
+	// - 1 candidate → auto-select it
+	// - >1 candidate → require selection (MULTI_SKILLS)
+	if !userProvidedSubpath && subpath == "." {
+		cands, err := listGitCandidates(repoDir, "")
+		if err != nil {
+			return ManagedSkill{}, err
+		}
+		switch len(cands) {
+		case 0:
+			return ManagedSkill{}, fmt.Errorf("skills: no SKILL.md found; please provide a GitHub folder URL or install with subpath")
+		case 1:
+			subpath = strings.TrimSpace(cands[0].Subpath)
+			if subpath == "" {
+				subpath = "."
+			}
+		default:
+			return ManagedSkill{}, errMultiSkills("该仓库包含多个 Skills，请先选择具体 Skill 文件夹")
+		}
 	}
 
 	name := strings.TrimSpace(input.Name)
@@ -486,16 +516,6 @@ func (s *Service) InstallGit(ctx context.Context, input InstallGitInput) (Manage
 		}
 	} else if err != nil && !os.IsNotExist(err) {
 		return ManagedSkill{}, fmt.Errorf("skills: stat dest: %w", err)
-	}
-
-	repoDir, rev, err := cloneToTemp(ctx, cloneURL, parsed.branch)
-	if err != nil {
-		return ManagedSkill{}, err
-	}
-	defer func() { _ = os.RemoveAll(repoDir) }()
-
-	if subpath == "." && strings.TrimSpace(input.Subpath) == "" && parsedSubpath == "" && isMultiSkillRepo(repoDir) {
-		return ManagedSkill{}, errMultiSkills("该仓库包含多个 Skills，请先选择具体 Skill 文件夹")
 	}
 
 	copySrc, err := safeRepoSubpath(repoDir, subpath)

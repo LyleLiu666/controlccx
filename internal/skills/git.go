@@ -298,6 +298,48 @@ func listGitCandidates(repoDir string, parsedSubpath string) ([]GitSkillCandidat
 		}
 	}
 
+	// Plugin-based repos: plugins/<plugin>/skills/<skill>/SKILL.md
+	pluginsDir := filepath.Join(repoDir, "plugins")
+	pluginEntries, err := os.ReadDir(pluginsDir)
+	if err == nil {
+		for _, plugin := range pluginEntries {
+			if !plugin.IsDir() {
+				continue
+			}
+			skillsDir := filepath.Join(pluginsDir, plugin.Name(), "skills")
+			skillEntries, err := os.ReadDir(skillsDir)
+			if err != nil {
+				continue
+			}
+			for _, skill := range skillEntries {
+				if !skill.IsDir() {
+					continue
+				}
+				p := filepath.Join(skillsDir, skill.Name())
+				skillMD := filepath.Join(p, "SKILL.md")
+				if _, err := os.Stat(skillMD); err != nil {
+					continue
+				}
+
+				name := skill.Name()
+				desc := ""
+				if n, d, ok := parseSkillFrontMatter(skillMD); ok {
+					name, desc = n, d
+				}
+
+				rel, err := filepath.Rel(repoDir, p)
+				if err != nil {
+					continue
+				}
+				out = append(out, GitSkillCandidate{
+					Name:        name,
+					Description: desc,
+					Subpath:     filepath.ToSlash(rel),
+				})
+			}
+		}
+	}
+
 	// Stable order by Name, then Subpath.
 	sortGitCandidates(out)
 	out = dedupeGitCandidates(out)

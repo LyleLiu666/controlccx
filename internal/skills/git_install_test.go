@@ -149,6 +149,93 @@ func TestService_GitInstall_AllowsExplicitRootSelection_InMultiSkillRepo(t *test
 	}
 }
 
+func TestService_GitInstall_MultiSkillsRequiresSelection_PluginsLayout(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+
+	ctx := context.Background()
+	home := t.TempDir()
+	sourceRoot := filepath.Join(home, ".agents", "skills")
+	svc, err := NewService(Options{HomeDir: home, SourceRoots: []string{sourceRoot}})
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+
+	repo := filepath.Join(home, "repo-plugins")
+	mustMkdir(t, repo)
+	git(t, repo, "init")
+	git(t, repo, "config", "user.email", "test@example.com")
+	git(t, repo, "config", "user.name", "Test")
+
+	mustMkdir(t, filepath.Join(repo, "plugins", "p1", "skills", "a"))
+	mustWrite(t, filepath.Join(repo, "plugins", "p1", "skills", "a", "SKILL.md"), "---\nname: A\ndescription: plugin a\n---\n")
+	mustMkdir(t, filepath.Join(repo, "plugins", "p2", "skills", "b"))
+	mustWrite(t, filepath.Join(repo, "plugins", "p2", "skills", "b", "SKILL.md"), "---\nname: B\ndescription: plugin b\n---\n")
+	git(t, repo, "add", ".")
+	git(t, repo, "commit", "-m", "init")
+
+	_, err = svc.InstallGit(ctx, InstallGitInput{RepoURL: repo, Name: "repo-root"})
+	if err == nil || !hasPrefix(err.Error(), errPrefixMultiSkills) {
+		t.Fatalf("expected %s error, got=%v", errPrefixMultiSkills, err)
+	}
+
+	cands, err := svc.ListGitSkills(ctx, repo)
+	if err != nil {
+		t.Fatalf("list candidates: %v", err)
+	}
+	if len(cands) != 2 {
+		t.Fatalf("candidates=%v", cands)
+	}
+
+	seen := make(map[string]bool, len(cands))
+	for _, c := range cands {
+		seen[c.Subpath] = true
+	}
+	if !seen["plugins/p1/skills/a"] || !seen["plugins/p2/skills/b"] {
+		t.Fatalf("unexpected subpaths=%v", cands)
+	}
+}
+
+func TestService_GitInstall_AutoSelectsSingleSkill_FromPluginsLayout(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+
+	ctx := context.Background()
+	home := t.TempDir()
+	sourceRoot := filepath.Join(home, ".agents", "skills")
+	svc, err := NewService(Options{HomeDir: home, SourceRoots: []string{sourceRoot}})
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+
+	repo := filepath.Join(home, "repo-single-plugin")
+	mustMkdir(t, repo)
+	git(t, repo, "init")
+	git(t, repo, "config", "user.email", "test@example.com")
+	git(t, repo, "config", "user.name", "Test")
+
+	mustMkdir(t, filepath.Join(repo, "plugins", "p1", "skills", "only-skill"))
+	mustWrite(t, filepath.Join(repo, "plugins", "p1", "skills", "only-skill", "SKILL.md"), "---\nname: Only\ndescription: single\n---\n")
+	git(t, repo, "add", ".")
+	git(t, repo, "commit", "-m", "init")
+
+	installed, err := svc.InstallGit(ctx, InstallGitInput{RepoURL: repo})
+	if err != nil {
+		t.Fatalf("install: %v", err)
+	}
+	if installed.Name != "only-skill" {
+		t.Fatalf("name=%q", installed.Name)
+	}
+	if installed.SourceSubpath != "plugins/p1/skills/only-skill" {
+		t.Fatalf("subpath=%q", installed.SourceSubpath)
+	}
+	if _, err := os.Stat(filepath.Join(sourceRoot, "only-skill", "SKILL.md")); err != nil {
+		t.Fatalf("expected installed SKILL.md: %v", err)
+	}
+}
+
 func git(t *testing.T, dir string, args ...string) {
 	t.Helper()
 	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
