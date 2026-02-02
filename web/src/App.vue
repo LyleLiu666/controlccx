@@ -102,7 +102,7 @@ const highRiskConfirmOpen = ref(false);
 const highRiskConfirmTitle = ref("");
 const highRiskConfirmMessage = ref("");
 const highRiskConfirmDetail = ref("");
-const highRiskConfirmConfirmLabel = ref("Continue");
+const highRiskConfirmConfirmLabel = ref("继续");
 const highRiskConfirmBusy = ref(false);
 let highRiskConfirmResolve: ((ok: boolean) => void) | null = null;
 
@@ -110,13 +110,13 @@ function highRiskPresetSummary(driver: ToolDriver, preset: string): string {
   const d = String(driver ?? "").trim();
   const p = String(preset ?? "").trim();
   if (d === "codex" && p === "unsafe") {
-    return "Codex: --dangerously-bypass-approvals-and-sandbox (no sandbox)";
+    return "Codex：--dangerously-bypass-approvals-and-sandbox（无 sandbox）";
   }
   if (d === "codex" && p === "danger-full-access") {
-    return "Codex: --sandbox danger-full-access (can access outside workspace)";
+    return "Codex：--sandbox danger-full-access（可访问 workspace 外）";
   }
   if (d === "claude-code" && p === "unsafe") {
-    return "Claude Code: --dangerously-skip-permissions";
+    return "Claude Code：--dangerously-skip-permissions（跳过权限确认）";
   }
   if (d && p) return `${d}: ${p}`;
   if (d) return d;
@@ -130,10 +130,10 @@ function requestHighRiskConfirm(opts: {
   confirmLabel?: string;
 }): Promise<boolean> {
   if (highRiskConfirmOpen.value) return Promise.resolve(false);
-  highRiskConfirmTitle.value = String(opts.title ?? "").trim() || "Confirm";
+  highRiskConfirmTitle.value = String(opts.title ?? "").trim() || "确认";
   highRiskConfirmMessage.value = String(opts.message ?? "").trim();
   highRiskConfirmDetail.value = String(opts.detail ?? "").trim();
-  highRiskConfirmConfirmLabel.value = String(opts.confirmLabel ?? "").trim() || "Continue";
+  highRiskConfirmConfirmLabel.value = String(opts.confirmLabel ?? "").trim() || "继续";
   highRiskConfirmBusy.value = false;
   highRiskConfirmOpen.value = true;
   return new Promise((resolve) => {
@@ -302,6 +302,7 @@ const {
     void maybeTriggerDeliveryForeman(prev, next);
     maybeTriggerAttentionAutopilot(prev, next);
     void maybePromptWorkspaceMerge(prev, next);
+    void maybePromptBlocked(prev, next);
     void maybePromptRehydrate(prev, next);
   },
   onChatMessage: (m) => {
@@ -516,6 +517,7 @@ const LS_KEY_ATTENTION_AUTOPILOT = "controlccx.attention_autopilot.v1";
 const LS_KEY_ATTENTION_AUTOPILOT_SEEN = "controlccx.attention_autopilot.seen.v1";
 const LS_KEY_WORKSPACE_MERGE_PROMPT_SEEN = "controlccx.workspace.merge_prompt_seen.v1";
 const LS_KEY_REHYDRATE_PROMPT_SEEN = "controlccx.rehydrate_prompt_seen.v1";
+const LS_KEY_BLOCKED_PROMPT_SEEN = "controlccx.blocked_prompt_seen.v1";
 
 const autoDeliveryForeman = ref<boolean>(true);
 const deliveryForemanSeenRuns = ref<Set<string>>(new Set());
@@ -546,6 +548,18 @@ const rehydratePromptBusy = ref(false);
 const rehydratePromptError = ref("");
 const rehydratePromptRunID = ref("");
 const rehydratePromptWorkspace = ref<SessionWorkspace | null>(null);
+
+const blockedPromptSeenRuns = ref<Set<string>>(new Set());
+const blockedPromptOpen = ref(false);
+const blockedPromptBusy = ref(false);
+const blockedPromptError = ref("");
+const blockedPromptRunID = ref("");
+
+const blockedPromptTask = computed<Task | null>(() => {
+  const id = blockedPromptRunID.value.trim();
+  if (!id) return null;
+  return tasks.value.get(id) ?? null;
+});
 
 const runSafetyPresetByTool = ref<Record<string, string>>({});
 const runSafetyIntentByTool = ref<Record<string, string>>({});
@@ -1313,20 +1327,21 @@ const workspaceSelect = ref<string>(loadString(LS_KEY_WORKSPACE_FILTER));
   const sec = loadString(LS_KEY_SECRETARY_VIEW).trim();
   if (sec === "chat" || sec === "overview") secretaryView.value = sec;
 
-	  const sc = loadString(LS_KEY_SECRETARY_SCOPE).trim();
-	  if (sc === "current" || sc === "all") secretaryScope.value = sc as any;
+  const sc = loadString(LS_KEY_SECRETARY_SCOPE).trim();
+  if (sc === "current" || sc === "all") secretaryScope.value = sc as any;
 
-	  secretaryFull.value = loadBool(LS_KEY_SECRETARY_FULL, false);
-	  {
-	    const maxW = typeof window !== "undefined" ? Math.max(520, window.innerWidth - 32) : 1600;
-	    const sw = loadInt(LS_KEY_SECRETARY_WIDTH, 1100);
-	    secretaryWidth.value = Math.max(520, Math.min(maxW, Math.min(1600, sw)));
-	  }
+  secretaryFull.value = loadBool(LS_KEY_SECRETARY_FULL, false);
+  {
+    const maxW = typeof window !== "undefined" ? Math.max(520, window.innerWidth - 32) : 1600;
+    const sw = loadInt(LS_KEY_SECRETARY_WIDTH, 1100);
+    secretaryWidth.value = Math.max(520, Math.min(maxW, Math.min(1600, sw)));
+  }
 
   autoDeliveryForeman.value = loadBool(LS_KEY_AUTO_DELIVERY_FOREMAN, true);
   deliveryForemanSeenRuns.value = new Set(loadStringArray(LS_KEY_DELIVERY_FOREMAN_SEEN));
   workspaceMergePromptSeenRuns.value = new Set(loadStringArray(LS_KEY_WORKSPACE_MERGE_PROMPT_SEEN));
   rehydratePromptSeenRuns.value = new Set(loadStringArray(LS_KEY_REHYDRATE_PROMPT_SEEN));
+  blockedPromptSeenRuns.value = new Set(loadStringArray(LS_KEY_BLOCKED_PROMPT_SEEN));
 
   runSafetyIntentByTool.value = loadStringMap(LS_KEY_RUN_SAFETY_INTENT_BY_TOOL);
   runSafetyPresetByTool.value = loadStringMap(LS_KEY_RUN_SAFETY_PRESET_BY_TOOL);
@@ -1359,17 +1374,17 @@ const workspaceSelect = ref<string>(loadString(LS_KEY_WORKSPACE_FILTER));
   const fs = loadString(LS_KEY_FEED_SCOPE).trim();
   if (fs === "current" || fs === "all") liveScope.value = fs;
   const fm = loadString(LS_KEY_FEED_MODE).trim();
-	  if (fm === "milestones" || fm === "all") liveMode.value = fm;
-	  liveWrap.value = loadBool(LS_KEY_FEED_WRAP, true);
+  if (fm === "milestones" || fm === "all") liveMode.value = fm;
+  liveWrap.value = loadBool(LS_KEY_FEED_WRAP, true);
 
-	  liveFull.value = loadBool(LS_KEY_LIVE_FULL, false);
-	  {
-	    const maxW = typeof window !== "undefined" ? Math.max(520, window.innerWidth - 32) : 1600;
-	    const lw = loadInt(LS_KEY_LIVE_WIDTH, 980);
-	    liveWidth.value = Math.max(520, Math.min(maxW, Math.min(1600, lw)));
-	  }
+  liveFull.value = loadBool(LS_KEY_LIVE_FULL, false);
+  {
+    const maxW = typeof window !== "undefined" ? Math.max(520, window.innerWidth - 32) : 1600;
+    const lw = loadInt(LS_KEY_LIVE_WIDTH, 980);
+    liveWidth.value = Math.max(520, Math.min(maxW, Math.min(1600, lw)));
+  }
 
-	  sessionsShowDeleted.value = loadBool(LS_KEY_SHOW_DELETED_SESSIONS, false);
+  sessionsShowDeleted.value = loadBool(LS_KEY_SHOW_DELETED_SESSIONS, false);
 
   const t = loadString(LS_KEY_THEME).trim();
   if (t === "dark" || t === "light") {
@@ -1478,6 +1493,9 @@ watch(selectedTaskId, () => {
   if (!t) return;
   if (workspaceMergePromptOpen.value && workspaceMergePromptRunID.value !== selectedTaskId.value) {
     closeWorkspaceMergePrompt();
+  }
+  if (blockedPromptOpen.value && blockedPromptRunID.value !== selectedTaskId.value) {
+    closeBlockedPrompt();
   }
   if (rehydratePromptOpen.value && rehydratePromptRunID.value !== selectedTaskId.value) {
     closeRehydratePrompt();
@@ -2170,6 +2188,18 @@ function persistRehydratePromptSeen(runID: string) {
   saveStringArray(LS_KEY_REHYDRATE_PROMPT_SEEN, arr);
 }
 
+function persistBlockedPromptSeen(runID: string) {
+  const id = (runID ?? "").trim();
+  if (!id) return;
+  if (blockedPromptSeenRuns.value.has(id)) return;
+  const next = new Set(blockedPromptSeenRuns.value);
+  next.add(id);
+  // Limit growth to keep localStorage small.
+  const arr = Array.from(next).slice(-800);
+  blockedPromptSeenRuns.value = new Set(arr);
+  saveStringArray(LS_KEY_BLOCKED_PROMPT_SEEN, arr);
+}
+
 function closeWorkspaceMergePrompt() {
   workspaceMergePromptOpen.value = false;
   workspaceMergePromptBusy.value = false;
@@ -2184,6 +2214,65 @@ function closeRehydratePrompt() {
   rehydratePromptError.value = "";
   rehydratePromptRunID.value = "";
   rehydratePromptWorkspace.value = null;
+}
+
+function closeBlockedPrompt() {
+  blockedPromptOpen.value = false;
+  blockedPromptBusy.value = false;
+  blockedPromptError.value = "";
+  blockedPromptRunID.value = "";
+}
+
+function openBlockedPromptForSelected() {
+  const t = selectedTask.value;
+  if (!t || t.status !== "blocked") return;
+  blockedPromptRunID.value = t.id;
+  blockedPromptError.value = "";
+  blockedPromptBusy.value = false;
+  blockedPromptOpen.value = true;
+  persistBlockedPromptSeen(t.id);
+}
+
+async function confirmBlockedPromptUnsafe() {
+  const runID = blockedPromptRunID.value.trim();
+  const t = blockedPromptTask.value;
+  if (!runID || !t) {
+    closeBlockedPrompt();
+    return;
+  }
+  if (blockedPromptBusy.value) return;
+
+  blockedPromptError.value = "";
+  const driver = toolDriverForWorkerType(t.worker_type);
+  if (driver !== "claude-code") {
+    blockedPromptError.value = "当前仅支持对 Claude Code 的 blocked 运行进行一键重试。";
+    return;
+  }
+
+  const ok = await requestHighRiskConfirm({
+    title: "高风险确认",
+    message: "该操作会跳过 Claude Code 的权限确认（风险更大）。继续吗？",
+    detail: highRiskPresetSummary(driver, "unsafe"),
+    confirmLabel: "继续（高风险）",
+  });
+  if (!ok) return;
+
+  blockedPromptBusy.value = true;
+  try {
+    const intent = normalizeTaskIntent(t.task_intent ?? "code");
+    const safety = buildRunSafetyPayload(driver, intent, "unsafe");
+    const nt = await resumeTaskWithOptions(runID, { prompt: "continue", ...safety });
+    resumeOriginByRunID.set(nt.id, "manual");
+    upsertTask(nt);
+    selectedTaskId.value = nt.id;
+    await loadLogs(nt.id);
+    outputTab.value = "logs";
+    closeBlockedPrompt();
+  } catch (e: any) {
+    blockedPromptError.value = e?.message ?? String(e);
+  } finally {
+    blockedPromptBusy.value = false;
+  }
 }
 
 async function confirmWorkspaceMergePrompt() {
@@ -2269,6 +2358,27 @@ async function maybePromptWorkspaceMerge(prev: Task | undefined, next: Task) {
   workspaceMergePromptBusy.value = false;
   workspaceMergePromptOpen.value = true;
   persistWorkspaceMergePromptSeen(next.id);
+}
+
+async function maybePromptBlocked(prev: Task | undefined, next: Task) {
+  if (!prev || !next?.id) return;
+  if (blockedPromptOpen.value) return;
+  if (blockedPromptSeenRuns.value.has(next.id)) return;
+
+  const prevStatus = prev?.status ?? "";
+  const nextStatus = next.status ?? "";
+  if (isTerminalStatus(prevStatus) || nextStatus !== "blocked") return;
+  if (!(prevStatus === "running" || prevStatus === "queued" || prevStatus === "")) return;
+
+  // Non-disruptive: only prompt when the blocked run belongs to the current session view.
+  const nextSessionKey = sessionKeyForTask(next);
+  if (selectedTaskId.value !== next.id && selectedSessionKey.value !== nextSessionKey) return;
+
+  blockedPromptRunID.value = next.id;
+  blockedPromptError.value = "";
+  blockedPromptBusy.value = false;
+  blockedPromptOpen.value = true;
+  persistBlockedPromptSeen(next.id);
 }
 
 async function maybePromptRehydrate(prev: Task | undefined, next: Task) {
@@ -4587,19 +4697,12 @@ watch(
 
 	          <div v-if="selectedTask?.status === 'blocked'" class="blockedHint">
 	            <div class="text">
-	              Blocked: requires approval · Try enabling <span class="mono">Install unlock</span> (one-time) or set
-	              <span class="mono">workers.unsafe_automation</span> and retry (dangerous).
+	              运行被阻塞：触发了需要人工确认的操作，但当前为非交互运行，无法点击批准继续。
 	            </div>
 	            <div class="actions">
-	              <button
-	                type="button"
-                @click="copyText('workers:\\n  unsafe_automation: true\\n')"
-                title="Copy config snippet"
-              >
-                Copy snippet
-              </button>
-            </div>
-          </div>
+	              <button type="button" @click="openBlockedPromptForSelected">处理…</button>
+	            </div>
+	          </div>
 
           <div v-if="acceptanceState || acceptanceLoading || acceptanceError" class="acceptanceHint">
             <div class="text">
@@ -5274,14 +5377,61 @@ watch(
                 {{ workspaceMergePromptBusy ? "合并中..." : "合并回 base_workdir" }}
               </button>
             </div>
+	        </div>
+	      </div>
+
+        <div
+          v-if="blockedPromptOpen"
+          class="modalOverlay"
+          @click.self="closeBlockedPrompt"
+        >
+          <div class="modal smallModal">
+            <div class="modalHeader">
+              <div class="modalTitle">运行被阻塞（需要确认）</div>
+              <button class="iconBtn" type="button" @click="closeBlockedPrompt">✕</button>
+            </div>
+            <div class="modalBody">
+              <div v-if="blockedPromptError" class="modalError">
+                {{ blockedPromptError }}
+              </div>
+              <div class="confirmText">
+                这个 run 在执行过程中触发了需要人工确认的权限/操作，但当前运行是非交互模式，无法点击批准。
+              </div>
+              <div class="tinyHint">
+                如果你确认操作安全，可以选择「高风险继续」跳过权限确认（风险更大）。
+              </div>
+              <div v-if="blockedPromptTask?.warning" class="tinyHint warn mono">
+                {{ blockedPromptTask.warning }}
+              </div>
+            </div>
+            <div class="modalFooter">
+              <button type="button" @click="closeBlockedPrompt" :disabled="blockedPromptBusy">
+                稍后
+              </button>
+              <button
+                type="button"
+                @click="copyText('workers:\\n  unsafe_automation: true\\n')"
+                :disabled="blockedPromptBusy"
+              >
+                复制配置片段
+              </button>
+              <button
+                type="button"
+                class="dangerBtn"
+                @click="confirmBlockedPromptUnsafe"
+                :disabled="blockedPromptBusy || highRiskConfirmOpen"
+              >
+                {{ blockedPromptBusy ? "处理中..." : "高风险继续" }}
+              </button>
+            </div>
           </div>
         </div>
 
-        <div
-          v-if="rehydratePromptOpen"
-          class="modalOverlay"
-          @click.self="closeRehydratePrompt"
-        >
+	        <div
+	          v-if="rehydratePromptOpen"
+	          class="modalOverlay"
+	          @click.self="closeRehydratePrompt"
+	        >
           <div class="modal smallModal">
             <div class="modalHeader">
               <div class="modalTitle">无法恢复该会话</div>
@@ -5659,7 +5809,7 @@ watch(
           </div>
         </div>
         <div class="modalFooter">
-          <button type="button" @click="cancelHighRiskConfirm">Cancel</button>
+          <button type="button" @click="cancelHighRiskConfirm">取消</button>
           <button
             type="button"
             class="dangerBtn"
