@@ -60,6 +60,9 @@ func (m *Manager) Start(ctx context.Context, taskID string) error {
 
 	runCtx, cancel := context.WithCancel(context.Background())
 	m.mu.Lock()
+	if m.cancels == nil {
+		m.cancels = make(map[string]context.CancelFunc)
+	}
 	if _, exists := m.cancels[taskID]; exists {
 		m.mu.Unlock()
 		cancel()
@@ -199,6 +202,7 @@ func (m *Manager) run(ctx context.Context, task tasks.Task) error {
 	exitCode := exitCode(waitErr)
 	status := tasks.StatusSucceeded
 	errText := ""
+	blockedReason := ""
 	if errors.Is(ctx.Err(), context.Canceled) {
 		status = tasks.StatusCanceled
 	} else if waitErr != nil {
@@ -215,6 +219,7 @@ func (m *Manager) run(ctx context.Context, task tasks.Task) error {
 		if status != tasks.StatusCanceled {
 			status = tasks.StatusBlocked
 			errText = ""
+			blockedReason = reason
 			if strings.TrimSpace(reason) != "" {
 				_ = m.store.SetWarning(context.Background(), task.ID, reason)
 			}
@@ -249,6 +254,10 @@ func (m *Manager) run(ctx context.Context, task tasks.Task) error {
 		FinishedAt: time.Now().UTC(),
 	})
 	m.publishTaskUpdated(task.ID)
+
+	if status == tasks.StatusBlocked && isApprovalBlockedReason(blockedReason, task.Warning) {
+		m.maybeAutoContinueApprovalBlocked(task, driver, sidToPersist)
+	}
 	return nil
 }
 
@@ -667,6 +676,8 @@ func isApprovalRequiredLine(line []byte) bool {
 	return false
 }
 
+const approvalRequiredBlockedReason = "阻塞：需要授权（requires approval），非交互运行无法继续。下一步：开启 workers.unsafe_automation（危险）并重试，或实现审批工作流。"
+
 type resumeFailureState struct {
 	mu      sync.Mutex
 	seen    bool
@@ -739,14 +750,215 @@ func (m *Manager) handleApprovalRequired(task tasks.Task, driver tasks.WorkerTyp
 		}
 	}
 
-	const reason = "Blocked: requires approval (non-interactive run cannot proceed). Next: enable workers.unsafe_automation (dangerous) and retry, or implement approval workflow."
-	if blocked != nil && blocked.setOnce(reason) {
+	if blocked != nil && blocked.setOnce(approvalRequiredBlockedReason) {
 		// Best-effort persist for UI; final run status is handled in run() even if these writes fail.
 		_ = m.store.SetBlocked(context.Background(), task.ID)
-		_ = m.store.SetWarning(context.Background(), task.ID, reason)
-		m.appendLog(task.ID, tasks.LogSystem, reason)
+		_ = m.store.SetWarning(context.Background(), task.ID, approvalRequiredBlockedReason)
+		m.appendLog(task.ID, tasks.LogSystem, approvalRequiredBlockedReason)
 		m.publishTaskUpdatedForce(task.ID)
 	}
+}
+
+func isApprovalBlockedReason(observed string, existingWarning string) bool {
+	observed = strings.ToLower(strings.TrimSpace(observed))
+	existingWarning = strings.ToLower(strings.TrimSpace(existingWarning))
+	if strings.Contains(observed, "requires approval") {
+		return true
+	}
+	if strings.Contains(existingWarning, "requires approval") {
+		return true
+	}
+	return false
+}
+
+func (m *Manager) maybeAutoContinueApprovalBlocked(task tasks.Task, driver tasks.WorkerType, sessionID string) {
+	if m == nil || m.store == nil {
+		return
+	}
+	if driver != tasks.WorkerClaudeCode {
+		return
+	}
+	// Avoid infinite retries: if a run was already unsafe and still got blocked, stop here.
+	if task.UnsafeAutomation || m.cfg.Workers.UnsafeAutomation {
+		return
+	}
+
+	conversationID := strings.TrimSpace(task.ConversationID)
+	if conversationID == "" {
+		return
+	}
+
+	// Avoid duplicate continuations if something else already started a new run for this conversation.
+	runs, err := m.store.ListTasksByConversationID(context.Background(), conversationID, 50, tasks.ListTasksOptions{IncludeDeleted: true})
+	if err == nil {
+		for _, t := range runs {
+			if t.ID == task.ID {
+				continue
+			}
+			if t.Status == tasks.StatusQueued || t.Status == tasks.StatusRunning {
+				return
+			}
+		}
+	}
+
+	evidence, err := m.collectApprovalEvidence(task.ID, task.Prompt)
+	if err != nil {
+		m.appendLog(task.ID, tasks.LogSystem, fmt.Sprintf("自动继续：获取证据失败：%v", err))
+		return
+	}
+
+	if shouldEscalate, why := approvalBlockedNeedsUser(evidence); shouldEscalate {
+		m.appendLog(task.ID, tasks.LogSystem, "自动继续：检测到高风险操作，需要你确认后才能继续（原因："+why+"）。")
+		return
+	}
+
+	sid := strings.TrimSpace(sessionID)
+	if sid == "" {
+		sid = strings.TrimSpace(task.SessionID)
+	}
+
+	prompt := "continue"
+
+	nextInput := tasks.CreateTaskInput{
+		WorkerType:            task.WorkerType,
+		ConversationID:        conversationID,
+		UnsafeAutomation:      true,
+		SafetyPreset:          strings.TrimSpace(task.SafetyPreset),
+		TaskIntent:            strings.TrimSpace(task.TaskIntent),
+		CodexSandbox:          strings.TrimSpace(task.CodexSandbox),
+		CodexApprovalPolicy:   strings.TrimSpace(task.CodexApprovalPolicy),
+		CodexSearch:           task.CodexSearch,
+		ClaudePermissionMode:  strings.TrimSpace(task.ClaudePermissionMode),
+		ClaudeSandbox:         task.ClaudeSandbox,
+		ClaudeWebFetchDomains: append([]string{}, task.ClaudeWebFetchDomains...),
+		Prompt:                prompt,
+		WorkDir:               task.WorkDir,
+	}
+
+	mode := tasks.ModeResume
+	if sid != "" {
+		nextInput.Mode = mode
+		nextInput.SessionID = sid
+	} else {
+		mode = tasks.ModeNew
+		nextInput.Mode = mode
+		ctxPrompt, err := tasks.BuildRehydratePrompt(context.Background(), m.store, conversationID, prompt)
+		if err != nil {
+			m.appendLog(task.ID, tasks.LogSystem, fmt.Sprintf("自动继续：生成上下文失败：%v", err))
+			return
+		}
+		nextInput.Prompt = ctxPrompt
+		nextInput.SessionID = ""
+	}
+
+	next, err := m.store.CreateTask(context.Background(), nextInput)
+	if err != nil {
+		m.appendLog(task.ID, tasks.LogSystem, fmt.Sprintf("自动继续：创建新 run 失败：%v", err))
+		return
+	}
+	_, _ = m.store.AppendLog(context.Background(), next.ID, tasks.LogSystem, fmt.Sprintf("auto-continue: from blocked run=%s", task.ID))
+	m.appendLog(task.ID, tasks.LogSystem, fmt.Sprintf("自动继续：已创建新 run（unsafe_automation=true）：%s", next.ID))
+	m.publishTaskUpdatedForce(task.ID)
+
+	if err := m.Start(context.Background(), next.ID); err != nil {
+		_ = m.store.FinishTask(context.Background(), next.ID, tasks.FinishTaskInput{
+			Status:     tasks.StatusFailed,
+			ExitCode:   nil,
+			Error:      err.Error(),
+			SessionID:  "",
+			FinishedAt: time.Now().UTC(),
+		})
+		m.appendLog(task.ID, tasks.LogSystem, fmt.Sprintf("自动继续：启动新 run 失败：%v", err))
+		m.publishTaskUpdatedForce(task.ID)
+	}
+}
+
+func (m *Manager) collectApprovalEvidence(taskID string, prompt string) (string, error) {
+	if m == nil || m.store == nil {
+		return "", errors.New("store not configured")
+	}
+	logs, err := m.store.ListLogs(context.Background(), taskID, 0, 2000)
+	if err != nil {
+		return "", err
+	}
+	const tail = 80
+	if len(logs) > tail {
+		logs = logs[len(logs)-tail:]
+	}
+
+	var b strings.Builder
+	prompt = strings.TrimSpace(prompt)
+	if prompt != "" {
+		b.WriteString("[prompt]\n")
+		b.WriteString(prompt)
+		b.WriteString("\n\n")
+	}
+	b.WriteString("[logs]\n")
+	for _, l := range logs {
+		msg := strings.TrimSpace(l.Message)
+		if msg == "" {
+			continue
+		}
+		b.WriteString(string(l.Stream))
+		b.WriteString(": ")
+		b.WriteString(msg)
+		b.WriteString("\n")
+	}
+	return b.String(), nil
+}
+
+func approvalBlockedNeedsUser(evidence string) (bool, string) {
+	s := strings.ToLower(evidence)
+
+	deleteDir := []string{
+		"rm -rf",
+		"rm -r",
+		"rmdir",
+		"remove directory",
+		"delete directory",
+		"remove folder",
+		"delete folder",
+		"删除目录",
+		"删除文件夹",
+		"移除目录",
+		"移除文件夹",
+		"git clean -fd",
+		"git clean -xdf",
+	}
+	for _, m := range deleteDir {
+		if strings.Contains(s, m) {
+			return true, "删除目录/文件夹"
+		}
+	}
+
+	systemRisk := []string{
+		"sudo ",
+		"sudo\t",
+		"mkfs",
+		"dd if=",
+		"shutdown",
+		"reboot",
+		"halt",
+		"poweroff",
+		"/etc/",
+		"/system/",
+		"/library/",
+		"/usr/",
+		"/bin/",
+		"/sbin/",
+		"diskutil erase",
+		"format c:",
+		"\\\\windows\\\\",
+		"reg delete",
+		"bcdedit",
+	}
+	for _, m := range systemRisk {
+		if strings.Contains(s, m) {
+			return true, "疑似危害系统的操作"
+		}
+	}
+
+	return false, ""
 }
 
 func (m *Manager) handleResumeNotFound(task tasks.Task, driver tasks.WorkerType, message string, cancel context.CancelFunc, resumeFailure *resumeFailureState) {
