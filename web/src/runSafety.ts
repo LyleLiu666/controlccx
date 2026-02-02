@@ -1,4 +1,4 @@
-import type { Task, ToolDriver } from "./types";
+import type { Task, Tool, ToolDriver } from "./types";
 
 export type TaskIntent = "analyze" | "code" | "search-browse" | "install";
 
@@ -44,6 +44,18 @@ export function safetyPresetsForDriver(driver: ToolDriver): SafetyPresetOption[]
     ];
   }
   return [];
+}
+
+export function toolDriverForWorkerType(workerType: string, toolsList?: Tool[]): ToolDriver {
+  const id = String(workerType ?? "").trim();
+  if (!id) return "exec";
+  const tools = Array.isArray(toolsList) ? toolsList : [];
+  const t = tools.find((x) => String(x?.id ?? "").trim() === id);
+  if (t?.driver) return t.driver;
+  if (id === "claude-code") return "claude-code";
+  if (id === "codex") return "codex";
+  if (id === "exec") return "exec";
+  return "exec";
 }
 
 export function recommendSafetyPreset(driver: ToolDriver, intent: TaskIntent): string {
