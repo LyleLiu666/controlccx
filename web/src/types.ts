@@ -57,30 +57,6 @@ export type Task = {
   finished_at?: string;
 };
 
-export type WorkspaceKind = "git-worktree" | "copy";
-
-export type WorkspaceStatus = "active" | "merged" | "discarded";
-
-export type SessionWorkspace = {
-  key: string;
-  workspace_id: string;
-  kind: WorkspaceKind;
-  base_workdir: string;
-  repo_root?: string;
-  run_root: string;
-  run_workdir: string;
-  base_branch?: string;
-  work_branch?: string;
-  status: WorkspaceStatus;
-  created_at: string;
-  updated_at: string;
-};
-
-export type ConflictError = {
-  message: string;
-  conflicts: string[];
-};
-
 export type AcceptanceState = {
   key: string;
   status: string;

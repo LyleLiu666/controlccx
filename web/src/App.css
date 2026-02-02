@@ -3484,22 +3484,6 @@ h2 {
     gap: 10px;
   }
 
-  .runWorkspaceBanner {
-    border: 1px dashed var(--border-color);
-    border-radius: var(--radius-md);
-    padding: 10px 12px;
-    background: var(--bg-panel);
-  }
-
-	  .runWorkspaceBannerActions {
-	    display: flex;
-	    gap: 10px;
-	    margin-top: 8px;
-	    flex-wrap: wrap;
-	    justify-content: flex-end;
-	    align-items: center;
-	  }
-
   .traceBox {
     border: 1px solid var(--border-color);
     border-radius: var(--radius-md);

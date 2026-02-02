@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"controlccx/internal/chat"
 	"controlccx/internal/db"
@@ -161,16 +162,16 @@ func TestAPI_ResumeTask_SafetyEnvelopeDoesNotOverridePreviousSafety(t *testing.T
 	t.Cleanup(srv.Close)
 
 	createBody := tasks.CreateTaskInput{
-		WorkerType:         tasks.WorkerCodex,
-		Mode:               tasks.ModeNew,
-		Prompt:             "search-browse: find docs for xyz",
-		WorkDir:            ".",
-		SessionID:          "sess-123",
-		TaskIntent:         "search-browse",
-		SafetyPreset:       "search-browse",
-		CodexSandbox:       "workspace-write",
+		WorkerType:          tasks.WorkerCodex,
+		Mode:                tasks.ModeNew,
+		Prompt:              "search-browse: find docs for xyz",
+		WorkDir:             ".",
+		SessionID:           "sess-123",
+		TaskIntent:          "search-browse",
+		SafetyPreset:        "search-browse",
+		CodexSandbox:        "workspace-write",
 		CodexApprovalPolicy: "never",
-		CodexSearch:        true,
+		CodexSearch:         true,
 	}
 	createBuf, _ := json.Marshal(createBody)
 	createRes, err := http.Post(srv.URL+"/api/tasks", "application/json", bytes.NewReader(createBuf))
@@ -185,6 +186,16 @@ func TestAPI_ResumeTask_SafetyEnvelopeDoesNotOverridePreviousSafety(t *testing.T
 	var created tasks.Task
 	if err := json.NewDecoder(createRes.Body).Decode(&created); err != nil {
 		t.Fatalf("decode created: %v", err)
+	}
+	exitCode := 0
+	if err := taskStore.FinishTask(ctx, created.ID, tasks.FinishTaskInput{
+		Status:     tasks.StatusSucceeded,
+		ExitCode:   &exitCode,
+		Error:      "",
+		SessionID:  created.SessionID,
+		FinishedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("finish created: %v", err)
 	}
 
 	resumePayload := map[string]any{

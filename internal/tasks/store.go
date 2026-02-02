@@ -65,6 +65,50 @@ func (s *Store) CreateTask(ctx context.Context, in CreateTaskInput) (Task, error
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	// Fast-path idempotent replays: return the existing task before applying workdir locks.
+	if idempotencyKey != "" {
+		var existingID string
+		err := tx.QueryRowContext(ctx, `
+			SELECT id
+			FROM tasks
+			WHERE idempotency_key = ?
+			LIMIT 1;
+		`, idempotencyKey).Scan(&existingID)
+		if err == nil {
+			if err := tx.Commit(); err != nil {
+				return Task{}, fmt.Errorf("tasks: commit create: %w", err)
+			}
+			return s.GetTask(ctx, existingID)
+		}
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return Task{}, fmt.Errorf("tasks: get by idempotency_key: %w", err)
+		}
+	}
+
+	// Mutual exclusion: disallow concurrent queued/running tasks per workdir.
+	{
+		var existingID, existingStatus string
+		err := tx.QueryRowContext(ctx, `
+			SELECT id, status
+			FROM tasks
+			WHERE workdir = ?
+				AND status IN (?, ?)
+			ORDER BY created_at DESC
+			LIMIT 1;
+		`, workdir, string(StatusQueued), string(StatusRunning)).Scan(&existingID, &existingStatus)
+		if err == nil {
+			return Task{}, &WorkDirBusyError{
+				WorkDir:         workdir,
+				ExistingWorkDir: workdir,
+				ExistingTaskID:  existingID,
+				ExistingStatus:  Status(existingStatus),
+			}
+		}
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return Task{}, fmt.Errorf("tasks: check workdir busy: %w", err)
+		}
+	}
+
 	if conversationID == "" {
 		if in.Mode == ModeResume && strings.TrimSpace(in.SessionID) != "" {
 			if err := tx.QueryRowContext(ctx, `
@@ -452,14 +496,11 @@ func (s *Store) FinishTask(ctx context.Context, id string, in FinishTaskInput) e
 		return fmt.Errorf("tasks: finish update: %w", err)
 	}
 
-	// Legacy compatibility: if a task has no conversation_id, session metadata/workspaces were historically keyed
+	// Legacy compatibility: if a task has no conversation_id, session metadata was historically keyed
 	// by task id until session_id became known at finish time.
 	if strings.TrimSpace(prevConversationID) == "" && strings.TrimSpace(prevSessionID) == "" && strings.TrimSpace(in.SessionID) != "" {
 		nowMs := toMillis(now)
 		if err := migrateSessionMetaKeyTx(tx, SessionKey(id, ""), SessionKey(id, in.SessionID), nowMs); err != nil {
-			return err
-		}
-		if err := migrateSessionWorkspaceKeyTx(tx, SessionKey(id, ""), SessionKey(id, in.SessionID), nowMs); err != nil {
 			return err
 		}
 	}
@@ -507,9 +548,6 @@ func (s *Store) SetSessionID(ctx context.Context, id, sessionID string) error {
 	nowMs := toMillis(now)
 	if strings.TrimSpace(prevConversationID) == "" {
 		if err := migrateSessionMetaKeyTx(tx, SessionKey(id, ""), SessionKey(id, sessionID), nowMs); err != nil {
-			return err
-		}
-		if err := migrateSessionWorkspaceKeyTx(tx, SessionKey(id, ""), SessionKey(id, sessionID), nowMs); err != nil {
 			return err
 		}
 	}

@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"controlccx/internal/db"
 	"controlccx/internal/tasks"
@@ -28,6 +29,16 @@ func TestService_resolveTaskID_ByPromptKeyword(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("create task1: %v", err)
+	}
+	exitCode := 0
+	if err := store.FinishTask(ctx, task1.ID, tasks.FinishTaskInput{
+		Status:     tasks.StatusSucceeded,
+		ExitCode:   &exitCode,
+		Error:      "",
+		SessionID:  "",
+		FinishedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("finish task1: %v", err)
 	}
 
 	_, err = store.CreateTask(ctx, tasks.CreateTaskInput{
@@ -60,13 +71,23 @@ func TestService_resolveTaskID_AmbiguousPromptKeyword(t *testing.T) {
 	t.Cleanup(func() { _ = conn.Close() })
 
 	store := tasks.NewStore(conn)
-	_, err = store.CreateTask(ctx, tasks.CreateTaskInput{
+	task1, err := store.CreateTask(ctx, tasks.CreateTaskInput{
 		WorkerType: tasks.WorkerExec,
 		Prompt:     "写一个脱口秀段子 A",
 		WorkDir:    ".",
 	})
 	if err != nil {
 		t.Fatalf("create task1: %v", err)
+	}
+	exitCode := 0
+	if err := store.FinishTask(ctx, task1.ID, tasks.FinishTaskInput{
+		Status:     tasks.StatusSucceeded,
+		ExitCode:   &exitCode,
+		Error:      "",
+		SessionID:  "",
+		FinishedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("finish task1: %v", err)
 	}
 	_, err = store.CreateTask(ctx, tasks.CreateTaskInput{
 		WorkerType: tasks.WorkerExec,

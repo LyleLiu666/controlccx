@@ -20,89 +20,7 @@ import (
 )
 
 func TestAPI_Rehydrate_RequiresWorkspaceNotActive(t *testing.T) {
-	ctx := context.Background()
-	conn, err := db.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "controlccx.db")})
-	if err != nil {
-		t.Fatalf("db open: %v", err)
-	}
-	t.Cleanup(func() { _ = conn.Close() })
-
-	taskStore := tasks.NewStore(conn)
-	chatStore := chat.NewStore(conn)
-	hub := events.NewHub()
-
-	apiSvc := &API{
-		Tasks:    taskStore,
-		Workers:  nil,
-		Observer: &observer.Service{Store: taskStore, Chat: chatStore},
-		Chat:     chatStore,
-		Hub:      hub,
-	}
-
-	baseDir := t.TempDir()
-
-	prev, err := taskStore.CreateTask(ctx, tasks.CreateTaskInput{
-		WorkerType: tasks.WorkerClaudeCode,
-		Mode:       tasks.ModeNew,
-		Prompt:     "do A",
-		WorkDir:    baseDir,
-		SessionID:  "sess-1",
-	})
-	if err != nil {
-		t.Fatalf("create prev: %v", err)
-	}
-	_, _ = taskStore.AppendLog(ctx, prev.ID, tasks.LogAssistant, "done A")
-
-	resume, err := taskStore.CreateTask(ctx, tasks.CreateTaskInput{
-		WorkerType: tasks.WorkerClaudeCode,
-		Mode:       tasks.ModeResume,
-		Prompt:     "continue",
-		WorkDir:    baseDir,
-		SessionID:  "sess-1",
-	})
-	if err != nil {
-		t.Fatalf("create resume: %v", err)
-	}
-	_, _ = taskStore.AppendLog(ctx, resume.ID, tasks.LogAssistant, "done B")
-
-	// Active workspace must block rehydrate.
-	key := tasks.SessionKeyForTask(resume)
-	ws := tasks.SessionWorkspace{
-		Key:         key,
-		WorkspaceID: "ws-1",
-		Kind:        tasks.WorkspaceKindCopy,
-		BaseWorkDir: baseDir,
-		RunRoot:     filepath.Join(baseDir, ".ccx", "workspaces", "ws-1"),
-		RunWorkDir:  filepath.Join(baseDir, ".ccx", "workspaces", "ws-1"),
-		Status:      tasks.WorkspaceStatusActive,
-		CreatedAt:   time.Now().UTC(),
-	}
-	if _, err := taskStore.UpsertSessionWorkspace(ctx, ws); err != nil {
-		t.Fatalf("upsert workspace: %v", err)
-	}
-
-	srv := httptest.NewServer(apiSvc.Handler())
-	t.Cleanup(srv.Close)
-
-	payload := map[string]any{"prompt": "continue"}
-	buf, _ := json.Marshal(payload)
-	res, err := http.Post(srv.URL+"/api/tasks/"+resume.ID+"/rehydrate", "application/json", bytes.NewReader(buf))
-	if err != nil {
-		t.Fatalf("post rehydrate: %v", err)
-	}
-	defer res.Body.Close()
-	if res.StatusCode != http.StatusConflict {
-		b, _ := io.ReadAll(res.Body)
-		t.Fatalf("status=%d, want %d; body=%s", res.StatusCode, http.StatusConflict, strings.TrimSpace(string(b)))
-	}
-
-	list, err := taskStore.ListTasksWithOptions(ctx, 50, tasks.ListTasksOptions{IncludeDeleted: true})
-	if err != nil {
-		t.Fatalf("list tasks: %v", err)
-	}
-	if len(list) != 2 {
-		t.Fatalf("tasks=%d, want 2", len(list))
-	}
+	t.Skip("legacy: run workspace prerequisite removed; rehydrate no longer depends on workspace status")
 }
 
 func TestAPI_Rehydrate_CreatesNewRunWithExtractedContext(t *testing.T) {
@@ -126,6 +44,8 @@ func TestAPI_Rehydrate_CreatesNewRunWithExtractedContext(t *testing.T) {
 	}
 
 	baseDir := t.TempDir()
+	now := time.Now().UTC()
+	exitCode := 0
 
 	first, err := taskStore.CreateTask(ctx, tasks.CreateTaskInput{
 		WorkerType: tasks.WorkerClaudeCode,
@@ -138,6 +58,15 @@ func TestAPI_Rehydrate_CreatesNewRunWithExtractedContext(t *testing.T) {
 		t.Fatalf("create first: %v", err)
 	}
 	_, _ = taskStore.AppendLog(ctx, first.ID, tasks.LogAssistant, "done A")
+	if err := taskStore.FinishTask(ctx, first.ID, tasks.FinishTaskInput{
+		Status:     tasks.StatusSucceeded,
+		ExitCode:   &exitCode,
+		Error:      "",
+		SessionID:  first.SessionID,
+		FinishedAt: now,
+	}); err != nil {
+		t.Fatalf("finish first: %v", err)
+	}
 
 	second, err := taskStore.CreateTask(ctx, tasks.CreateTaskInput{
 		WorkerType: tasks.WorkerClaudeCode,
@@ -150,20 +79,38 @@ func TestAPI_Rehydrate_CreatesNewRunWithExtractedContext(t *testing.T) {
 		t.Fatalf("create second: %v", err)
 	}
 	_, _ = taskStore.AppendLog(ctx, second.ID, tasks.LogAssistant, "done B")
+	if err := taskStore.FinishTask(ctx, second.ID, tasks.FinishTaskInput{
+		Status:     tasks.StatusSucceeded,
+		ExitCode:   &exitCode,
+		Error:      "",
+		SessionID:  second.SessionID,
+		FinishedAt: now,
+	}); err != nil {
+		t.Fatalf("finish second: %v", err)
+	}
 
 	// Simulate a rehydrated session with a new provider session_id but the same conversation.
 	third, err := taskStore.CreateTask(ctx, tasks.CreateTaskInput{
-		WorkerType:      tasks.WorkerClaudeCode,
-		Mode:            tasks.ModeNew,
-		ConversationID:  first.ConversationID,
-		Prompt:          "rehydrate: continue",
-		WorkDir:         baseDir,
-		SessionID:       "sess-2",
+		WorkerType:     tasks.WorkerClaudeCode,
+		Mode:           tasks.ModeNew,
+		ConversationID: first.ConversationID,
+		Prompt:         "rehydrate: continue",
+		WorkDir:        baseDir,
+		SessionID:      "sess-2",
 	})
 	if err != nil {
 		t.Fatalf("create third: %v", err)
 	}
 	_, _ = taskStore.AppendLog(ctx, third.ID, tasks.LogAssistant, "done C")
+	if err := taskStore.FinishTask(ctx, third.ID, tasks.FinishTaskInput{
+		Status:     tasks.StatusSucceeded,
+		ExitCode:   &exitCode,
+		Error:      "",
+		SessionID:  third.SessionID,
+		FinishedAt: now,
+	}); err != nil {
+		t.Fatalf("finish third: %v", err)
+	}
 
 	srv := httptest.NewServer(apiSvc.Handler())
 	t.Cleanup(srv.Close)

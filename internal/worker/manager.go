@@ -18,7 +18,6 @@ import (
 	"controlccx/internal/config"
 	"controlccx/internal/events"
 	"controlccx/internal/execenv"
-	"controlccx/internal/runworkspace"
 	"controlccx/internal/tasks"
 	"controlccx/internal/tooling"
 )
@@ -117,24 +116,6 @@ func (m *Manager) run(ctx context.Context, task tasks.Task) error {
 		})
 		m.publishTaskUpdated(task.ID)
 		return err
-	}
-
-	if (driver == tasks.WorkerClaudeCode || driver == tasks.WorkerCodex) && m != nil && m.store != nil {
-		ws, err := runworkspace.NewService(m.store).EnsureForTask(ctx, task)
-		if err != nil {
-			m.appendLog(task.ID, tasks.LogSystem, fmt.Sprintf("workspace warning: %v", err))
-		} else if strings.TrimSpace(ws.RunWorkDir) != "" {
-			runTask := task
-			runTask.WorkDir = ws.RunWorkDir
-			if nextTool, nextDriver, err := m.buildToolCommand(runTask); err != nil {
-				m.appendLog(task.ID, tasks.LogSystem, fmt.Sprintf("workspace warning: failed to rebuild tool command: %v", err))
-			} else {
-				tool = nextTool
-				driver = nextDriver
-				m.appendLog(task.ID, tasks.LogSystem, fmt.Sprintf("workspace.active kind=%s base=%s run=%s", ws.Kind, ws.BaseWorkDir, ws.RunWorkDir))
-				tool.Stdin = injectWorkspaceContextPrompt(tool.Stdin, ws)
-			}
-		}
 	}
 
 	if tool.Warning != "" {
@@ -273,34 +254,6 @@ func sessionIDToPersist(task tasks.Task, observed string) (string, string) {
 		return "", fmt.Sprintf("resume warning: session_id changed (requested=%q observed=%q). Keeping requested session_id for this run.", requested, observed)
 	}
 	return observed, ""
-}
-
-func injectWorkspaceContextPrompt(prompt string, ws tasks.SessionWorkspace) string {
-	if strings.Contains(prompt, "[controlccx workspace]") {
-		return prompt
-	}
-	base := strings.TrimSpace(ws.BaseWorkDir)
-	run := strings.TrimSpace(ws.RunWorkDir)
-	kind := strings.TrimSpace(string(ws.Kind))
-	if base == "" || run == "" || kind == "" {
-		return prompt
-	}
-
-	note := fmt.Sprintf(
-		`[controlccx workspace]
-This run uses an isolated workspace (%s).
-- base_workdir: %s
-- run_workdir: %s
-When you mention file paths to the user, prefer base_workdir and clarify when using run_workdir.
-向用户输出路径时优先使用 base_workdir；run_workdir 是隔离工作区路径，需要时请说明。
-[/controlccx workspace]
-
-`,
-		kind,
-		base,
-		run,
-	)
-	return note + prompt
 }
 
 func (m *Manager) buildToolCommand(task tasks.Task) (ToolCommand, tasks.WorkerType, error) {

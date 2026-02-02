@@ -95,20 +95,6 @@ func Migrate(ctx context.Context, conn *sql.DB) error {
 			deleted_at INTEGER,
 			updated_at INTEGER NOT NULL DEFAULT 0
 		);`,
-		`CREATE TABLE IF NOT EXISTS session_workspaces (
-			key TEXT PRIMARY KEY,
-			workspace_id TEXT NOT NULL,
-			kind TEXT NOT NULL,
-			base_workdir TEXT NOT NULL,
-			repo_root TEXT NOT NULL DEFAULT '',
-			run_root TEXT NOT NULL,
-			run_workdir TEXT NOT NULL,
-			base_branch TEXT NOT NULL DEFAULT '',
-			work_branch TEXT NOT NULL DEFAULT '',
-			status TEXT NOT NULL DEFAULT 'active',
-			created_at INTEGER NOT NULL,
-			updated_at INTEGER NOT NULL
-		);`,
 		`CREATE TABLE IF NOT EXISTS acceptance_states (
 			session_key TEXT PRIMARY KEY,
 			status TEXT NOT NULL DEFAULT '',

@@ -13,7 +13,6 @@ import type {
   FSListEntry,
   FSRoot,
   LogEntry,
-  SessionWorkspace,
   Tool,
   ToolDriver,
   ToolsListResponse,
@@ -79,7 +78,6 @@ import AuthSettingsModal from "./components/AuthSettingsModal.vue";
 import ToolsSettingsModal from "./components/ToolsSettingsModal.vue";
 import { useSkills } from "./composables/useSkills";
 import { useSecretaryChat } from "./composables/useSecretaryChat";
-import { useTaskWorkspace } from "./composables/useTaskWorkspace";
 import { useTasks } from "./composables/useTasks";
 import { useLiveFeed } from "./composables/useLiveFeed";
 
@@ -305,7 +303,6 @@ const {
     // Fire-and-forget; avoid blocking SSE handling.
     void maybeTriggerDeliveryForeman(prev, next);
     maybeTriggerAttentionAutopilot(prev, next);
-    void maybePromptWorkspaceMerge(prev, next);
     void maybePromptBlocked(prev, next);
     void maybePromptRehydrate(prev, next);
   },
@@ -313,40 +310,6 @@ const {
     chat.value = appendChatMessageUnique(chat.value, m);
   },
 });
-
-const {
-  workspace: runWorkspace,
-  loading: runWorkspaceLoading,
-  error: runWorkspaceError,
-  conflict: runWorkspaceConflict,
-  refresh: refreshRunWorkspace,
-  merge: mergeRunWorkspace,
-  discard: discardRunWorkspace,
-} = useTaskWorkspace(selectedTaskId);
-
-function conflictSummary(c: any): string {
-  if (!c) return "";
-  const msg = String(c.message ?? "").trim() || "conflict";
-  const list = Array.isArray(c.conflicts) ? c.conflicts.filter((x: any) => typeof x === "string" && x.trim()) : [];
-  if (!list.length) return msg;
-  const head = list.slice(0, 4).join(", ");
-  const tail = list.length > 4 ? ` +${list.length - 4} more` : "";
-  return `${msg}: ${head}${tail}`;
-}
-
-async function onMergeRunWorkspace() {
-  const ws = runWorkspace.value;
-  if (!ws || ws.status !== "active") return;
-  if (!confirm("确认将隔离工作区的改动合并回 base_workdir 吗？")) return;
-  await mergeRunWorkspace();
-}
-
-async function onDiscardRunWorkspace() {
-  const ws = runWorkspace.value;
-  if (!ws || ws.status !== "active") return;
-  if (!confirm("确认丢弃隔离工作区的改动吗？（会删除 run_workdir 目录，且不可恢复）")) return;
-  await discardRunWorkspace();
-}
 
 const selectedRunInstruction = computed(() => {
   const t = selectedTask.value;
@@ -519,7 +482,6 @@ const LS_KEY_RUN_SAFETY_AUTOPILOT = "controlccx.run_safety.autopilot.v1";
 const LS_KEY_RUN_SAFETY_INSTALL_UNLOCK = "controlccx.run_safety.install_unlock.v1";
 const LS_KEY_ATTENTION_AUTOPILOT = "controlccx.attention_autopilot.v1";
 const LS_KEY_ATTENTION_AUTOPILOT_SEEN = "controlccx.attention_autopilot.seen.v1";
-const LS_KEY_WORKSPACE_MERGE_PROMPT_SEEN = "controlccx.workspace.merge_prompt_seen.v1";
 const LS_KEY_REHYDRATE_PROMPT_SEEN = "controlccx.rehydrate_prompt_seen.v1";
 const LS_KEY_BLOCKED_PROMPT_SEEN = "controlccx.blocked_prompt_seen.v1";
 
@@ -539,19 +501,11 @@ const attentionAutopilotNote = ref("");
 
 const resumeOriginByRunID = new Map<string, ResumeOrigin>();
 
-const workspaceMergePromptSeenRuns = ref<Set<string>>(new Set());
-const workspaceMergePromptOpen = ref(false);
-const workspaceMergePromptBusy = ref(false);
-const workspaceMergePromptError = ref("");
-const workspaceMergePromptRunID = ref("");
-const workspaceMergePromptWorkspace = ref<SessionWorkspace | null>(null);
-
 const rehydratePromptSeenRuns = ref<Set<string>>(new Set());
 const rehydratePromptOpen = ref(false);
 const rehydratePromptBusy = ref(false);
 const rehydratePromptError = ref("");
 const rehydratePromptRunID = ref("");
-const rehydratePromptWorkspace = ref<SessionWorkspace | null>(null);
 
 const blockedPromptSeenRuns = ref<Set<string>>(new Set());
 const blockedPromptOpen = ref(false);
@@ -1343,7 +1297,6 @@ const workspaceSelect = ref<string>(loadString(LS_KEY_WORKSPACE_FILTER));
 
   autoDeliveryForeman.value = loadBool(LS_KEY_AUTO_DELIVERY_FOREMAN, true);
   deliveryForemanSeenRuns.value = new Set(loadStringArray(LS_KEY_DELIVERY_FOREMAN_SEEN));
-  workspaceMergePromptSeenRuns.value = new Set(loadStringArray(LS_KEY_WORKSPACE_MERGE_PROMPT_SEEN));
   rehydratePromptSeenRuns.value = new Set(loadStringArray(LS_KEY_REHYDRATE_PROMPT_SEEN));
   blockedPromptSeenRuns.value = new Set(loadStringArray(LS_KEY_BLOCKED_PROMPT_SEEN));
 
@@ -1495,9 +1448,6 @@ function desiredOutputTabForTask(t: Task | null): "result" | "logs" {
 watch(selectedTaskId, () => {
   const t = selectedTask.value;
   if (!t) return;
-  if (workspaceMergePromptOpen.value && workspaceMergePromptRunID.value !== selectedTaskId.value) {
-    closeWorkspaceMergePrompt();
-  }
   if (blockedPromptOpen.value && blockedPromptRunID.value !== selectedTaskId.value) {
     closeBlockedPrompt();
   }
@@ -2190,18 +2140,6 @@ function showDeliveryForemanToast(message: string) {
   }, 10_000);
 }
 
-function persistWorkspaceMergePromptSeen(runID: string) {
-  const id = (runID ?? "").trim();
-  if (!id) return;
-  if (workspaceMergePromptSeenRuns.value.has(id)) return;
-  const next = new Set(workspaceMergePromptSeenRuns.value);
-  next.add(id);
-  // Limit growth to keep localStorage small.
-  const arr = Array.from(next).slice(-800);
-  workspaceMergePromptSeenRuns.value = new Set(arr);
-  saveStringArray(LS_KEY_WORKSPACE_MERGE_PROMPT_SEEN, arr);
-}
-
 function persistRehydratePromptSeen(runID: string) {
   const id = (runID ?? "").trim();
   if (!id) return;
@@ -2226,20 +2164,11 @@ function persistBlockedPromptSeen(runID: string) {
   saveStringArray(LS_KEY_BLOCKED_PROMPT_SEEN, arr);
 }
 
-function closeWorkspaceMergePrompt() {
-  workspaceMergePromptOpen.value = false;
-  workspaceMergePromptBusy.value = false;
-  workspaceMergePromptError.value = "";
-  workspaceMergePromptRunID.value = "";
-  workspaceMergePromptWorkspace.value = null;
-}
-
 function closeRehydratePrompt() {
   rehydratePromptOpen.value = false;
   rehydratePromptBusy.value = false;
   rehydratePromptError.value = "";
   rehydratePromptRunID.value = "";
-  rehydratePromptWorkspace.value = null;
 }
 
 function closeBlockedPrompt() {
@@ -2301,26 +2230,6 @@ async function confirmBlockedPromptUnsafe() {
   }
 }
 
-async function confirmWorkspaceMergePrompt() {
-  const runID = workspaceMergePromptRunID.value.trim();
-  const ws = workspaceMergePromptWorkspace.value;
-  if (!runID || !ws || ws.status !== "active" || selectedTaskId.value !== runID) {
-    closeWorkspaceMergePrompt();
-    return;
-  }
-  workspaceMergePromptBusy.value = true;
-  workspaceMergePromptError.value = "";
-  try {
-    await mergeRunWorkspace();
-    if (runWorkspaceConflict.value) return; // keep modal open for user to read the conflict summary
-    closeWorkspaceMergePrompt();
-  } catch (e: any) {
-    workspaceMergePromptError.value = e?.message ?? String(e);
-  } finally {
-    workspaceMergePromptBusy.value = false;
-  }
-}
-
 async function confirmRehydratePrompt() {
   const runID = rehydratePromptRunID.value.trim();
   if (!runID) {
@@ -2336,39 +2245,6 @@ async function confirmRehydratePrompt() {
   rehydratePromptBusy.value = true;
   rehydratePromptError.value = "";
   try {
-    try {
-      await refreshRunWorkspace();
-    } catch {
-      // ignore workspace fetch errors (server will re-check on rehydrate)
-    }
-    let ws = runWorkspace.value;
-    rehydratePromptWorkspace.value = ws;
-    if (ws && ws.status === "active") {
-      try {
-        await mergeRunWorkspace();
-      } catch (e: any) {
-        rehydratePromptError.value = e?.message ?? String(e);
-        return;
-      }
-      if (runWorkspaceConflict.value) {
-        rehydratePromptError.value = conflictSummary(runWorkspaceConflict.value);
-        return;
-      }
-      // Refresh after merge attempt.
-      try {
-        await refreshRunWorkspace();
-      } catch {
-        // ignore
-      }
-      ws = runWorkspace.value;
-      rehydratePromptWorkspace.value = ws;
-      if (ws && ws.status === "active") {
-        rehydratePromptError.value =
-          "检测到隔离工作区仍处于 active。请先解决合并冲突或在 Workspace 面板完成 Merge，然后再继续。";
-        return;
-      }
-    }
-
     const nt = await rehydrateTaskWithOptions(runID, { prompt: "continue" });
     upsertTask(nt);
     selectedTaskId.value = nt.id;
@@ -2380,35 +2256,6 @@ async function confirmRehydratePrompt() {
   } finally {
     rehydratePromptBusy.value = false;
   }
-}
-
-async function maybePromptWorkspaceMerge(prev: Task | undefined, next: Task) {
-  if (!prev || !next?.id) return;
-  if (workspaceMergePromptOpen.value) return;
-  if (workspaceMergePromptSeenRuns.value.has(next.id)) return;
-
-  const prevStatus = prev?.status ?? "";
-  const nextStatus = next.status ?? "";
-  if (isTerminalStatus(prevStatus) || !isTerminalStatus(nextStatus)) return;
-  if (!(prevStatus === "running" || prevStatus === "queued" || prevStatus === "")) return;
-
-  // Non-disruptive: only prompt for the currently selected run.
-  if (selectedTaskId.value !== next.id) return;
-
-  try {
-    await refreshRunWorkspace();
-  } catch {
-    // ignore fetch errors
-  }
-  const ws2 = runWorkspace.value;
-  if (!ws2 || ws2.status !== "active") return;
-
-  workspaceMergePromptRunID.value = next.id;
-  workspaceMergePromptWorkspace.value = ws2;
-  workspaceMergePromptError.value = "";
-  workspaceMergePromptBusy.value = false;
-  workspaceMergePromptOpen.value = true;
-  persistWorkspaceMergePromptSeen(next.id);
 }
 
 async function maybePromptBlocked(prev: Task | undefined, next: Task) {
@@ -2449,13 +2296,6 @@ async function maybePromptRehydrate(prev: Task | undefined, next: Task) {
   // This helps when a background run (e.g. created outside the UI) fails with "No conversation found".
   const nextSessionKey = sessionKeyForTask(next);
   if (selectedTaskId.value !== next.id && selectedSessionKey.value !== nextSessionKey) return;
-
-  try {
-    await refreshRunWorkspace();
-  } catch {
-    // ignore
-  }
-  rehydratePromptWorkspace.value = runWorkspace.value;
   rehydratePromptRunID.value = next.id;
   rehydratePromptError.value = "";
   rehydratePromptBusy.value = false;
@@ -4664,48 +4504,6 @@ watch(
                         Delete session
                       </button>
                     </div>
-                    <template v-if="runWorkspace">
-                      <div class="detailPopupWorkdir mono" :title="runWorkspace.run_workdir">
-                        Run workspace: {{ runWorkspace.run_workdir }}
-                      </div>
-                      <div class="detailMoreActions">
-                        <button
-                          type="button"
-                          @click="copyText(runWorkspace.run_workdir)"
-                          title="Copy run workspace dir"
-                        >
-                          Copy run dir
-                        </button>
-                        <button
-                          v-if="runWorkspace.status === 'active'"
-                          type="button"
-                          @click="onMergeRunWorkspace"
-                          :disabled="runWorkspaceLoading"
-                          title="Merge changes back"
-                        >
-                          Merge back
-                        </button>
-                        <button
-                          v-if="runWorkspace.status === 'active'"
-                          type="button"
-                          class="dangerBtn"
-                          @click="onDiscardRunWorkspace"
-                          :disabled="runWorkspaceLoading"
-                          title="Discard and delete run workspace"
-                        >
-                          Discard
-                        </button>
-                        <span class="tinyHint"
-                          >{{ runWorkspace.kind }} · {{ runWorkspace.status }}</span
-                        >
-                      </div>
-                      <div v-if="runWorkspaceConflict" class="tinyHint warn">
-                        {{ conflictSummary(runWorkspaceConflict) }}
-                      </div>
-                      <div v-else-if="runWorkspaceError" class="tinyHint warn">
-                        {{ runWorkspaceError }}
-                      </div>
-                    </template>
                     <div class="detailMoreGrid">
                       <div>
                         <span class="k">Session</span>
@@ -5060,59 +4858,6 @@ watch(
             </div>
 
             <div v-if="outputTab === 'result'" class="resultPanel">
-              <div
-                v-if="runWorkspace && runWorkspace.status === 'active'"
-                class="runWorkspaceBanner"
-              >
-                <div class="tinyHint">
-                  隔离运行目录：
-                  <span class="mono" :title="runWorkspace.run_workdir">{{
-                    workdirLabelForSession(runWorkspace.run_workdir)
-                  }}</span>
-                  · 基础工作目录：
-                  <span class="mono" :title="selectedTask?.workdir">{{
-                    workdirLabelForSession(selectedTask?.workdir ?? '')
-                  }}</span>
-                  · 工具把 run workspace 当作“当前目录”输出属正常现象
-                </div>
-                <div class="runWorkspaceBannerActions">
-                  <details class="detailMore compact">
-                    <summary title="目录操作" aria-label="目录操作">⋯</summary>
-                    <div class="detailMorePopup">
-                      <div class="detailPopupWorkdir mono" :title="runWorkspace.run_workdir">
-                        运行目录：{{ runWorkspace.run_workdir }}
-                      </div>
-                      <div class="detailPopupWorkdir mono" :title="selectedTask?.workdir ?? ''">
-                        基础目录：{{ selectedTask?.workdir || "(未设置)" }}
-                      </div>
-                      <div class="detailMoreActions">
-                        <button
-                          type="button"
-                          @click="setWorkspace(runWorkspace.run_workdir)"
-                          title="切换到运行目录"
-                        >
-                          切换到运行目录
-                        </button>
-                        <button
-                          type="button"
-                          @click="copyText(runWorkspace.run_workdir)"
-                          title="复制运行目录"
-                        >
-                          复制运行目录
-                        </button>
-                        <button
-                          type="button"
-                          @click="copyText(selectedTask?.workdir ?? '')"
-                          :disabled="!selectedTask?.workdir"
-                          title="复制基础目录"
-                        >
-                          复制基础目录
-                        </button>
-                      </div>
-                    </div>
-                  </details>
-                </div>
-              </div>
               <div v-if="!selectedResultText" class="empty">
                 {{
                   selectedTask?.status === "running" ||
@@ -5382,64 +5127,6 @@ watch(
 		    </div>
 
         <div
-          v-if="workspaceMergePromptOpen"
-          class="modalOverlay"
-          @click.self="closeWorkspaceMergePrompt"
-        >
-          <div class="modal smallModal">
-            <div class="modalHeader">
-              <div class="modalTitle">合并隔离工作区</div>
-              <button class="iconBtn" type="button" @click="closeWorkspaceMergePrompt">
-                ✕
-              </button>
-            </div>
-            <div class="modalBody">
-              <div v-if="workspaceMergePromptError" class="modalError">
-                {{ workspaceMergePromptError }}
-              </div>
-              <div class="confirmText">
-                该 run 使用了隔离工作区。是否将改动合并回 <span class="mono">base_workdir</span>？
-              </div>
-              <div
-                v-if="workspaceMergePromptWorkspace"
-                class="tinyHint"
-                style="overflow-wrap: anywhere"
-              >
-                base_workdir：
-                <span class="mono">{{ workspaceMergePromptWorkspace.base_workdir }}</span>
-              </div>
-              <div
-                v-if="workspaceMergePromptWorkspace"
-                class="tinyHint"
-                style="overflow-wrap: anywhere"
-              >
-                run_workdir：
-                <span class="mono">{{ workspaceMergePromptWorkspace.run_workdir }}</span>
-              </div>
-              <div v-if="runWorkspaceConflict" class="modalError">
-                {{ conflictSummary(runWorkspaceConflict) }}
-              </div>
-              <div class="tinyHint">
-                提示：你也可以稍后在 Session 的“⋯”菜单里执行 Merge。
-              </div>
-            </div>
-            <div class="modalFooter">
-              <button type="button" @click="closeWorkspaceMergePrompt" :disabled="workspaceMergePromptBusy">
-                暂不
-              </button>
-              <button
-                type="button"
-                class="primary"
-                @click="confirmWorkspaceMergePrompt"
-                :disabled="workspaceMergePromptBusy"
-              >
-                {{ workspaceMergePromptBusy ? "合并中..." : "合并回 base_workdir" }}
-              </button>
-            </div>
-	        </div>
-	      </div>
-
-        <div
           v-if="blockedPromptOpen"
           class="modalOverlay"
           @click.self="closeBlockedPrompt"
@@ -5503,18 +5190,6 @@ watch(
               <div class="confirmText">
                 Claude Code 找不到该 session（No conversation found）。你可以新建一个会话，把历史上下文带过去继续。
               </div>
-              <div v-if="rehydratePromptWorkspace?.status === 'active'" class="modalError">
-                检测到该会话仍有隔离工作区处于 <span class="mono">active</span>。为避免丢改动，点击右下角「合并并继续」将先
-                把改动合并回 <span class="mono">base_workdir</span>，再新建会话继续；若有冲突会提示你处理。
-              </div>
-              <div
-                v-if="rehydratePromptWorkspace"
-                class="tinyHint"
-                style="overflow-wrap: anywhere"
-              >
-                base_workdir：
-                <span class="mono">{{ rehydratePromptWorkspace.base_workdir }}</span>
-              </div>
               <div class="tinyHint">
                 说明：该操作会创建一个新的 <span class="mono">mode=new</span> run（不会复用旧
                 <span class="mono">session_id</span>）。
@@ -5530,13 +5205,7 @@ watch(
                 @click="confirmRehydratePrompt"
                 :disabled="rehydratePromptBusy"
               >
-                {{
-                  rehydratePromptBusy
-                    ? "处理中..."
-                    : rehydratePromptWorkspace?.status === "active"
-                      ? "合并并继续（带上下文）"
-                      : "新建会话继续（带上下文）"
-                }}
+                {{ rehydratePromptBusy ? "处理中..." : "新建会话继续（带上下文）" }}
               </button>
             </div>
           </div>

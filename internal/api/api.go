@@ -18,7 +18,6 @@ import (
 	"controlccx/internal/events"
 	"controlccx/internal/observer"
 	"controlccx/internal/runsafe"
-	"controlccx/internal/runworkspace"
 	"controlccx/internal/skills"
 	"controlccx/internal/systeminfo"
 	"controlccx/internal/tasks"
@@ -312,6 +311,11 @@ func (a *API) handleTasks(w http.ResponseWriter, r *http.Request) {
 
 		task, err := a.Tasks.CreateTask(r.Context(), in)
 		if err != nil {
+			var busy *tasks.WorkDirBusyError
+			if errors.As(err, &busy) {
+				http.Error(w, err.Error(), http.StatusConflict)
+				return
+			}
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
@@ -426,16 +430,6 @@ func (a *API) handleSessionByKey(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 
-			ws, ok, err := resolveSessionWorkspaceForConversation(r.Context(), a.Tasks, tasks.ConversationKey(conversationID), runs)
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-			if ok && ws.Status == tasks.WorkspaceStatusActive {
-				http.Error(w, "无法新建会话继续：该会话仍有隔离工作区处于 active。请先在 Workspace 面板执行 Merge（把改动合并回 base_workdir）后再重试。", http.StatusConflict)
-				return
-			}
-
 			prompt := strings.TrimSpace(body.Prompt)
 			if prompt == "" {
 				prompt = "continue"
@@ -512,6 +506,11 @@ func (a *API) handleSessionByKey(w http.ResponseWriter, r *http.Request) {
 
 			newTask, err := a.Tasks.CreateTask(r.Context(), in)
 			if err != nil {
+				var busy *tasks.WorkDirBusyError
+				if errors.As(err, &busy) {
+					http.Error(w, err.Error(), http.StatusConflict)
+					return
+				}
 				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
 			}
@@ -536,18 +535,6 @@ func (a *API) handleSessionByKey(w http.ResponseWriter, r *http.Request) {
 		if strings.TrimSpace(latest.SessionID) == "" {
 			http.Error(w, "task has no session_id to resume", http.StatusBadRequest)
 			return
-		}
-
-		// Ensure resume uses the same run workspace as the session origin when available.
-		desiredWSKey := tasks.SessionKeyForTask(latest)
-		legacyWSKey := tasks.SessionKey(latest.ID, "")
-		legacySessionKey := tasks.SessionKey("", latest.SessionID)
-		if _, ok, err := a.Tasks.GetSessionWorkspace(r.Context(), desiredWSKey); err == nil && !ok {
-			if _, ok2, err := a.Tasks.GetSessionWorkspace(r.Context(), legacySessionKey); err == nil && ok2 {
-				_ = a.Tasks.MigrateSessionWorkspaceKey(r.Context(), legacySessionKey, desiredWSKey)
-			} else if _, ok2, err := a.Tasks.GetSessionWorkspace(r.Context(), legacyWSKey); err == nil && ok2 {
-				_ = a.Tasks.MigrateSessionWorkspaceKey(r.Context(), legacyWSKey, desiredWSKey)
-			}
 		}
 
 		// SafetyEnvelope is an autopilot hint (UI-level “one-time unlock”); it does not count as an explicit safety override.
@@ -628,6 +615,11 @@ func (a *API) handleSessionByKey(w http.ResponseWriter, r *http.Request) {
 
 		newTask, err := a.Tasks.CreateTask(r.Context(), resumeIn)
 		if err != nil {
+			var busy *tasks.WorkDirBusyError
+			if errors.As(err, &busy) {
+				http.Error(w, err.Error(), http.StatusConflict)
+				return
+			}
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
@@ -744,53 +736,6 @@ func isNoConversationFound(message string) bool {
 	return strings.Contains(lower, "session")
 }
 
-func resolveSessionWorkspaceForConversation(ctx context.Context, store *tasks.Store, desiredKey string, runs []tasks.Task) (tasks.SessionWorkspace, bool, error) {
-	if store == nil {
-		return tasks.SessionWorkspace{}, false, errors.New("tasks store not configured")
-	}
-	desiredKey = strings.TrimSpace(desiredKey)
-	if desiredKey == "" {
-		return tasks.SessionWorkspace{}, false, nil
-	}
-
-	if ws, ok, err := store.GetSessionWorkspace(ctx, desiredKey); err != nil {
-		return tasks.SessionWorkspace{}, false, err
-	} else if ok {
-		return ws, true, nil
-	}
-
-	for _, t := range runs {
-		if sid := strings.TrimSpace(t.SessionID); sid != "" {
-			legacySessionKey := tasks.SessionKey("", sid)
-			if legacySessionKey != desiredKey {
-				if ws, ok, err := store.GetSessionWorkspace(ctx, legacySessionKey); err != nil {
-					return tasks.SessionWorkspace{}, false, err
-				} else if ok {
-					_ = store.MigrateSessionWorkspaceKey(ctx, legacySessionKey, desiredKey)
-					if migrated, ok2, err := store.GetSessionWorkspace(ctx, desiredKey); err == nil && ok2 {
-						return migrated, true, nil
-					}
-					return ws, true, nil
-				}
-			}
-		}
-		legacyTaskKey := tasks.SessionKey(t.ID, "")
-		if legacyTaskKey != desiredKey {
-			if ws, ok, err := store.GetSessionWorkspace(ctx, legacyTaskKey); err != nil {
-				return tasks.SessionWorkspace{}, false, err
-			} else if ok {
-				_ = store.MigrateSessionWorkspaceKey(ctx, legacyTaskKey, desiredKey)
-				if migrated, ok2, err := store.GetSessionWorkspace(ctx, desiredKey); err == nil && ok2 {
-					return migrated, true, nil
-				}
-				return ws, true, nil
-			}
-		}
-	}
-
-	return tasks.SessionWorkspace{}, false, nil
-}
-
 func (a *API) handleTaskByID(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/api/tasks/")
 	if path == "" {
@@ -890,121 +835,6 @@ func (a *API) handleTaskByID(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeJSON(w, map[string]any{"task": task, "invocation": inv})
-	case "workspace":
-		task, err := a.Tasks.GetTask(r.Context(), id)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusNotFound)
-			return
-		}
-
-		desiredKey := tasks.SessionKeyForTask(task)
-		key := desiredKey
-		// Backward-compatible: older runs stored workspaces under session_id/task-id keys.
-		// Prefer migrating them to the conversation-scoped key so the UI stays stable.
-		if _, ok, err := a.Tasks.GetSessionWorkspace(r.Context(), desiredKey); err == nil && !ok {
-			var fallbacks []string
-			if strings.TrimSpace(task.SessionID) != "" {
-				fallbacks = append(fallbacks, tasks.SessionKey("", task.SessionID))
-			}
-			fallbacks = append(fallbacks, tasks.SessionKey(task.ID, ""))
-
-			for _, legacyKey := range fallbacks {
-				if strings.TrimSpace(legacyKey) == "" || legacyKey == desiredKey {
-					continue
-				}
-				if _, ok2, err := a.Tasks.GetSessionWorkspace(r.Context(), legacyKey); err == nil && ok2 {
-					_ = a.Tasks.MigrateSessionWorkspaceKey(r.Context(), legacyKey, desiredKey)
-					if _, ok3, err := a.Tasks.GetSessionWorkspace(r.Context(), desiredKey); err == nil && ok3 {
-						key = desiredKey
-						break
-					}
-					// If migration didn't stick, still allow reading/merging the legacy mapping.
-					key = legacyKey
-					break
-				}
-			}
-			if key == desiredKey && strings.TrimSpace(task.SessionID) != "" {
-				all, err := a.Tasks.ListTasksWithOptions(r.Context(), 500, tasks.ListTasksOptions{IncludeDeleted: true})
-				if err == nil {
-					sid := strings.TrimSpace(task.SessionID)
-					for _, t := range all {
-						if strings.TrimSpace(t.SessionID) != sid {
-							continue
-						}
-						legacyKey := tasks.SessionKey(t.ID, "")
-						if strings.TrimSpace(legacyKey) == "" || legacyKey == desiredKey {
-							continue
-						}
-						if _, ok2, err := a.Tasks.GetSessionWorkspace(r.Context(), legacyKey); err == nil && ok2 {
-							_ = a.Tasks.MigrateSessionWorkspaceKey(r.Context(), legacyKey, desiredKey)
-							if _, ok3, err := a.Tasks.GetSessionWorkspace(r.Context(), desiredKey); err == nil && ok3 {
-								key = desiredKey
-							} else {
-								key = legacyKey
-							}
-							break
-						}
-					}
-				}
-			}
-		}
-		if len(parts) == 2 {
-			if r.Method != http.MethodGet {
-				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-				return
-			}
-			ws, ok, err := a.Tasks.GetSessionWorkspace(r.Context(), key)
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-			if !ok {
-				writeJSON(w, map[string]any{"workspace": nil})
-				return
-			}
-			writeJSON(w, map[string]any{"workspace": ws})
-			return
-		}
-
-		if len(parts) < 3 {
-			http.NotFound(w, r)
-			return
-		}
-		if r.Method != http.MethodPost {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-
-		svc := runworkspace.NewService(a.Tasks)
-		switch parts[2] {
-		case "merge":
-			if err := svc.Merge(r.Context(), key); err != nil {
-				var conflict *runworkspace.ConflictError
-				if errors.As(err, &conflict) {
-					writeJSONStatus(w, http.StatusConflict, conflict)
-					return
-				}
-				if strings.Contains(err.Error(), "workspace not found") {
-					http.Error(w, err.Error(), http.StatusNotFound)
-					return
-				}
-				http.Error(w, err.Error(), http.StatusBadRequest)
-				return
-			}
-			writeJSON(w, map[string]any{"ok": true})
-		case "discard":
-			if err := svc.Discard(r.Context(), key); err != nil {
-				if strings.Contains(err.Error(), "workspace not found") {
-					http.Error(w, err.Error(), http.StatusNotFound)
-					return
-				}
-				http.Error(w, err.Error(), http.StatusBadRequest)
-				return
-			}
-			writeJSON(w, map[string]any{"ok": true})
-		default:
-			http.NotFound(w, r)
-		}
 	case "resume":
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -1062,20 +892,6 @@ func (a *API) handleTaskByID(w http.ResponseWriter, r *http.Request) {
 					http.Error(w, "session already has a running task (task_id="+t.ID+" status="+string(t.Status)+")", http.StatusConflict)
 					return
 				}
-			}
-		}
-
-		// Ensure resume uses the same run workspace as the session origin when available.
-		// Claude Code resumes are scoped to the project directory; changing directories
-		// (e.g. new per-run workspaces) can make the session non-resumable.
-		desiredWSKey := tasks.SessionKeyForTask(prev)
-		legacyWSKey := tasks.SessionKey(prev.ID, "")
-		legacySessionKey := tasks.SessionKey("", prev.SessionID)
-		if _, ok, err := a.Tasks.GetSessionWorkspace(r.Context(), desiredWSKey); err == nil && !ok {
-			if _, ok2, err := a.Tasks.GetSessionWorkspace(r.Context(), legacySessionKey); err == nil && ok2 {
-				_ = a.Tasks.MigrateSessionWorkspaceKey(r.Context(), legacySessionKey, desiredWSKey)
-			} else if _, ok2, err := a.Tasks.GetSessionWorkspace(r.Context(), legacyWSKey); err == nil && ok2 {
-				_ = a.Tasks.MigrateSessionWorkspaceKey(r.Context(), legacyWSKey, desiredWSKey)
 			}
 		}
 
@@ -1152,6 +968,11 @@ func (a *API) handleTaskByID(w http.ResponseWriter, r *http.Request) {
 
 		newTask, err := a.Tasks.CreateTask(r.Context(), resumeIn)
 		if err != nil {
+			var busy *tasks.WorkDirBusyError
+			if errors.As(err, &busy) {
+				http.Error(w, err.Error(), http.StatusConflict)
+				return
+			}
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
@@ -1215,66 +1036,6 @@ func (a *API) handleTaskByID(w http.ResponseWriter, r *http.Request) {
 		}
 		if driver != tasks.WorkerClaudeCode {
 			http.Error(w, "rehydrate is only supported for claude-code sessions", http.StatusBadRequest)
-			return
-		}
-
-		key := tasks.SessionKeyForTask(src)
-		ws, ok, err := a.Tasks.GetSessionWorkspace(r.Context(), key)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		if !ok {
-			var fallbacks []string
-			if strings.TrimSpace(src.SessionID) != "" {
-				fallbacks = append(fallbacks, tasks.SessionKey("", src.SessionID))
-			}
-			fallbacks = append(fallbacks, tasks.SessionKey(src.ID, ""))
-			for _, legacyKey := range fallbacks {
-				if strings.TrimSpace(legacyKey) == "" || legacyKey == key {
-					continue
-				}
-				if ws2, ok2, err := a.Tasks.GetSessionWorkspace(r.Context(), legacyKey); err == nil && ok2 {
-					_ = a.Tasks.MigrateSessionWorkspaceKey(r.Context(), legacyKey, key)
-					if migrated, ok3, err := a.Tasks.GetSessionWorkspace(r.Context(), key); err == nil && ok3 {
-						ws = migrated
-						ok = true
-					} else {
-						ws = ws2
-						ok = true
-					}
-					break
-				}
-			}
-		}
-		if !ok && strings.TrimSpace(src.SessionID) != "" {
-			all, err := a.Tasks.ListTasksWithOptions(r.Context(), 500, tasks.ListTasksOptions{IncludeDeleted: true})
-			if err == nil {
-				sid := strings.TrimSpace(src.SessionID)
-				for _, t := range all {
-					if strings.TrimSpace(t.SessionID) != sid {
-						continue
-					}
-					legacyKey := tasks.SessionKey(t.ID, "")
-					if strings.TrimSpace(legacyKey) == "" || legacyKey == key {
-						continue
-					}
-					if ws2, ok2, err := a.Tasks.GetSessionWorkspace(r.Context(), legacyKey); err == nil && ok2 {
-						_ = a.Tasks.MigrateSessionWorkspaceKey(r.Context(), legacyKey, key)
-						if migrated, ok3, err := a.Tasks.GetSessionWorkspace(r.Context(), key); err == nil && ok3 {
-							ws = migrated
-							ok = true
-						} else {
-							ws = ws2
-							ok = true
-						}
-						break
-					}
-				}
-			}
-		}
-		if ok && ws.Status == tasks.WorkspaceStatusActive {
-			http.Error(w, "无法新建会话继续：该会话仍有隔离工作区处于 active。请先在 Workspace 面板执行 Merge（把改动合并回 base_workdir）后再重试。", http.StatusConflict)
 			return
 		}
 
@@ -1354,6 +1115,11 @@ func (a *API) handleTaskByID(w http.ResponseWriter, r *http.Request) {
 
 		newTask, err := a.Tasks.CreateTask(r.Context(), in)
 		if err != nil {
+			var busy *tasks.WorkDirBusyError
+			if errors.As(err, &busy) {
+				http.Error(w, err.Error(), http.StatusConflict)
+				return
+			}
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}

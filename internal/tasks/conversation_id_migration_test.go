@@ -55,22 +55,6 @@ func TestStore_EnsureConversationIDs_MigratesLegacyKeys(t *testing.T) {
 	`, SessionKey("", sessionID), "running", 1, 10, "gate", "sum", "{}", "rep", taskIDLegacy, nowMs); err != nil {
 		t.Fatalf("insert acceptance_states: %v", err)
 	}
-	if _, err := conn.ExecContext(ctx, `
-		INSERT INTO session_workspaces (
-			key, workspace_id, kind,
-			base_workdir, repo_root,
-			run_root, run_workdir,
-			base_branch, work_branch,
-			status, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
-	`, SessionKey("", sessionID), "ws-legacy", string(WorkspaceKindCopy),
-		baseDir, "",
-		filepath.Join(baseDir, ".ccx", "workspaces", "ws-legacy"), filepath.Join(baseDir, ".ccx", "workspaces", "ws-legacy"),
-		"", "",
-		string(WorkspaceStatusActive), nowMs, nowMs,
-	); err != nil {
-		t.Fatalf("insert session_workspaces: %v", err)
-	}
 
 	// Legacy: task-scoped metadata keyed by t:<task_id>, tasks missing conversation_id.
 	const taskIDNoSession = "task-nosession"
@@ -111,11 +95,6 @@ func TestStore_EnsureConversationIDs_MigratesLegacyKeys(t *testing.T) {
 		t.Fatalf("legacy session key=%q, want c:<conversation_id>", legacyKey)
 	}
 
-	// Workspace mapping migrated to conversation key.
-	if _, ok, err := store.GetSessionWorkspace(ctx, legacyKey); err != nil || !ok {
-		t.Fatalf("expected workspace at conversation key; ok=%v err=%v", ok, err)
-	}
-
 	// Acceptance mapping migrated to conversation key.
 	if st, ok, err := store.GetAcceptanceState(ctx, legacyKey); err != nil || !ok {
 		t.Fatalf("expected acceptance at conversation key; ok=%v err=%v", ok, err)
@@ -124,9 +103,6 @@ func TestStore_EnsureConversationIDs_MigratesLegacyKeys(t *testing.T) {
 	}
 
 	// Legacy keys are gone.
-	if _, ok, _ := store.GetSessionWorkspace(ctx, SessionKey("", sessionID)); ok {
-		t.Fatalf("expected legacy workspace key removed")
-	}
 	if _, ok, _ := store.GetAcceptanceState(ctx, SessionKey("", sessionID)); ok {
 		t.Fatalf("expected legacy acceptance key removed")
 	}

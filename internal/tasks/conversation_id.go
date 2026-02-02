@@ -10,7 +10,7 @@ import (
 )
 
 // EnsureConversationIDs backfills conversation_id for legacy tasks and migrates session-scoped state
-// (session_meta, session_workspaces, acceptance_states) to conversation-scoped keys.
+// (session_meta, acceptance_states) to conversation-scoped keys.
 //
 // It is safe to call multiple times.
 func (s *Store) EnsureConversationIDs(ctx context.Context) error {
@@ -68,9 +68,6 @@ func (s *Store) EnsureConversationIDs(ctx context.Context) error {
 		}
 		fromKey := SessionKey("", sid)
 		if err := migrateSessionMetaKeyTx(tx, fromKey, toKey, nowMs); err != nil {
-			return err
-		}
-		if err := migrateSessionWorkspaceKeyTx(tx, fromKey, toKey, nowMs); err != nil {
 			return err
 		}
 		if err := migrateAcceptanceStateKeyTx(tx, fromKey, toKey, nowMs); err != nil {
@@ -145,9 +142,6 @@ func (s *Store) EnsureConversationIDs(ctx context.Context) error {
 		if err := migrateSessionMetaKeyTx(tx, fromSessionKey, toKey, nowMs); err != nil {
 			return err
 		}
-		if err := migrateSessionWorkspaceKeyTx(tx, fromSessionKey, toKey, nowMs); err != nil {
-			return err
-		}
 		if err := migrateAcceptanceStateKeyTx(tx, fromSessionKey, toKey, nowMs); err != nil {
 			return err
 		}
@@ -160,9 +154,6 @@ func (s *Store) EnsureConversationIDs(ctx context.Context) error {
 			}
 			fromTaskKey := SessionKey(id, "")
 			if err := migrateSessionMetaKeyTx(tx, fromTaskKey, toKey, nowMs); err != nil {
-				return err
-			}
-			if err := migrateSessionWorkspaceKeyTx(tx, fromTaskKey, toKey, nowMs); err != nil {
 				return err
 			}
 			if err := migrateAcceptanceStateKeyTx(tx, fromTaskKey, toKey, nowMs); err != nil {
@@ -193,9 +184,6 @@ func (s *Store) EnsureConversationIDs(ctx context.Context) error {
 
 		fromKey := SessionKey(id, "")
 		if err := migrateSessionMetaKeyTx(tx, fromKey, toKey, nowMs); err != nil {
-			return err
-		}
-		if err := migrateSessionWorkspaceKeyTx(tx, fromKey, toKey, nowMs); err != nil {
 			return err
 		}
 		if err := migrateAcceptanceStateKeyTx(tx, fromKey, toKey, nowMs); err != nil {

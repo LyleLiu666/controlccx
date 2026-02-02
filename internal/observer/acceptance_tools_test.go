@@ -23,6 +23,7 @@ func TestTools_acceptancePrepare_CreatesAndAdvancesIterationByRunID(t *testing.T
 	t.Cleanup(func() { _ = conn.Close() })
 
 	store := tasks.NewStore(conn)
+	exitCode := 0
 	first, err := store.CreateTask(ctx, tasks.CreateTaskInput{
 		WorkerType: tasks.WorkerClaudeCode,
 		Mode:       tasks.ModeNew,
@@ -32,6 +33,15 @@ func TestTools_acceptancePrepare_CreatesAndAdvancesIterationByRunID(t *testing.T
 	})
 	if err != nil {
 		t.Fatalf("create first: %v", err)
+	}
+	if err := store.FinishTask(ctx, first.ID, tasks.FinishTaskInput{
+		Status:     tasks.StatusSucceeded,
+		ExitCode:   &exitCode,
+		Error:      "",
+		SessionID:  first.SessionID,
+		FinishedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("finish first: %v", err)
 	}
 	second, err := store.CreateTask(ctx, tasks.CreateTaskInput{
 		WorkerType: tasks.WorkerClaudeCode,
@@ -101,6 +111,7 @@ func TestTools_acceptancePrepare_StopsAtIterationLimit(t *testing.T) {
 	t.Cleanup(func() { _ = conn.Close() })
 
 	store := tasks.NewStore(conn)
+	exitCode := 0
 	first, err := store.CreateTask(ctx, tasks.CreateTaskInput{
 		WorkerType: tasks.WorkerClaudeCode,
 		Mode:       tasks.ModeNew,
@@ -110,6 +121,15 @@ func TestTools_acceptancePrepare_StopsAtIterationLimit(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("create first: %v", err)
+	}
+	if err := store.FinishTask(ctx, first.ID, tasks.FinishTaskInput{
+		Status:     tasks.StatusSucceeded,
+		ExitCode:   &exitCode,
+		Error:      "",
+		SessionID:  first.SessionID,
+		FinishedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("finish first: %v", err)
 	}
 	second, err := store.CreateTask(ctx, tasks.CreateTaskInput{
 		WorkerType: tasks.WorkerClaudeCode,
@@ -173,7 +193,7 @@ func TestTools_acceptanceClassify_UsesDeterministicHeuristics(t *testing.T) {
 		WorkerType: tasks.WorkerClaudeCode,
 		Mode:       tasks.ModeNew,
 		Prompt:     "把这段话翻译成英文",
-		WorkDir:    ".",
+		WorkDir:    t.TempDir(),
 		SessionID:  "sess-1",
 	})
 	if err != nil {
@@ -183,7 +203,7 @@ func TestTools_acceptanceClassify_UsesDeterministicHeuristics(t *testing.T) {
 		WorkerType: tasks.WorkerClaudeCode,
 		Mode:       tasks.ModeNew,
 		Prompt:     "从0开发一个前后端+数据库的可运行项目，并写README和测试",
-		WorkDir:    ".",
+		WorkDir:    t.TempDir(),
 		SessionID:  "sess-2",
 	})
 	if err != nil {

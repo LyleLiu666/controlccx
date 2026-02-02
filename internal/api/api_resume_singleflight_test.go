@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"controlccx/internal/chat"
 	"controlccx/internal/db"
@@ -45,6 +46,17 @@ func TestAPI_ResumeTask_SingleFlightPerSession(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("create prev: %v", err)
+	}
+	now := time.Now().UTC()
+	exitCode := 0
+	if err := taskStore.FinishTask(ctx, prev.ID, tasks.FinishTaskInput{
+		Status:     tasks.StatusSucceeded,
+		ExitCode:   &exitCode,
+		Error:      "",
+		SessionID:  prev.SessionID,
+		FinishedAt: now,
+	}); err != nil {
+		t.Fatalf("finish prev: %v", err)
 	}
 
 	running, err := taskStore.CreateTask(ctx, tasks.CreateTaskInput{

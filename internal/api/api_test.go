@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"controlccx/internal/auth"
 	"controlccx/internal/chat"
@@ -64,11 +65,12 @@ func TestAPI_TasksAndChat(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	t.Run("create task", func(t *testing.T) {
+		baseDir := t.TempDir()
 		body := tasks.CreateTaskInput{
 			WorkerType: tasks.WorkerExec,
 			Mode:       tasks.ModeNew,
 			Prompt:     "echo hello",
-			WorkDir:    ".",
+			WorkDir:    baseDir,
 		}
 		buf, _ := json.Marshal(body)
 		res, err := http.Post(srv.URL+"/api/tasks", "application/json", bytes.NewReader(buf))
@@ -108,6 +110,16 @@ func TestAPI_TasksAndChat(t *testing.T) {
 		}
 
 		_ = taskStore.SetSessionID(ctx, created.ID, "sess-1")
+		exitCode := 0
+		if err := taskStore.FinishTask(ctx, created.ID, tasks.FinishTaskInput{
+			Status:     tasks.StatusSucceeded,
+			ExitCode:   &exitCode,
+			Error:      "",
+			SessionID:  "sess-1",
+			FinishedAt: time.Now().UTC(),
+		}); err != nil {
+			t.Fatalf("finish created: %v", err)
+		}
 		resumeReq := map[string]string{"prompt": "continue"}
 		resumeBuf, _ := json.Marshal(resumeReq)
 		resumeRes, err := http.Post(srv.URL+"/api/tasks/"+created.ID+"/resume", "application/json", bytes.NewReader(resumeBuf))
@@ -157,12 +169,13 @@ func TestAPI_TasksAndChat(t *testing.T) {
 	})
 
 	t.Run("acceptance", func(t *testing.T) {
+		baseDir := t.TempDir()
 		// Create a task so we can reference via session key.
 		task, err := taskStore.CreateTask(ctx, tasks.CreateTaskInput{
 			WorkerType: tasks.WorkerExec,
 			Mode:       tasks.ModeNew,
 			Prompt:     "hi",
-			WorkDir:    ".",
+			WorkDir:    baseDir,
 			SessionID:  "sess-acc-1",
 		})
 		if err != nil {
@@ -191,7 +204,7 @@ func TestAPI_TasksAndChat(t *testing.T) {
 			t.Fatalf("status=%d, want 200; body=%s", res.StatusCode, string(body))
 		}
 		var body struct {
-			OK    bool                  `json:"ok"`
+			OK    bool                   `json:"ok"`
 			State *tasks.AcceptanceState `json:"state"`
 		}
 		if err := json.NewDecoder(res.Body).Decode(&body); err != nil {
