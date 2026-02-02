@@ -3,7 +3,7 @@ import test from "node:test";
 
 import { shouldOfferRehydrateForTask } from "../src/rehydrate.ts";
 
-test("shouldOfferRehydrateForTask gates on manual claude resume missing-session failures", () => {
+test("shouldOfferRehydrateForTask offers rehydrate for manual/unknown claude resume missing-session failures", () => {
   const base = {
     worker_type: "claude-code",
     mode: "resume",
@@ -12,6 +12,7 @@ test("shouldOfferRehydrateForTask gates on manual claude resume missing-session 
   } as any;
 
   assert.equal(shouldOfferRehydrateForTask(base, "manual"), true);
+  assert.equal(shouldOfferRehydrateForTask(base, ""), true);
   assert.equal(shouldOfferRehydrateForTask(base, "autopilot"), false);
   assert.equal(shouldOfferRehydrateForTask({ ...base, status: "succeeded" }, "manual"), false);
   assert.equal(shouldOfferRehydrateForTask({ ...base, mode: "new" }, "manual"), false);
@@ -29,4 +30,5 @@ test("shouldOfferRehydrateForTask also matches warning field", () => {
   } as any;
 
   assert.equal(shouldOfferRehydrateForTask(base, "manual"), true);
+  assert.equal(shouldOfferRehydrateForTask(base, ""), true);
 });
