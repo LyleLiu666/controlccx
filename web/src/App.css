@@ -677,7 +677,7 @@ h2 {
   box-shadow: none;
 }
 
-.workdirRow {
+:deep(.workdirRow) {
   display: grid;
   grid-template-columns: 1fr auto;
   gap: 10px;
@@ -726,22 +726,22 @@ h2 {
   font-weight: 800;
 }
 
-.newRunBody {
+:deep(.newRunBody) {
   padding: 0;
   overflow: auto;
 }
 
-.modal.newRunModal {
+:deep(.modal.newRunModal) {
   height: min(680px, 92vh);
 }
 
-.newRunForm {
+:deep(.newRunForm) {
   padding: 20px;
   margin: 0;
   min-height: 0;
 }
 
-.newRunAdvanced {
+:deep(.newRunAdvanced) {
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
   background: var(--bg-subtle);
@@ -750,28 +750,28 @@ h2 {
   gap: 10px;
 }
 
-.newRunAdvanced summary {
+:deep(.newRunAdvanced summary) {
   cursor: pointer;
   font-size: 13px;
   font-weight: 800;
   user-select: none;
 }
 
-.newRunAdvancedSummaryHint {
+:deep(.newRunAdvancedSummaryHint) {
   margin-left: 10px;
   font-size: 12px;
   font-weight: 700;
   color: var(--text-sub);
 }
 
-.newRunAdvancedBody {
+:deep(.newRunAdvancedBody) {
   border-top: 1px dashed rgba(148, 163, 184, 0.35);
   padding-top: 12px;
   display: grid;
   gap: 12px;
 }
 
-.newRunSafety {
+:deep(.newRunSafety) {
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
   background: var(--bg-subtle);
@@ -780,7 +780,7 @@ h2 {
   gap: 10px;
 }
 
-.newRunSafetyTitle {
+:deep(.newRunSafetyTitle) {
   font-size: 12px;
   font-weight: 800;
   color: var(--text-sub);
@@ -788,21 +788,21 @@ h2 {
   letter-spacing: 0.05em;
 }
 
-.newRunSafetyGrid {
+:deep(.newRunSafetyGrid) {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 12px;
   align-items: end;
 }
 
-.newRunSafetyAutoRow {
+:deep(.newRunSafetyAutoRow) {
   display: inline-flex;
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
 }
 
-.newRunSafetyUnlock {
+:deep(.newRunSafetyUnlock) {
   display: inline-flex;
   align-items: center;
   gap: 10px;
@@ -812,31 +812,31 @@ h2 {
   flex-wrap: wrap;
 }
 
-.newRunSafetyUnlock input {
+:deep(.newRunSafetyUnlock input) {
   width: 18px;
   height: 18px;
 }
 
-.newRunSafetyAdvanced {
+:deep(.newRunSafetyAdvanced) {
   border-top: 1px dashed rgba(148, 163, 184, 0.35);
   padding-top: 10px;
   display: grid;
   gap: 10px;
 }
 
-.newRunSafetyAdvanced summary {
+:deep(.newRunSafetyAdvanced summary) {
   cursor: pointer;
   font-size: 13px;
   font-weight: 800;
   user-select: none;
 }
 
-.newRunSafetyAdvancedGrid {
+:deep(.newRunSafetyAdvancedGrid) {
   display: grid;
   gap: 8px;
 }
 
-.newRunSafetyAdvancedGrid label {
+:deep(.newRunSafetyAdvancedGrid label) {
   display: inline-flex;
   align-items: center;
   gap: 10px;
@@ -845,26 +845,26 @@ h2 {
   user-select: none;
 }
 
-.newRunSafetyAdvancedGrid input {
+:deep(.newRunSafetyAdvancedGrid input) {
   width: 18px;
   height: 18px;
 }
 
-.newRunSafetyExtra {
+:deep(.newRunSafetyExtra) {
   border-top: 1px dashed rgba(148, 163, 184, 0.35);
   padding-top: 10px;
   display: grid;
   gap: 8px;
 }
 
-.newRunSafetyWarn {
+:deep(.newRunSafetyWarn) {
   border-top: 1px solid rgba(148, 163, 184, 0.35);
   padding-top: 10px;
   display: grid;
   gap: 8px;
 }
 
-.newRunSafetyOptIn {
+:deep(.newRunSafetyOptIn) {
   display: inline-flex;
   align-items: center;
   gap: 10px;
@@ -873,7 +873,7 @@ h2 {
   user-select: none;
 }
 
-.newRunSafetyOptIn input {
+:deep(.newRunSafetyOptIn input) {
   width: 18px;
   height: 18px;
 }
@@ -4381,11 +4381,11 @@ h2 {
 }
 
 @media (max-width: 640px) {
-  .newRunOverlay {
+  :deep(.newRunOverlay) {
     padding: 0;
   }
 
-  .modal.newRunModal {
+  :deep(.modal.newRunModal) {
     width: 100vw;
     height: 100dvh;
     border-radius: 0;
@@ -4393,33 +4393,33 @@ h2 {
     box-shadow: none;
   }
 
-  .modal.newRunModal .modalHeader {
+  :deep(.modal.newRunModal .modalHeader) {
     padding-top: calc(16px + env(safe-area-inset-top));
   }
 
-  .modal.newRunModal .modalFooter {
+  :deep(.modal.newRunModal .modalFooter) {
     padding-bottom: calc(14px + env(safe-area-inset-bottom));
   }
 
-  .newRunForm {
+  :deep(.newRunForm) {
     padding: 16px;
   }
 }
 
 @media (max-width: 520px) {
-  .modal.newRunModal .workdirRow {
+  :deep(.modal.newRunModal .workdirRow) {
     grid-template-columns: 1fr;
   }
 
-  .modal.newRunModal .workdirRow button {
+  :deep(.modal.newRunModal .workdirRow button) {
     width: 100%;
   }
 
-  .modal.newRunModal .modalFooter {
+  :deep(.modal.newRunModal .modalFooter) {
     justify-content: space-between;
   }
 
-  .modal.newRunModal .modalFooter button {
+  :deep(.modal.newRunModal .modalFooter button) {
     flex: 1 1 auto;
   }
 }
