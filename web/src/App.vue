@@ -2298,11 +2298,15 @@ async function confirmWorkspaceMergePrompt() {
 
 async function confirmRehydratePrompt() {
   const runID = rehydratePromptRunID.value.trim();
-  if (!runID || selectedTaskId.value !== runID) {
+  if (!runID) {
     closeRehydratePrompt();
     return;
   }
   if (rehydratePromptBusy.value) return;
+
+  if (selectedTaskId.value !== runID) {
+    selectedTaskId.value = runID;
+  }
 
   rehydratePromptBusy.value = true;
   rehydratePromptError.value = "";
@@ -2312,11 +2316,32 @@ async function confirmRehydratePrompt() {
     } catch {
       // ignore workspace fetch errors (server will re-check on rehydrate)
     }
-    const ws = runWorkspace.value;
+    let ws = runWorkspace.value;
     rehydratePromptWorkspace.value = ws;
     if (ws && ws.status === "active") {
-      rehydratePromptError.value = "请先在 Workspace 面板点击「Merge」把隔离工作区的改动合并回 base_workdir，然后再继续。";
-      return;
+      try {
+        await mergeRunWorkspace();
+      } catch (e: any) {
+        rehydratePromptError.value = e?.message ?? String(e);
+        return;
+      }
+      if (runWorkspaceConflict.value) {
+        rehydratePromptError.value = conflictSummary(runWorkspaceConflict.value);
+        return;
+      }
+      // Refresh after merge attempt.
+      try {
+        await refreshRunWorkspace();
+      } catch {
+        // ignore
+      }
+      ws = runWorkspace.value;
+      rehydratePromptWorkspace.value = ws;
+      if (ws && ws.status === "active") {
+        rehydratePromptError.value =
+          "检测到隔离工作区仍处于 active。请先解决合并冲突或在 Workspace 面板完成 Merge，然后再继续。";
+        return;
+      }
     }
 
     const nt = await rehydrateTaskWithOptions(runID, { prompt: "continue" });
@@ -2566,6 +2591,9 @@ async function maybeTriggerDeliveryForeman(prev: Task | undefined, next: Task) {
   if (deliveryForemanSeenRuns.value.has(runID)) return;
   const prevStatus = prev?.status ?? "";
   const nextStatus = next.status ?? "";
+  // Auto Delivery Foreman is a "delivery check" for completed runs.
+  // Avoid auto-triggering on failed/blocked runs to prevent noisy auto-resume loops.
+  if (nextStatus !== "succeeded") return;
   // Avoid noisy auto loops for "blocked" + resume-missing-session failures.
   if (shouldSkipAutoDeliveryForemanForTask(next)) return;
 
@@ -5445,8 +5473,8 @@ watch(
                 Claude Code 找不到该 session（No conversation found）。你可以新建一个会话，把历史上下文带过去继续。
               </div>
               <div v-if="rehydratePromptWorkspace?.status === 'active'" class="modalError">
-                检测到该会话仍有隔离工作区处于 <span class="mono">active</span>。为避免丢改动，请先在
-                Workspace 面板点击「Merge」把改动合并回 <span class="mono">base_workdir</span>，然后再继续。
+                检测到该会话仍有隔离工作区处于 <span class="mono">active</span>。为避免丢改动，点击右下角「合并并继续」将先
+                把改动合并回 <span class="mono">base_workdir</span>，再新建会话继续；若有冲突会提示你处理。
               </div>
               <div
                 v-if="rehydratePromptWorkspace"
@@ -5469,9 +5497,15 @@ watch(
                 type="button"
                 class="primary"
                 @click="confirmRehydratePrompt"
-                :disabled="rehydratePromptBusy || rehydratePromptWorkspace?.status === 'active'"
+                :disabled="rehydratePromptBusy"
               >
-                {{ rehydratePromptBusy ? "创建中..." : "新建会话继续（带上下文）" }}
+                {{
+                  rehydratePromptBusy
+                    ? "处理中..."
+                    : rehydratePromptWorkspace?.status === "active"
+                      ? "合并并继续（带上下文）"
+                      : "新建会话继续（带上下文）"
+                }}
               </button>
             </div>
           </div>
