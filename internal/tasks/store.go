@@ -227,6 +227,96 @@ func (s *Store) ListTasksWithOptions(ctx context.Context, limit int, opts ListTa
 	return out, nil
 }
 
+func (s *Store) ConversationIDForSessionID(ctx context.Context, sessionID string) (string, bool, error) {
+	if s == nil || s.db == nil {
+		return "", false, errors.New("tasks: store not initialized")
+	}
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return "", false, nil
+	}
+
+	var cid string
+	err := s.db.QueryRowContext(ctx, `
+		SELECT conversation_id
+		FROM tasks
+		WHERE session_id = ? AND conversation_id IS NOT NULL AND conversation_id != ''
+		ORDER BY created_at DESC
+		LIMIT 1;
+	`, sessionID).Scan(&cid)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", false, nil
+		}
+		return "", false, fmt.Errorf("tasks: resolve conversation_id for session_id: %w", err)
+	}
+	cid = strings.TrimSpace(cid)
+	if cid == "" {
+		return "", false, nil
+	}
+	return cid, true, nil
+}
+
+func (s *Store) ListTasksByConversationID(ctx context.Context, conversationID string, limit int, opts ListTasksOptions) ([]Task, error) {
+	if s == nil || s.db == nil {
+		return nil, errors.New("tasks: store not initialized")
+	}
+	conversationID = strings.TrimSpace(conversationID)
+	if conversationID == "" {
+		return nil, errors.New("tasks: conversation_id is required")
+	}
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+	includeDeleted := 0
+	if opts.IncludeDeleted {
+		includeDeleted = 1
+	}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT
+			t.id, t.conversation_id, t.worker_type, t.mode, t.status,
+			COALESCE(o.unsafe_automation, 0),
+			COALESCE(o.safety_preset, ''), COALESCE(o.task_intent, ''),
+			COALESCE(o.codex_sandbox, ''), COALESCE(o.codex_approval_policy, ''), COALESCE(o.codex_search, 0),
+			COALESCE(o.claude_permission_mode, ''), COALESCE(o.claude_sandbox, 0), COALESCE(o.claude_webfetch_domains_json, ''),
+			t.prompt, t.workdir, t.session_id, COALESCE(sm.title, ''), sm.deleted_at,
+			t.warning, t.error, t.exit_code,
+			t.stderr_count, t.keyword_count, t.score,
+			t.created_at, t.updated_at, t.started_at, t.finished_at
+		FROM tasks t
+		LEFT JOIN task_run_options o ON o.task_id = t.id
+		LEFT JOIN session_meta sm ON sm.key = (
+			CASE
+				WHEN t.conversation_id IS NOT NULL AND t.conversation_id != '' THEN 'c:' || t.conversation_id
+				WHEN t.session_id IS NOT NULL AND t.session_id != '' THEN 's:' || t.session_id
+				ELSE 't:' || t.id
+			END
+		)
+		WHERE t.conversation_id = ?
+			AND (? = 1 OR sm.deleted_at IS NULL)
+		ORDER BY t.created_at DESC
+		LIMIT ?;
+	`, conversationID, includeDeleted, limit)
+	if err != nil {
+		return nil, fmt.Errorf("tasks: list by conversation_id: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var out []Task
+	for rows.Next() {
+		task, err := scanTask(rows)
+		if err != nil {
+			return nil, err
+		}
+		PopulateHints(&task)
+		out = append(out, task)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("tasks: list by conversation_id rows: %w", err)
+	}
+	return out, nil
+}
+
 func (s *Store) MarkInterrupted(ctx context.Context) (int64, error) {
 	now := toMillis(s.now().UTC())
 	res, err := s.db.ExecContext(ctx, `

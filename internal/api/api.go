@@ -874,7 +874,7 @@ func (a *API) handleTaskByID(w http.ResponseWriter, r *http.Request) {
 		if prompt == "" {
 			prompt = "continue"
 		}
-		ctxPrompt, err := buildRehydratePrompt(r.Context(), a.Tasks, strings.TrimSpace(src.SessionID), prompt)
+		ctxPrompt, err := buildRehydratePrompt(r.Context(), a.Tasks, strings.TrimSpace(src.ConversationID), prompt)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -969,13 +969,13 @@ func (a *API) handleTaskByID(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func buildRehydratePrompt(ctx context.Context, store *tasks.Store, sessionID string, nextPrompt string) (string, error) {
+func buildRehydratePrompt(ctx context.Context, store *tasks.Store, conversationID string, nextPrompt string) (string, error) {
 	if store == nil {
 		return "", errors.New("tasks store not configured")
 	}
-	sessionID = strings.TrimSpace(sessionID)
-	if sessionID == "" {
-		return "", errors.New("rehydrate: session_id is required")
+	conversationID = strings.TrimSpace(conversationID)
+	if conversationID == "" {
+		return "", errors.New("rehydrate: conversation_id is required")
 	}
 	nextPrompt = strings.TrimSpace(nextPrompt)
 	if nextPrompt == "" {
@@ -989,7 +989,7 @@ func buildRehydratePrompt(ctx context.Context, store *tasks.Store, sessionID str
 
 	var runs []tasks.Task
 	for _, t := range all {
-		if strings.TrimSpace(t.SessionID) != sessionID {
+		if strings.TrimSpace(t.ConversationID) != conversationID {
 			continue
 		}
 		runs = append(runs, t)

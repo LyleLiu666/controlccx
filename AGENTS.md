@@ -16,3 +16,5 @@ Use `@/openspec/AGENTS.md` to learn:
 Keep this managed block so 'openspec update' can refresh the instructions.
 
 <!-- OPENSPEC:END -->
+
+额外的忠告：如果遇到决策问题，请先回顾本项目的【愿景】和【路线图】

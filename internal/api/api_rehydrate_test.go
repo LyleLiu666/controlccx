@@ -151,12 +151,26 @@ func TestAPI_Rehydrate_CreatesNewRunWithExtractedContext(t *testing.T) {
 	}
 	_, _ = taskStore.AppendLog(ctx, second.ID, tasks.LogAssistant, "done B")
 
+	// Simulate a rehydrated session with a new provider session_id but the same conversation.
+	third, err := taskStore.CreateTask(ctx, tasks.CreateTaskInput{
+		WorkerType:      tasks.WorkerClaudeCode,
+		Mode:            tasks.ModeNew,
+		ConversationID:  first.ConversationID,
+		Prompt:          "rehydrate: continue",
+		WorkDir:         baseDir,
+		SessionID:       "sess-2",
+	})
+	if err != nil {
+		t.Fatalf("create third: %v", err)
+	}
+	_, _ = taskStore.AppendLog(ctx, third.ID, tasks.LogAssistant, "done C")
+
 	srv := httptest.NewServer(apiSvc.Handler())
 	t.Cleanup(srv.Close)
 
 	payload := map[string]any{"prompt": "continue"}
 	buf, _ := json.Marshal(payload)
-	res, err := http.Post(srv.URL+"/api/tasks/"+second.ID+"/rehydrate", "application/json", bytes.NewReader(buf))
+	res, err := http.Post(srv.URL+"/api/tasks/"+third.ID+"/rehydrate", "application/json", bytes.NewReader(buf))
 	if err != nil {
 		t.Fatalf("post rehydrate: %v", err)
 	}
@@ -184,6 +198,9 @@ func TestAPI_Rehydrate_CreatesNewRunWithExtractedContext(t *testing.T) {
 	}
 	if !strings.Contains(created.Prompt, "done B") {
 		t.Fatalf("prompt missing second run context: %q", created.Prompt)
+	}
+	if !strings.Contains(created.Prompt, "done C") {
+		t.Fatalf("prompt missing third run context: %q", created.Prompt)
 	}
 
 	logs, err := taskStore.ListLogs(ctx, created.ID, 0, 200)
