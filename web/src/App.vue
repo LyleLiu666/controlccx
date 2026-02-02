@@ -66,6 +66,7 @@ import {
   isHighRiskPreset,
   normalizeSafetyPreset,
   normalizeTaskIntent,
+  recommendSafetyPreset,
   safetyPresetsForDriver,
 } from "./runSafety";
 import SkillsPanel from "./components/SkillsPanel.vue";
