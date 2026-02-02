@@ -989,7 +989,7 @@ async function replaySelectedRun() {
   } catch (e: any) {
     const msg = e?.message ?? String(e);
     if (attentionAutopilotIsNoConversationFound(msg)) {
-      stopAttentionAutopilotForSession(sessionKeyForTask(s.latest));
+      stopAttentionAutopilotForSession(sessionKeyForTask(t));
       errorBanner.value =
         "Resume 失败：Claude 找不到该 session（No conversation found）。建议：直接 New Run 重新开始；或检查 Claude Code 会话是否被清理/禁用持久化。原始错误：" +
         msg;
@@ -2598,7 +2598,8 @@ async function onCancelTask() {
   } catch (e: any) {
     const msg = e?.message ?? String(e);
     if (attentionAutopilotIsNoConversationFound(msg)) {
-      stopAttentionAutopilotForSession(sessionKeyForTask(sess.latest));
+      const t = selectedTask.value;
+      if (t) stopAttentionAutopilotForSession(sessionKeyForTask(t));
       errorBanner.value =
         "Resume 失败：Claude 找不到该 session（No conversation found）。建议：直接 New Run 重新开始；或检查 Claude Code 会话是否被清理/禁用持久化。原始错误：" +
         msg;
