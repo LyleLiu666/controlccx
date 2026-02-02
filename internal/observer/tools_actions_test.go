@@ -180,6 +180,7 @@ func TestTools_acceptanceUpdate_UpsertsAndMerges(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create task: %v", err)
 	}
+	key := tasks.SessionKeyForTask(task)
 
 	svc := &Service{Store: store}
 	tools := svc.agentTools()
@@ -197,7 +198,7 @@ func TestTools_acceptanceUpdate_UpsertsAndMerges(t *testing.T) {
 		t.Fatalf("acceptance_update: %v", err)
 	}
 
-	st, ok, err := store.GetAcceptanceState(ctx, "s:sess-1")
+	st, ok, err := store.GetAcceptanceState(ctx, key)
 	if err != nil {
 		t.Fatalf("get acceptance: %v", err)
 	}
@@ -210,13 +211,13 @@ func TestTools_acceptanceUpdate_UpsertsAndMerges(t *testing.T) {
 
 	// Partial update should merge (keep iteration/gate).
 	_, err = tools["acceptance_update"].Run(ctx, map[string]any{
-		"key":     "s:sess-1",
+		"key":     key,
 		"summary": "still running",
 	})
 	if err != nil {
 		t.Fatalf("acceptance_update partial: %v", err)
 	}
-	st2, ok, err := store.GetAcceptanceState(ctx, "s:sess-1")
+	st2, ok, err := store.GetAcceptanceState(ctx, key)
 	if err != nil {
 		t.Fatalf("get acceptance2: %v", err)
 	}
@@ -227,7 +228,7 @@ func TestTools_acceptanceUpdate_UpsertsAndMerges(t *testing.T) {
 		t.Fatalf("unexpected merged state=%+v", st2)
 	}
 
-	res, err := tools["acceptance_get"].Run(ctx, map[string]any{"key": "s:sess-1"})
+	res, err := tools["acceptance_get"].Run(ctx, map[string]any{"key": key})
 	if err != nil {
 		t.Fatalf("acceptance_get: %v", err)
 	}

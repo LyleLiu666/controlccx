@@ -442,7 +442,7 @@ func (s *Service) agentTools() map[string]Tool {
 				if err != nil {
 					return nil, err
 				}
-				key := tasks.SessionKey(t.ID, t.SessionID)
+				key := tasks.SessionKeyForTask(t)
 
 				maxIter := intArg(args, "max_iterations", 10, 1, 100)
 
@@ -648,7 +648,7 @@ func (s *Service) agentTools() map[string]Tool {
 		},
 		"acceptance_get": ToolFunc{
 			ToolName:        "acceptance_get",
-			ToolDescription: "获取某个 session 的验收状态（Acceptance Gates）。参数：{key?: string, task_id?: string}。优先使用 key（形如 s:<session_id> / t:<task_id>）。",
+			ToolDescription: "获取某个会话（conversation/session）的验收状态（Acceptance Gates）。参数：{key?: string, task_id?: string}。优先使用 key（形如 c:<conversation_id> / s:<session_id> / t:<task_id>）。",
 			Fn: func(ctx context.Context, args map[string]any) (any, error) {
 				if s.Store == nil {
 					return nil, errors.New("tasks store not configured")
@@ -668,7 +668,7 @@ func (s *Service) agentTools() map[string]Tool {
 						if err != nil {
 							return nil, err
 						}
-						key = tasks.SessionKey(t.ID, t.SessionID)
+						key = tasks.SessionKeyForTask(t)
 					}
 				}
 				if key == "" {
@@ -707,7 +707,7 @@ func (s *Service) agentTools() map[string]Tool {
 					if err != nil {
 						return nil, err
 					}
-					key = tasks.SessionKey(t.ID, t.SessionID)
+					key = tasks.SessionKeyForTask(t)
 					if runID == "" {
 						runID = t.ID
 					}

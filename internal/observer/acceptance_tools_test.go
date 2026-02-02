@@ -123,8 +123,9 @@ func TestTools_acceptancePrepare_StopsAtIterationLimit(t *testing.T) {
 	}
 
 	// Seed acceptance state as already at max.
+	key := tasks.SessionKeyForTask(first)
 	if _, err := store.UpsertAcceptanceState(ctx, tasks.UpsertAcceptanceStateInput{
-		Key:           "s:sess-1",
+		Key:           key,
 		Status:        "running",
 		Iteration:     10,
 		MaxIterations: 10,

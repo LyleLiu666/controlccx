@@ -19,6 +19,21 @@ func SessionKey(taskID, sessionID string) string {
 	return "t:" + strings.TrimSpace(taskID)
 }
 
+func ConversationKey(conversationID string) string {
+	cid := strings.TrimSpace(conversationID)
+	if cid == "" {
+		return ""
+	}
+	return "c:" + cid
+}
+
+func SessionKeyForTask(t Task) string {
+	if cid := strings.TrimSpace(t.ConversationID); cid != "" {
+		return ConversationKey(cid)
+	}
+	return SessionKey(t.ID, t.SessionID)
+}
+
 func (s *Store) RenameSession(ctx context.Context, key, title string) error {
 	if s.db == nil {
 		return fmt.Errorf("tasks: store not initialized")
@@ -72,7 +87,7 @@ func migrateSessionMetaKeyTx(tx *sql.Tx, fromKey, toKey string, nowMs int64) err
 	}
 
 	var (
-		fromTitle string
+		fromTitle   string
 		fromDeleted sql.NullInt64
 	)
 	err := tx.QueryRow(`SELECT title, deleted_at FROM session_meta WHERE key = ?;`, fromKey).
@@ -85,7 +100,7 @@ func migrateSessionMetaKeyTx(tx *sql.Tx, fromKey, toKey string, nowMs int64) err
 	}
 
 	var (
-		toTitle string
+		toTitle   string
 		toDeleted sql.NullInt64
 	)
 	err = tx.QueryRow(`SELECT title, deleted_at FROM session_meta WHERE key = ?;`, toKey).
@@ -121,4 +136,3 @@ func migrateSessionMetaKeyTx(tx *sql.Tx, fromKey, toKey string, nowMs int64) err
 	}
 	return nil
 }
-

@@ -34,6 +34,7 @@ func Migrate(ctx context.Context, conn *sql.DB) error {
 				prompt TEXT NOT NULL,
 				workdir TEXT NOT NULL,
 				session_id TEXT NOT NULL DEFAULT '',
+				conversation_id TEXT NOT NULL DEFAULT '',
 				created_at INTEGER NOT NULL,
 				updated_at INTEGER NOT NULL,
 				started_at INTEGER,
@@ -132,9 +133,59 @@ func Migrate(ctx context.Context, conn *sql.DB) error {
 	if err := ensureTaskRunOptionsColumns(ctx, tx); err != nil {
 		return err
 	}
+	if err := ensureTasksColumns(ctx, tx); err != nil {
+		return err
+	}
 
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("db: migrate commit: %w", err)
+	}
+	return nil
+}
+
+func ensureTasksColumns(ctx context.Context, tx *sql.Tx) error {
+	if tx == nil {
+		return fmt.Errorf("db: ensure tasks columns: tx is nil")
+	}
+
+	rows, err := tx.QueryContext(ctx, "PRAGMA table_info(tasks);")
+	if err != nil {
+		return fmt.Errorf("db: ensure tasks columns: table_info: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	existing := map[string]bool{}
+	for rows.Next() {
+		var (
+			cid     int
+			name    string
+			typ     string
+			notnull int
+			dflt    any
+			pk      int
+		)
+		if err := rows.Scan(&cid, &name, &typ, &notnull, &dflt, &pk); err != nil {
+			return fmt.Errorf("db: ensure tasks columns: scan: %w", err)
+		}
+		existing[name] = true
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("db: ensure tasks columns: rows: %w", err)
+	}
+
+	type col struct {
+		Name string
+		Def  string
+	}
+	for _, c := range []col{
+		{Name: "conversation_id", Def: "conversation_id TEXT NOT NULL DEFAULT ''"},
+	} {
+		if existing[c.Name] {
+			continue
+		}
+		if _, err := tx.ExecContext(ctx, "ALTER TABLE tasks ADD COLUMN "+c.Def+";"); err != nil {
+			return fmt.Errorf("db: ensure tasks columns: add %s: %w", c.Name, err)
+		}
 	}
 	return nil
 }

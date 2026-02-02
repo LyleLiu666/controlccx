@@ -92,6 +92,12 @@ const chatInputEl = ref<HTMLTextAreaElement | null>(null);
 const chatMsgsEl = ref<HTMLDivElement | null>(null);
 const chatIsComposing = ref(false);
 
+function shortSessionLabel(s: SessionGroup): string {
+  const key = String(s?.key ?? "").trim();
+  if (key.startsWith("c:")) return key.slice(2, 10);
+  return String(s?.session_id || s?.latest?.id || "").slice(0, 8);
+}
+
 function shouldAutoScrollChat(el: HTMLElement): boolean {
   const threshold = 90;
   const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
@@ -305,7 +311,7 @@ function onMarkdownClick(e: MouseEvent) {
             <div v-for="s in needsAttentionSessions" :key="s.key" class="secRow">
               <button type="button" class="secRowMain" @click="onSelectAttentionSession(s)">
                 <div class="rowTop">
-                  <span class="mono">{{ (s.session_id || s.latest.id).slice(0, 8) }}</span>
+                  <span class="mono">{{ shortSessionLabel(s) }}</span>
                   <span class="pill" :class="s.status">{{ s.status }}</span>
                 </div>
                 <div class="rowMid">

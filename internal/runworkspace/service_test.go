@@ -177,26 +177,19 @@ func TestService_Resume_ReusesSessionWorkspaceAfterSessionIDSet(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ensure: %v", err)
 	}
-	if ws1.Key != tasks.SessionKey(first.ID, "") {
-		t.Fatalf("ws1.key=%q, want %q", ws1.Key, tasks.SessionKey(first.ID, ""))
+	wantKey := tasks.SessionKeyForTask(first)
+	if ws1.Key != wantKey {
+		t.Fatalf("ws1.key=%q, want %q", ws1.Key, wantKey)
 	}
 
 	if err := store.SetSessionID(ctx, first.ID, "sess-1"); err != nil {
 		t.Fatalf("set session id: %v", err)
 	}
 
-	if _, ok, err := store.GetSessionWorkspace(ctx, tasks.SessionKey(first.ID, "")); err != nil || ok {
-		t.Fatalf("legacy workspace key should be migrated; ok=%v err=%v", ok, err)
-	}
-	wsMigrated, ok, err := store.GetSessionWorkspace(ctx, tasks.SessionKey(first.ID, "sess-1"))
-	if err != nil {
-		t.Fatalf("get migrated workspace: %v", err)
-	}
-	if !ok {
-		t.Fatalf("expected migrated workspace")
-	}
-	if wsMigrated.WorkspaceID != ws1.WorkspaceID {
-		t.Fatalf("workspace_id=%q, want %q", wsMigrated.WorkspaceID, ws1.WorkspaceID)
+	if ws2, ok, err := store.GetSessionWorkspace(ctx, wantKey); err != nil || !ok {
+		t.Fatalf("expected workspace key stable; ok=%v err=%v", ok, err)
+	} else if ws2.WorkspaceID != ws1.WorkspaceID {
+		t.Fatalf("workspace_id=%q, want %q", ws2.WorkspaceID, ws1.WorkspaceID)
 	}
 
 	resume, err := store.CreateTask(ctx, tasks.CreateTaskInput{
@@ -208,6 +201,9 @@ func TestService_Resume_ReusesSessionWorkspaceAfterSessionIDSet(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("create resume task: %v", err)
+	}
+	if strings.TrimSpace(resume.ConversationID) != strings.TrimSpace(first.ConversationID) {
+		t.Fatalf("resume conversation_id=%q, want %q", resume.ConversationID, first.ConversationID)
 	}
 	ws2, err := svc.EnsureForTask(ctx, resume)
 	if err != nil {
@@ -221,7 +217,7 @@ func TestService_Resume_ReusesSessionWorkspaceAfterSessionIDSet(t *testing.T) {
 	}
 }
 
-func TestService_Resume_RecoversLegacyWorkspaceKeyWhenSessionKeyMissing(t *testing.T) {
+func TestService_Resume_RecoversLegacySessionWorkspaceKey(t *testing.T) {
 	ctx := context.Background()
 	dbPath := filepath.Join(t.TempDir(), "controlccx.db")
 
@@ -253,20 +249,17 @@ func TestService_Resume_RecoversLegacyWorkspaceKeyWhenSessionKeyMissing(t *testi
 	if err != nil {
 		t.Fatalf("ensure: %v", err)
 	}
-	if ws1.Key != tasks.SessionKey(first.ID, "") {
-		t.Fatalf("ws1.key=%q, want %q", ws1.Key, tasks.SessionKey(first.ID, ""))
+
+	const sid = "sess-legacy"
+	if err := store.SetSessionID(ctx, first.ID, sid); err != nil {
+		t.Fatalf("set session id: %v", err)
 	}
 
-	// Simulate legacy behavior: session_id is populated but session_workspaces key was not migrated.
-	const sid = "sess-legacy"
-	if _, err := conn.ExecContext(ctx, `UPDATE tasks SET session_id = ? WHERE id = ?;`, sid, first.ID); err != nil {
-		t.Fatalf("force set session_id: %v", err)
-	}
-	if _, ok, err := store.GetSessionWorkspace(ctx, tasks.SessionKey(first.ID, sid)); err != nil || ok {
-		t.Fatalf("expected no session-key workspace mapping yet; ok=%v err=%v", ok, err)
-	}
-	if _, ok, err := store.GetSessionWorkspace(ctx, tasks.SessionKey(first.ID, "")); err != nil || !ok {
-		t.Fatalf("expected legacy workspace mapping to exist; ok=%v err=%v", ok, err)
+	// Simulate legacy DB: workspace stored under s:<session_id> rather than conversation key.
+	desiredKey := tasks.SessionKeyForTask(first)
+	legacySessionKey := tasks.SessionKey("", sid)
+	if _, err := conn.ExecContext(ctx, `UPDATE session_workspaces SET key = ? WHERE key = ?;`, legacySessionKey, desiredKey); err != nil {
+		t.Fatalf("force legacy workspace key: %v", err)
 	}
 
 	resume, err := store.CreateTask(ctx, tasks.CreateTaskInput{
@@ -289,15 +282,15 @@ func TestService_Resume_RecoversLegacyWorkspaceKeyWhenSessionKeyMissing(t *testi
 	if ws2.RunWorkDir != ws1.RunWorkDir {
 		t.Fatalf("resume run_workdir=%q, want %q", ws2.RunWorkDir, ws1.RunWorkDir)
 	}
-	if ws2.Key != tasks.SessionKey(resume.ID, sid) {
-		t.Fatalf("resume key=%q, want %q", ws2.Key, tasks.SessionKey(resume.ID, sid))
+	if ws2.Key != desiredKey {
+		t.Fatalf("resume key=%q, want %q", ws2.Key, desiredKey)
 	}
 
-	// Legacy key should be migrated to the session key.
-	if _, ok, err := store.GetSessionWorkspace(ctx, tasks.SessionKey(first.ID, "")); err != nil || ok {
-		t.Fatalf("legacy workspace key should be migrated; ok=%v err=%v", ok, err)
+	// Legacy key should be migrated back to the conversation key.
+	if _, ok, err := store.GetSessionWorkspace(ctx, legacySessionKey); err != nil || ok {
+		t.Fatalf("legacy session workspace key should be migrated; ok=%v err=%v", ok, err)
 	}
-	if _, ok, err := store.GetSessionWorkspace(ctx, tasks.SessionKey(resume.ID, sid)); err != nil || !ok {
-		t.Fatalf("expected session-key workspace mapping after recovery; ok=%v err=%v", ok, err)
+	if _, ok, err := store.GetSessionWorkspace(ctx, desiredKey); err != nil || !ok {
+		t.Fatalf("expected conversation-key workspace mapping after recovery; ok=%v err=%v", ok, err)
 	}
 }

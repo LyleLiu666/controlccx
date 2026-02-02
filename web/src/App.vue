@@ -1551,6 +1551,8 @@ type SessionGroup = {
 };
 
 function sessionKeyForTask(t: Task): string {
+  const cid = t.conversation_id?.trim();
+  if (cid) return `c:${cid}`;
   const sid = t.session_id?.trim();
   if (sid) return `s:${sid}`;
   return `t:${t.id}`;
@@ -1679,6 +1681,8 @@ const sessionDeleteError = ref("");
 const sessionDeleteSaving = ref(false);
 
 function sessionShortID(s: SessionGroup): string {
+  const key = (s.key ?? "").trim();
+  if (key.startsWith("c:")) return key.slice(2, 10);
   return (s.session_id || s.latest.id).slice(0, 8);
 }
 
@@ -3683,11 +3687,13 @@ const filteredSessions = computed(() => {
       return false;
     if (!needle) return true;
 
+    const cid = (s.key ?? "").toLowerCase();
     const sid = (s.session_id || s.latest.id).toLowerCase();
     const title = (s.title ?? "").toLowerCase();
     const prompt = (s.latest.prompt ?? "").toLowerCase();
     const workdir = (s.workdir ?? "").toLowerCase();
     return (
+      cid.includes(needle) ||
       sid.includes(needle) ||
       title.includes(needle) ||
       prompt.includes(needle) ||
@@ -4511,9 +4517,13 @@ watch(
               <div class="detailTopLeft">
                 <span
                   class="mono detailSid"
-                  :title="selectedSession.session_id || selectedSession.latest.id"
+                  :title="
+                    (selectedSession.key ?? '').startsWith('c:')
+                      ? selectedSession.key.slice(2)
+                      : selectedSession.session_id || selectedSession.latest.id
+                  "
                   >{{
-                    (selectedSession.session_id || selectedSession.latest.id).slice(0, 8)
+                    sessionShortID(selectedSession)
                   }}</span
                 >
                 <span

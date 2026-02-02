@@ -67,6 +67,9 @@ func main() {
 	if _, err := taskStore.MarkInterrupted(ctx); err != nil {
 		log.Fatal(err)
 	}
+	if err := taskStore.EnsureConversationIDs(ctx); err != nil {
+		log.Fatal(err)
+	}
 
 	authStore, err := auth.Load(filepath.Join(cfg.Paths.DataDir, "secrets.json"))
 	if err != nil {
@@ -110,16 +113,16 @@ func main() {
 	}
 
 	apiSvc := &api.API{
-		Tasks:         taskStore,
-		Workers:       workerMgr,
-		Observer:      observerSvc,
-		Chat:          chatStore,
-		Hub:           hub,
-		Auth:          authStore,
-		Skills:        skillsSvc,
-		SkillVersions: skillVersionsSvc,
+		Tasks:                taskStore,
+		Workers:              workerMgr,
+		Observer:             observerSvc,
+		Chat:                 chatStore,
+		Hub:                  hub,
+		Auth:                 authStore,
+		Skills:               skillsSvc,
+		SkillVersions:        skillVersionsSvc,
 		SkillVersionsBySkill: perSkillVersionsSvc,
-		Tools:         toolsSvc,
+		Tools:                toolsSvc,
 	}
 
 	mux := http.NewServeMux()

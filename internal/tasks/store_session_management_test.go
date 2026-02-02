@@ -3,6 +3,7 @@ package tasks
 import (
 	"context"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -33,9 +34,13 @@ func TestStore_SessionRenameDeleteAndMigration(t *testing.T) {
 		t.Fatalf("create task: %v", err)
 	}
 
-	// Before the task has a session_id, its session key should be t:<task_id>.
-	initialKey := SessionKey(task.ID, "")
-	if err := store.RenameSession(ctx, initialKey, "My Session"); err != nil {
+	if strings.TrimSpace(task.ConversationID) == "" {
+		t.Fatalf("conversation_id is required")
+	}
+
+	// Session key is conversation-scoped and stable (not tied to provider session_id).
+	key := SessionKeyForTask(task)
+	if err := store.RenameSession(ctx, key, "My Session"); err != nil {
 		t.Fatalf("rename: %v", err)
 	}
 
@@ -47,7 +52,7 @@ func TestStore_SessionRenameDeleteAndMigration(t *testing.T) {
 		t.Fatalf("session_title=%q, want %q", got.SessionTitle, "My Session")
 	}
 
-	// Once session_id is set, the key becomes s:<session_id> and metadata should migrate.
+	// Once session_id is set, the session key should remain stable (conversation-scoped).
 	if err := store.FinishTask(ctx, task.ID, FinishTaskInput{
 		Status:     StatusSucceeded,
 		SessionID:  "sess-123",
@@ -59,13 +64,15 @@ func TestStore_SessionRenameDeleteAndMigration(t *testing.T) {
 	if got.SessionID != "sess-123" {
 		t.Fatalf("session_id=%q, want sess-123", got.SessionID)
 	}
+	if SessionKeyForTask(got) != key {
+		t.Fatalf("session key changed: got=%q want=%q", SessionKeyForTask(got), key)
+	}
 	if got.SessionTitle != "My Session" {
-		t.Fatalf("session_title=%q, want %q after migrate", got.SessionTitle, "My Session")
+		t.Fatalf("session_title=%q, want %q", got.SessionTitle, "My Session")
 	}
 
 	// Soft delete hides the session by default.
-	newKey := SessionKey(task.ID, "sess-123")
-	if err := store.DeleteSession(ctx, newKey); err != nil {
+	if err := store.DeleteSession(ctx, key); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
 
@@ -88,4 +95,3 @@ func TestStore_SessionRenameDeleteAndMigration(t *testing.T) {
 		t.Fatalf("expected session_deleted_at set")
 	}
 }
-

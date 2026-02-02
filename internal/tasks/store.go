@@ -55,6 +55,7 @@ func (s *Store) CreateTask(ctx context.Context, in CreateTaskInput) (Task, error
 
 	now := s.now().UTC()
 	id := uuid.NewString()
+	conversationID := strings.TrimSpace(in.ConversationID)
 
 	createdAt := toMillis(now)
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -63,12 +64,29 @@ func (s *Store) CreateTask(ctx context.Context, in CreateTaskInput) (Task, error
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	if conversationID == "" {
+		if in.Mode == ModeResume && strings.TrimSpace(in.SessionID) != "" {
+			if err := tx.QueryRowContext(ctx, `
+				SELECT conversation_id
+				FROM tasks
+				WHERE session_id = ? AND conversation_id IS NOT NULL AND conversation_id != ''
+				ORDER BY created_at DESC
+				LIMIT 1;
+			`, strings.TrimSpace(in.SessionID)).Scan(&conversationID); err != nil && !errors.Is(err, sql.ErrNoRows) {
+				return Task{}, fmt.Errorf("tasks: resolve conversation_id for session_id: %w", err)
+			}
+		}
+		if conversationID == "" {
+			conversationID = uuid.NewString()
+		}
+	}
+
 	_, err = tx.ExecContext(ctx, `
 		INSERT INTO tasks (
-			id, worker_type, mode, status, prompt, workdir, session_id, warning,
+			id, worker_type, mode, status, prompt, workdir, session_id, conversation_id, warning,
 			created_at, updated_at, stderr_count, keyword_count, score
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0);
-	`, id, string(in.WorkerType), string(in.Mode), string(StatusQueued), in.Prompt, workdir, in.SessionID, in.Warning, createdAt, createdAt)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0);
+	`, id, string(in.WorkerType), string(in.Mode), string(StatusQueued), in.Prompt, workdir, in.SessionID, conversationID, in.Warning, createdAt, createdAt)
 	if err != nil {
 		return Task{}, fmt.Errorf("tasks: insert: %w", err)
 	}
@@ -125,7 +143,7 @@ func (s *Store) CreateTask(ctx context.Context, in CreateTaskInput) (Task, error
 func (s *Store) GetTask(ctx context.Context, id string) (Task, error) {
 	row := s.db.QueryRowContext(ctx, `
 		SELECT
-			t.id, t.worker_type, t.mode, t.status,
+			t.id, t.conversation_id, t.worker_type, t.mode, t.status,
 			COALESCE(o.unsafe_automation, 0),
 			COALESCE(o.safety_preset, ''), COALESCE(o.task_intent, ''),
 			COALESCE(o.codex_sandbox, ''), COALESCE(o.codex_approval_policy, ''), COALESCE(o.codex_search, 0),
@@ -138,6 +156,7 @@ func (s *Store) GetTask(ctx context.Context, id string) (Task, error) {
 		LEFT JOIN task_run_options o ON o.task_id = t.id
 		LEFT JOIN session_meta sm ON sm.key = (
 			CASE
+				WHEN t.conversation_id IS NOT NULL AND t.conversation_id != '' THEN 'c:' || t.conversation_id
 				WHEN t.session_id IS NOT NULL AND t.session_id != '' THEN 's:' || t.session_id
 				ELSE 't:' || t.id
 			END
@@ -166,7 +185,7 @@ func (s *Store) ListTasksWithOptions(ctx context.Context, limit int, opts ListTa
 	}
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT
-			t.id, t.worker_type, t.mode, t.status,
+			t.id, t.conversation_id, t.worker_type, t.mode, t.status,
 			COALESCE(o.unsafe_automation, 0),
 			COALESCE(o.safety_preset, ''), COALESCE(o.task_intent, ''),
 			COALESCE(o.codex_sandbox, ''), COALESCE(o.codex_approval_policy, ''), COALESCE(o.codex_search, 0),
@@ -179,6 +198,7 @@ func (s *Store) ListTasksWithOptions(ctx context.Context, limit int, opts ListTa
 		LEFT JOIN task_run_options o ON o.task_id = t.id
 		LEFT JOIN session_meta sm ON sm.key = (
 			CASE
+				WHEN t.conversation_id IS NOT NULL AND t.conversation_id != '' THEN 'c:' || t.conversation_id
 				WHEN t.session_id IS NOT NULL AND t.session_id != '' THEN 's:' || t.session_id
 				ELSE 't:' || t.id
 			END
@@ -293,15 +313,16 @@ func (s *Store) FinishTask(ctx context.Context, id string, in FinishTaskInput) e
 	defer func() { _ = tx.Rollback() }()
 
 	var (
-		stderrCount  int
-		keywordCount int
-		prevSessionID string
+		stderrCount        int
+		keywordCount       int
+		prevSessionID      string
+		prevConversationID string
 	)
 	err = tx.QueryRowContext(ctx, `
-		SELECT stderr_count, keyword_count, session_id
+		SELECT stderr_count, keyword_count, session_id, conversation_id
 		FROM tasks
 		WHERE id = ?;
-	`, id).Scan(&stderrCount, &keywordCount, &prevSessionID)
+	`, id).Scan(&stderrCount, &keywordCount, &prevSessionID, &prevConversationID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return fmt.Errorf("tasks: not found")
@@ -320,7 +341,9 @@ func (s *Store) FinishTask(ctx context.Context, id string, in FinishTaskInput) e
 		return fmt.Errorf("tasks: finish update: %w", err)
 	}
 
-	if strings.TrimSpace(prevSessionID) == "" && strings.TrimSpace(in.SessionID) != "" {
+	// Legacy compatibility: if a task has no conversation_id, session metadata/workspaces were historically keyed
+	// by task id until session_id became known at finish time.
+	if strings.TrimSpace(prevConversationID) == "" && strings.TrimSpace(prevSessionID) == "" && strings.TrimSpace(in.SessionID) != "" {
 		nowMs := toMillis(now)
 		if err := migrateSessionMetaKeyTx(tx, SessionKey(id, ""), SessionKey(id, in.SessionID), nowMs); err != nil {
 			return err
@@ -350,7 +373,8 @@ func (s *Store) SetSessionID(ctx context.Context, id, sessionID string) error {
 	defer func() { _ = tx.Rollback() }()
 
 	var prev string
-	if err := tx.QueryRowContext(ctx, `SELECT session_id FROM tasks WHERE id = ?;`, id).Scan(&prev); err != nil {
+	var prevConversationID string
+	if err := tx.QueryRowContext(ctx, `SELECT session_id, conversation_id FROM tasks WHERE id = ?;`, id).Scan(&prev, &prevConversationID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return fmt.Errorf("tasks: not found")
 		}
@@ -370,11 +394,13 @@ func (s *Store) SetSessionID(ctx context.Context, id, sessionID string) error {
 	}
 
 	nowMs := toMillis(now)
-	if err := migrateSessionMetaKeyTx(tx, SessionKey(id, ""), SessionKey(id, sessionID), nowMs); err != nil {
-		return err
-	}
-	if err := migrateSessionWorkspaceKeyTx(tx, SessionKey(id, ""), SessionKey(id, sessionID), nowMs); err != nil {
-		return err
+	if strings.TrimSpace(prevConversationID) == "" {
+		if err := migrateSessionMetaKeyTx(tx, SessionKey(id, ""), SessionKey(id, sessionID), nowMs); err != nil {
+			return err
+		}
+		if err := migrateSessionWorkspaceKeyTx(tx, SessionKey(id, ""), SessionKey(id, sessionID), nowMs); err != nil {
+			return err
+		}
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -675,7 +701,7 @@ func scanTask(row rowScanner) (Task, error) {
 		exitCode                  sql.NullInt64
 	)
 	err := row.Scan(
-		&t.ID, &workerType, &mode, &status,
+		&t.ID, &t.ConversationID, &workerType, &mode, &status,
 		&unsafeAutomation,
 		&safetyPreset, &taskIntent,
 		&codexSandbox, &codexApproval, &codexSearch,
@@ -695,6 +721,7 @@ func scanTask(row rowScanner) (Task, error) {
 	t.WorkerType = WorkerType(workerType)
 	t.Mode = Mode(mode)
 	t.Status = Status(status)
+	t.ConversationID = strings.TrimSpace(t.ConversationID)
 	t.UnsafeAutomation = unsafeAutomation != 0
 	t.SafetyPreset = strings.TrimSpace(safetyPreset)
 	t.TaskIntent = strings.TrimSpace(taskIntent)

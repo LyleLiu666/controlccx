@@ -66,8 +66,9 @@ func TestAPI_Rehydrate_RequiresWorkspaceNotActive(t *testing.T) {
 	_, _ = taskStore.AppendLog(ctx, resume.ID, tasks.LogAssistant, "done B")
 
 	// Active workspace must block rehydrate.
+	key := tasks.SessionKeyForTask(resume)
 	ws := tasks.SessionWorkspace{
-		Key:         tasks.SessionKey("", "sess-1"),
+		Key:         key,
 		WorkspaceID: "ws-1",
 		Kind:        tasks.WorkspaceKindCopy,
 		BaseWorkDir: baseDir,
@@ -171,6 +172,9 @@ func TestAPI_Rehydrate_CreatesNewRunWithExtractedContext(t *testing.T) {
 	}
 	if created.Mode != tasks.ModeNew {
 		t.Fatalf("mode=%q, want %q", created.Mode, tasks.ModeNew)
+	}
+	if strings.TrimSpace(created.ConversationID) != strings.TrimSpace(first.ConversationID) {
+		t.Fatalf("conversation_id=%q, want %q", created.ConversationID, first.ConversationID)
 	}
 	if strings.TrimSpace(created.SessionID) != "" {
 		t.Fatalf("session_id=%q, want empty for new session", created.SessionID)

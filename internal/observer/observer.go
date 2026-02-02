@@ -321,7 +321,7 @@ func (s *Service) handleDeliveryForemanFallback(ctx context.Context, msg string)
 	sb.WriteString("- 配置一个可用的 LLM backend（claude/codex），以启用主观 rubric 验收与自动迭代。\n")
 	sb.WriteString("- 或者手动执行默认验证步骤，并把证据写入日志供验收。\n")
 
-	key := tasks.SessionKey(t.ID, t.SessionID)
+	key := tasks.SessionKeyForTask(t)
 	prev, ok, err := s.Store.GetAcceptanceState(ctx, key)
 	if err != nil {
 		return Reply{}, err

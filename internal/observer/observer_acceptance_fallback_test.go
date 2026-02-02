@@ -65,7 +65,7 @@ func TestObserverRespond_DeliveryForemanFallback_UpdatesAcceptanceState(t *testi
 		t.Fatalf("reply=%q, want contains 验收", reply.Message)
 	}
 
-	st, ok, err := store.GetAcceptanceState(ctx, "s:sess-1")
+	st, ok, err := store.GetAcceptanceState(ctx, tasks.SessionKeyForTask(task))
 	if err != nil {
 		t.Fatalf("get acceptance: %v", err)
 	}
