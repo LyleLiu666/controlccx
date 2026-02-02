@@ -145,6 +145,140 @@ func TestService_GitWorktree_Merge(t *testing.T) {
 	}
 }
 
+func TestService_CopyWorkspace_MountsVenvSymlink(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "controlccx.db")
+
+	conn, err := db.Open(ctx, db.Options{Path: dbPath})
+	if err != nil {
+		t.Fatalf("db open: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+
+	store := tasks.NewStore(conn)
+
+	baseDir := t.TempDir()
+	mustMkdir(t, filepath.Join(baseDir, ".venv", "bin"))
+	if err := os.WriteFile(filepath.Join(baseDir, ".venv", "bin", "python"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("write venv python: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(baseDir, "a.txt"), []byte("hello\n"), 0o644); err != nil {
+		t.Fatalf("write base file: %v", err)
+	}
+
+	svc := NewService(store)
+	ws, err := svc.EnsureForTask(ctx, tasks.Task{ID: "task-venv-copy", WorkDir: baseDir})
+	if err != nil {
+		t.Fatalf("ensure: %v", err)
+	}
+	if ws.Kind != tasks.WorkspaceKindCopy {
+		t.Fatalf("kind=%q, want %q", ws.Kind, tasks.WorkspaceKindCopy)
+	}
+
+	dst := filepath.Join(ws.RunWorkDir, ".venv")
+	fi, err := os.Lstat(dst)
+	if err != nil {
+		t.Fatalf("lstat mounted venv: %v", err)
+	}
+	if fi.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("expected symlink at %s, mode=%v", dst, fi.Mode())
+	}
+	target, err := os.Readlink(dst)
+	if err != nil {
+		t.Fatalf("readlink: %v", err)
+	}
+
+	got, err := filepath.EvalSymlinks(target)
+	if err != nil {
+		t.Fatalf("eval target: %v", err)
+	}
+	want, err := filepath.EvalSymlinks(filepath.Join(baseDir, ".venv"))
+	if err != nil {
+		t.Fatalf("eval want: %v", err)
+	}
+	if got != want {
+		t.Fatalf("link target=%q (resolved=%q), want %q", target, got, want)
+	}
+}
+
+func TestService_GitWorktree_MountsVenvSymlink(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "controlccx.db")
+
+	conn, err := db.Open(ctx, db.Options{Path: dbPath})
+	if err != nil {
+		t.Fatalf("db open: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+
+	store := tasks.NewStore(conn)
+
+	repo := t.TempDir()
+	run := func(args ...string) string {
+		cmd := exec.CommandContext(ctx, "git", append([]string{"-C", repo}, args...)...)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, strings.TrimSpace(string(out)))
+		}
+		return strings.TrimSpace(string(out))
+	}
+
+	run("init", "-q")
+	run("config", "user.email", "test@example.com")
+	run("config", "user.name", "Test User")
+	if err := os.WriteFile(filepath.Join(repo, ".gitignore"), []byte(".venv/\n"), 0o644); err != nil {
+		t.Fatalf("write .gitignore: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "a.txt"), []byte("hello\n"), 0o644); err != nil {
+		t.Fatalf("write a.txt: %v", err)
+	}
+	run("add", ".gitignore", "a.txt")
+	run("commit", "-q", "-m", "init")
+
+	mustMkdir(t, filepath.Join(repo, ".venv", "bin"))
+	if err := os.WriteFile(filepath.Join(repo, ".venv", "bin", "python"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("write venv python: %v", err)
+	}
+
+	svc := NewService(store)
+	ws, err := svc.EnsureForTask(ctx, tasks.Task{ID: "task-venv-wt", WorkDir: repo})
+	if err != nil {
+		t.Fatalf("ensure: %v", err)
+	}
+	if ws.Kind != tasks.WorkspaceKindGitWorktree {
+		t.Fatalf("kind=%q, want %q", ws.Kind, tasks.WorkspaceKindGitWorktree)
+	}
+
+	dst := filepath.Join(ws.RunWorkDir, ".venv")
+	fi, err := os.Lstat(dst)
+	if err != nil {
+		t.Fatalf("lstat mounted venv: %v", err)
+	}
+	if fi.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("expected symlink at %s, mode=%v", dst, fi.Mode())
+	}
+	target, err := os.Readlink(dst)
+	if err != nil {
+		t.Fatalf("readlink: %v", err)
+	}
+
+	got, err := filepath.EvalSymlinks(target)
+	if err != nil {
+		t.Fatalf("eval target: %v", err)
+	}
+	want, err := filepath.EvalSymlinks(filepath.Join(repo, ".venv"))
+	if err != nil {
+		t.Fatalf("eval want: %v", err)
+	}
+	if got != want {
+		t.Fatalf("link target=%q (resolved=%q), want %q", target, got, want)
+	}
+}
+
 func TestService_Resume_ReusesSessionWorkspaceAfterSessionIDSet(t *testing.T) {
 	ctx := context.Background()
 	dbPath := filepath.Join(t.TempDir(), "controlccx.db")
@@ -292,5 +426,12 @@ func TestService_Resume_RecoversLegacySessionWorkspaceKey(t *testing.T) {
 	}
 	if _, ok, err := store.GetSessionWorkspace(ctx, desiredKey); err != nil || !ok {
 		t.Fatalf("expected conversation-key workspace mapping after recovery; ok=%v err=%v", ok, err)
+	}
+}
+
+func mustMkdir(t *testing.T, path string) {
+	t.Helper()
+	if err := os.MkdirAll(path, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", path, err)
 	}
 }

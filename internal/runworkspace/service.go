@@ -157,6 +157,8 @@ func (s *Service) EnsureForTask(ctx context.Context, task tasks.Task) (tasks.Ses
 		ws.RunWorkDir = runRoot
 	}
 
+	_ = mountPythonVenv(baseWorkDir, ws.RunWorkDir)
+
 	out, err := s.Store.UpsertSessionWorkspace(ctx, ws)
 	if err != nil {
 		return tasks.SessionWorkspace{}, err
@@ -613,6 +615,30 @@ func buildIgnoreMatcher(_ string) ignoreMatcher {
 		}
 		return false
 	})
+}
+
+func mountPythonVenv(baseWorkDir string, runWorkDir string) error {
+	baseWorkDir = filepath.Clean(strings.TrimSpace(baseWorkDir))
+	runWorkDir = filepath.Clean(strings.TrimSpace(runWorkDir))
+	if baseWorkDir == "" || runWorkDir == "" {
+		return nil
+	}
+
+	src := filepath.Join(baseWorkDir, ".venv")
+	st, err := os.Stat(src)
+	if err != nil || !st.IsDir() {
+		return nil
+	}
+
+	dst := filepath.Join(runWorkDir, ".venv")
+	if _, err := os.Lstat(dst); err == nil {
+		return nil // already present (tracked/untracked or previously mounted)
+	}
+
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return err
+	}
+	return os.Symlink(src, dst)
 }
 
 func (s *Service) gcBestEffort(ctx context.Context, scopeRoot string) error {

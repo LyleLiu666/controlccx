@@ -179,6 +179,7 @@ func ensureTasksColumns(ctx context.Context, tx *sql.Tx) error {
 	}
 	for _, c := range []col{
 		{Name: "conversation_id", Def: "conversation_id TEXT NOT NULL DEFAULT ''"},
+		{Name: "idempotency_key", Def: "idempotency_key TEXT NOT NULL DEFAULT ''"},
 	} {
 		if existing[c.Name] {
 			continue
@@ -186,6 +187,15 @@ func ensureTasksColumns(ctx context.Context, tx *sql.Tx) error {
 		if _, err := tx.ExecContext(ctx, "ALTER TABLE tasks ADD COLUMN "+c.Def+";"); err != nil {
 			return fmt.Errorf("db: ensure tasks columns: add %s: %w", c.Name, err)
 		}
+	}
+
+	// Ensure idempotency key uniqueness (ignore empty keys for backward compatibility).
+	if _, err := tx.ExecContext(ctx, `
+		CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_idempotency_key
+		ON tasks(idempotency_key)
+		WHERE idempotency_key != '';
+	`); err != nil {
+		return fmt.Errorf("db: ensure tasks indexes: %w", err)
 	}
 	return nil
 }

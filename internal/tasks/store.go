@@ -52,6 +52,7 @@ func (s *Store) CreateTask(ctx context.Context, in CreateTaskInput) (Task, error
 		in.WorkDir = "."
 	}
 	workdir := filepath.Clean(in.WorkDir)
+	idempotencyKey := strings.TrimSpace(in.IdempotencyKey)
 
 	now := s.now().UTC()
 	id := uuid.NewString()
@@ -81,14 +82,34 @@ func (s *Store) CreateTask(ctx context.Context, in CreateTaskInput) (Task, error
 		}
 	}
 
-	_, err = tx.ExecContext(ctx, `
-		INSERT INTO tasks (
-			id, worker_type, mode, status, prompt, workdir, session_id, conversation_id, warning,
+	res, err := tx.ExecContext(ctx, `
+		INSERT OR IGNORE INTO tasks (
+			id, worker_type, mode, status, prompt, workdir, session_id, conversation_id, idempotency_key, warning,
 			created_at, updated_at, stderr_count, keyword_count, score
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0);
-	`, id, string(in.WorkerType), string(in.Mode), string(StatusQueued), in.Prompt, workdir, in.SessionID, conversationID, in.Warning, createdAt, createdAt)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0);
+	`, id, string(in.WorkerType), string(in.Mode), string(StatusQueued), in.Prompt, workdir, in.SessionID, conversationID, idempotencyKey, in.Warning, createdAt, createdAt)
 	if err != nil {
 		return Task{}, fmt.Errorf("tasks: insert: %w", err)
+	}
+	if idempotencyKey != "" {
+		if rows, _ := res.RowsAffected(); rows == 0 {
+			var existingID string
+			if err := tx.QueryRowContext(ctx, `
+				SELECT id
+				FROM tasks
+				WHERE idempotency_key = ?
+				LIMIT 1;
+			`, idempotencyKey).Scan(&existingID); err != nil {
+				if errors.Is(err, sql.ErrNoRows) {
+					return Task{}, fmt.Errorf("tasks: idempotency key conflict but existing row not found")
+				}
+				return Task{}, fmt.Errorf("tasks: get by idempotency_key: %w", err)
+			}
+			if err := tx.Commit(); err != nil {
+				return Task{}, fmt.Errorf("tasks: commit create: %w", err)
+			}
+			return s.GetTask(ctx, existingID)
+		}
 	}
 
 	unsafeInt := 0

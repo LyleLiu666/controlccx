@@ -90,6 +90,8 @@ const newWorkdir = ref<string>(".");
 const newPrompt = ref<string>("");
 const newRunOpen = ref(false);
 const newRunPromptEl = ref<HTMLTextAreaElement | null>(null);
+const newRunStarting = ref(false);
+const newRunIdempotencyKey = ref("");
 
 const newRunSafetyOverride = ref(false);
 const newRunHighRiskOptIn = ref(false);
@@ -1601,7 +1603,7 @@ async function refreshAuth() {
   }
 }
 
-async function onCreateTask(): Promise<boolean> {
+async function onCreateTask(opts?: { idempotencyKey?: string }): Promise<boolean> {
   errorBanner.value = "";
   try {
     const driver = newRunDriver.value;
@@ -1636,13 +1638,16 @@ async function onCreateTask(): Promise<boolean> {
 
     const envelope = buildSafetyEnvelopePayload();
 
-    const t = await createTask({
-      worker_type: newWorkerType.value,
-      prompt: newPrompt.value,
-      workdir: newWorkdir.value,
-      ...envelope,
-      ...safety,
-    });
+    const t = await createTask(
+      {
+        worker_type: newWorkerType.value,
+        prompt: newPrompt.value,
+        workdir: newWorkdir.value,
+        ...envelope,
+        ...safety,
+      },
+      opts,
+    );
     upsertTask(t);
     selectedTaskId.value = t.id;
     newPrompt.value = "";
@@ -1813,6 +1818,8 @@ function openNewRun() {
 
 function closeNewRun() {
   newRunOpen.value = false;
+  newRunStarting.value = false;
+  newRunIdempotencyKey.value = "";
 }
 
 function goHome() {
@@ -1913,11 +1920,24 @@ function onSessionActionsMenuDocumentMouseDown(ev: MouseEvent) {
 }
 
 async function onCreateTaskFromModal() {
+  if (newRunStarting.value) return;
   if (!newPrompt.value.trim()) return;
   if (!newWorkdir.value.trim()) return;
   if (missingAuthText.value) return;
-  const ok = await onCreateTask();
-  if (ok) closeNewRun();
+  newRunStarting.value = true;
+  if (!newRunIdempotencyKey.value) {
+    newRunIdempotencyKey.value =
+      typeof crypto !== "undefined" && "randomUUID" in crypto
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  }
+  const key = newRunIdempotencyKey.value;
+  try {
+    const ok = await onCreateTask({ idempotencyKey: key });
+    if (ok) closeNewRun();
+  } finally {
+    newRunStarting.value = false;
+  }
 }
 
 function toggleSecretary() {
@@ -5827,9 +5847,9 @@ watch(
             type="button"
             class="primary"
             @click="onCreateTaskFromModal"
-            :disabled="!newPrompt.trim() || !newWorkdir.trim() || !!missingAuthText || highRiskConfirmOpen"
+            :disabled="!newPrompt.trim() || !newWorkdir.trim() || !!missingAuthText || highRiskConfirmOpen || newRunStarting"
 	          >
-	            Start
+	            {{ newRunStarting ? "Starting…" : "Start" }}
 	          </button>
         </div>
       </div>
@@ -6139,4 +6159,3 @@ watch(
 </template>
 
 <style scoped src="./App.css"></style>
-

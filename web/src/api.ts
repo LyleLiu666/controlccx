@@ -36,10 +36,15 @@ async function getJSON<T>(path: string): Promise<T> {
   return (await res.json()) as T;
 }
 
-async function postJSON<T>(path: string, body: unknown): Promise<T> {
+async function postJSON<T>(
+  path: string,
+  body: unknown,
+  opts?: { headers?: Record<string, string> },
+): Promise<T> {
+  const extraHeaders = opts?.headers ?? {};
   const res = await fetch(path, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...extraHeaders },
     body: JSON.stringify(body),
     credentials: "same-origin",
   });
@@ -77,8 +82,11 @@ export async function createTask(input: {
   claude_permission_mode?: string;
   claude_sandbox?: boolean;
   claude_webfetch_domains?: string[];
-}): Promise<Task> {
-  return postJSON<Task>("/api/tasks", { ...input, mode: "new" });
+}, opts?: { idempotencyKey?: string }): Promise<Task> {
+  const idempotencyKey = String(opts?.idempotencyKey ?? "").trim();
+  const headers: Record<string, string> = {};
+  if (idempotencyKey) headers["Idempotency-Key"] = idempotencyKey;
+  return postJSON<Task>("/api/tasks", { ...input, mode: "new" }, { headers });
 }
 
 export async function cancelTask(id: string): Promise<{ ok: boolean }> {

@@ -282,6 +282,9 @@ func (a *API) handleTasks(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "invalid json", http.StatusBadRequest)
 			return
 		}
+		if k := strings.TrimSpace(r.Header.Get("Idempotency-Key")); k != "" && strings.TrimSpace(in.IdempotencyKey) == "" {
+			in.IdempotencyKey = k
+		}
 		if a.Tools != nil {
 			if _, ok := a.Tools.Resolve(string(in.WorkerType)); !ok {
 				http.Error(w, "unknown tool id: "+string(in.WorkerType), http.StatusBadRequest)
