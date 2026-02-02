@@ -2284,8 +2284,10 @@ async function maybePromptRehydrate(prev: Task | undefined, next: Task) {
   const origin = resumeOriginByRunID.get(next.id) ?? "";
   if (!shouldOfferRehydrateForTask(next, origin)) return;
 
-  // Non-disruptive: only prompt for the currently selected run (manual resume).
-  if (selectedTaskId.value !== next.id) return;
+  // Non-disruptive: prompt for the currently selected run OR any run in the current session.
+  // This helps when a background run (e.g. created outside the UI) fails with "No conversation found".
+  const nextSessionKey = sessionKeyForTask(next);
+  if (selectedTaskId.value !== next.id && selectedSessionKey.value !== nextSessionKey) return;
 
   try {
     await refreshRunWorkspace();
@@ -2453,6 +2455,9 @@ async function maybeTriggerDeliveryForeman(prev: Task | undefined, next: Task) {
   if (deliveryForemanSeenRuns.value.has(runID)) return;
   const prevStatus = prev?.status ?? "";
   const nextStatus = next.status ?? "";
+  // Avoid triggering Delivery Foreman on "blocked" runs. A blocked run typically needs
+  // explicit user intervention (approvals / high-risk settings) and auto-resume is noisy.
+  if (nextStatus === "blocked") return;
 
   // Only auto-trigger on transitions into terminal states.
   if (isTerminalStatus(prevStatus) || !isTerminalStatus(nextStatus)) return;
