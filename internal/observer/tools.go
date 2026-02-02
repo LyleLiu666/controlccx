@@ -370,6 +370,200 @@ func (s *Service) agentTools() map[string]Tool {
 				}, nil
 			},
 		},
+		"session_continue": ToolFunc{
+			ToolName:        "session_continue",
+			ToolDescription: "继续一个会话：根据最新 run 自动选择 resume 或 rehydrate（当检测到 No conversation found 时）。参数：{key?: string, task_id?: string, prompt?: string, unsafe_automation?: boolean}。key 为 c:/s:/t: 会话键；task_id 可为：完整 id / id 前缀 / session_id / prompt 关键词",
+			Fn: func(ctx context.Context, args map[string]any) (any, error) {
+				if s.Store == nil {
+					return nil, errors.New("tasks store not configured")
+				}
+				if s.Runner == nil {
+					return nil, errors.New("task runner not configured")
+				}
+
+				key := strings.TrimSpace(stringArg(args, "key"))
+				taskID := strings.TrimSpace(stringArg(args, "task_id"))
+				if taskID == "" {
+					taskID = strings.TrimSpace(stringArg(args, "id"))
+				}
+
+				var (
+					conversationID string
+				)
+				if key != "" {
+					cid, err := resolveConversationIDForSessionKey(ctx, s.Store, key)
+					if err != nil {
+						return nil, err
+					}
+					conversationID = cid
+				} else {
+					if taskID == "" {
+						return nil, errors.New("session_continue: key or task_id is required")
+					}
+					resolved, err := s.resolveTaskID(ctx, taskID)
+					if err != nil {
+						return nil, err
+					}
+					t, err := s.Store.GetTask(ctx, resolved)
+					if err != nil {
+						return nil, err
+					}
+					conversationID = strings.TrimSpace(t.ConversationID)
+					if conversationID == "" {
+						conversationID = strings.TrimSpace(t.ID)
+					}
+				}
+
+				runs, err := s.Store.ListTasksByConversationID(ctx, conversationID, 500, tasks.ListTasksOptions{IncludeDeleted: true})
+				if err != nil {
+					return nil, err
+				}
+				if len(runs) == 0 {
+					return nil, errors.New("session not found")
+				}
+				// Deterministic: newest first with ID tie-break.
+				sort.SliceStable(runs, func(i, j int) bool {
+					if runs[i].CreatedAt.Equal(runs[j].CreatedAt) {
+						return runs[i].ID > runs[j].ID
+					}
+					return runs[i].CreatedAt.After(runs[j].CreatedAt)
+				})
+
+				latest := runs[0]
+				if latest.SessionDeletedAt != nil {
+					return nil, fmt.Errorf("session is deleted; cannot continue (conversation_id=%s)", strings.TrimSpace(latest.ConversationID))
+				}
+
+				for _, t := range runs {
+					if t.Status == tasks.StatusRunning || t.Status == tasks.StatusQueued {
+						return nil, fmt.Errorf("session already has a running task (task_id=%s status=%s)", t.ID, t.Status)
+					}
+				}
+
+				prompt := strings.TrimSpace(stringArg(args, "prompt"))
+				if prompt == "" {
+					prompt = "continue"
+				}
+				unsafe := boolArg(args, "unsafe_automation", latest.UnsafeAutomation)
+
+				// If the latest run is blocked, require explicit unsafe_automation=true to proceed.
+				if latest.Status == tasks.StatusBlocked && !unsafe {
+					return nil, fmt.Errorf("latest run is blocked; set unsafe_automation=true to continue (task_id=%s)", latest.ID)
+				}
+
+				shouldRehydrate := latest.Mode == tasks.ModeResume &&
+					(isNoConversationFound(latest.Warning) || isNoConversationFound(latest.Error))
+
+				if shouldRehydrate {
+					ctxPrompt, err := tasks.BuildRehydratePrompt(ctx, s.Store, conversationID, prompt)
+					if err != nil {
+						return nil, err
+					}
+					next, err := s.Store.CreateTask(ctx, tasks.CreateTaskInput{
+						WorkerType:            latest.WorkerType,
+						Mode:                  tasks.ModeNew,
+						ConversationID:        conversationID,
+						UnsafeAutomation:      unsafe,
+						SafetyPreset:          strings.TrimSpace(latest.SafetyPreset),
+						TaskIntent:            strings.TrimSpace(latest.TaskIntent),
+						CodexSandbox:          strings.TrimSpace(latest.CodexSandbox),
+						CodexApprovalPolicy:   strings.TrimSpace(latest.CodexApprovalPolicy),
+						CodexSearch:           latest.CodexSearch,
+						ClaudePermissionMode:  strings.TrimSpace(latest.ClaudePermissionMode),
+						ClaudeSandbox:         latest.ClaudeSandbox,
+						ClaudeWebFetchDomains: append([]string{}, latest.ClaudeWebFetchDomains...),
+						Prompt:                ctxPrompt,
+						WorkDir:               latest.WorkDir,
+						SessionID:             "",
+					})
+					if err != nil {
+						return nil, err
+					}
+					_, _ = s.Store.AppendLog(ctx, next.ID, tasks.LogSystem, fmt.Sprintf("rehydrate: from run=%s session=%s", latest.ID, strings.TrimSpace(latest.SessionID)))
+
+					if err := s.Runner.Start(ctx, next.ID); err != nil {
+						_ = s.Store.FinishTask(context.Background(), next.ID, tasks.FinishTaskInput{
+							Status:     tasks.StatusFailed,
+							ExitCode:   nil,
+							Error:      err.Error(),
+							SessionID:  "",
+							FinishedAt: time.Now().UTC(),
+						})
+						return nil, err
+					}
+
+					return map[string]any{
+						"ok": true,
+						"task": map[string]any{
+							"id":              next.ID,
+							"mode":            next.Mode,
+							"conversation_id": strings.TrimSpace(next.ConversationID),
+							"session_id":      strings.TrimSpace(next.SessionID),
+							"worker_type":     next.WorkerType,
+							"status":          next.Status,
+							"prompt":          truncateDisplay(strings.TrimSpace(next.Prompt), 240),
+							"workdir":         next.WorkDir,
+							"unsafe":          next.UnsafeAutomation,
+							"continued_from":  latest.ID,
+						},
+					}, nil
+				}
+
+				sid := strings.TrimSpace(latest.SessionID)
+				if sid == "" {
+					return nil, fmt.Errorf("task has no session_id to resume (task_id=%s)", latest.ID)
+				}
+
+				next, err := s.Store.CreateTask(ctx, tasks.CreateTaskInput{
+					WorkerType:            latest.WorkerType,
+					Mode:                  tasks.ModeResume,
+					ConversationID:        conversationID,
+					UnsafeAutomation:      unsafe,
+					SafetyPreset:          strings.TrimSpace(latest.SafetyPreset),
+					TaskIntent:            strings.TrimSpace(latest.TaskIntent),
+					CodexSandbox:          strings.TrimSpace(latest.CodexSandbox),
+					CodexApprovalPolicy:   strings.TrimSpace(latest.CodexApprovalPolicy),
+					CodexSearch:           latest.CodexSearch,
+					ClaudePermissionMode:  strings.TrimSpace(latest.ClaudePermissionMode),
+					ClaudeSandbox:         latest.ClaudeSandbox,
+					ClaudeWebFetchDomains: append([]string{}, latest.ClaudeWebFetchDomains...),
+					Prompt:                prompt,
+					WorkDir:               latest.WorkDir,
+					SessionID:             sid,
+					Warning:               latest.Warning,
+				})
+				if err != nil {
+					return nil, err
+				}
+
+				if err := s.Runner.Start(ctx, next.ID); err != nil {
+					_ = s.Store.FinishTask(context.Background(), next.ID, tasks.FinishTaskInput{
+						Status:     tasks.StatusFailed,
+						ExitCode:   nil,
+						Error:      err.Error(),
+						SessionID:  "",
+						FinishedAt: time.Now().UTC(),
+					})
+					return nil, err
+				}
+
+				return map[string]any{
+					"ok": true,
+					"task": map[string]any{
+						"id":              next.ID,
+						"mode":            next.Mode,
+						"conversation_id": strings.TrimSpace(next.ConversationID),
+						"session_id":      strings.TrimSpace(next.SessionID),
+						"worker_type":     next.WorkerType,
+						"status":          next.Status,
+						"prompt":          truncateDisplay(strings.TrimSpace(next.Prompt), 240),
+						"workdir":         next.WorkDir,
+						"unsafe":          next.UnsafeAutomation,
+						"continued_from":  latest.ID,
+					},
+				}, nil
+			},
+		},
 		"task_cancel": ToolFunc{
 			ToolName:        "task_cancel",
 			ToolDescription: "取消一个正在执行的任务。参数：{task_id: string}。task_id 可为：完整 id / id 前缀 / session_id / prompt 关键词",
@@ -950,6 +1144,61 @@ func (s *Service) resolveTaskID(ctx context.Context, idOrPrefix string) (string,
 	}
 
 	return "", fmt.Errorf("task_id not found: %s", idOrPrefix)
+}
+
+func resolveConversationIDForSessionKey(ctx context.Context, store *tasks.Store, key string) (string, error) {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return "", errors.New("session key is required")
+	}
+	if store == nil {
+		return "", errors.New("tasks store not configured")
+	}
+	if strings.HasPrefix(key, "c:") {
+		cid := strings.TrimSpace(strings.TrimPrefix(key, "c:"))
+		if cid == "" {
+			return "", errors.New("conversation_id is required")
+		}
+		return cid, nil
+	}
+	if strings.HasPrefix(key, "t:") {
+		taskID := strings.TrimSpace(strings.TrimPrefix(key, "t:"))
+		if taskID == "" {
+			return "", errors.New("task_id is required")
+		}
+		t, err := store.GetTask(ctx, taskID)
+		if err != nil {
+			return "", fmt.Errorf("task not found: %w", err)
+		}
+		if cid := strings.TrimSpace(t.ConversationID); cid != "" {
+			return cid, nil
+		}
+		return strings.TrimSpace(t.ID), nil
+	}
+	if strings.HasPrefix(key, "s:") {
+		sid := strings.TrimSpace(strings.TrimPrefix(key, "s:"))
+		if sid == "" {
+			return "", errors.New("session_id is required")
+		}
+		if cid, ok, err := store.ConversationIDForSessionID(ctx, sid); err != nil {
+			return "", err
+		} else if ok {
+			return cid, nil
+		}
+		return "", errors.New("session not found")
+	}
+	return "", errors.New("invalid session key (expected c:/s:/t:)")
+}
+
+func isNoConversationFound(message string) bool {
+	lower := strings.ToLower(strings.TrimSpace(message))
+	if lower == "" {
+		return false
+	}
+	if !strings.Contains(lower, "no conversation found") {
+		return false
+	}
+	return strings.Contains(lower, "session")
 }
 
 func minInt(a, b int) int {

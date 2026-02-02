@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -351,6 +350,297 @@ func (a *API) handleSessionByKey(w http.ResponseWriter, r *http.Request) {
 	}
 
 	switch parts[1] {
+	case "continue":
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if a.Tasks == nil {
+			http.Error(w, "tasks store not configured", http.StatusServiceUnavailable)
+			return
+		}
+
+		var body struct {
+			Prompt                string   `json:"prompt"`
+			UnsafeAutomation      bool     `json:"unsafe_automation,omitempty"`
+			SafetyEnvelope        string   `json:"safety_envelope,omitempty"`
+			SafetyPreset          string   `json:"safety_preset,omitempty"`
+			TaskIntent            string   `json:"task_intent,omitempty"`
+			CodexSandbox          string   `json:"codex_sandbox,omitempty"`
+			CodexApprovalPolicy   string   `json:"codex_approval_policy,omitempty"`
+			CodexSearch           bool     `json:"codex_search,omitempty"`
+			ClaudePermissionMode  string   `json:"claude_permission_mode,omitempty"`
+			ClaudeSandbox         bool     `json:"claude_sandbox,omitempty"`
+			ClaudeWebFetchDomains []string `json:"claude_webfetch_domains,omitempty"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil && !errors.Is(err, io.EOF) {
+			http.Error(w, "invalid json", http.StatusBadRequest)
+			return
+		}
+
+		conversationID, err := resolveConversationIDForSessionKey(r.Context(), a.Tasks, key)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		runs, err := a.Tasks.ListTasksByConversationID(r.Context(), conversationID, 500, tasks.ListTasksOptions{IncludeDeleted: true})
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if len(runs) == 0 {
+			http.Error(w, "session not found", http.StatusNotFound)
+			return
+		}
+
+		latest := runs[0]
+		if latest.SessionDeletedAt != nil {
+			http.Error(w, "session is deleted; cannot continue", http.StatusBadRequest)
+			return
+		}
+
+		for _, t := range runs {
+			if t.Status == tasks.StatusRunning || t.Status == tasks.StatusQueued {
+				http.Error(w, "session already has a running task (task_id="+t.ID+" status="+string(t.Status)+")", http.StatusConflict)
+				return
+			}
+		}
+
+		if latest.Status == tasks.StatusBlocked {
+			http.Error(w, "当前会话存在被阻塞的 run（需要人工确认/放权）。请先处理阻塞或选择高风险继续。", http.StatusConflict)
+			return
+		}
+
+		if shouldContinueViaRehydrate(latest) {
+			driver := latest.WorkerType
+			if a.Tools != nil {
+				if profile, ok := a.Tools.Resolve(string(latest.WorkerType)); ok && strings.TrimSpace(string(profile.Driver)) != "" {
+					driver = tasks.WorkerType(strings.TrimSpace(string(profile.Driver)))
+				}
+			}
+			if driver != tasks.WorkerClaudeCode {
+				http.Error(w, "rehydrate is only supported for claude-code sessions", http.StatusBadRequest)
+				return
+			}
+
+			ws, ok, err := resolveSessionWorkspaceForConversation(r.Context(), a.Tasks, tasks.ConversationKey(conversationID), runs)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			if ok && ws.Status == tasks.WorkspaceStatusActive {
+				http.Error(w, "无法新建会话继续：该会话仍有隔离工作区处于 active。请先在 Workspace 面板执行 Merge（把改动合并回 base_workdir）后再重试。", http.StatusConflict)
+				return
+			}
+
+			prompt := strings.TrimSpace(body.Prompt)
+			if prompt == "" {
+				prompt = "continue"
+			}
+			ctxPrompt, err := tasks.BuildRehydratePrompt(r.Context(), a.Tasks, conversationID, prompt)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+
+			// SafetyEnvelope is an autopilot hint (UI-level “one-time unlock”); it does not count as an explicit safety override.
+			explicitSafety := body.UnsafeAutomation ||
+				strings.TrimSpace(body.SafetyPreset) != "" ||
+				strings.TrimSpace(body.TaskIntent) != "" ||
+				strings.TrimSpace(body.CodexSandbox) != "" ||
+				strings.TrimSpace(body.CodexApprovalPolicy) != "" ||
+				body.CodexSearch ||
+				strings.TrimSpace(body.ClaudePermissionMode) != "" ||
+				body.ClaudeSandbox ||
+				len(body.ClaudeWebFetchDomains) > 0
+
+			unsafe := body.UnsafeAutomation
+			safetyEnvelope := strings.TrimSpace(body.SafetyEnvelope)
+			safetyPreset := strings.TrimSpace(body.SafetyPreset)
+			taskIntent := strings.TrimSpace(body.TaskIntent)
+			codexSandbox := strings.TrimSpace(body.CodexSandbox)
+			codexApprovalPolicy := strings.TrimSpace(body.CodexApprovalPolicy)
+			codexSearch := body.CodexSearch
+			claudePermissionMode := strings.TrimSpace(body.ClaudePermissionMode)
+			claudeSandbox := body.ClaudeSandbox
+			claudeDomains := body.ClaudeWebFetchDomains
+
+			if !explicitSafety {
+				unsafe = latest.UnsafeAutomation
+				safetyPreset = strings.TrimSpace(latest.SafetyPreset)
+				taskIntent = strings.TrimSpace(latest.TaskIntent)
+				codexSandbox = strings.TrimSpace(latest.CodexSandbox)
+				codexApprovalPolicy = strings.TrimSpace(latest.CodexApprovalPolicy)
+				codexSearch = latest.CodexSearch
+				claudePermissionMode = strings.TrimSpace(latest.ClaudePermissionMode)
+				claudeSandbox = latest.ClaudeSandbox
+				claudeDomains = append([]string{}, latest.ClaudeWebFetchDomains...)
+			}
+
+			in := tasks.CreateTaskInput{
+				WorkerType:            latest.WorkerType,
+				Mode:                  tasks.ModeNew,
+				ConversationID:        conversationID,
+				UnsafeAutomation:      unsafe,
+				SafetyEnvelope:        safetyEnvelope,
+				SafetyPreset:          safetyPreset,
+				TaskIntent:            taskIntent,
+				CodexSandbox:          codexSandbox,
+				CodexApprovalPolicy:   codexApprovalPolicy,
+				CodexSearch:           codexSearch,
+				ClaudePermissionMode:  claudePermissionMode,
+				ClaudeSandbox:         claudeSandbox,
+				ClaudeWebFetchDomains: claudeDomains,
+				Prompt:                ctxPrompt,
+				WorkDir:               latest.WorkDir,
+				SessionID:             "",
+			}
+
+			envelope := runsafe.SafetyEnvelope(strings.TrimSpace(in.SafetyEnvelope))
+			llm := runsafe.LLMBackend(nil)
+			if a.Observer != nil {
+				llm = a.Observer.LLM
+			}
+			in, ap := runsafe.ApplyAutopilot(r.Context(), in, runsafe.ApplyOptions{
+				Driver:   driver,
+				Envelope: envelope,
+				Classify: runsafe.ClassifyOptions{LLM: llm},
+			})
+
+			newTask, err := a.Tasks.CreateTask(r.Context(), in)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			_, _ = a.Tasks.AppendLog(r.Context(), newTask.ID, tasks.LogSystem, fmt.Sprintf("rehydrate: from run=%s session=%s", latest.ID, strings.TrimSpace(latest.SessionID)))
+
+			if ap.Applied {
+				if audit := runsafe.FormatAuditLog(driver, ap.Decision, in, true); strings.TrimSpace(audit) != "" {
+					_, _ = a.Tasks.AppendLog(r.Context(), newTask.ID, tasks.LogSystem, audit)
+				}
+			}
+
+			if a.Hub != nil {
+				a.Hub.Publish(events.Event{Type: "task.created", Time: time.Now().UTC(), Payload: newTask})
+			}
+			if a.Workers != nil {
+				_ = a.Workers.Start(r.Context(), newTask.ID)
+			}
+			writeJSON(w, newTask)
+			return
+		}
+
+		if strings.TrimSpace(latest.SessionID) == "" {
+			http.Error(w, "task has no session_id to resume", http.StatusBadRequest)
+			return
+		}
+
+		// Ensure resume uses the same run workspace as the session origin when available.
+		desiredWSKey := tasks.SessionKeyForTask(latest)
+		legacyWSKey := tasks.SessionKey(latest.ID, "")
+		legacySessionKey := tasks.SessionKey("", latest.SessionID)
+		if _, ok, err := a.Tasks.GetSessionWorkspace(r.Context(), desiredWSKey); err == nil && !ok {
+			if _, ok2, err := a.Tasks.GetSessionWorkspace(r.Context(), legacySessionKey); err == nil && ok2 {
+				_ = a.Tasks.MigrateSessionWorkspaceKey(r.Context(), legacySessionKey, desiredWSKey)
+			} else if _, ok2, err := a.Tasks.GetSessionWorkspace(r.Context(), legacyWSKey); err == nil && ok2 {
+				_ = a.Tasks.MigrateSessionWorkspaceKey(r.Context(), legacyWSKey, desiredWSKey)
+			}
+		}
+
+		// SafetyEnvelope is an autopilot hint (UI-level “one-time unlock”); it does not count as an explicit safety override.
+		explicitSafety := body.UnsafeAutomation ||
+			strings.TrimSpace(body.SafetyPreset) != "" ||
+			strings.TrimSpace(body.TaskIntent) != "" ||
+			strings.TrimSpace(body.CodexSandbox) != "" ||
+			strings.TrimSpace(body.CodexApprovalPolicy) != "" ||
+			body.CodexSearch ||
+			strings.TrimSpace(body.ClaudePermissionMode) != "" ||
+			body.ClaudeSandbox ||
+			len(body.ClaudeWebFetchDomains) > 0
+
+		unsafe := body.UnsafeAutomation
+		safetyEnvelope := strings.TrimSpace(body.SafetyEnvelope)
+		safetyPreset := strings.TrimSpace(body.SafetyPreset)
+		taskIntent := strings.TrimSpace(body.TaskIntent)
+		codexSandbox := strings.TrimSpace(body.CodexSandbox)
+		codexApprovalPolicy := strings.TrimSpace(body.CodexApprovalPolicy)
+		codexSearch := body.CodexSearch
+		claudePermissionMode := strings.TrimSpace(body.ClaudePermissionMode)
+		claudeSandbox := body.ClaudeSandbox
+		claudeDomains := body.ClaudeWebFetchDomains
+
+		if !explicitSafety {
+			unsafe = latest.UnsafeAutomation
+			safetyPreset = strings.TrimSpace(latest.SafetyPreset)
+			taskIntent = strings.TrimSpace(latest.TaskIntent)
+			codexSandbox = strings.TrimSpace(latest.CodexSandbox)
+			codexApprovalPolicy = strings.TrimSpace(latest.CodexApprovalPolicy)
+			codexSearch = latest.CodexSearch
+			claudePermissionMode = strings.TrimSpace(latest.ClaudePermissionMode)
+			claudeSandbox = latest.ClaudeSandbox
+			claudeDomains = append([]string{}, latest.ClaudeWebFetchDomains...)
+		}
+
+		prompt := strings.TrimSpace(body.Prompt)
+		if prompt == "" {
+			prompt = "continue"
+		}
+
+		resumeIn := tasks.CreateTaskInput{
+			WorkerType:            latest.WorkerType,
+			Mode:                  tasks.ModeResume,
+			ConversationID:        conversationID,
+			UnsafeAutomation:      unsafe,
+			SafetyEnvelope:        safetyEnvelope,
+			SafetyPreset:          safetyPreset,
+			TaskIntent:            taskIntent,
+			CodexSandbox:          codexSandbox,
+			CodexApprovalPolicy:   codexApprovalPolicy,
+			CodexSearch:           codexSearch,
+			ClaudePermissionMode:  claudePermissionMode,
+			ClaudeSandbox:         claudeSandbox,
+			ClaudeWebFetchDomains: claudeDomains,
+			Prompt:                prompt,
+			WorkDir:               latest.WorkDir,
+			SessionID:             strings.TrimSpace(latest.SessionID),
+			Warning:               latest.Warning,
+		}
+
+		driver := latest.WorkerType
+		if a.Tools != nil {
+			if profile, ok := a.Tools.Resolve(string(latest.WorkerType)); ok && strings.TrimSpace(string(profile.Driver)) != "" {
+				driver = tasks.WorkerType(strings.TrimSpace(string(profile.Driver)))
+			}
+		}
+		envelope := runsafe.SafetyEnvelope(strings.TrimSpace(resumeIn.SafetyEnvelope))
+		llm := runsafe.LLMBackend(nil)
+		if a.Observer != nil {
+			llm = a.Observer.LLM
+		}
+		resumeIn, ap := runsafe.ApplyAutopilot(r.Context(), resumeIn, runsafe.ApplyOptions{
+			Driver:   driver,
+			Envelope: envelope,
+			Classify: runsafe.ClassifyOptions{LLM: llm},
+		})
+
+		newTask, err := a.Tasks.CreateTask(r.Context(), resumeIn)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		if ap.Applied {
+			if audit := runsafe.FormatAuditLog(driver, ap.Decision, resumeIn, true); strings.TrimSpace(audit) != "" {
+				_, _ = a.Tasks.AppendLog(r.Context(), newTask.ID, tasks.LogSystem, audit)
+			}
+		}
+		if a.Hub != nil {
+			a.Hub.Publish(events.Event{Type: "task.created", Time: time.Now().UTC(), Payload: newTask})
+		}
+		if a.Workers != nil {
+			_ = a.Workers.Start(r.Context(), newTask.ID)
+		}
+		writeJSON(w, newTask)
 	case "rename":
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -381,6 +671,121 @@ func (a *API) handleSessionByKey(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.NotFound(w, r)
 	}
+}
+
+func resolveConversationIDForSessionKey(ctx context.Context, store *tasks.Store, key string) (string, error) {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return "", errors.New("session key is required")
+	}
+	if store == nil {
+		return "", errors.New("tasks store not configured")
+	}
+	if strings.HasPrefix(key, "c:") {
+		cid := strings.TrimSpace(strings.TrimPrefix(key, "c:"))
+		if cid == "" {
+			return "", errors.New("conversation_id is required")
+		}
+		return cid, nil
+	}
+	if strings.HasPrefix(key, "t:") {
+		taskID := strings.TrimSpace(strings.TrimPrefix(key, "t:"))
+		if taskID == "" {
+			return "", errors.New("task_id is required")
+		}
+		t, err := store.GetTask(ctx, taskID)
+		if err != nil {
+			return "", fmt.Errorf("task not found: %w", err)
+		}
+		if cid := strings.TrimSpace(t.ConversationID); cid != "" {
+			return cid, nil
+		}
+		return strings.TrimSpace(t.ID), nil
+	}
+	if strings.HasPrefix(key, "s:") {
+		sid := strings.TrimSpace(strings.TrimPrefix(key, "s:"))
+		if sid == "" {
+			return "", errors.New("session_id is required")
+		}
+		if cid, ok, err := store.ConversationIDForSessionID(ctx, sid); err != nil {
+			return "", err
+		} else if ok {
+			return cid, nil
+		}
+		return "", errors.New("session not found")
+	}
+	return "", errors.New("invalid session key (expected c:/s:/t:)")
+}
+
+func shouldContinueViaRehydrate(t tasks.Task) bool {
+	if t.Mode != tasks.ModeResume {
+		return false
+	}
+	if isNoConversationFound(t.Warning) {
+		return true
+	}
+	if isNoConversationFound(t.Error) {
+		return true
+	}
+	return false
+}
+
+func isNoConversationFound(message string) bool {
+	lower := strings.ToLower(strings.TrimSpace(message))
+	if lower == "" {
+		return false
+	}
+	if !strings.Contains(lower, "no conversation found") {
+		return false
+	}
+	return strings.Contains(lower, "session")
+}
+
+func resolveSessionWorkspaceForConversation(ctx context.Context, store *tasks.Store, desiredKey string, runs []tasks.Task) (tasks.SessionWorkspace, bool, error) {
+	if store == nil {
+		return tasks.SessionWorkspace{}, false, errors.New("tasks store not configured")
+	}
+	desiredKey = strings.TrimSpace(desiredKey)
+	if desiredKey == "" {
+		return tasks.SessionWorkspace{}, false, nil
+	}
+
+	if ws, ok, err := store.GetSessionWorkspace(ctx, desiredKey); err != nil {
+		return tasks.SessionWorkspace{}, false, err
+	} else if ok {
+		return ws, true, nil
+	}
+
+	for _, t := range runs {
+		if sid := strings.TrimSpace(t.SessionID); sid != "" {
+			legacySessionKey := tasks.SessionKey("", sid)
+			if legacySessionKey != desiredKey {
+				if ws, ok, err := store.GetSessionWorkspace(ctx, legacySessionKey); err != nil {
+					return tasks.SessionWorkspace{}, false, err
+				} else if ok {
+					_ = store.MigrateSessionWorkspaceKey(ctx, legacySessionKey, desiredKey)
+					if migrated, ok2, err := store.GetSessionWorkspace(ctx, desiredKey); err == nil && ok2 {
+						return migrated, true, nil
+					}
+					return ws, true, nil
+				}
+			}
+		}
+		legacyTaskKey := tasks.SessionKey(t.ID, "")
+		if legacyTaskKey != desiredKey {
+			if ws, ok, err := store.GetSessionWorkspace(ctx, legacyTaskKey); err != nil {
+				return tasks.SessionWorkspace{}, false, err
+			} else if ok {
+				_ = store.MigrateSessionWorkspaceKey(ctx, legacyTaskKey, desiredKey)
+				if migrated, ok2, err := store.GetSessionWorkspace(ctx, desiredKey); err == nil && ok2 {
+					return migrated, true, nil
+				}
+				return ws, true, nil
+			}
+		}
+	}
+
+	return tasks.SessionWorkspace{}, false, nil
 }
 
 func (a *API) handleTaskByID(w http.ResponseWriter, r *http.Request) {
@@ -874,7 +1279,7 @@ func (a *API) handleTaskByID(w http.ResponseWriter, r *http.Request) {
 		if prompt == "" {
 			prompt = "continue"
 		}
-		ctxPrompt, err := buildRehydratePrompt(r.Context(), a.Tasks, strings.TrimSpace(src.ConversationID), prompt)
+		ctxPrompt, err := tasks.BuildRehydratePrompt(r.Context(), a.Tasks, strings.TrimSpace(src.ConversationID), prompt)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -967,119 +1372,6 @@ func (a *API) handleTaskByID(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.NotFound(w, r)
 	}
-}
-
-func buildRehydratePrompt(ctx context.Context, store *tasks.Store, conversationID string, nextPrompt string) (string, error) {
-	if store == nil {
-		return "", errors.New("tasks store not configured")
-	}
-	conversationID = strings.TrimSpace(conversationID)
-	if conversationID == "" {
-		return "", errors.New("rehydrate: conversation_id is required")
-	}
-	nextPrompt = strings.TrimSpace(nextPrompt)
-	if nextPrompt == "" {
-		nextPrompt = "continue"
-	}
-
-	all, err := store.ListTasksWithOptions(ctx, 500, tasks.ListTasksOptions{IncludeDeleted: true})
-	if err != nil {
-		return "", err
-	}
-
-	var runs []tasks.Task
-	for _, t := range all {
-		if strings.TrimSpace(t.ConversationID) != conversationID {
-			continue
-		}
-		runs = append(runs, t)
-	}
-	sort.SliceStable(runs, func(i, j int) bool {
-		if runs[i].CreatedAt.Equal(runs[j].CreatedAt) {
-			return runs[i].ID < runs[j].ID
-		}
-		return runs[i].CreatedAt.Before(runs[j].CreatedAt)
-	})
-
-	const maxBytes = 60_000
-	var (
-		segments  []string
-		total     int
-		truncated bool
-	)
-	add := func(s string) {
-		s = strings.TrimSpace(s)
-		if s == "" {
-			return
-		}
-		segments = append(segments, s)
-		total += len(s)
-		for total > maxBytes && len(segments) > 1 {
-			truncated = true
-			total -= len(segments[0])
-			segments = segments[1:]
-		}
-	}
-
-	for _, run := range runs {
-		user := strings.TrimSpace(run.Prompt)
-		if user == "" {
-			continue
-		}
-		var assistantParts []string
-		logs, err := store.ListLogsFiltered(ctx, run.ID, 0, 2000, tasks.ListLogsFilter{Streams: []tasks.LogStream{tasks.LogAssistant}})
-		if err != nil {
-			return "", err
-		}
-		for _, l := range logs {
-			if strings.TrimSpace(l.Message) == "" {
-				continue
-			}
-			assistantParts = append(assistantParts, l.Message)
-		}
-		assistant := strings.TrimSpace(strings.Join(assistantParts, "\n"))
-
-		entry := "[User]\n" + user
-		if assistant != "" {
-			entry += "\n\n[Assistant]\n" + assistant
-		}
-		add(entry)
-	}
-
-	// Ensure the new instruction is always present at the end.
-	add("[User]\n" + nextPrompt)
-
-	headerLines := []string{
-		"[controlccx rehydrate]",
-		"以下内容由 ControlCCX 从历史 run 的 prompt/输出中拼接生成，可能不完整；已尽量保留最近上下文。",
-	}
-	if truncated {
-		headerLines = append(headerLines, "（提示：上下文过长，已自动截断较早部分。）")
-	}
-	headerLines = append(headerLines, "[/controlccx rehydrate]", "")
-
-	out := strings.Join(headerLines, "\n") + strings.Join(segments, "\n\n")
-	if len(out) > maxBytes {
-		out = truncateUTF8(out, maxBytes)
-	}
-	return out, nil
-}
-
-func truncateUTF8(s string, maxBytes int) string {
-	if maxBytes <= 0 || len(s) <= maxBytes {
-		return s
-	}
-	cut := 0
-	for i := range s {
-		if i > maxBytes {
-			break
-		}
-		cut = i
-	}
-	if cut <= 0 {
-		return ""
-	}
-	return s[:cut]
 }
 
 func (a *API) handleChat(w http.ResponseWriter, r *http.Request) {

@@ -271,34 +271,34 @@ function onMarkdownClick(e: MouseEvent) {
         <div v-if="viewModel === 'overview'" class="secOverview">
           <div class="secretaryCards">
             <div class="secCard">
-              <div class="secK">Sessions</div>
+              <div class="secK">会话</div>
               <div class="secV">{{ counts.total }}</div>
             </div>
             <div class="secCard">
-              <div class="secK">Running</div>
+              <div class="secK">运行中</div>
               <div class="secV">{{ counts.running }}</div>
             </div>
             <div class="secCard">
-              <div class="secK">Blocked</div>
+              <div class="secK">阻塞</div>
               <div class="secV">{{ counts.blocked }}</div>
             </div>
             <div class="secCard">
-              <div class="secK">Failed</div>
+              <div class="secK">失败</div>
               <div class="secV">{{ counts.failed }}</div>
             </div>
           </div>
 
           <div class="secSection">
             <div class="secSectionTitleRow">
-              <div class="secSectionTitle">Needs Attention</div>
+              <div class="secSectionTitle">需要关注</div>
               <div class="secSectionControls">
-                <select v-model="scopeModel" class="secScopeSelect" title="Scope">
-                  <option value="current">Current</option>
-                  <option value="all">All</option>
+                <select v-model="scopeModel" class="secScopeSelect" title="范围">
+                  <option value="current">当前</option>
+                  <option value="all">全部</option>
                 </select>
-                <label class="secMiniToggle" title="Auto resume interrupted sessions">
+                <label class="secMiniToggle" title="自动尝试继续中断的会话">
                   <input type="checkbox" v-model="autopilotModel" />
-                  Autopilot
+                  自动
                 </label>
               </div>
             </div>
@@ -331,34 +331,34 @@ function onMarkdownClick(e: MouseEvent) {
                     s.latest.status === 'running' ||
                     s.latest.status === 'queued'
                   "
-                  title="Resume session"
+                  title="继续会话"
                 >
-                  Resume
+                  继续
                 </button>
                 <button
                   type="button"
                   class="secAction"
                   @click="emit('cancelSession', s)"
                   :disabled="!(s.latest.status === 'running' || s.latest.status === 'queued')"
-                  title="Cancel run"
+                  title="取消运行"
                 >
-                  Cancel
+                  取消
                 </button>
               </div>
             </div>
           </div>
 
           <div class="secSection">
-            <div class="secSectionTitle">Briefing</div>
+            <div class="secSectionTitle">简报</div>
             <pre class="briefing">{{ briefing }}</pre>
           </div>
         </div>
 
         <div v-else class="secChatView">
           <div v-if="needsAttentionSessions.length" class="secAttentionHint">
-            <div class="text">Needs attention: {{ needsAttentionSessions.length }} session(s)</div>
-            <button type="button" @click="viewModel = 'overview'" title="Open overview">
-              View
+            <div class="text">需要关注：{{ needsAttentionSessions.length }} 个会话</div>
+            <button type="button" @click="viewModel = 'overview'" title="打开概览">
+              查看
             </button>
           </div>
 

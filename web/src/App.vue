@@ -39,6 +39,7 @@ import {
   fsWrite,
   deleteTool,
   renameSession,
+  continueSessionWithOptions,
   resumeTaskWithOptions,
   rehydrateTaskWithOptions,
   sendChat,
@@ -348,7 +349,7 @@ async function onDiscardRunWorkspace() {
 const selectedRunInstruction = computed(() => {
   const t = selectedTask.value;
   if (!t) return "";
-  const mode = t.mode === "resume" ? "Resume" : "New";
+  const mode = t.mode === "resume" ? "继续" : "新建";
   const p = promptSummary(t.prompt);
   return p ? `${mode} · ${p}` : mode;
 });
@@ -1006,7 +1007,7 @@ async function replaySelectedRun() {
     if (attentionAutopilotIsNoConversationFound(msg)) {
       stopAttentionAutopilotForSession(sessionKeyForTask(t));
       errorBanner.value =
-        "Resume 失败：Claude 找不到该 session（No conversation found）。建议：直接 New Run 重新开始；或检查 Claude Code 会话是否被清理/禁用持久化。原始错误：" +
+        "继续失败：Claude 找不到该会话（No conversation found）。建议：直接新建 Run 重新开始；或检查 Claude Code 会话是否被清理/禁用持久化。原始错误：" +
         msg;
       return;
     }
@@ -2468,7 +2469,7 @@ async function buildDeliveryForemanPrompt(t: Task): Promise<string> {
   parts.push("【Delivery Foreman / 交付前哨】");
   parts.push("");
   parts.push("请你作为系统秘书/观察者，判断该 run 是否真的完成，以及是否需要工业级交付检查。");
-  parts.push("如果未完成：你 SHOULD 直接调用 task_resume 工具创建新的 resume run（尽量不要让用户手动操作），并在回复里说明你做了什么；同时列出需要补齐的关键点。");
+  parts.push("如果未完成：你 SHOULD 优先调用 session_continue 工具继续该会话（会自动选择 resume/rehydrate，尽量不要让用户手动操作），并在回复里说明你做了什么；同时列出需要补齐的关键点。");
   parts.push("如果你判断不适合自动 resume（例如需要用户选择/高风险/信息不足），才给出用户下一步最小 resume prompt（用户要输入的那句话）。");
   parts.push("如果已完成且属于复杂任务：给出工业级交付 checklist（以可执行步骤/命令为主，不默认执行）。");
   parts.push("如果是简单任务：一句话说明无需工业级交付检查并结束。");
@@ -2696,27 +2697,27 @@ async function runAttentionAutopilotLoop() {
       markAttentionAutopilotSeen(key);
 
       const short = (sess.session_id || sess.latest.id).slice(0, 8);
-      attentionAutopilotNote.value = `Autopilot: resuming ${short}…`;
+      attentionAutopilotNote.value = `Autopilot：正在继续 ${short}…`;
       try {
         const driver = toolDriverForWorkerType(sess.worker_type);
         const intent = normalizeTaskIntent(sess.latest.task_intent ?? "code");
         const preset = effectiveSafetyPresetForTask(driver, sess.latest);
         if (isHighRiskPreset(driver, preset)) {
-          attentionAutopilotNote.value = `Autopilot skipped for ${short}: high-risk preset requires manual resume.`;
+          attentionAutopilotNote.value = `Autopilot 已跳过 ${short}：高风险设置需要手动继续。`;
           continue;
         }
         const safety = buildRunSafetyPayload(driver, intent, preset);
-        const nt = await resumeTaskWithOptions(sess.latest.id, { prompt: "continue", ...safety });
+        const nt = await continueSessionWithOptions(sess.key, { prompt: "continue", ...safety });
         resumeOriginByRunID.set(nt.id, "autopilot");
         upsertTask(nt);
-        attentionAutopilotNote.value = `Autopilot: resume started for ${short}.`;
+        attentionAutopilotNote.value = `Autopilot：已开始继续 ${short}。`;
       } catch (e: any) {
         const msg = e?.message ?? String(e);
         if (attentionAutopilotIsNoConversationFound(msg)) {
           stopAttentionAutopilotForSession(key);
           attentionAutopilotNote.value = `Autopilot 已停止：${short} 在 Claude 侧已不存在。建议：新建会话继续。`;
         } else {
-          attentionAutopilotNote.value = `Autopilot: resume failed for ${short}: ${msg}`;
+          attentionAutopilotNote.value = `Autopilot：继续失败 ${short}：${msg}`;
         }
       }
     }
@@ -2748,7 +2749,7 @@ async function onCancelTask() {
       const t = selectedTask.value;
       if (t) stopAttentionAutopilotForSession(sessionKeyForTask(t));
       errorBanner.value =
-        "Resume 失败：Claude 找不到该 session（No conversation found）。建议：直接 New Run 重新开始；或检查 Claude Code 会话是否被清理/禁用持久化。原始错误：" +
+        "继续失败：Claude 找不到该会话（No conversation found）。建议：直接新建 Run 重新开始；或检查 Claude Code 会话是否被清理/禁用持久化。原始错误：" +
         msg;
       return;
     }
@@ -2769,15 +2770,15 @@ async function secretaryCancelSessionRun(s: SessionGroup) {
 async function secretaryResumeSessionRun(s: SessionGroup) {
   if (!s?.latest?.id) return;
   if (s.deleted_at) {
-    errorBanner.value = "该 session 已删除（软删除），无法 resume。";
+    errorBanner.value = "该会话已删除（软删除），无法继续。";
     return;
   }
   if (!s.session_id) {
-    errorBanner.value = "该 session 还没有 session_id，无法 resume。";
+    errorBanner.value = "该会话还没有 session_id，无法继续。";
     return;
   }
   if (s.latest.status === "running" || s.latest.status === "queued") {
-    errorBanner.value = "该 session 仍在运行中，暂不需要 resume。";
+    errorBanner.value = "该会话仍在运行中，暂不需要继续。";
     return;
   }
   errorBanner.value = "";
@@ -2789,14 +2790,14 @@ async function secretaryResumeSessionRun(s: SessionGroup) {
     if (isHighRiskPreset(driver, preset)) {
       const ok = await requestHighRiskConfirm({
         title: "高风险确认",
-        message: "该 resume 需要高风险设置（权限更大）。继续吗？",
+        message: "该继续操作需要高风险设置（权限更大）。继续吗？",
         detail: highRiskPresetSummary(driver, preset),
-        confirmLabel: "继续 Resume（我已知晓）",
+        confirmLabel: "继续（我已知晓）",
       });
-      if (!ok) return;
-    }
+        if (!ok) return;
+      }
     const safety = buildRunSafetyPayload(driver, intent, preset);
-    const nt = await resumeTaskWithOptions(s.latest.id, { prompt: "continue", ...safety });
+    const nt = await continueSessionWithOptions(s.key, { prompt: "continue", ...safety });
     resumeOriginByRunID.set(nt.id, "manual");
     upsertTask(nt);
     selectedTaskId.value = nt.id;
@@ -2812,11 +2813,11 @@ async function onResumeTask() {
   const sess = selectedSession.value;
   if (!sess) return;
   if (sess.deleted_at) {
-    errorBanner.value = "该 session 已删除（软删除），无法 resume。";
+    errorBanner.value = "该会话已删除（软删除），无法继续。";
     return;
   }
   if (!sess.session_id) {
-    errorBanner.value = "该 session 还没有 session_id，无法 resume。";
+    errorBanner.value = "该会话还没有 session_id，无法继续。";
     return;
   }
   if (!resumePrompt.value.trim()) return;
@@ -2849,9 +2850,9 @@ async function onResumeTask() {
       ) {
         const ok = await requestHighRiskConfirm({
           title: "高风险确认",
-          message: "该 resume 需要高风险设置（权限更大）。继续吗？",
+          message: "该继续操作需要高风险设置（权限更大）。继续吗？",
           detail: highRiskPresetSummary(driver, preset),
-          confirmLabel: "继续 Resume（我已知晓）",
+          confirmLabel: "继续（我已知晓）",
         });
         if (!ok) return;
         resumeHighRiskOptIn.value = true;
@@ -2864,7 +2865,7 @@ async function onResumeTask() {
       payload = { ...envelope, ...buildRunSafetyPayload(driver, intent, preset) };
     }
 
-    const nt = await resumeTaskWithOptions(sess.latest.id, { prompt: resumePrompt.value, ...payload });
+    const nt = await continueSessionWithOptions(sess.key, { prompt: resumePrompt.value, ...payload });
     resumeOriginByRunID.set(nt.id, "manual");
     upsertTask(nt);
     selectedTaskId.value = nt.id;
@@ -4785,21 +4786,21 @@ watch(
               <input
                 v-if="!resumeExpanded"
                 v-model="resumePrompt"
-                placeholder="Continue with..."
+                placeholder="继续输入…"
                 @keydown.enter="onResumeEnter"
               />
               <textarea
                 v-else
                 v-model="resumePrompt"
                 rows="3"
-                placeholder="Continue with..."
+                placeholder="继续输入…"
               ></textarea>
 	              <div
 	                v-if="resumeDriver === 'codex' || resumeDriver === 'claude-code'"
 	                class="resumeSafetyControls"
 	              >
 	                <span class="pill" :class="resumeUseAutopilot ? 'low' : 'warn'">{{
-	                  resumeUseAutopilot ? "Auto" : "Manual"
+	                  resumeUseAutopilot ? "自动" : "手动"
 	                }}</span>
 	                <span class="mono">
 	                  <template v-if="resumeShowManualSafety">
@@ -4818,7 +4819,7 @@ watch(
                 @click="onResumeTask"
                 :disabled="!resumePrompt.trim() || !selectedSession.session_id || !!selectedSession.deleted_at || highRiskConfirmOpen"
 	              >
-                Resume
+                继续
               </button>
               <button
                 type="button"
@@ -4927,10 +4928,10 @@ watch(
 	              </template>
 	            </div>
             <div v-if="selectedSession.deleted_at" class="tinyHint">
-              session deleted：resume disabled
+              会话已删除：无法继续
             </div>
             <div v-else-if="!selectedSession.session_id" class="tinyHint">
-              session_id pending：暂时无法 resume
+              session_id 未就绪：暂时无法继续
             </div>
           </div>
 

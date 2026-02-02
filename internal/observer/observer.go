@@ -91,7 +91,7 @@ func (s *Service) RespondWithOptions(ctx context.Context, userMessage string, op
 - 如果用户只给了“任务名称/关键词”，你也可以把该关键词直接作为 task_id 传入（系统会用 prompt/session_id/id 前缀进行匹配）；若匹配多个，请先向用户确认
 
 当用户要求“继续/恢复/重试”某个已中断/失败/阻塞的任务时：
-- 你 SHOULD 尽量直接调用 task_resume / task_cancel 等操作工具来帮用户推进（除非你需要用户确认某个高风险选择）
+- 你 SHOULD 优先调用 session_continue（会自动选择 resume/rehydrate），必要时再用 task_cancel 等操作工具推进（除非你需要用户确认某个高风险选择）
 - 你 MUST 在最终回复里说明你做了什么（例如：已创建新的 resume run / 已取消任务 / 为什么没法继续）
 
 当你收到【Delivery Foreman / 交付前哨】一类的请求时（通常包含 run_id / session_id / recent_logs_tail）：
@@ -702,9 +702,9 @@ func (s *Service) handleResumeQuery(ctx context.Context, msg string, lower strin
 		return Reply{Message: "没有找到可继续的任务（failed/blocked/interrupted 且可 resume 的 session）。"}, nil
 	}
 
-	tool := s.agentTools()["task_resume"]
+	tool := s.agentTools()["session_continue"]
 	if tool == nil {
-		return Reply{Message: "当前无法继续：task_resume 不可用。"}, nil
+		return Reply{Message: "当前无法继续：session_continue 不可用。"}, nil
 	}
 
 	res, err := tool.Run(ctx, map[string]any{"task_id": target.ID})

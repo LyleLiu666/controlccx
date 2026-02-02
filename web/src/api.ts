@@ -108,6 +108,25 @@ export async function resumeTaskWithOptions(
   return postJSON<Task>(`/api/tasks/${id}/resume`, input);
 }
 
+export async function continueSessionWithOptions(
+  key: string,
+  input: {
+    prompt: string;
+    unsafe_automation?: boolean;
+    safety_envelope?: string;
+    safety_preset?: string;
+    task_intent?: string;
+    codex_sandbox?: string;
+    codex_approval_policy?: string;
+    codex_search?: boolean;
+    claude_permission_mode?: string;
+    claude_sandbox?: boolean;
+    claude_webfetch_domains?: string[];
+  },
+): Promise<Task> {
+  return postJSON<Task>(`/api/sessions/${encodeURIComponent(key)}/continue`, input);
+}
+
 export async function rehydrateTaskWithOptions(
   id: string,
   input: {

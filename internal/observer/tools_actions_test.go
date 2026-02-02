@@ -159,6 +159,147 @@ func TestTools_taskResume_RejectsOverlappingRunsInSession(t *testing.T) {
 	}
 }
 
+func TestTools_sessionContinue_CreatesResumeOrRehydrateRun(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "controlccx.db")
+
+	conn, err := db.Open(ctx, db.Options{Path: dbPath})
+	if err != nil {
+		t.Fatalf("db open: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+
+	store := tasks.NewStore(conn)
+	first, err := store.CreateTask(ctx, tasks.CreateTaskInput{
+		WorkerType: tasks.WorkerClaudeCode,
+		Mode:       tasks.ModeNew,
+		Prompt:     "do A",
+		WorkDir:    ".",
+		SessionID:  "sess-1",
+	})
+	if err != nil {
+		t.Fatalf("create first: %v", err)
+	}
+	_, _ = store.AppendLog(ctx, first.ID, tasks.LogAssistant, "done A")
+	if err := store.FinishTask(ctx, first.ID, tasks.FinishTaskInput{
+		Status:     tasks.StatusSucceeded,
+		SessionID:  "sess-1",
+		FinishedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("finish first: %v", err)
+	}
+
+	time.Sleep(2 * time.Millisecond)
+	resume, err := store.CreateTask(ctx, tasks.CreateTaskInput{
+		WorkerType:     tasks.WorkerClaudeCode,
+		Mode:           tasks.ModeResume,
+		ConversationID: first.ConversationID,
+		Prompt:         "continue",
+		WorkDir:        ".",
+		SessionID:      "sess-1",
+	})
+	if err != nil {
+		t.Fatalf("create resume: %v", err)
+	}
+	if err := store.SetWarning(ctx, resume.ID, "resume failed: No conversation found with session ID: sess-1"); err != nil {
+		t.Fatalf("set warning: %v", err)
+	}
+	if err := store.FinishTask(ctx, resume.ID, tasks.FinishTaskInput{
+		Status:     tasks.StatusFailed,
+		SessionID:  "sess-1",
+		FinishedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("finish resume: %v", err)
+	}
+
+	r := &fakeRunner{cancelOK: true}
+	svc := &Service{Store: store, Runner: r}
+	tools := svc.agentTools()
+
+	_, err = tools["session_continue"].Run(ctx, map[string]any{
+		"task_id": first.ID,
+		"prompt":  "继续",
+	})
+	if err != nil {
+		t.Fatalf("tool run: %v", err)
+	}
+	if len(r.started) != 1 {
+		t.Fatalf("started=%v, want 1 start", r.started)
+	}
+	next, err := store.GetTask(ctx, r.started[0])
+	if err != nil {
+		t.Fatalf("get continued task: %v", err)
+	}
+	if next.Mode != tasks.ModeNew {
+		t.Fatalf("mode=%q want %q", next.Mode, tasks.ModeNew)
+	}
+	if next.ConversationID != first.ConversationID {
+		t.Fatalf("conversation_id=%q want %q", next.ConversationID, first.ConversationID)
+	}
+	if !strings.Contains(next.Prompt, "do A") || !strings.Contains(next.Prompt, "done A") {
+		t.Fatalf("rehydrate prompt missing context: %q", next.Prompt)
+	}
+	if !strings.Contains(next.Prompt, "[controlccx rehydrate]") {
+		t.Fatalf("prompt missing header: %q", next.Prompt)
+	}
+}
+
+func TestTools_sessionContinue_CreatesResumeRunWhenHealthy(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "controlccx.db")
+
+	conn, err := db.Open(ctx, db.Options{Path: dbPath})
+	if err != nil {
+		t.Fatalf("db open: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+
+	store := tasks.NewStore(conn)
+	prev, err := store.CreateTask(ctx, tasks.CreateTaskInput{
+		WorkerType: tasks.WorkerClaudeCode,
+		Mode:       tasks.ModeNew,
+		Prompt:     "hi",
+		WorkDir:    ".",
+		SessionID:  "sess-1",
+	})
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	if err := store.FinishTask(ctx, prev.ID, tasks.FinishTaskInput{
+		Status:     tasks.StatusSucceeded,
+		SessionID:  "sess-1",
+		FinishedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("finish prev: %v", err)
+	}
+
+	r := &fakeRunner{cancelOK: true}
+	svc := &Service{Store: store, Runner: r}
+	tools := svc.agentTools()
+
+	_, err = tools["session_continue"].Run(ctx, map[string]any{
+		"task_id": prev.ID,
+		"prompt":  "继续",
+	})
+	if err != nil {
+		t.Fatalf("tool run: %v", err)
+	}
+	if len(r.started) != 1 {
+		t.Fatalf("started=%v, want 1 start", r.started)
+	}
+
+	next, err := store.GetTask(ctx, r.started[0])
+	if err != nil {
+		t.Fatalf("get resumed task: %v", err)
+	}
+	if next.Mode != tasks.ModeResume {
+		t.Fatalf("mode=%q want %q", next.Mode, tasks.ModeResume)
+	}
+	if strings.TrimSpace(next.SessionID) != "sess-1" {
+		t.Fatalf("session_id=%q want %q", next.SessionID, "sess-1")
+	}
+}
+
 func TestTools_acceptanceUpdate_UpsertsAndMerges(t *testing.T) {
 	ctx := context.Background()
 	dbPath := filepath.Join(t.TempDir(), "controlccx.db")
