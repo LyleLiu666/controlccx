@@ -54,6 +54,7 @@ import {
   attentionAutopilotShouldAttempt,
   attentionAutopilotStopForSession,
 } from "./attentionAutopilot";
+import { shouldSkipAutoDeliveryForemanForTask } from "./deliveryForeman";
 import { shouldOfferRehydrateForTask, type ResumeOrigin } from "./rehydrate";
 import { computePopupPosition } from "./menuPosition";
 import { prettifyLogMessage } from "./logPretty";
@@ -2565,9 +2566,8 @@ async function maybeTriggerDeliveryForeman(prev: Task | undefined, next: Task) {
   if (deliveryForemanSeenRuns.value.has(runID)) return;
   const prevStatus = prev?.status ?? "";
   const nextStatus = next.status ?? "";
-  // Avoid triggering Delivery Foreman on "blocked" runs. A blocked run typically needs
-  // explicit user intervention (approvals / high-risk settings) and auto-resume is noisy.
-  if (nextStatus === "blocked") return;
+  // Avoid noisy auto loops for "blocked" + resume-missing-session failures.
+  if (shouldSkipAutoDeliveryForemanForTask(next)) return;
 
   // Only auto-trigger on transitions into terminal states.
   if (isTerminalStatus(prevStatus) || !isTerminalStatus(nextStatus)) return;
