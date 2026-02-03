@@ -4528,12 +4528,16 @@ watch(
                   :title="`${formatLocalDateTime(selectedRunActivity.time)} · ${selectedRunActivity.summary}`"
                   >{{ selectedRunActivity.summary }}</span
                 >
-                <span
+                <div
                   v-else-if="selectedRunInstruction"
-                  class="detailPrompt"
-                  :title="selectedRunInstruction"
-                  >{{ selectedRunInstruction }}</span
+                  class="detailPromptWrap"
+                  tabindex="0"
                 >
+                  <span class="detailPrompt">{{ selectedRunInstruction }}</span>
+                  <div class="detailPromptFull" aria-hidden="true">
+                    {{ selectedRunInstruction }}
+                  </div>
+                </div>
               </div>
               <div class="detailTopActions">
                 <button
