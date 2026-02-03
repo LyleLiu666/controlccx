@@ -40,6 +40,14 @@ jobs:
       - name: Install deps
         run: pnpm install --frozen-lockfile
 
+      - name: Ensure web/dist placeholder for Go embed
+        run: |
+          set -euo pipefail
+          mkdir -p web/dist
+          if [ ! -f web/dist/placeholder.txt ]; then
+            printf "This file keeps web/dist non-empty so Go embed works before the first web build.\n" > web/dist/placeholder.txt
+          fi
+
       - name: Test
         run: pnpm test
 
