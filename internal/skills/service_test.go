@@ -191,6 +191,52 @@ func TestService_SyncCursor_ForcesCopy_AndSupportsOverwrite(t *testing.T) {
 	}
 }
 
+func TestService_SyncOverwrite_BacksUpUnmanagedEntry(t *testing.T) {
+	ctx := context.Background()
+	home := t.TempDir()
+	sourceRoot := filepath.Join(home, ".agent", "skills")
+	mustMkdir(t, filepath.Join(sourceRoot, "demo"))
+	mustWrite(t, filepath.Join(sourceRoot, "demo", "README.md"), "hello\n")
+
+	claudeRoot := filepath.Join(home, ".claude", "skills")
+	mustMkdir(t, filepath.Join(claudeRoot, "demo"))
+	mustWrite(t, filepath.Join(claudeRoot, "demo", "unmanaged.txt"), "x\n")
+
+	svc, err := NewService(Options{HomeDir: home, SourceRoots: []string{sourceRoot}})
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+
+	if err := svc.Sync(ctx, "demo", TargetClaudeCode, true); err != nil {
+		t.Fatalf("sync overwrite: %v", err)
+	}
+
+	dest := filepath.Join(claudeRoot, "demo")
+	assertSymlink(t, dest)
+
+	// Original unmanaged entry should be backed up.
+	backupRoot := filepath.Join(home, ".controlccx", "skills_backups", string(TargetClaudeCode), "demo")
+	entries, err := os.ReadDir(backupRoot)
+	if err != nil {
+		t.Fatalf("read backup root: %v", err)
+	}
+	if len(entries) == 0 {
+		t.Fatalf("expected backup entry in %s", backupRoot)
+	}
+	backupPath := filepath.Join(backupRoot, entries[0].Name())
+	b, err := os.ReadFile(filepath.Join(backupPath, "unmanaged.txt"))
+	if err != nil {
+		t.Fatalf("read backed up file: %v", err)
+	}
+	if string(b) != "x\n" {
+		t.Fatalf("backup unmanaged.txt=%q", string(b))
+	}
+
+	if _, err := os.Stat(filepath.Join(dest, "unmanaged.txt")); !os.IsNotExist(err) {
+		t.Fatalf("expected unmanaged.txt removed from destination, err=%v", err)
+	}
+}
+
 func mustMkdir(t *testing.T, path string) {
 	t.Helper()
 	if err := os.MkdirAll(path, 0o755); err != nil {

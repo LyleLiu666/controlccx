@@ -1,6 +1,6 @@
 import { computed, ref, watch } from "vue";
 import type { Skill, SkillsListResponse } from "../types";
-import { fetchSkills, linkSkill, unlinkSkill } from "../api";
+import { fetchSkills, linkSkill, syncSkill, unlinkSkill } from "../api";
 
 import type { SkillTarget } from "../skillsSummary";
 import { summarizeSkillTarget } from "../skillsSummary";
@@ -110,6 +110,30 @@ export function useSkills() {
     }
   }
 
+  async function onSkillsTakeover(name: string, target: SkillTarget) {
+    const key = skillsKey(name, target);
+    if (
+      typeof window !== "undefined" &&
+      !window.confirm(
+        `将覆盖 ${target}:${name} 的现有条目，并替换为受控关联（旧目录会备份到 ~/.controlccx/skills_backups）。继续？`,
+      )
+    ) {
+      return;
+    }
+    skillsActionBusy.value.set(key, true);
+    skillsActionBusy.value = new Map(skillsActionBusy.value);
+    skillsError.value = "";
+    try {
+      await syncSkill({ name, target, overwrite: true });
+      await refreshSkills();
+    } catch (e: any) {
+      skillsError.value = e?.message ?? String(e);
+    } finally {
+      skillsActionBusy.value.delete(key);
+      skillsActionBusy.value = new Map(skillsActionBusy.value);
+    }
+  }
+
   function skillBadgeClass(status: string) {
     switch (status) {
       case "linked":
@@ -154,6 +178,7 @@ export function useSkills() {
     skillsNextPage,
     skillsKey,
     onSkillsToggle,
+    onSkillsTakeover,
     summarizeSkillTarget,
     skillBadgeClass,
   };

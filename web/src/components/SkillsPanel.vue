@@ -41,6 +41,7 @@ const emit = defineEmits<{
   (e: "prevPage"): void;
   (e: "nextPage"): void;
   (e: "toggle", name: string, target: SkillTarget, enable: boolean): void;
+  (e: "takeover", name: string, target: SkillTarget): void;
   (e: "openVersions", name: string, hasSource: boolean): void;
   (e: "update:filter", value: string): void;
   (e: "update:limit", value: number): void;
@@ -135,6 +136,17 @@ function disableTitle(target: SkillTarget, canDisable: boolean): string {
   const t = targetLabel(target);
   if (canDisable) return `为 ${t} 禁用`;
   return `无法禁用：目标目录存在未托管的同名条目（请先处理冲突/外部/已存在）`;
+}
+
+function canTakeover(skill: Skill, t: SkillsSummary): boolean {
+  const hasSource = !!(skill.source && skill.source.trim());
+  if (!hasSource) return false;
+  return t.status === "present" || t.status === "external" || t.status === "conflict";
+}
+
+function takeoverTitle(target: SkillTarget): string {
+  const t = targetLabel(target);
+  return `接管 ${t} 目标中的同名条目（将覆盖并改为受控关联）`;
 }
 </script>
 
@@ -258,12 +270,31 @@ function disableTitle(target: SkillTarget, canDisable: boolean): string {
                     <button
                       type="button"
                       class="skillActionBtn"
-                      v-if="!t.enabled"
+                      v-if="!t.enabled && t.canEnable"
                       @click="emit('toggle', s.name, target, true)"
-                      :disabled="!t.canEnable || !!actionBusy.get(makeKey(s.name, target))"
-                      :title="enableTitle(s, target, t.canEnable)"
+                      :disabled="!!actionBusy.get(makeKey(s.name, target))"
+                      :title="enableTitle(s, target, true)"
                     >
                       {{ actionBusy.get(makeKey(s.name, target)) ? "…" : "启用" }}
+                    </button>
+                    <button
+                      v-else-if="!t.enabled && canTakeover(s, t)"
+                      type="button"
+                      class="skillActionBtn"
+                      @click="emit('takeover', s.name, target)"
+                      :disabled="!!actionBusy.get(makeKey(s.name, target))"
+                      :title="takeoverTitle(target)"
+                    >
+                      {{ actionBusy.get(makeKey(s.name, target)) ? "…" : "接管" }}
+                    </button>
+                    <button
+                      v-else-if="!t.enabled"
+                      type="button"
+                      class="skillActionBtn"
+                      :disabled="true"
+                      :title="enableTitle(s, target, t.canEnable)"
+                    >
+                      启用
                     </button>
                     <button
                       type="button"

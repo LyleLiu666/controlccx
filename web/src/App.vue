@@ -280,6 +280,7 @@ const {
   skillsNextPage,
   skillsKey,
   onSkillsToggle,
+  onSkillsTakeover,
   summarizeSkillTarget,
   skillBadgeClass,
 } = useSkills();
@@ -4084,6 +4085,7 @@ watch(
 	              @prev-page="skillsPrevPage"
 	              @next-page="skillsNextPage"
 	              @toggle="onSkillsToggle"
+	              @takeover="onSkillsTakeover"
 	              @openVersions="openSkillVersions"
 	            />
           </div>

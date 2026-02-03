@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 )
 
 type Target string
@@ -265,7 +266,7 @@ func (s *Service) Sync(ctx context.Context, name string, target Target, overwrit
 
 	for _, root := range roots {
 		forceCopy := target == TargetCursor
-		if err := s.linkOne(root, name, sourcePath, overwrite, forceCopy); err != nil {
+		if err := s.linkOne(target, root, name, sourcePath, overwrite, forceCopy); err != nil {
 			return err
 		}
 	}
@@ -327,7 +328,7 @@ func (s *Service) resolveSourceRoots() []string {
 	return dedupePaths(roots)
 }
 
-func (s *Service) linkOne(targetRoot, name, sourcePath string, overwrite bool, forceCopy bool) error {
+func (s *Service) linkOne(target Target, targetRoot, name, sourcePath string, overwrite bool, forceCopy bool) error {
 	targetRoot = filepath.Clean(targetRoot)
 	dest := filepath.Join(targetRoot, name)
 
@@ -350,7 +351,9 @@ func (s *Service) linkOne(targetRoot, name, sourcePath string, overwrite bool, f
 	if st, err := os.Lstat(dest); err == nil {
 		if st.Mode()&os.ModeSymlink != 0 {
 			if overwrite {
-				_ = os.Remove(dest)
+				if _, err := s.backupTargetEntry(target, name, dest); err != nil {
+					return err
+				}
 			} else {
 				// Only allow replacing a symlink if it points to allowed roots.
 				linkTo, _ := os.Readlink(dest)
@@ -363,13 +366,17 @@ func (s *Service) linkOne(targetRoot, name, sourcePath string, overwrite bool, f
 			if isManagedCopy(dest) {
 				_ = os.RemoveAll(dest)
 			} else if overwrite {
-				_ = os.RemoveAll(dest)
+				if _, err := s.backupTargetEntry(target, name, dest); err != nil {
+					return err
+				}
 			} else {
 				return errTargetExists(dest)
 			}
 		} else {
 			if overwrite {
-				_ = os.Remove(dest)
+				if _, err := s.backupTargetEntry(target, name, dest); err != nil {
+					return err
+				}
 			} else {
 				return errTargetExists(dest)
 			}
@@ -396,6 +403,40 @@ func (s *Service) linkOne(targetRoot, name, sourcePath string, overwrite bool, f
 		return fmt.Errorf("skills: write marker: %w", err)
 	}
 	return nil
+}
+
+func (s *Service) backupTargetEntry(target Target, name, entryPath string) (string, error) {
+	if s == nil {
+		return "", fmt.Errorf("skills: service is nil")
+	}
+	name = strings.TrimSpace(name)
+	if !isSafeName(name) {
+		return "", fmt.Errorf("skills: invalid skill name")
+	}
+	entryPath = filepath.Clean(strings.TrimSpace(entryPath))
+	if entryPath == "" {
+		return "", fmt.Errorf("skills: backup: empty entry path")
+	}
+
+	// Backups are stored outside any tool skills roots to avoid polluting scans.
+	backupRoot := filepath.Join(s.homeDir, ".controlccx", "skills_backups", string(target), name)
+	if err := os.MkdirAll(backupRoot, 0o755); err != nil {
+		return "", fmt.Errorf("skills: backup: mkdir: %w", err)
+	}
+
+	stamp := time.Now().UTC().Format("20060102-150405")
+	backupPath := filepath.Join(backupRoot, stamp)
+	for i := 0; i < 1000; i++ {
+		if _, err := os.Lstat(backupPath); os.IsNotExist(err) {
+			break
+		}
+		backupPath = filepath.Join(backupRoot, fmt.Sprintf("%s-%02d", stamp, i+1))
+	}
+
+	if err := os.Rename(entryPath, backupPath); err != nil {
+		return "", fmt.Errorf("skills: backup: move %q -> %q: %w", entryPath, backupPath, err)
+	}
+	return backupPath, nil
 }
 
 func (s *Service) unlinkOne(targetRoot, name string) error {
