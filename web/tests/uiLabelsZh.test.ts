@@ -16,4 +16,5 @@ test("session header mini actions use Chinese labels", () => {
   assert.match(appVue, /title="浏览工作区文件"[\s\S]*>\s*文件\s*<\/button>/);
 
   assert.ok(appVue.includes("{{ s.runs.length }} 次运行"));
+  assert.ok(appVue.includes("最后运行："));
 });

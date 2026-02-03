@@ -1,6 +1,9 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
-import type { Tool, ToolDriver } from "../types";
+import { computed, nextTick, ref, watch } from "vue";
+import { fetchSkills } from "../api";
+import { type SkillTarget, type SkillsSummary, summarizeSkillTarget } from "../skillsSummary";
+import { formatSkillToken } from "../skillsInvoke";
+import type { Skill, Tool, ToolDriver } from "../types";
 import {
   isHighRiskPreset,
   safetyPresetsForDriver,
@@ -58,6 +61,7 @@ const newRunShowManualSafety = computed<boolean>(
 );
 
 function close() {
+  closeSkillsPicker();
   emit("update:open", false);
   emit("close");
 }
@@ -70,6 +74,186 @@ function updatePrompt(e: Event) {
   emit("update:prompt", (e.target as HTMLTextAreaElement).value);
 }
 
+const canUseSkills = computed<boolean>(() => newRunDriver.value === "claude-code" || newRunDriver.value === "codex");
+const skillsPickerOpen = ref(false);
+const skillsQuery = ref("");
+const skillsOnlyAvailable = ref(true);
+const skillsLoading = ref(false);
+const skillsError = ref("");
+const skillsData = ref<Skill[]>([]);
+const skillsSearchEl = ref<HTMLInputElement | null>(null);
+
+const skillsTarget = computed<SkillTarget | null>(() => {
+  switch (newRunDriver.value) {
+    case "claude-code":
+      return "claude_code";
+    case "codex":
+      return "codex";
+    default:
+      return null;
+  }
+});
+
+function skillStatusLabel(status: SkillsSummary["status"]): string {
+  switch (status) {
+    case "missing":
+      return "缺失";
+    case "linked":
+      return "已关联";
+    case "copied":
+      return "已复制";
+    case "present":
+      return "已存在";
+    case "external":
+      return "外部";
+    case "broken":
+      return "异常";
+    case "conflict":
+      return "冲突";
+    case "partial":
+      return "部分";
+    default:
+      return String(status).toUpperCase();
+  }
+}
+
+function skillStatusBadgeClass(status: SkillsSummary["status"]): string {
+  switch (status) {
+    case "linked":
+    case "copied":
+      return "ok";
+    case "present":
+    case "external":
+      return "muted";
+    case "partial":
+      return "partial";
+    case "missing":
+      return "dim";
+    default:
+      return "warn";
+  }
+}
+
+function isSkillAvailable(summary: SkillsSummary): boolean {
+  return summary.status !== "missing" && summary.status !== "broken";
+}
+
+const skillsVisible = computed(() => {
+  const q = skillsQuery.value.trim().toLowerCase();
+  const target = skillsTarget.value;
+
+  const out: Array<{ name: string; summary: SkillsSummary | null; available: boolean; title: string }> = [];
+  for (const s of skillsData.value) {
+    if (q && !String(s.name ?? "").toLowerCase().includes(q)) continue;
+
+    const summary = target ? summarizeSkillTarget(s, target) : null;
+    const available = summary ? isSkillAvailable(summary) : false;
+    if (skillsOnlyAvailable.value && !available) continue;
+    out.push({
+      name: s.name,
+      summary,
+      available,
+      title: summary?.detail ?? "",
+    });
+  }
+
+  out.sort((a, b) => a.name.localeCompare(b.name));
+  return out.slice(0, 200);
+});
+
+async function ensureSkillsLoaded(force = false) {
+  if (!canUseSkills.value) return;
+  if (skillsLoading.value) return;
+  if (!force && skillsData.value.length) return;
+  skillsLoading.value = true;
+  skillsError.value = "";
+  try {
+    const res = await fetchSkills({ limit: 500, offset: 0 });
+    const list = Array.isArray(res.skills) ? res.skills.slice() : [];
+    list.sort((a, b) => String(a.name).localeCompare(String(b.name)));
+    skillsData.value = list;
+  } catch (e: any) {
+    skillsError.value = e?.message ?? String(e);
+  } finally {
+    skillsLoading.value = false;
+  }
+}
+
+function openSkillsPicker() {
+  if (!canUseSkills.value) return;
+  skillsPickerOpen.value = true;
+  skillsError.value = "";
+  void ensureSkillsLoaded();
+  void nextTick(() => {
+    skillsSearchEl.value?.focus();
+  });
+}
+
+function closeSkillsPicker() {
+  skillsPickerOpen.value = false;
+  skillsError.value = "";
+  skillsQuery.value = "";
+}
+
+function onSkillsPickerKeyDown(ev: KeyboardEvent) {
+  if (!skillsPickerOpen.value) return;
+  if (ev.key !== "Escape") return;
+  ev.preventDefault();
+  closeSkillsPicker();
+  void nextTick(() => {
+    promptEl.value?.focus();
+  });
+}
+
+function insertIntoPrompt(text: string) {
+  const current = String(props.prompt ?? "");
+  const el = promptEl.value;
+  const start = el?.selectionStart ?? current.length;
+  const end = el?.selectionEnd ?? start;
+  const next = current.slice(0, start) + text + current.slice(end);
+  emit("update:prompt", next);
+  void nextTick(() => {
+    const nextPos = start + text.length;
+    try {
+      el?.focus();
+      el?.setSelectionRange(nextPos, nextPos);
+    } catch {
+      // ignore
+    }
+  });
+}
+
+function chooseSkill(name: string) {
+  if (!canUseSkills.value) return;
+  const token = formatSkillToken(name, newRunDriver.value);
+  if (!token) return;
+
+  const insertText = token.startsWith("/") ? token + "\n" : token + " ";
+  insertIntoPrompt(insertText);
+  closeSkillsPicker();
+}
+
+function atBlankLineStart(el: HTMLTextAreaElement, value: string): boolean {
+  const pos = el.selectionStart ?? 0;
+  const before = value.slice(0, pos);
+  const lineStart = before.lastIndexOf("\n") + 1;
+  const prefix = before.slice(lineStart);
+  return /^\s*$/.test(prefix);
+}
+
+function onPromptKeyDown(ev: KeyboardEvent) {
+  if (ev.key !== "/") return;
+  if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
+  if (!canUseSkills.value) return;
+  const el = ev.target as HTMLTextAreaElement | null;
+  if (!el) return;
+
+  const current = String(props.prompt ?? "");
+  if (!atBlankLineStart(el, current)) return;
+  ev.preventDefault();
+  openSkillsPicker();
+}
+
 // Focus handling for prompt textarea
 const promptEl = ref<HTMLTextAreaElement | null>(null);
 watch(
@@ -78,9 +262,12 @@ watch(
     if (open) {
       // Small delay to allow render
       setTimeout(() => {
+        if (skillsPickerOpen.value) return;
         promptEl.value?.focus();
       }, 50);
+      return;
     }
+    closeSkillsPicker();
   }
 );
 </script>
@@ -117,16 +304,99 @@ watch(
             </button>
           </div>
           <label class="full">
-            提示词
+            <div class="newRunPromptLabelRow">
+              <span>提示词</span>
+              <button
+                type="button"
+                class="inlineBtn newRunSkillsOpenBtn"
+                @click="openSkillsPicker"
+                :disabled="!canUseSkills"
+                :title="canUseSkills ? '选择技能（将插入到提示词中）' : '当前工具不支持 skills'"
+              >
+                选择技能
+              </button>
+            </div>
             <textarea
               ref="promptEl"
               class="promptEmphasis"
               :value="prompt"
               @input="updatePrompt"
+              @keydown="onPromptKeyDown"
               rows="6"
               placeholder="描述要运行的任务..."
             ></textarea>
+            <div v-if="canUseSkills" class="tinyHint newRunSkillsHint">
+              技能：点击「选择技能」或在输入框里按 <span class="mono">/</span> 搜索（兼容 TUI）。
+            </div>
+            <div v-else class="tinyHint newRunSkillsHint">
+              当前工具为 <span class="mono">{{ newRunDriver }}</span>：不支持 skills（仅执行命令）。
+            </div>
           </label>
+
+          <div
+            v-if="skillsPickerOpen"
+            class="modalOverlay newRunSkillsOverlay"
+            @click.self="closeSkillsPicker"
+            @keydown.capture="onSkillsPickerKeyDown"
+          >
+            <div class="modal smallModal newRunSkillsModal" role="dialog" aria-modal="true">
+              <div class="modalHeader">
+                <div class="modalTitle">选择技能</div>
+                <button class="iconBtn" type="button" @click="closeSkillsPicker">✕</button>
+              </div>
+              <div class="modalBody newRunSkillsBody">
+                <div class="tinyHint">
+                  当前工具：<span class="mono">{{ newRunDriver }}</span> · 插入：
+                  <span class="mono">{{ formatSkillToken("my-skill", newRunDriver) }}</span>
+                </div>
+
+                <div class="newRunSkillsToolbar">
+                  <input
+                    ref="skillsSearchEl"
+                    v-model="skillsQuery"
+                    placeholder="搜索技能（名称）…"
+                    :disabled="skillsLoading"
+                  />
+                  <label class="newRunSkillsOnly">
+                    <input type="checkbox" v-model="skillsOnlyAvailable" />
+                    <span>仅显示可用</span>
+                  </label>
+                  <button
+                    type="button"
+                    @click="ensureSkillsLoaded(true)"
+                    :disabled="skillsLoading"
+                    title="刷新技能列表"
+                  >
+                    刷新
+                  </button>
+                </div>
+
+                <div v-if="skillsError" class="modalError">{{ skillsError }}</div>
+                <div v-else-if="skillsLoading" class="loading">加载中…</div>
+                <div v-else class="newRunSkillsList" role="listbox" aria-label="Skills">
+                  <button
+                    v-for="s in skillsVisible"
+                    :key="s.name"
+                    type="button"
+                    class="newRunSkillOption"
+                    :disabled="!s.available"
+                    :title="s.title"
+                    @click="chooseSkill(s.name)"
+                  >
+                    <span class="mono">{{ s.name }}</span>
+                    <span v-if="s.summary" class="pill mono skillStatus" :class="skillStatusBadgeClass(s.summary.status)">{{
+                      skillStatusLabel(s.summary.status)
+                    }}</span>
+                    <span v-else class="pill mono skillStatus dim">未知</span>
+                  </button>
+                  <div v-if="!skillsVisible.length" class="empty">暂无匹配技能</div>
+                </div>
+              </div>
+              <div class="modalFooter">
+                <button type="button" @click="closeSkillsPicker">关闭</button>
+              </div>
+            </div>
+          </div>
           <details class="newRunAdvanced full">
             <summary>
               <span>高级设置</span>

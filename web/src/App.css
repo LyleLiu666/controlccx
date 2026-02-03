@@ -929,6 +929,107 @@ h2 {
   height: 18px;
 }
 
+:deep(.newRunPromptLabelRow) {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+:deep(.newRunPromptLabelRow span) {
+  font-weight: 700;
+}
+
+:deep(.newRunSkillsOpenBtn) {
+  border: 1px solid rgba(20, 184, 166, 0.35);
+  background: rgba(20, 184, 166, 0.08);
+  color: var(--text);
+}
+
+:deep(.newRunSkillsOpenBtn:disabled) {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+:deep(.newRunSkillsHint) {
+  margin-top: 8px;
+}
+
+:deep(.modal.newRunSkillsModal) {
+  width: min(720px, 95vw);
+  max-height: 90vh;
+}
+
+:deep(.newRunSkillsBody) {
+  display: grid;
+  gap: 12px;
+}
+
+:deep(.newRunSkillsToolbar) {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 10px;
+  align-items: center;
+}
+
+:deep(.newRunSkillsToolbar input) {
+  min-height: 40px;
+}
+
+:deep(.newRunSkillsOnly) {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  font-weight: 700;
+  user-select: none;
+}
+
+:deep(.newRunSkillsOnly input) {
+  width: 18px;
+  height: 18px;
+}
+
+:deep(.newRunSkillsList) {
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--bg-subtle);
+  padding: 10px;
+  display: grid;
+  gap: 8px;
+  max-height: min(420px, 60vh);
+  overflow: auto;
+}
+
+:deep(.newRunSkillOption) {
+  width: 100%;
+  text-align: left;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px solid transparent;
+  background: transparent;
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease,
+    transform 0.15s ease;
+}
+
+:deep(.newRunSkillOption:hover) {
+  background: rgba(20, 184, 166, 0.08);
+  border-color: rgba(20, 184, 166, 0.35);
+}
+
+:deep(.newRunSkillOption:disabled) {
+  opacity: 0.55;
+  cursor: not-allowed;
+  transform: none;
+}
+
 .inlineBtn {
   padding: 2px 10px;
   border-radius: 999px;
@@ -2931,6 +3032,14 @@ h2 {
 .pill.kind {
   background: var(--bg-subtle);
   color: var(--text-sub);
+}
+
+.pill.time {
+  background: var(--bg-subtle);
+  color: var(--text-sub);
+  border-color: rgba(148, 163, 184, 0.25);
+  text-transform: none;
+  letter-spacing: 0;
 }
 
 .pill.running {

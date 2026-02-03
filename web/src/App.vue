@@ -605,6 +605,13 @@ function formatLocalDateTime(ts: string): string {
   return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
 }
 
+function formatSessionLastRunTime(ts: string): string {
+  const full = formatLocalDateTime(ts);
+  if (!full) return "";
+  if (/^\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}$/.test(full)) return full.slice(5, 16);
+  return full;
+}
+
 const selectedAssistantResult = computed(() => {
   let best = "";
   for (const l of selectedLogs.value) {
@@ -1544,6 +1551,7 @@ type SessionGroup = {
   session_id: string;
   title: string;
   deleted_at: string;
+  last_run_at: string;
   worker_type: WorkerType;
   workdir: string;
   status: Task["status"];
@@ -3578,6 +3586,9 @@ const sessionsAll = computed<SessionGroup[]>(() => {
   for (const [key, runs] of groups.entries()) {
     runs.sort((a, b) => a.created_at.localeCompare(b.created_at));
     const latest = runs[runs.length - 1];
+    const lastRunAt = String(
+      latest.finished_at ?? latest.started_at ?? latest.created_at ?? latest.updated_at ?? "",
+    ).trim();
 
     let score = 0;
     let stderrCount = 0;
@@ -3597,6 +3608,7 @@ const sessionsAll = computed<SessionGroup[]>(() => {
       session_id: latest.session_id?.trim() ?? "",
       title,
       deleted_at: deletedAt,
+      last_run_at: lastRunAt,
       worker_type: latest.worker_type,
       workdir: latest.workdir,
       status: latest.status,
@@ -4342,6 +4354,12 @@ watch(
                 >
                 <span class="pill" :class="s.status">{{ s.status }}</span>
                 <span class="pill kind">{{ s.runs.length }} 次运行</span>
+                <span
+                  v-if="s.last_run_at"
+                  class="pill time"
+                  :title="`最后运行：${formatLocalDateTime(s.last_run_at)}`"
+                  >最后 <span class="mono">{{ formatSessionLastRunTime(s.last_run_at) }}</span></span
+                >
                 <button
                   type="button"
                   class="rowMoreBtn"
