@@ -3124,12 +3124,23 @@ h2 {
   line-height: 1.45;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+  user-select: text;
+  cursor: text;
   opacity: 0;
   transform: translateY(-6px);
   pointer-events: none;
   transition:
     opacity 0.15s ease,
     transform 0.15s ease;
+}
+
+.detailPromptFull::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -8px;
+  height: 8px;
 }
 
 .detailPromptWrap:hover .detailPromptFull,

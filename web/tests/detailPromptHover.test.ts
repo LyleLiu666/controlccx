@@ -12,6 +12,7 @@ test("detail prompt is emphasized and reveals full text on hover", () => {
 
   assert.ok(appVue.includes("detailPromptWrap"));
   assert.ok(appVue.includes("detailPromptFull"));
+  assert.doesNotMatch(appVue, /:title="selectedRunInstruction"/);
 
   assert.doesNotMatch(css, /\.detailPrompt\s*\{[^}]*font-size:\s*12px;/s);
   assert.match(css, /\.detailPrompt\s*\{[^}]*font-size:\s*13px;/s);
@@ -19,8 +20,9 @@ test("detail prompt is emphasized and reveals full text on hover", () => {
 
   assert.match(css, /\.detailPromptFull\s*\{[^}]*position:\s*absolute;/s);
   assert.match(css, /\.detailPromptFull\s*\{[^}]*max-height:\s*40vh;/s);
+  assert.match(css, /\.detailPromptFull\s*\{[^}]*user-select:\s*text;/s);
+  assert.match(css, /\.detailPromptFull::before\s*\{[^}]*height:\s*8px;/s);
 
   assert.doesNotMatch(css, /\.detailHeader\.compact \.detailTopLeft\s*\{[^}]*overflow:\s*hidden;/s);
   assert.match(css, /\.detailHeader\.compact \.detailTopLeft\s*\{[^}]*overflow:\s*visible;/s);
 });
-

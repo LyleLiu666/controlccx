@@ -4546,6 +4546,7 @@ watch(
                 <div
                   v-else-if="selectedRunInstruction"
                   class="detailPromptWrap"
+                  :title="null"
                   tabindex="0"
                 >
                   <span class="detailPrompt">{{ selectedRunInstruction }}</span>
