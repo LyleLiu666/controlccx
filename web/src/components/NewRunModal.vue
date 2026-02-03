@@ -60,6 +60,10 @@ const newRunShowManualSafety = computed<boolean>(
   () => !newRunUseAutopilot.value
 );
 
+const recommendedSafetyPreset = computed<string>(() =>
+  recommendSafetyPreset(newRunDriver.value, props.taskIntent)
+);
+
 function close() {
   emit("update:open", false);
   emit("close");
@@ -218,10 +222,10 @@ watch(
                           :value="taskIntent"
                           @change="emit('update:taskIntent', ($event.target as HTMLSelectElement).value as TaskIntent)"
                         >
-                          <option value="code">code</option>
-                          <option value="analyze">analyze</option>
-                          <option value="search-browse">search-browse</option>
-                          <option value="install">install</option>
+                          <option value="code">code（写代码/跑脚本）</option>
+                          <option value="analyze">analyze（阅读/分析总结）</option>
+                          <option value="search-browse">search-browse（查资料/浏览）</option>
+                          <option value="install">install（下载/安装/执行安装脚本）</option>
                         </select>
                       </label>
                       <label>
@@ -235,23 +239,24 @@ watch(
                             :key="p.value"
                             :value="p.value"
                           >
-                            {{ p.value }}
+                            {{ p.label }}
                           </option>
                         </select>
                       </label>
                     </div>
                     <div class="tinyHint">
-                      推荐:
-                      <span class="mono">{{
-                        recommendSafetyPreset(newRunDriver, taskIntent)
-                      }}</span>
-                      <button
-                        type="button"
-                        class="inlineBtn"
-                        @click="emit('update:safetyPreset', recommendSafetyPreset(newRunDriver, taskIntent))"
-                      >
-                        使用
-                      </button>
+                      推荐（由意图决定）:
+                      <span class="mono">{{ recommendedSafetyPreset }}</span>
+                      <template v-if="recommendedSafetyPreset !== safetyPreset">
+                        <button
+                          type="button"
+                          class="inlineBtn"
+                          @click="emit('update:safetyPreset', recommendedSafetyPreset)"
+                        >
+                          应用推荐
+                        </button>
+                      </template>
+                      <template v-else>（已应用）</template>
                     </div>
 
                     <div

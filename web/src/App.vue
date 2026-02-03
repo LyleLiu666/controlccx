@@ -62,6 +62,7 @@ import { deriveRunActivity } from "./runActivity";
 import type { RunSafetyPayload, TaskIntent } from "./runSafety";
 import {
   buildRunSafetyPayload,
+  DEFAULT_RUN_SAFETY_INSTALL_UNLOCK,
   effectiveSafetyPresetForTask,
   isHighRiskPreset,
   normalizeSafetyPreset,
@@ -524,7 +525,7 @@ const blockedPromptTask = computed<Task | null>(() => {
 const runSafetyPresetByTool = ref<Record<string, string>>({});
 const runSafetyIntentByTool = ref<Record<string, string>>({});
 const runSafetyAutopilotEnabled = ref<boolean>(true);
-const runSafetyInstallUnlock = ref<boolean>(false);
+const runSafetyInstallUnlock = ref<boolean>(DEFAULT_RUN_SAFETY_INSTALL_UNLOCK);
 
 function formatLogTime(ts: string): string {
   const s = (ts ?? "").trim();
@@ -1305,7 +1306,10 @@ const workspaceSelect = ref<string>(loadString(LS_KEY_WORKSPACE_FILTER));
   runSafetyIntentByTool.value = loadStringMap(LS_KEY_RUN_SAFETY_INTENT_BY_TOOL);
   runSafetyPresetByTool.value = loadStringMap(LS_KEY_RUN_SAFETY_PRESET_BY_TOOL);
   runSafetyAutopilotEnabled.value = loadBool(LS_KEY_RUN_SAFETY_AUTOPILOT, true);
-  runSafetyInstallUnlock.value = loadBool(LS_KEY_RUN_SAFETY_INSTALL_UNLOCK, false);
+  runSafetyInstallUnlock.value = loadBool(
+    LS_KEY_RUN_SAFETY_INSTALL_UNLOCK,
+    DEFAULT_RUN_SAFETY_INSTALL_UNLOCK,
+  );
 
   // Back-compat: v1 Claude auto-approve was a single boolean toggle.
   const legacyClaudeAutoApprove = loadBool(LS_KEY_CLAUDE_AUTO_APPROVE_LEGACY, false);
@@ -3618,6 +3622,10 @@ const resumeSafetyPreset = computed<string>({
   },
 });
 
+const resumeRecommendedSafetyPreset = computed<string>(() =>
+  recommendSafetyPreset(resumeDriver.value, resumeTaskIntent.value),
+);
+
 const resumeUseAutopilot = computed<boolean>(
   () => runSafetyAutopilotEnabled.value && !resumeSafetyOverride.value,
 );
@@ -4654,57 +4662,60 @@ watch(
 	              v-if="resumeExpanded && (resumeDriver === 'codex' || resumeDriver === 'claude-code')"
 	              class="resumeSafetyExtra"
 	            >
-	              <div class="resumeSafetyExtraGrid">
-	                <label class="full">
-	                  <input type="checkbox" v-model="runSafetyInstallUnlock" />
-	                  <span class="mono">Install unlock</span>
-	                  <span class="tinyHint">Allows downloads/installers (higher risk)</span>
-	                </label>
-	                <label class="full">
-	                  <input type="checkbox" v-model="runSafetyAutopilotEnabled" />
-	                  <span>Safety autopilot (recommended)</span>
-	                </label>
-	                <label v-if="runSafetyAutopilotEnabled" class="full">
-	                  <input type="checkbox" v-model="resumeSafetyOverride" />
-	                  <span>Override autopilot (manual intent/preset)</span>
-	                </label>
-	              </div>
+		              <div class="resumeSafetyExtraGrid">
+		                <label class="full">
+		                  <input type="checkbox" v-model="runSafetyInstallUnlock" />
+		                  <span class="mono">安装解锁 (Install unlock)</span>
+		                  <span class="tinyHint">允许下载/安装程序（较高风险）</span>
+		                </label>
+		                <label class="full">
+		                  <input type="checkbox" v-model="runSafetyAutopilotEnabled" />
+		                  <span>安全自动驾驶（推荐）</span>
+		                </label>
+		                <label v-if="runSafetyAutopilotEnabled" class="full">
+		                  <input type="checkbox" v-model="resumeSafetyOverride" />
+		                  <span>覆盖自动驾驶（手动设置意图/预设）</span>
+		                </label>
+		              </div>
 
-	              <template v-if="resumeShowManualSafety">
-	                <div class="resumeSafetyGrid">
-	                  <label class="resumeSafetyLabel">
-	                    Intent
-	                    <select v-model="resumeTaskIntent">
-	                      <option value="code">code</option>
-	                      <option value="analyze">analyze</option>
-	                      <option value="search-browse">search-browse</option>
-	                      <option value="install">install</option>
-	                    </select>
-	                  </label>
-	                  <label class="resumeSafetyLabel">
-	                    Safety
-	                    <select v-model="resumeSafetyPreset">
-	                      <option
-	                        v-for="p in safetyPresetsForDriver(resumeDriver)"
-	                        :key="p.value"
-	                        :value="p.value"
-	                      >
-	                        {{ p.value }}
-	                      </option>
-	                    </select>
-	                  </label>
-	                </div>
-	                <div class="tinyHint">
-	                  Recommended:
-	                  <span class="mono">{{ recommendSafetyPreset(resumeDriver, resumeTaskIntent) }}</span>
-	                  <button
-	                    type="button"
-	                    class="inlineBtn"
-	                    @click="resumeSafetyPreset = recommendSafetyPreset(resumeDriver, resumeTaskIntent)"
-	                  >
-	                    Use
-	                  </button>
-	                </div>
+		              <template v-if="resumeShowManualSafety">
+		                <div class="resumeSafetyGrid">
+		                  <label class="resumeSafetyLabel">
+		                    任务意图
+		                    <select v-model="resumeTaskIntent">
+		                      <option value="code">code（写代码/跑脚本）</option>
+		                      <option value="analyze">analyze（阅读/分析总结）</option>
+		                      <option value="search-browse">search-browse（查资料/浏览）</option>
+		                      <option value="install">install（下载/安装/执行安装脚本）</option>
+		                    </select>
+		                  </label>
+		                  <label class="resumeSafetyLabel">
+		                    安全预设
+		                    <select v-model="resumeSafetyPreset">
+		                      <option
+		                        v-for="p in safetyPresetsForDriver(resumeDriver)"
+		                        :key="p.value"
+		                        :value="p.value"
+		                      >
+		                        {{ p.label }}
+		                      </option>
+		                    </select>
+		                  </label>
+		                </div>
+		                <div class="tinyHint">
+		                  推荐（由意图决定）:
+		                  <span class="mono">{{ resumeRecommendedSafetyPreset }}</span>
+		                  <template v-if="resumeRecommendedSafetyPreset !== resumeSafetyPreset">
+		                    <button
+		                      type="button"
+		                      class="inlineBtn"
+		                      @click="resumeSafetyPreset = resumeRecommendedSafetyPreset"
+		                    >
+		                      应用推荐
+		                    </button>
+		                  </template>
+		                  <template v-else>（已应用）</template>
+		                </div>
 	                <div
 	                  v-if="resumeDriver === 'claude-code' && resumeSafetyPreset === 'search-browse'"
 	                  class="tinyHint"

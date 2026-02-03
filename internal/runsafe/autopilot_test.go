@@ -2,6 +2,7 @@ package runsafe
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"controlccx/internal/tasks"
@@ -49,8 +50,8 @@ func TestApplyAutopilot_Claude_Analyze(t *testing.T) {
 	if out.TaskIntent != "analyze" {
 		t.Fatalf("task_intent=%q, want %q", out.TaskIntent, "analyze")
 	}
-	if out.SafetyPreset != "no-network" {
-		t.Fatalf("safety_preset=%q, want %q", out.SafetyPreset, "no-network")
+	if out.SafetyPreset != "search-browse" {
+		t.Fatalf("safety_preset=%q, want %q", out.SafetyPreset, "search-browse")
 	}
 	if out.ClaudePermissionMode != "acceptEdits" {
 		t.Fatalf("claude_permission_mode=%q, want %q", out.ClaudePermissionMode, "acceptEdits")
@@ -81,8 +82,8 @@ func TestApplyAutopilot_Claude_Install_RequiresUnlock(t *testing.T) {
 	if out.TaskIntent != "install" {
 		t.Fatalf("task_intent=%q, want %q", out.TaskIntent, "install")
 	}
-	if out.SafetyPreset != "no-network" {
-		t.Fatalf("safety_preset=%q, want %q", out.SafetyPreset, "no-network")
+	if out.SafetyPreset != "search-browse" {
+		t.Fatalf("safety_preset=%q, want %q", out.SafetyPreset, "search-browse")
 	}
 	if out.ClaudePermissionMode != "acceptEdits" {
 		t.Fatalf("claude_permission_mode=%q, want %q", out.ClaudePermissionMode, "acceptEdits")
@@ -100,5 +101,30 @@ func TestApplyAutopilot_Claude_Install_RequiresUnlock(t *testing.T) {
 	}
 	if unlocked.ClaudePermissionMode != "" {
 		t.Fatalf("unlock claude_permission_mode=%q, want empty", unlocked.ClaudePermissionMode)
+	}
+}
+
+func TestFormatAuditLog_IncludesEnvelopeAndUnsafeAutomation(t *testing.T) {
+	in := tasks.CreateTaskInput{
+		WorkerType:       tasks.WorkerClaudeCode,
+		TaskIntent:       "code",
+		SafetyPreset:     "search-browse",
+		SafetyEnvelope:   "install-enabled",
+		UnsafeAutomation: false,
+	}
+	decision := Decision{Intent: IntentCode}
+	out := FormatAuditLog(tasks.WorkerClaudeCode, decision, in, true)
+	if !strings.Contains(out, "unsafe_automation=false") {
+		t.Fatalf("missing unsafe_automation in %q", out)
+	}
+	if !strings.Contains(out, "envelope=install-enabled") {
+		t.Fatalf("missing envelope in %q", out)
+	}
+
+	in.UnsafeAutomation = true
+	in.SafetyPreset = "unsafe"
+	out = FormatAuditLog(tasks.WorkerClaudeCode, decision, in, true)
+	if !strings.Contains(out, "unsafe_automation=true") {
+		t.Fatalf("missing unsafe_automation=true in %q", out)
 	}
 }

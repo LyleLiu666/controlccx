@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { buildRunSafetyPayload, toolDriverForWorkerType } from "../src/runSafety.ts";
+import {
+  buildRunSafetyPayload,
+  DEFAULT_RUN_SAFETY_INSTALL_UNLOCK,
+  toolDriverForWorkerType,
+} from "../src/runSafety.ts";
 
 test("claude-code safe preset sets acceptEdits permission mode", () => {
   const payload = buildRunSafetyPayload("claude-code", "code", "search-browse");
@@ -30,4 +34,8 @@ test("toolDriverForWorkerType resolves driver via tools list", () => {
     toolDriverForWorkerType("my-codex", [{ id: "my-codex", driver: "codex", command: "x" } as any]),
     "codex",
   );
+});
+
+test("default install unlock is enabled", () => {
+  assert.equal(DEFAULT_RUN_SAFETY_INSTALL_UNLOCK, true);
 });

@@ -107,13 +107,15 @@ func applyClaudeAutopilot(in *tasks.CreateTaskInput, decision Decision, env Safe
 			in.SafetyPreset = "unsafe"
 			in.UnsafeAutomation = true
 		} else {
-			in.SafetyPreset = "no-network"
+			// Default to allowing WebFetch so the agent can read docs/instructions before asking for unlock.
+			in.SafetyPreset = "search-browse"
 		}
 	case IntentAnalyze:
-		in.SafetyPreset = "no-network"
+		// Default to allowing WebFetch; most analysis tasks benefit from reading docs.
+		in.SafetyPreset = "search-browse"
 	default:
-		// "code" defaults to no-network; allow users to opt into search-browse when needed.
-		in.SafetyPreset = "no-network"
+		// "code" defaults to search-browse; WebFetch is low-risk compared to downloading/executing scripts.
+		in.SafetyPreset = "search-browse"
 	}
 
 	// Non-interactive Claude runs cannot respond to interactive approval prompts.
@@ -129,14 +131,19 @@ func FormatAuditLog(driver tasks.WorkerType, decision Decision, in tasks.CreateT
 	}
 	intent := strings.TrimSpace(in.TaskIntent)
 	preset := strings.TrimSpace(in.SafetyPreset)
+	envelope := strings.TrimSpace(in.SafetyEnvelope)
 	if intent == "" {
 		intent = string(decision.Intent)
 	}
 	parts := []string{
 		"safety.autopilot",
 		fmt.Sprintf("driver=%s", strings.TrimSpace(string(driver))),
+		fmt.Sprintf("unsafe_automation=%t", in.UnsafeAutomation),
 		fmt.Sprintf("intent=%s", intent),
 		fmt.Sprintf("preset=%s", preset),
+	}
+	if envelope != "" {
+		parts = append(parts, fmt.Sprintf("envelope=%s", envelope))
 	}
 	if len(decision.Signals) > 0 {
 		parts = append(parts, "signals="+strings.Join(decision.Signals, ","))

@@ -8,6 +8,8 @@ export type SafetyPresetOption = {
   risk: "low" | "med" | "high" | "extreme";
 };
 
+export const DEFAULT_RUN_SAFETY_INSTALL_UNLOCK = true;
+
 export type RunSafetyPayload = {
   unsafe_automation?: boolean;
   safety_envelope?: string;
@@ -29,18 +31,18 @@ export function normalizeTaskIntent(raw: string): TaskIntent {
 export function safetyPresetsForDriver(driver: ToolDriver): SafetyPresetOption[] {
   if (driver === "codex") {
     return [
-      { value: "workspace-write", label: "Workspace write (sandboxed)", risk: "low" },
-      { value: "read-only", label: "Read-only (sandboxed)", risk: "low" },
-      { value: "search-browse", label: "Search/browse (sandbox + web search)", risk: "med" },
-      { value: "danger-full-access", label: "Full access (sandbox: danger-full-access)", risk: "high" },
-      { value: "unsafe", label: "UNSAFE (no sandbox/approvals)", risk: "extreme" },
+      { value: "workspace-write", label: "workspace-write（工作区可写，沙箱）", risk: "low" },
+      { value: "read-only", label: "read-only（只读，沙箱）", risk: "low" },
+      { value: "search-browse", label: "search-browse（搜索/浏览：开启 web_search）", risk: "med" },
+      { value: "danger-full-access", label: "danger-full-access（高风险：可访问工作区外）", risk: "high" },
+      { value: "unsafe", label: "unsafe（极高风险：无 sandbox/审批）", risk: "extreme" },
     ];
   }
   if (driver === "claude-code") {
     return [
-      { value: "search-browse", label: "Search/browse (WebFetch enabled)", risk: "med" },
-      { value: "no-network", label: "Sandboxed (no network)", risk: "low" },
-      { value: "unsafe", label: "UNSAFE (skip permissions)", risk: "high" },
+      { value: "search-browse", label: "search-browse（查资料/浏览：开启 WebFetch）", risk: "med" },
+      { value: "no-network", label: "no-network（默认安全：禁 WebFetch，禁 curl/wget）", risk: "low" },
+      { value: "unsafe", label: "unsafe（高风险：跳过权限确认）", risk: "high" },
     ];
   }
   return [];
