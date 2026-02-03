@@ -153,6 +153,7 @@ func claudeSettingsForTask(task tasks.Task) (string, bool) {
 
 	preset := strings.ToLower(strings.TrimSpace(task.SafetyPreset))
 	noNetwork := strings.Contains(preset, "no-network")
+	unsafe := strings.Contains(preset, "unsafe") || task.UnsafeAutomation
 
 	type permissions struct {
 		Allow []string `json:"allow,omitempty"`
@@ -162,31 +163,43 @@ func claudeSettingsForTask(task tasks.Task) (string, bool) {
 
 	p := permissions{
 		Deny: []string{
-			"Bash(curl *)",
-			"Bash(wget *)",
 			"Read(./.env)",
 			"Read(./secrets/**)",
 		},
 	}
+	if !unsafe {
+		p.Deny = append(p.Deny, "Bash(curl *)", "Bash(wget *)")
+	}
 	if noNetwork {
 		p.Deny = append(p.Deny, "WebFetch")
 	} else {
-		// Search/browse is considered low-risk. Allow WebFetch without requiring a domain allowlist.
-		p.Allow = append(p.Allow, "WebFetch")
+		if len(task.ClaudeWebFetchDomains) > 0 {
+			for _, d := range task.ClaudeWebFetchDomains {
+				d = strings.TrimSpace(d)
+				if d == "" {
+					continue
+				}
+				p.Allow = append(p.Allow, "WebFetch(domain:"+d+")")
+			}
+		} else {
+			// Search/browse is considered low-risk. Allow WebFetch without requiring a domain allowlist.
+			p.Allow = append(p.Allow, "WebFetch")
+		}
 	}
 
 	type sandboxSettings struct {
-		Enabled                 bool `json:"enabled"`
-		AutoAllowBashIfSandboxed bool `json:"autoAllowBashIfSandboxed,omitempty"`
-		AllowUnsandboxedCommands bool `json:"allowUnsandboxedCommands,omitempty"`
+		Enabled                 bool  `json:"enabled"`
+		AutoAllowBashIfSandboxed bool  `json:"autoAllowBashIfSandboxed,omitempty"`
+		AllowUnsandboxedCommands *bool `json:"allowUnsandboxedCommands,omitempty"`
 	}
 
 	var sandbox *sandboxSettings
 	if task.ClaudeSandbox && runtime.GOOS != "windows" {
+		allowUnsandboxedCommands := unsafe
 		sandbox = &sandboxSettings{
 			Enabled:                 true,
 			AutoAllowBashIfSandboxed: true,
-			AllowUnsandboxedCommands: false,
+			AllowUnsandboxedCommands: &allowUnsandboxedCommands,
 		}
 	}
 

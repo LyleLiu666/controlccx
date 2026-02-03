@@ -54,6 +54,11 @@ func TestBuildToolCommand_Claude_NoNetwork_DeniesWebFetchAndCurl(t *testing.T) {
 	if !contains(deny, "Bash(curl *)") {
 		t.Fatalf("settings.permissions.deny=%v, expected Bash(curl *)", deny)
 	}
+
+	sandbox := settings["sandbox"].(map[string]any)
+	if sandbox["allowUnsandboxedCommands"] != false {
+		t.Fatalf("settings.sandbox.allowUnsandboxedCommands=%v, expected false", sandbox["allowUnsandboxedCommands"])
+	}
 }
 
 func TestBuildToolCommand_Claude_SearchBrowse_AllowsWebFetchAndDeniesCurlWget(t *testing.T) {
@@ -85,8 +90,44 @@ func TestBuildToolCommand_Claude_SearchBrowse_AllowsWebFetchAndDeniesCurlWget(t 
 	}
 
 	allow := stringsFromAny(settings["permissions"], "allow")
-	if !contains(allow, "WebFetch") {
-		t.Fatalf("settings.permissions.allow=%v, expected WebFetch allowed", allow)
+	if !contains(allow, "WebFetch(domain:docs.claude.com)") {
+		t.Fatalf("settings.permissions.allow=%v, expected WebFetch(domain:docs.claude.com) allowed", allow)
+	}
+
+	sandbox := settings["sandbox"].(map[string]any)
+	if sandbox["allowUnsandboxedCommands"] != false {
+		t.Fatalf("settings.sandbox.allowUnsandboxedCommands=%v, expected false", sandbox["allowUnsandboxedCommands"])
+	}
+}
+
+func TestBuildToolCommand_Claude_Unsafe_DoesNotDenyCurlWget(t *testing.T) {
+	cfg := config.Default()
+	task := tasks.Task{
+		WorkerType:       tasks.WorkerClaudeCode,
+		Mode:             tasks.ModeNew,
+		Prompt:           "hi",
+		WorkDir:          ".",
+		SafetyPreset:     "unsafe",
+		TaskIntent:       "install",
+		UnsafeAutomation: true,
+		ClaudeSandbox:    true,
+	}
+
+	tool, err := BuildToolCommand(cfg, task)
+	if err != nil {
+		t.Fatalf("BuildToolCommand: %v", err)
+	}
+
+	settings := mustExtractClaudeSettings(t, tool.Args)
+
+	deny := stringsFromAny(settings["permissions"], "deny")
+	if contains(deny, "Bash(curl *)") || contains(deny, "Bash(wget *)") {
+		t.Fatalf("settings.permissions.deny=%v, expected curl+wget not denied", deny)
+	}
+
+	sandbox := settings["sandbox"].(map[string]any)
+	if sandbox["allowUnsandboxedCommands"] != true {
+		t.Fatalf("settings.sandbox.allowUnsandboxedCommands=%v, expected true", sandbox["allowUnsandboxedCommands"])
 	}
 }
 
