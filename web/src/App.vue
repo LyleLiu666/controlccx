@@ -533,6 +533,7 @@ const LS_KEY_RUN_SAFETY_AUTOPILOT = "controlccx.run_safety.autopilot.v1";
 const LS_KEY_RUN_SAFETY_INSTALL_UNLOCK = "controlccx.run_safety.install_unlock.v1";
 const LS_KEY_ATTENTION_AUTOPILOT = "controlccx.attention_autopilot.v1";
 const LS_KEY_ATTENTION_AUTOPILOT_SEEN = "controlccx.attention_autopilot.seen.v1";
+const LS_KEY_ATTENTION_DISMISSED = "controlccx.attention_dismissed.v1";
 const LS_KEY_REHYDRATE_PROMPT_SEEN = "controlccx.rehydrate_prompt_seen.v1";
 const LS_KEY_BLOCKED_PROMPT_SEEN = "controlccx.blocked_prompt_seen.v1";
 
@@ -549,6 +550,7 @@ const attentionAutopilotQueue = ref<string[]>([]);
 const attentionAutopilotQueued = new Set<string>();
 const attentionAutopilotSeen = ref<Record<string, string>>({});
 const attentionAutopilotNote = ref("");
+const attentionDismissed = ref<Record<string, string>>({});
 
 const resumeOriginByRunID = new Map<string, ResumeOrigin>();
 
@@ -1384,6 +1386,7 @@ const workspaceSelect = ref<string>(loadString(LS_KEY_WORKSPACE_FILTER));
 
   attentionAutopilotEnabled.value = loadBool(LS_KEY_ATTENTION_AUTOPILOT, true);
   attentionAutopilotSeen.value = loadStringMap(LS_KEY_ATTENTION_AUTOPILOT_SEEN);
+  attentionDismissed.value = loadStringMap(LS_KEY_ATTENTION_DISMISSED);
 
   const fs = loadString(LS_KEY_FEED_SCOPE).trim();
   if (fs === "current" || fs === "all") liveScope.value = fs;
@@ -2693,6 +2696,16 @@ async function secretaryCancelSessionRun(s: SessionGroup) {
   }
 }
 
+function dismissAttentionSession(s: SessionGroup) {
+  const key = String(s?.key ?? "").trim();
+  if (!key) return;
+  attentionDismissed.value = {
+    ...attentionDismissed.value,
+    [key]: String(Date.now()),
+  };
+  saveStringMap(LS_KEY_ATTENTION_DISMISSED, attentionDismissed.value);
+}
+
 async function secretaryResumeSessionRun(s: SessionGroup) {
   if (!s?.latest?.id) return;
   if (s.deleted_at) {
@@ -3794,6 +3807,7 @@ const anyRunning = computed(() =>
 );
 
 const needsAttentionSessions = computed(() => {
+  const dismissed = attentionDismissed.value;
   return secretarySessionsAll.value
     .filter(
       (s) =>
@@ -3803,6 +3817,7 @@ const needsAttentionSessions = computed(() => {
           s.status === "blocked" ||
           s.status === "interrupted"),
     )
+    .filter((s) => !dismissed[String(s.key ?? "").trim()])
     .slice(0, 6);
 });
 
@@ -5145,6 +5160,7 @@ watch(
 	      @selectTask="onSelectTask"
 	      @resumeSession="secretaryResumeSessionRun"
 	      @cancelSession="secretaryCancelSessionRun"
+	      @dismissAttention="dismissAttentionSession"
 	      @sendChat="sendChatMessage"
 	      @markdownClick="onResultMarkdownClick"
 	    />

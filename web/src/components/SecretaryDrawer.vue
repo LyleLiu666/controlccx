@@ -51,6 +51,7 @@ const emit = defineEmits<{
   (e: "selectTask", taskID: string): void;
   (e: "resumeSession", session: SessionGroup): void;
   (e: "cancelSession", session: SessionGroup): void;
+  (e: "dismissAttention", session: SessionGroup): void;
   (e: "sendChat"): void;
   (e: "markdownClick", ev: MouseEvent): void;
 }>();
@@ -336,13 +337,22 @@ function onMarkdownClick(e: MouseEvent) {
                   继续
                 </button>
                 <button
+                  v-if="s.latest.status === 'running' || s.latest.status === 'queued'"
                   type="button"
                   class="secAction"
                   @click="emit('cancelSession', s)"
-                  :disabled="!(s.latest.status === 'running' || s.latest.status === 'queued')"
                   title="取消运行"
                 >
-                  取消
+                  取消运行
+                </button>
+                <button
+                  v-else
+                  type="button"
+                  class="secAction"
+                  @click="emit('dismissAttention', s)"
+                  title="不再提示"
+                >
+                  取消提醒
                 </button>
               </div>
             </div>
