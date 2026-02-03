@@ -188,18 +188,24 @@ func claudeSettingsForTask(task tasks.Task) (string, bool) {
 	}
 
 	type sandboxSettings struct {
-		Enabled                 bool  `json:"enabled"`
+		Enabled                  bool  `json:"enabled"`
 		AutoAllowBashIfSandboxed bool  `json:"autoAllowBashIfSandboxed,omitempty"`
 		AllowUnsandboxedCommands *bool `json:"allowUnsandboxedCommands,omitempty"`
 	}
 
 	var sandbox *sandboxSettings
-	if task.ClaudeSandbox && runtime.GOOS != "windows" {
-		allowUnsandboxedCommands := unsafe
-		sandbox = &sandboxSettings{
-			Enabled:                 true,
-			AutoAllowBashIfSandboxed: true,
-			AllowUnsandboxedCommands: &allowUnsandboxedCommands,
+	if runtime.GOOS != "windows" {
+		if unsafe {
+			// Unsafe mode is an explicit opt-in to higher risk. Disable Claude's bash sandbox so
+			// networking (pip/python/curl) works as expected for installs and other automation.
+			sandbox = &sandboxSettings{Enabled: false}
+		} else if task.ClaudeSandbox {
+			allowUnsandboxedCommands := false
+			sandbox = &sandboxSettings{
+				Enabled:                  true,
+				AutoAllowBashIfSandboxed: true,
+				AllowUnsandboxedCommands: &allowUnsandboxedCommands,
+			}
 		}
 	}
 

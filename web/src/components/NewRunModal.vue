@@ -309,7 +309,7 @@ watch(
                             safetyPreset === 'unsafe'
                           "
                         >
-                          以 <span class="mono">--dangerously-skip-permissions</span> 运行 Claude Code。建议仅在无互联网访问的沙箱中使用。
+                          以 <span class="mono">--dangerously-skip-permissions</span> 运行 Claude Code，并关闭 bash 沙箱（脚本可直接联网/访问系统环境）。仅在明确需要时使用。
                         </template>
                       </div>
                       <label class="newRunSafetyOptIn">

@@ -17,7 +17,7 @@ test("claude-code safe preset sets acceptEdits permission mode", () => {
 test("claude-code unsafe preset uses unsafe_automation", () => {
   const payload = buildRunSafetyPayload("claude-code", "code", "unsafe");
   assert.equal(payload.unsafe_automation, true);
-  assert.equal(payload.claude_sandbox, true);
+  assert.equal(payload.claude_sandbox, false);
 });
 
 test("toolDriverForWorkerType falls back to exec", () => {

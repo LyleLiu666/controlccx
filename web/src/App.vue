@@ -165,7 +165,7 @@ function highRiskPresetSummary(driver: ToolDriver, preset: string): string {
     return "Codex：--sandbox danger-full-access（可访问 workspace 外）";
   }
   if (d === "claude-code" && p === "unsafe") {
-    return "Claude Code：--dangerously-skip-permissions（跳过权限确认）";
+    return "Claude Code：--dangerously-skip-permissions（跳过权限确认，无 bash sandbox）";
   }
   if (d && p) return `${d}: ${p}`;
   if (d) return d;
@@ -4803,7 +4803,7 @@ watch(
 	                      Runs Codex with <span class="mono">--sandbox danger-full-access</span> (can access outside the workspace).
 	                    </template>
 	                    <template v-else-if="resumeDriver === 'claude-code' && resumeSafetyPreset === 'unsafe'">
-	                      Runs Claude Code with <span class="mono">--dangerously-skip-permissions</span>. Recommended only for sandboxes with no internet access.
+	                      Runs Claude Code with <span class="mono">--dangerously-skip-permissions</span> and disables bash sandbox (scripts can access system network/files). Use only if you understand the risk.
 	                    </template>
 	                  </div>
 	                  <label class="resumeSafetyOptIn">

@@ -42,7 +42,7 @@ export function safetyPresetsForDriver(driver: ToolDriver): SafetyPresetOption[]
     return [
       { value: "search-browse", label: "search-browse（查资料/浏览：开启 WebFetch）", risk: "med" },
       { value: "no-network", label: "no-network（默认安全：禁 WebFetch，禁 curl/wget）", risk: "low" },
-      { value: "unsafe", label: "unsafe（高风险：跳过权限确认）", risk: "high" },
+      { value: "unsafe", label: "unsafe（高风险：跳过权限确认，无 bash sandbox）", risk: "high" },
     ];
   }
   return [];
@@ -120,12 +120,13 @@ export function buildRunSafetyPayload(driver: ToolDriver, intent: TaskIntent, pr
 
   if (driver === "claude-code") {
     if (sp === "unsafe") {
-      // Keep sandbox enabled (when supported) even in unsafe mode.
       return {
         unsafe_automation: true,
         safety_preset: sp,
         task_intent: ti,
-        claude_sandbox: true,
+        // Disable Claude bash sandbox in unsafe mode so the run can access system network
+        // (e.g. pip/python/curl) when the user explicitly opts into high risk.
+        claude_sandbox: false,
       };
     }
     return {

@@ -99,6 +99,9 @@ func TestApplyAutopilot_Claude_Install_RequiresUnlock(t *testing.T) {
 	if unlocked.SafetyPreset != "unsafe" || !unlocked.UnsafeAutomation {
 		t.Fatalf("unlock preset/unsafe=%q/%v, want unsafe/true", unlocked.SafetyPreset, unlocked.UnsafeAutomation)
 	}
+	if unlocked.ClaudeSandbox {
+		t.Fatalf("unlock claude_sandbox=%v, want false", unlocked.ClaudeSandbox)
+	}
 	if unlocked.ClaudePermissionMode != "" {
 		t.Fatalf("unlock claude_permission_mode=%q, want empty", unlocked.ClaudePermissionMode)
 	}

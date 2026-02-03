@@ -126,8 +126,8 @@ func TestBuildToolCommand_Claude_Unsafe_DoesNotDenyCurlWget(t *testing.T) {
 	}
 
 	sandbox := settings["sandbox"].(map[string]any)
-	if sandbox["allowUnsandboxedCommands"] != true {
-		t.Fatalf("settings.sandbox.allowUnsandboxedCommands=%v, expected true", sandbox["allowUnsandboxedCommands"])
+	if sandbox["enabled"] != false {
+		t.Fatalf("settings.sandbox.enabled=%v, expected false", sandbox["enabled"])
 	}
 }
 

@@ -96,6 +96,7 @@ func applyCodexAutopilot(in *tasks.CreateTaskInput, decision Decision, env Safet
 func applyClaudeAutopilot(in *tasks.CreateTaskInput, decision Decision, env SafetyEnvelope) {
 	intent := string(decision.Intent)
 	in.TaskIntent = intent
+	// Safe-by-default: enable Claude bash sandboxing unless the run explicitly opts into unsafe.
 	in.ClaudeSandbox = true
 
 	switch decision.Intent {
@@ -106,6 +107,9 @@ func applyClaudeAutopilot(in *tasks.CreateTaskInput, decision Decision, env Safe
 		if env == EnvelopeInstallEnabled {
 			in.SafetyPreset = "unsafe"
 			in.UnsafeAutomation = true
+			// Unsafe installs often require arbitrary network access; disable bash sandbox so tools like
+			// pip/curl can reach the public internet.
+			in.ClaudeSandbox = false
 		} else {
 			// Default to allowing WebFetch so the agent can read docs/instructions before asking for unlock.
 			in.SafetyPreset = "search-browse"
