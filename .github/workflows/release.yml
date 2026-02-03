@@ -1,0 +1,83 @@
+name: release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-upload:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Enable Corepack (pnpm)
+        run: corepack enable
+
+      - name: Install deps
+        run: pnpm install --frozen-lockfile
+
+      - name: Test
+        run: pnpm test
+
+      - name: Build web UI
+        run: pnpm -C web build
+
+      - name: Build release binaries
+        env:
+          VERSION: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist/release
+
+          build_one() {
+            local goos="$1"
+            local goarch="$2"
+            local ext=""
+            if [ "$goos" = "windows" ]; then
+              ext=".exe"
+            fi
+
+            local dir="dist/release/controlccx_${VERSION}_${goos}_${goarch}"
+            mkdir -p "$dir"
+            echo "Building ${goos}/${goarch}..."
+            CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" \
+              go build -o "${dir}/controlccx${ext}" ./cmd/controlccx-server
+
+            if [ "$goos" = "windows" ]; then
+              (cd "$dir" && zip -q "../controlccx_${VERSION}_${goos}_${goarch}.zip" "controlccx${ext}")
+            else
+              (cd "$dir" && tar -czf "../controlccx_${VERSION}_${goos}_${goarch}.tar.gz" "controlccx${ext}")
+            fi
+          }
+
+          build_one linux amd64
+          build_one darwin amd64
+          build_one windows amd64
+
+          (cd dist/release && sha256sum *.tar.gz *.zip > SHA256SUMS.txt)
+
+      - name: Upload release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/release/*.tar.gz
+            dist/release/*.zip
+            dist/release/SHA256SUMS.txt
+

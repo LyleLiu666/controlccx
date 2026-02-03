@@ -30,6 +30,15 @@ pnpm start
 - macOS/Linux: `./start.sh`
 - Windows (PowerShell): `powershell -ExecutionPolicy Bypass -File .\\start.ps1`
 
+## Releases
+
+When a GitHub Release is **published**, GitHub Actions builds and uploads binaries (with embedded web UI):
+
+- `controlccx_<tag>_linux_amd64.tar.gz`
+- `controlccx_<tag>_darwin_amd64.tar.gz`
+- `controlccx_<tag>_windows_amd64.zip`
+- `SHA256SUMS.txt`
+
 ## Tests
 
 ```bash
