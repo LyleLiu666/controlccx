@@ -1,7 +1,7 @@
 {
   "name": "controlccx",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.1",
   "packageManager": "pnpm@9.15.4",
   "scripts": {
     "dev": "concurrently -k \"go run ./cmd/controlccx-server --addr 127.0.0.1:5174\" \"pnpm -C web dev\"",
