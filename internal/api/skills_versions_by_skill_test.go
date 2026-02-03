@@ -19,6 +19,10 @@ func TestAPI_SkillVersionsBySkill(t *testing.T) {
 	mustMkdirAll(t, filepath.Join(sourceRoot, "skill-a"))
 	mustWriteFile(t, filepath.Join(sourceRoot, "skill-a", "README.md"), "a\n")
 
+	targetRoot := filepath.Join(home, ".claude", "skills")
+	mustMkdirAll(t, filepath.Join(targetRoot, "skill-b"))
+	mustWriteFile(t, filepath.Join(targetRoot, "skill-b", "README.md"), "b\n")
+
 	vers, err := skills.NewPerSkillVersionsService(skills.PerSkillVersionsOptions{
 		HomeDir: home,
 		Now: func() time.Time {
@@ -37,6 +41,26 @@ func TestAPI_SkillVersionsBySkill(t *testing.T) {
 		body := map[string]any{"id": "20260130-01"}
 		buf, _ := json.Marshal(body)
 		res, err := http.Post(srv.URL+"/api/skills/skill-a/versions/create", "application/json", bytes.NewReader(buf))
+		if err != nil {
+			t.Fatalf("post: %v", err)
+		}
+		defer res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("status=%d", res.StatusCode)
+		}
+		var out skills.Version
+		if err := json.NewDecoder(res.Body).Decode(&out); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if out.ID != "20260130-01" {
+			t.Fatalf("id=%q", out.ID)
+		}
+	})
+
+	t.Run("create from target root (no source)", func(t *testing.T) {
+		body := map[string]any{"id": "20260130-01"}
+		buf, _ := json.Marshal(body)
+		res, err := http.Post(srv.URL+"/api/skills/skill-b/versions/create", "application/json", bytes.NewReader(buf))
 		if err != nil {
 			t.Fatalf("post: %v", err)
 		}

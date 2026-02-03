@@ -32,7 +32,7 @@ const title = computed(() => {
   return `版本快照：${name}`;
 });
 const versions = computed(() => data.value?.versions ?? []);
-const canCreate = computed(() => !!String(props.skill ?? "").trim() && props.hasSource);
+const canCreate = computed(() => !!String(props.skill ?? "").trim());
 
 async function refresh() {
   const name = String(props.skill ?? "").trim();
@@ -137,8 +137,8 @@ async function deleteByID(id: string) {
             </div>
           </div>
 
-          <div v-if="!hasSource" class="modalError">
-            该技能缺少来源（source），无法创建快照。请先在 Skills 页导入/安装该技能后再试。
+          <div v-if="!hasSource" class="tinyHint warn">
+            该技能缺少来源（source）。仍可创建快照（将从当前可用的技能目录进行快照）；如需启用/同步，请先在 Skills 页添加来源。
           </div>
 
           <div class="skillsVersionsCreate">
@@ -185,4 +185,3 @@ async function deleteByID(id: string) {
     </div>
   </div>
 </template>
-

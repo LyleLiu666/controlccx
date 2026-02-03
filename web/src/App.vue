@@ -79,10 +79,12 @@ import FilesModal from "./components/FilesModal.vue";
 import AuthSettingsModal from "./components/AuthSettingsModal.vue";
 import ToolsSettingsModal from "./components/ToolsSettingsModal.vue";
 import NewRunModal from "./components/NewRunModal.vue";
+import RunLaunchOverlay from "./components/RunLaunchOverlay.vue";
 import { useSkills } from "./composables/useSkills";
 import { useSecretaryChat } from "./composables/useSecretaryChat";
 import { useTasks } from "./composables/useTasks";
 import { useLiveFeed } from "./composables/useLiveFeed";
+import { shouldDismissRunLaunchMask } from "./runLaunchMask";
 
 const systemInfo = ref<SystemInfo | null>(null);
 
@@ -103,6 +105,11 @@ const resumeSafetyOverride = ref(false);
 const resumeHighRiskOptIn = ref(false);
 const errorBanner = ref<string>("");
 
+const runLaunchMaskOpen = ref(false);
+const runLaunchMaskTitle = ref("启动中…");
+const runLaunchMaskDetail = ref("");
+const runLaunchMaskRunID = ref("");
+
 const highRiskConfirmOpen = ref(false);
 const highRiskConfirmTitle = ref("");
 const highRiskConfirmMessage = ref("");
@@ -110,6 +117,43 @@ const highRiskConfirmDetail = ref("");
 const highRiskConfirmConfirmLabel = ref("继续");
 const highRiskConfirmBusy = ref(false);
 let highRiskConfirmResolve: ((ok: boolean) => void) | null = null;
+
+function openRunLaunchMask(opts: { title: string; detail?: string }) {
+  runLaunchMaskOpen.value = true;
+  runLaunchMaskTitle.value = String(opts.title ?? "").trim() || "启动中…";
+  runLaunchMaskDetail.value = String(opts.detail ?? "").trim();
+  runLaunchMaskRunID.value = "";
+}
+
+function closeRunLaunchMask() {
+  runLaunchMaskOpen.value = false;
+  runLaunchMaskTitle.value = "启动中…";
+  runLaunchMaskDetail.value = "";
+  runLaunchMaskRunID.value = "";
+}
+
+function runLaunchMaskDetailForTask(t: Task): string {
+  const mode = t.mode === "resume" ? "继续" : "新建";
+  const s = promptSummary(t.prompt);
+  const clipped = s.length > 140 ? s.slice(0, 140) + "…" : s;
+  return clipped ? `${mode} · ${clipped}` : `${mode} · ${(t.id ?? "").slice(0, 8)}`;
+}
+
+function trackRunLaunchMaskForTask(t: Task, opts?: { title?: string; detail?: string }) {
+  runLaunchMaskRunID.value = t.id;
+  if (opts?.title) runLaunchMaskTitle.value = opts.title;
+  if (opts?.detail) runLaunchMaskDetail.value = opts.detail;
+  if (!runLaunchMaskDetail.value) runLaunchMaskDetail.value = runLaunchMaskDetailForTask(t);
+  if (shouldDismissRunLaunchMask(t)) closeRunLaunchMask();
+}
+
+function maybeDismissRunLaunchMaskForTask(next: Task) {
+  if (!runLaunchMaskOpen.value) return;
+  const id = runLaunchMaskRunID.value.trim();
+  if (!id) return;
+  if (next.id !== id) return;
+  if (shouldDismissRunLaunchMask(next)) closeRunLaunchMask();
+}
 
 function highRiskPresetSummary(driver: ToolDriver, preset: string): string {
   const d = String(driver ?? "").trim();
@@ -303,6 +347,7 @@ const {
   showDeleted: sessionsShowDeleted,
   autoSelectFirst: false,
   onTaskUpsert: (prev, next) => {
+    maybeDismissRunLaunchMaskForTask(next);
     // Fire-and-forget; avoid blocking SSE handling.
     void maybeTriggerDeliveryForeman(prev, next);
     maybeTriggerAttentionAutopilot(prev, next);
@@ -952,16 +997,19 @@ async function replaySelectedRun() {
   if (!confirm("确认重放该 run 吗？（将使用相同的 tool/workdir/prompt 创建一个新任务）")) return;
   errorBanner.value = "";
   try {
+    openRunLaunchMask({ title: "启动中…", detail: "正在创建任务…" });
     const next = await createTask({
       worker_type: t.worker_type,
       prompt: t.prompt,
       workdir: t.workdir,
       unsafe_automation: t.unsafe_automation || undefined,
     });
+    trackRunLaunchMaskForTask(next);
     upsertTask(next);
     selectedTaskId.value = next.id;
     await loadLogs(next.id);
   } catch (e: any) {
+    closeRunLaunchMask();
     const msg = e?.message ?? String(e);
     if (attentionAutopilotIsNoConversationFound(msg)) {
       stopAttentionAutopilotForSession(sessionKeyForTask(t));
@@ -1594,6 +1642,7 @@ async function onCreateTask(opts?: { idempotencyKey?: string }): Promise<boolean
 
     const envelope = buildSafetyEnvelopePayload();
 
+    openRunLaunchMask({ title: "启动中…", detail: "正在创建任务…" });
     const t = await createTask(
       {
         worker_type: newWorkerType.value,
@@ -1604,12 +1653,14 @@ async function onCreateTask(opts?: { idempotencyKey?: string }): Promise<boolean
       },
       opts,
     );
+    trackRunLaunchMaskForTask(t);
     upsertTask(t);
     selectedTaskId.value = t.id;
     newPrompt.value = "";
     await loadLogs(t.id);
     return true;
   } catch (e: any) {
+    closeRunLaunchMask();
     errorBanner.value = e?.message ?? String(e);
     return false;
   }
@@ -2222,7 +2273,9 @@ async function confirmBlockedPromptUnsafe() {
   try {
     const intent = normalizeTaskIntent(t.task_intent ?? "code");
     const safety = buildRunSafetyPayload(driver, intent, "unsafe");
+    openRunLaunchMask({ title: "继续中…", detail: "正在继续运行…" });
     const nt = await resumeTaskWithOptions(runID, { prompt: "continue", ...safety });
+    trackRunLaunchMaskForTask(nt);
     resumeOriginByRunID.set(nt.id, "manual");
     upsertTask(nt);
     selectedTaskId.value = nt.id;
@@ -2230,6 +2283,7 @@ async function confirmBlockedPromptUnsafe() {
     outputTab.value = "logs";
     closeBlockedPrompt();
   } catch (e: any) {
+    closeRunLaunchMask();
     blockedPromptError.value = e?.message ?? String(e);
   } finally {
     blockedPromptBusy.value = false;
@@ -2251,13 +2305,16 @@ async function confirmRehydratePrompt() {
   rehydratePromptBusy.value = true;
   rehydratePromptError.value = "";
   try {
+    openRunLaunchMask({ title: "恢复中…", detail: "正在恢复会话…" });
     const nt = await rehydrateTaskWithOptions(runID, { prompt: "continue" });
+    trackRunLaunchMaskForTask(nt);
     upsertTask(nt);
     selectedTaskId.value = nt.id;
     await loadLogs(nt.id);
     outputTab.value = "logs";
     closeRehydratePrompt();
   } catch (e: any) {
+    closeRunLaunchMask();
     rehydratePromptError.value = e?.message ?? String(e);
   } finally {
     rehydratePromptBusy.value = false;
@@ -2663,7 +2720,9 @@ async function secretaryResumeSessionRun(s: SessionGroup) {
         if (!ok) return;
       }
     const safety = buildRunSafetyPayload(driver, intent, preset);
+    openRunLaunchMask({ title: "继续中…", detail: "正在继续会话…" });
     const nt = await continueSessionWithOptions(s.key, { prompt: "continue", ...safety });
+    trackRunLaunchMaskForTask(nt);
     resumeOriginByRunID.set(nt.id, "manual");
     upsertTask(nt);
     selectedTaskId.value = nt.id;
@@ -2671,6 +2730,7 @@ async function secretaryResumeSessionRun(s: SessionGroup) {
     outputTab.value = "logs";
     closeSecretary();
   } catch (e: any) {
+    closeRunLaunchMask();
     errorBanner.value = e?.message ?? String(e);
   }
 }
@@ -2731,13 +2791,16 @@ async function onResumeTask() {
       payload = { ...envelope, ...buildRunSafetyPayload(driver, intent, preset) };
     }
 
+    openRunLaunchMask({ title: "继续中…", detail: "正在继续会话…" });
     const nt = await continueSessionWithOptions(sess.key, { prompt: resumePrompt.value, ...payload });
+    trackRunLaunchMaskForTask(nt);
     resumeOriginByRunID.set(nt.id, "manual");
     upsertTask(nt);
     selectedTaskId.value = nt.id;
     resumePrompt.value = "";
     await loadLogs(nt.id);
   } catch (e: any) {
+    closeRunLaunchMask();
     errorBanner.value = e?.message ?? String(e);
   }
 }
@@ -5625,6 +5688,12 @@ watch(
         </div>
       </div>
     </div>
+
+    <RunLaunchOverlay
+      :open="runLaunchMaskOpen"
+      :title="runLaunchMaskTitle"
+      :detail="runLaunchMaskDetail"
+    />
 
     <teleport to="body">
       <div

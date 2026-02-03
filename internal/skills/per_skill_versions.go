@@ -21,6 +21,7 @@ type PerSkillVersionsListResponse struct {
 type PerSkillVersionsOptions struct {
 	HomeDir      string
 	SourceRoot   string
+	FallbackRoots []string
 	VersionsRoot string
 	Now          func() time.Time
 }
@@ -28,6 +29,7 @@ type PerSkillVersionsOptions struct {
 type PerSkillVersionsService struct {
 	homeDir      string
 	sourceRoot   string
+	fallbackRoots []string
 	versionsRoot string
 	now          func() time.Time
 }
@@ -54,6 +56,32 @@ func NewPerSkillVersionsService(opts PerSkillVersionsOptions) (*PerSkillVersions
 		sourceRoot = filepath.Clean(sourceRoot)
 	}
 
+	fallbackRoots := opts.FallbackRoots
+	if len(fallbackRoots) == 0 {
+		fallbackRoots = []string{
+			filepath.Join(home, ".claude", "skills"),
+			filepath.Join(home, ".codex", "skills"),
+			filepath.Join(home, ".cursor", "skills"),
+		}
+		if ch := strings.TrimSpace(os.Getenv("CODEX_HOME")); ch != "" {
+			ch = expandHome(ch, home)
+			if !filepath.IsAbs(ch) {
+				ch = filepath.Join(home, ch)
+			}
+			ch = filepath.Clean(ch)
+			fallbackRoots = append(fallbackRoots, filepath.Join(ch, "skills"))
+		}
+	}
+	var normalizedFallback []string
+	for _, r := range fallbackRoots {
+		p := expandHome(r, home)
+		if !filepath.IsAbs(p) {
+			p = filepath.Join(home, p)
+		}
+		p = filepath.Clean(p)
+		normalizedFallback = append(normalizedFallback, p)
+	}
+
 	versionsRoot := strings.TrimSpace(opts.VersionsRoot)
 	if versionsRoot == "" {
 		versionsRoot = filepath.Join(home, ".agent", "skills_versions", "by_skill")
@@ -73,6 +101,7 @@ func NewPerSkillVersionsService(opts PerSkillVersionsOptions) (*PerSkillVersions
 	return &PerSkillVersionsService{
 		homeDir:      home,
 		sourceRoot:   sourceRoot,
+		fallbackRoots: dedupePaths(normalizedFallback),
 		versionsRoot: versionsRoot,
 		now:          now,
 	}, nil
@@ -86,6 +115,9 @@ func (s *PerSkillVersionsService) List(ctx context.Context, skill string) (PerSk
 	}
 
 	skillSource := filepath.Join(s.sourceRoot, skill)
+	if src, err := s.resolveSkillSource(skill); err == nil && strings.TrimSpace(src) != "" {
+		skillSource = src
+	}
 	skillVersionsRoot := filepath.Join(s.versionsRoot, skill)
 
 	entries, err := os.ReadDir(skillVersionsRoot)
@@ -226,29 +258,48 @@ func (s *PerSkillVersionsService) nextAutoID(skillVersionsRoot string) string {
 
 func (s *PerSkillVersionsService) resolveSkillSource(skill string) (string, error) {
 	path := filepath.Join(s.sourceRoot, skill)
+	if resolved, ok, err := resolveSkillDir(path, skill); err != nil {
+		return "", err
+	} else if ok {
+		return resolved, nil
+	}
+
+	for _, root := range s.fallbackRoots {
+		path := filepath.Join(root, skill)
+		if resolved, ok, err := resolveSkillDir(path, skill); err != nil {
+			return "", err
+		} else if ok {
+			return resolved, nil
+		}
+	}
+
+	return "", fmt.Errorf("skills: skill not found: %s", skill)
+}
+
+func resolveSkillDir(path, skill string) (resolved string, ok bool, _ error) {
 	fi, err := os.Lstat(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return "", fmt.Errorf("skills: skill not found: %s", skill)
+			return "", false, nil
 		}
-		return "", fmt.Errorf("skills: stat skill: %w", err)
+		return "", false, fmt.Errorf("skills: stat skill: %w", err)
 	}
 
-	resolved := path
+	resolved = path
 	if fi.Mode()&os.ModeSymlink != 0 {
 		v, err := filepath.EvalSymlinks(path)
 		if err != nil || strings.TrimSpace(v) == "" {
-			return "", fmt.Errorf("skills: unreadable skill symlink: %s", skill)
+			return "", false, fmt.Errorf("skills: unreadable skill symlink: %s", skill)
 		}
 		resolved = v
 	}
 
 	fi, err = os.Stat(resolved)
 	if err != nil {
-		return "", fmt.Errorf("skills: stat skill: %w", err)
+		return "", false, fmt.Errorf("skills: stat skill: %w", err)
 	}
 	if !fi.IsDir() {
-		return "", fmt.Errorf("skills: skill source is not a directory: %s", skill)
+		return "", false, fmt.Errorf("skills: skill source is not a directory: %s", skill)
 	}
-	return resolved, nil
+	return resolved, true, nil
 }
