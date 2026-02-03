@@ -1,0 +1,1 @@
+This file keeps web/dist non-empty so Go embed works before the first web build.
