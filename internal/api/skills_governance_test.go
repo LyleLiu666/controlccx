@@ -56,13 +56,18 @@ func TestAPI_SkillsGovernance_ToolsOnboardingInstallSyncUpdate(t *testing.T) {
 		if err := json.NewDecoder(res.Body).Decode(&body); err != nil {
 			t.Fatalf("decode tools: %v", err)
 		}
-		if len(body.Tools) != 3 {
+		if len(body.Tools) != 5 {
 			t.Fatalf("tools=%v", body.Tools)
 		}
+		installed := map[string]bool{}
 		for _, tool := range body.Tools {
-			if !tool.Installed {
-				t.Fatalf("expected installed tool: %v", tool)
-			}
+			installed[tool.Key] = tool.Installed
+		}
+		if !installed["cursor"] || !installed["claude_code"] || !installed["codex"] {
+			t.Fatalf("expected cursor/claude_code/codex installed, got=%v", installed)
+		}
+		if installed["antigravity"] || installed["opencode"] {
+			t.Fatalf("expected antigravity/opencode not installed, got=%v", installed)
 		}
 	}
 

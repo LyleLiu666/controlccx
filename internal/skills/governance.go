@@ -41,6 +41,16 @@ func (s *Service) ListTools(ctx context.Context) ([]ToolInfo, error) {
 			DisplayName: "Codex",
 			SkillsRoots: dedupePaths(s.targetRoots[TargetCodex]),
 		},
+		{
+			Key:         string(TargetAntigravity),
+			DisplayName: "Antigravity",
+			SkillsRoots: dedupePaths(s.targetRoots[TargetAntigravity]),
+		},
+		{
+			Key:         string(TargetOpencode),
+			DisplayName: "OpenCode",
+			SkillsRoots: dedupePaths(s.targetRoots[TargetOpencode]),
+		},
 	}
 
 	for i := range tools {

@@ -15,7 +15,7 @@ import {
   updateManagedSkill,
 } from "../api";
 
-type SkillTarget = "cursor" | "claude_code" | "codex";
+type SkillTarget = "cursor" | "claude_code" | "codex" | "antigravity" | "opencode";
 
 export function useSkillsGovernance() {
   const toolsLoading = ref(false);
@@ -61,7 +61,7 @@ export function useSkillsGovernance() {
 
   // Sync
   const syncName = ref("");
-  const syncTarget = ref<SkillTarget>("cursor");
+  const syncTarget = ref<SkillTarget>("claude_code");
   const syncOverwrite = ref(false);
   const syncing = ref(false);
 

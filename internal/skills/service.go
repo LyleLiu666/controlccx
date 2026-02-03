@@ -17,6 +17,8 @@ const (
 	TargetClaudeCode Target = "claude_code"
 	TargetCodex      Target = "codex"
 	TargetCursor     Target = "cursor"
+	TargetAntigravity Target = "antigravity"
+	TargetOpencode    Target = "opencode"
 )
 
 type EntryStatus string
@@ -100,6 +102,8 @@ func NewService(opts Options) (*Service, error) {
 
 	claudeRoot := filepath.Join(home, ".claude", "skills")
 	cursorRoot := filepath.Join(home, ".cursor", "skills")
+	antigravityRoot := filepath.Join(home, ".antigravity", "skills")
+	opencodeRoot := filepath.Join(xdgConfigHome(home), "opencode", "skills")
 	codexRoots := []string{filepath.Join(home, ".codex", "skills")}
 	if strings.TrimSpace(opts.CodexHome) != "" {
 		ch := expandHome(strings.TrimSpace(opts.CodexHome), home)
@@ -130,6 +134,8 @@ func NewService(opts Options) (*Service, error) {
 			TargetClaudeCode: {claudeRoot},
 			TargetCodex:      codexRoots,
 			TargetCursor:     {cursorRoot},
+			TargetAntigravity: {antigravityRoot},
+			TargetOpencode:    {opencodeRoot},
 		},
 		symlink: symlinkFn,
 	}, nil
@@ -499,6 +505,21 @@ func expandHome(p, home string) string {
 		return filepath.Join(home, p[2:])
 	}
 	return p
+}
+
+func xdgConfigHome(home string) string {
+	home = filepath.Clean(strings.TrimSpace(home))
+	if home == "" {
+		home = "."
+	}
+	if raw := strings.TrimSpace(os.Getenv("XDG_CONFIG_HOME")); raw != "" {
+		p := expandHome(raw, home)
+		if !filepath.IsAbs(p) {
+			p = filepath.Join(home, p)
+		}
+		return filepath.Clean(p)
+	}
+	return filepath.Join(home, ".config")
 }
 
 func dedupePaths(paths []string) []string {

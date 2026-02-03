@@ -1,6 +1,6 @@
 import type { Skill } from "./types.ts";
 
-export type SkillTarget = "cursor" | "claude_code" | "codex";
+export type SkillTarget = "cursor" | "claude_code" | "codex" | "antigravity" | "opencode";
 
 export type SkillsSummary = {
   target: SkillTarget;
@@ -26,6 +26,10 @@ export function summarizeSkillTarget(skill: Skill, target: SkillTarget): SkillsS
     .join("\n");
 
   const hasSource = !!(skill.source && skill.source.trim());
+  const allStatuses = (skill.targets ?? []).map((s) => s.status);
+  const hasBootstrapCandidate = allStatuses.some(
+    (s) => s === "present" || s === "external" || s === "copied" || s === "linked",
+  );
   const statuses = states.map((s) => s.status);
   const unique = Array.from(new Set(statuses));
   const status =
@@ -40,9 +44,8 @@ export function summarizeSkillTarget(skill: Skill, target: SkillTarget): SkillsS
   const hasUnmanagedBlocker = statuses.some(
     (s) => s === "present" || s === "conflict" || s === "external",
   );
-  const canEnable = hasSource && !hasUnmanagedBlocker;
+  const canEnable = (hasSource || hasBootstrapCandidate) && !hasUnmanagedBlocker;
   const canDisable = !hasUnmanagedBlocker && (anyManagedEnabled || anyBroken);
 
   return { target, status, canEnable, canDisable, enabled, detail };
 }
-

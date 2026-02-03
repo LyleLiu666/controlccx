@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"controlccx/internal/skills"
@@ -171,6 +173,115 @@ func TestAPI_Skills_ListPagingAndFilter(t *testing.T) {
 		if len(got.Skills) != 1 || got.Skills[0].Name != "skill-creator" {
 			t.Fatalf("skills=%v, want only skill-creator", got.Skills)
 		}
+	}
+}
+
+func TestAPI_Skills_LinkAutoImportBootstrap(t *testing.T) {
+	t.Setenv("CODEX_HOME", "")
+
+	home := t.TempDir()
+	sourceRoot := filepath.Join(home, ".agent", "skills")
+
+	// Existing unmanaged variant in a tool dir.
+	variant := filepath.Join(home, ".claude", "skills", "skill-x")
+	mustMkdirAll(t, variant)
+	if err := os.WriteFile(filepath.Join(variant, "SKILL.md"), []byte("hello\n"), 0o644); err != nil {
+		t.Fatalf("write variant: %v", err)
+	}
+
+	svc, err := skills.NewService(skills.Options{
+		HomeDir:     home,
+		SourceRoots: []string{sourceRoot},
+	})
+	if err != nil {
+		t.Fatalf("new skills: %v", err)
+	}
+
+	apiSvc := &API{Skills: svc}
+	srv := httptest.NewServer(apiSvc.Handler())
+	t.Cleanup(srv.Close)
+
+	body, _ := json.Marshal(map[string]any{
+		"name":        "skill-x",
+		"target":      "codex",
+		"auto_import": true,
+	})
+	res, err := http.Post(srv.URL+"/api/skills/link", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("post link: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(res.Body)
+		t.Fatalf("status=%d, want 200, body=%s", res.StatusCode, strings.TrimSpace(string(b)))
+	}
+
+	// Source bootstrapped.
+	gotSource, err := os.ReadFile(filepath.Join(sourceRoot, "skill-x", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("read source: %v", err)
+	}
+	if string(gotSource) != "hello\n" {
+		t.Fatalf("source=%q, want %q", string(gotSource), "hello\\n")
+	}
+
+	// Target enabled (symlink or copy).
+	gotTarget, err := os.ReadFile(filepath.Join(home, ".codex", "skills", "skill-x", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("read target: %v", err)
+	}
+	if string(gotTarget) != "hello\n" {
+		t.Fatalf("target=%q, want %q", string(gotTarget), "hello\\n")
+	}
+}
+
+func TestAPI_Skills_LinkAutoImportRefusesMultiVariants(t *testing.T) {
+	t.Setenv("CODEX_HOME", "")
+
+	home := t.TempDir()
+	sourceRoot := filepath.Join(home, ".agent", "skills")
+
+	v1 := filepath.Join(home, ".claude", "skills", "skill-x")
+	mustMkdirAll(t, v1)
+	if err := os.WriteFile(filepath.Join(v1, "SKILL.md"), []byte("one\n"), 0o644); err != nil {
+		t.Fatalf("write v1: %v", err)
+	}
+
+	v2 := filepath.Join(home, ".cursor", "skills", "skill-x")
+	mustMkdirAll(t, v2)
+	if err := os.WriteFile(filepath.Join(v2, "SKILL.md"), []byte("two\n"), 0o644); err != nil {
+		t.Fatalf("write v2: %v", err)
+	}
+
+	svc, err := skills.NewService(skills.Options{
+		HomeDir:     home,
+		SourceRoots: []string{sourceRoot},
+	})
+	if err != nil {
+		t.Fatalf("new skills: %v", err)
+	}
+
+	apiSvc := &API{Skills: svc}
+	srv := httptest.NewServer(apiSvc.Handler())
+	t.Cleanup(srv.Close)
+
+	body, _ := json.Marshal(map[string]any{
+		"name":        "skill-x",
+		"target":      "codex",
+		"auto_import": true,
+	})
+	res, err := http.Post(srv.URL+"/api/skills/link", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("post link: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusBadRequest {
+		b, _ := io.ReadAll(res.Body)
+		t.Fatalf("status=%d, want 400, body=%s", res.StatusCode, strings.TrimSpace(string(b)))
+	}
+	b, _ := io.ReadAll(res.Body)
+	if !strings.Contains(string(b), "MULTI_VARIANTS|") {
+		t.Fatalf("body=%q, want MULTI_VARIANTS|", strings.TrimSpace(string(b)))
 	}
 }
 

@@ -1542,7 +1542,7 @@ h2 {
 
 :deep(.skillsHead) {
   display: grid;
-  grid-template-columns: 1.4fr 1fr 1fr 1fr;
+  grid-template-columns: 1.4fr 2fr;
   gap: 12px;
   padding: 10px 12px;
   background: var(--bg-subtle);
@@ -1556,7 +1556,7 @@ h2 {
 
 :deep(.skillsRow) {
   display: grid;
-  grid-template-columns: 1.4fr 1fr 1fr 1fr;
+  grid-template-columns: 1.4fr 2fr;
   gap: 12px;
   padding: 12px;
   border-top: 1px solid var(--border-color);
@@ -1588,6 +1588,20 @@ h2 {
   gap: 10px;
   align-items: center;
   flex-wrap: wrap;
+}
+
+:deep(.skillsTargetBlock) {
+  display: inline-flex;
+  gap: 10px;
+  align-items: center;
+  padding: 6px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  background: var(--bg-subtle);
+}
+
+:deep(.skillsTargetLabel) {
+  min-width: 108px;
 }
 
 :deep(.skillActionBtn) {

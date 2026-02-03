@@ -355,21 +355,23 @@ export async function fetchSkills(opts?: {
 
 export async function linkSkill(input: {
   name: string;
-  target: "cursor" | "claude_code" | "codex";
+  target: "cursor" | "claude_code" | "codex" | "antigravity" | "opencode";
+  auto_import?: boolean;
+  prefer_tool?: "cursor" | "claude_code" | "codex" | "antigravity" | "opencode";
 }): Promise<{ ok: boolean }> {
   return postJSON<{ ok: boolean }>("/api/skills/link", input);
 }
 
 export async function unlinkSkill(input: {
   name: string;
-  target: "cursor" | "claude_code" | "codex";
+  target: "cursor" | "claude_code" | "codex" | "antigravity" | "opencode";
 }): Promise<{ ok: boolean }> {
   return postJSON<{ ok: boolean }>("/api/skills/unlink", input);
 }
 
 export async function syncSkill(input: {
   name: string;
-  target: "cursor" | "claude_code" | "codex";
+  target: "cursor" | "claude_code" | "codex" | "antigravity" | "opencode";
   overwrite?: boolean;
 }): Promise<{ ok: boolean }> {
   return postJSON<{ ok: boolean }>("/api/skills/sync", input);

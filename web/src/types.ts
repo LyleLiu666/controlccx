@@ -76,12 +76,12 @@ export type AcceptanceResponse = {
 };
 
 export type SkillTargetRoot = {
-  target: "cursor" | "claude_code" | "codex";
+  target: "cursor" | "claude_code" | "codex" | "antigravity" | "opencode";
   root: string;
 };
 
 export type SkillTargetState = {
-  target: "cursor" | "claude_code" | "codex";
+  target: "cursor" | "claude_code" | "codex" | "antigravity" | "opencode";
   root: string;
   status:
     | "missing"
@@ -177,7 +177,7 @@ export type InstallGitBatchItem = {
 export type InstallGitBatchInput = {
   repo_url: string;
   skills: InstallGitBatchItem[];
-  targets?: Array<"cursor" | "claude_code" | "codex">;
+  targets?: Array<"cursor" | "claude_code" | "codex" | "antigravity" | "opencode">;
   overwrite?: boolean;
 };
 

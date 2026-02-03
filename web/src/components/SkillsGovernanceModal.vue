@@ -25,7 +25,14 @@ const gitAllSelected = computed(
   () => (gov.gitCandidates?.length ?? 0) > 0 && gitSelectedCount.value === gov.gitCandidates.length,
 );
 const gitTargetTools = computed(() =>
-  (gov.tools ?? []).filter((t) => t.key === "cursor" || t.key === "claude_code" || t.key === "codex"),
+  (gov.tools ?? []).filter(
+    (t) =>
+      t.key === "claude_code" ||
+      t.key === "codex" ||
+      t.key === "antigravity" ||
+      t.key === "opencode" ||
+      t.key === "cursor",
+  ),
 );
 
 let switchingInstallOp = false;
@@ -361,9 +368,11 @@ watch(
               <div class="skillsGovField">
                 <div class="skillsGovFieldLabel">目标工具</div>
                 <select v-model="gov.syncTarget">
-                  <option value="cursor">Cursor</option>
                   <option value="claude_code">Claude Code</option>
                   <option value="codex">Codex</option>
+                  <option value="antigravity">Antigravity</option>
+                  <option value="opencode">OpenCode</option>
+                  <option value="cursor">Cursor</option>
                 </select>
               </div>
               <div class="skillsGovActions">

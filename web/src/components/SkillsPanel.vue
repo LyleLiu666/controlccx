@@ -2,7 +2,7 @@
 import { computed } from "vue";
 import type { Skill, SkillsListResponse } from "../types";
 
-type SkillTarget = "cursor" | "claude_code" | "codex";
+type SkillTarget = "cursor" | "claude_code" | "codex" | "antigravity" | "opencode";
 type SkillsSummary = {
   target: SkillTarget;
   status:
@@ -55,6 +55,39 @@ const limitModel = computed({
   set: (value: number) => emit("update:limit", value),
 });
 const skillsVisible = computed(() => props.data?.skills ?? []);
+const targetsOrdered = computed(() => {
+  const seen = new Set<SkillTarget>();
+  for (const t of props.data?.targets ?? []) {
+    seen.add(t.target as SkillTarget);
+  }
+
+  const preferred: SkillTarget[] = ["claude_code", "codex", "antigravity", "opencode", "cursor"];
+  const out: SkillTarget[] = [];
+  for (const t of preferred) {
+    if (!seen.has(t)) continue;
+    out.push(t);
+    seen.delete(t);
+  }
+  const rest = Array.from(seen).sort((a, b) => String(a).localeCompare(String(b)));
+  return out.concat(rest);
+});
+
+function targetLabel(target: SkillTarget): string {
+  switch (target) {
+    case "claude_code":
+      return "Claude Code";
+    case "codex":
+      return "Codex";
+    case "antigravity":
+      return "Antigravity";
+    case "opencode":
+      return "OpenCode";
+    case "cursor":
+      return "Cursor";
+    default:
+      return String(target);
+  }
+}
 
 function statusLabel(status: SkillsSummary["status"]): string {
   switch (status) {
@@ -80,17 +113,26 @@ function statusLabel(status: SkillsSummary["status"]): string {
 }
 
 function enableTitle(skill: Skill, target: SkillTarget, canEnable: boolean): string {
-  const t = target === "claude_code" ? "Claude Code" : target === "codex" ? "Codex" : "Cursor";
-  if (canEnable) return `为 ${t} 启用`;
+  const t = targetLabel(target);
   const hasSource = !!(skill.source && skill.source.trim());
+  const hasBootstrapCandidate = (skill.targets ?? []).some(
+    (s) => s.status === "present" || s.status === "external" || s.status === "copied" || s.status === "linked",
+  );
+  if (canEnable) {
+    if (!hasSource) return `为 ${t} 启用（将自动接管来源）`;
+    return `为 ${t} 启用`;
+  }
   if (!hasSource) {
-    return `无法启用：缺少来源（source）。请先把技能导入/安装到来源库，再启用到 ${t}。`;
+    if (!hasBootstrapCandidate) {
+      return `无法启用：缺少来源（source），且未发现可接管的现有技能目录。请先添加来源，再启用到 ${t}。`;
+    }
+    return `无法启用：该技能缺少来源但可自动接管；当前目标目录存在未托管的同名条目（冲突/外部/已存在）。请先处理或接管，再启用到 ${t}。`;
   }
   return `无法启用：目标目录存在未托管的同名条目（冲突/外部/已存在）。请先处理或接管，再启用到 ${t}。`;
 }
 
 function disableTitle(target: SkillTarget, canDisable: boolean): string {
-  const t = target === "claude_code" ? "Claude Code" : target === "codex" ? "Codex" : "Cursor";
+  const t = targetLabel(target);
   if (canDisable) return `为 ${t} 禁用`;
   return `无法禁用：目标目录存在未托管的同名条目（请先处理冲突/外部/已存在）`;
 }
@@ -169,9 +211,7 @@ function disableTitle(target: SkillTarget, canDisable: boolean): string {
       <div class="skillsTable">
         <div class="skillsHead">
           <div>技能</div>
-          <div>Cursor</div>
-          <div>Claude Code</div>
-          <div>Codex</div>
+          <div>目标</div>
         </div>
 
         <div class="skillsRows">
@@ -192,7 +232,7 @@ function disableTitle(target: SkillTarget, canDisable: boolean): string {
                 {{ s.source }}
               </div>
               <div class="tinyHint warn" v-else>
-                缺少来源（请先添加/导入/接管）
+                缺少来源（可直接在目标里点“启用”自动接管；或先添加/导入/接管）
                 <button
                   type="button"
                   class="skillActionBtn"
@@ -205,95 +245,38 @@ function disableTitle(target: SkillTarget, canDisable: boolean): string {
             </div>
 
             <div class="skillsCell">
-              <template v-for="t in [summarizeTarget(s, 'cursor')]" :key="t.target">
-                <span
-                  class="pill mono skillStatus"
-                  :class="badgeClass(t.status)"
-                  :title="t.detail"
-                  >{{ statusLabel(t.status) }}</span
-                >
-                <button
-                  type="button"
-                  class="skillActionBtn"
-                  v-if="!t.enabled"
-                  @click="emit('toggle', s.name, 'cursor', true)"
-                  :disabled="!t.canEnable || !!actionBusy.get(makeKey(s.name, 'cursor'))"
-                  :title="enableTitle(s, 'cursor', t.canEnable)"
-                >
-                  {{ actionBusy.get(makeKey(s.name, "cursor")) ? "…" : "启用" }}
-                </button>
-                <button
-                  type="button"
-                  class="skillActionBtn"
-                  v-else
-                  @click="emit('toggle', s.name, 'cursor', false)"
-                  :disabled="!t.canDisable || !!actionBusy.get(makeKey(s.name, 'cursor'))"
-                  :title="disableTitle('cursor', t.canDisable)"
-                >
-                  {{ actionBusy.get(makeKey(s.name, "cursor")) ? "…" : "禁用" }}
-                </button>
-              </template>
-            </div>
-
-            <div class="skillsCell">
-              <template v-for="t in [summarizeTarget(s, 'claude_code')]" :key="t.target">
-                <span
-                  class="pill mono skillStatus"
-                  :class="badgeClass(t.status)"
-                  :title="t.detail"
-                  >{{ statusLabel(t.status) }}</span
-                >
-                <button
-                  type="button"
-                  class="skillActionBtn"
-                  v-if="!t.enabled"
-                  @click="emit('toggle', s.name, 'claude_code', true)"
-                  :disabled="!t.canEnable || !!actionBusy.get(makeKey(s.name, 'claude_code'))"
-                  :title="enableTitle(s, 'claude_code', t.canEnable)"
-                >
-                  {{ actionBusy.get(makeKey(s.name, "claude_code")) ? "…" : "启用" }}
-                </button>
-                <button
-                  type="button"
-                  class="skillActionBtn"
-                  v-else
-                  @click="emit('toggle', s.name, 'claude_code', false)"
-                  :disabled="!t.canDisable || !!actionBusy.get(makeKey(s.name, 'claude_code'))"
-                  :title="disableTitle('claude_code', t.canDisable)"
-                >
-                  {{ actionBusy.get(makeKey(s.name, "claude_code")) ? "…" : "禁用" }}
-                </button>
-              </template>
-            </div>
-
-            <div class="skillsCell">
-              <template v-for="t in [summarizeTarget(s, 'codex')]" :key="t.target">
-                <span
-                  class="pill mono skillStatus"
-                  :class="badgeClass(t.status)"
-                  :title="t.detail"
-                  >{{ statusLabel(t.status) }}</span
-                >
-                <button
-                  type="button"
-                  class="skillActionBtn"
-                  v-if="!t.enabled"
-                  @click="emit('toggle', s.name, 'codex', true)"
-                  :disabled="!t.canEnable || !!actionBusy.get(makeKey(s.name, 'codex'))"
-                  :title="enableTitle(s, 'codex', t.canEnable)"
-                >
-                  {{ actionBusy.get(makeKey(s.name, "codex")) ? "…" : "启用" }}
-                </button>
-                <button
-                  type="button"
-                  class="skillActionBtn"
-                  v-else
-                  @click="emit('toggle', s.name, 'codex', false)"
-                  :disabled="!t.canDisable || !!actionBusy.get(makeKey(s.name, 'codex'))"
-                  :title="disableTitle('codex', t.canDisable)"
-                >
-                  {{ actionBusy.get(makeKey(s.name, "codex")) ? "…" : "禁用" }}
-                </button>
+              <template v-for="target in targetsOrdered" :key="target">
+                <template v-for="t in [summarizeTarget(s, target)]" :key="t.target">
+                  <div class="skillsTargetBlock">
+                    <span class="tinyHint mono skillsTargetLabel">{{ targetLabel(target) }}</span>
+                    <span
+                      class="pill mono skillStatus"
+                      :class="badgeClass(t.status)"
+                      :title="t.detail"
+                      >{{ statusLabel(t.status) }}</span
+                    >
+                    <button
+                      type="button"
+                      class="skillActionBtn"
+                      v-if="!t.enabled"
+                      @click="emit('toggle', s.name, target, true)"
+                      :disabled="!t.canEnable || !!actionBusy.get(makeKey(s.name, target))"
+                      :title="enableTitle(s, target, t.canEnable)"
+                    >
+                      {{ actionBusy.get(makeKey(s.name, target)) ? "…" : "启用" }}
+                    </button>
+                    <button
+                      type="button"
+                      class="skillActionBtn"
+                      v-else
+                      @click="emit('toggle', s.name, target, false)"
+                      :disabled="!t.canDisable || !!actionBusy.get(makeKey(s.name, target))"
+                      :title="disableTitle(target, t.canDisable)"
+                    >
+                      {{ actionBusy.get(makeKey(s.name, target)) ? "…" : "禁用" }}
+                    </button>
+                  </div>
+                </template>
               </template>
             </div>
           </div>

@@ -97,7 +97,7 @@ export function useSkills() {
     skillsError.value = "";
     try {
       if (enable) {
-        await linkSkill({ name, target });
+        await linkSkill({ name, target, auto_import: true, prefer_tool: "claude_code" });
       } else {
         await unlinkSkill({ name, target });
       }

@@ -16,6 +16,38 @@ test("summarizeSkillTarget disables enable when source missing", () => {
   assert.equal(summary.canEnable, false);
 });
 
+test("summarizeSkillTarget enables enable when source missing but bootstrap candidate exists", () => {
+  const summary = summarizeSkillTarget(
+    {
+      name: "threejs-materials",
+      source: "",
+      targets: [
+        { target: "claude_code", root: "/tmp/claude/skills", status: "present" },
+        { target: "cursor", root: "/tmp/cursor/skills", status: "missing" },
+      ],
+    } as any,
+    "cursor",
+  );
+  assert.equal(summary.status, "missing");
+  assert.equal(summary.canEnable, true);
+});
+
+test("summarizeSkillTarget keeps enable disabled when target is blocked even with bootstrap candidate", () => {
+  const summary = summarizeSkillTarget(
+    {
+      name: "threejs-materials",
+      source: "",
+      targets: [
+        { target: "claude_code", root: "/tmp/claude/skills", status: "present" },
+        { target: "cursor", root: "/tmp/cursor/skills", status: "present" },
+      ],
+    } as any,
+    "cursor",
+  );
+  assert.equal(summary.status, "present");
+  assert.equal(summary.canEnable, false);
+});
+
 test("summarizeSkillTarget enables enable when source exists and no blockers", () => {
   const summary = summarizeSkillTarget(
     {

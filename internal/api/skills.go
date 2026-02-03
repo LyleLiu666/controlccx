@@ -89,8 +89,10 @@ func (a *API) handleSkillsLink(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		Name   string `json:"name"`
-		Target string `json:"target"`
+		Name       string `json:"name"`
+		Target     string `json:"target"`
+		AutoImport bool   `json:"auto_import,omitempty"`
+		PreferTool string `json:"prefer_tool,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, "invalid json", http.StatusBadRequest)
@@ -100,6 +102,15 @@ func (a *API) handleSkillsLink(w http.ResponseWriter, r *http.Request) {
 	target := normalizeSkillsTarget(body.Target)
 	if name == "" || target == "" {
 		http.Error(w, "name and target are required", http.StatusBadRequest)
+		return
+	}
+	if body.AutoImport {
+		prefer := normalizeSkillsTarget(body.PreferTool)
+		if err := a.Skills.LinkWithAutoImport(r.Context(), name, target, skills.AutoImportLinkOptions{PreferTool: prefer}); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		writeJSON(w, map[string]any{"ok": true})
 		return
 	}
 	if err := a.Skills.Link(r.Context(), name, target); err != nil {
