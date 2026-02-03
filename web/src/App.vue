@@ -4351,7 +4351,7 @@ watch(
                   >⚠</span
                 >
                 <span class="pill" :class="s.status">{{ s.status }}</span>
-                <span class="pill kind">{{ s.runs.length }} runs</span>
+                <span class="pill kind">{{ s.runs.length }} 次运行</span>
                 <button
                   type="button"
                   class="rowMoreBtn"
@@ -4498,17 +4498,17 @@ watch(
 	                  type="button"
 	                  class="detailMini detailMiniBtn"
 	                  @click="openRuns"
-                  title="Open runs"
+                  title="查看运行记录"
                 >
-                  {{ selectedSession.runs.length }} runs
+                  运行记录（{{ selectedSession.runs.length }}）
                 </button>
                 <button
                   type="button"
                   class="detailMini detailMiniBtn"
                   @click="openWorkspaceFilesInNewTab"
-                  title="Browse workspace files"
+                  title="浏览工作区文件"
                 >
-                  Files
+                  文件
                 </button>
                 <span
                   v-if="selectedTask?.warning || selectedSession.warning"
