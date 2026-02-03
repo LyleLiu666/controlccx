@@ -1427,7 +1427,7 @@ h2 {
   overflow: auto;
 }
 
-.settingsModal {
+:deep(.settingsModal) {
   width: min(760px, 95vw);
   height: min(600px, 90vh);
 }
@@ -2137,7 +2137,7 @@ h2 {
   min-height: 0;
 }
 
-.settingsModal .modalBody {
+:deep(.settingsModal .modalBody) {
   overflow: auto;
 }
 
@@ -2484,12 +2484,12 @@ h2 {
   color: #fbbf24;
 }
 
-.settingsBody {
+:deep(.settingsBody) {
   display: grid;
   gap: 20px;
 }
 
-.settingsSection {
+:deep(.settingsSection) {
   border: 1px solid var(--border-color);
   border-radius: var(--radius-lg);
   padding: 16px;
@@ -2498,13 +2498,13 @@ h2 {
   background: var(--bg-subtle);
 }
 
-.settingsSectionTitle {
+:deep(.settingsSectionTitle) {
   font-weight: 700;
   font-size: 14px;
   color: var(--color-primary);
 }
 
-.settingsToggleRow {
+:deep(.settingsToggleRow) {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -2549,7 +2549,7 @@ h2 {
   }
 }
 
-.kv {
+:deep(.kv) {
   display: grid;
   grid-template-columns: 180px 1fr;
   gap: 12px;
@@ -2557,7 +2557,7 @@ h2 {
   font-size: 13px;
 }
 
-.secretRow {
+:deep(.secretRow) {
   display: grid;
   grid-template-columns: 1fr auto;
   gap: 10px;
