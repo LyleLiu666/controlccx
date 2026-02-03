@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   buildRunSafetyPayload,
   DEFAULT_RUN_SAFETY_INSTALL_UNLOCK,
+  inferTaskIntentFromSafetyPreset,
   toolDriverForWorkerType,
 } from "../src/runSafety.ts";
 
@@ -38,4 +39,15 @@ test("toolDriverForWorkerType resolves driver via tools list", () => {
 
 test("default install unlock is enabled", () => {
   assert.equal(DEFAULT_RUN_SAFETY_INSTALL_UNLOCK, true);
+});
+
+test("inferTaskIntentFromSafetyPreset derives intent from preset", () => {
+  assert.equal(inferTaskIntentFromSafetyPreset("codex", "workspace-write"), "code");
+  assert.equal(inferTaskIntentFromSafetyPreset("codex", "read-only"), "analyze");
+  assert.equal(inferTaskIntentFromSafetyPreset("codex", "search-browse"), "search-browse");
+  assert.equal(inferTaskIntentFromSafetyPreset("codex", "danger-full-access"), "install");
+
+  assert.equal(inferTaskIntentFromSafetyPreset("claude-code", "no-network"), "code");
+  assert.equal(inferTaskIntentFromSafetyPreset("claude-code", "search-browse"), "search-browse");
+  assert.equal(inferTaskIntentFromSafetyPreset("claude-code", "unsafe"), "install");
 });

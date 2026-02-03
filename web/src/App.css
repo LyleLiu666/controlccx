@@ -841,7 +841,7 @@ h2 {
 
 :deep(.newRunSafetyGrid) {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr;
   gap: 12px;
   align-items: end;
 }
@@ -3455,7 +3455,7 @@ h2 {
 
 .resumeSafetyGrid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr;
   gap: 12px;
   align-items: end;
 }

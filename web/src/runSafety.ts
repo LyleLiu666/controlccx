@@ -75,6 +75,27 @@ export function recommendSafetyPreset(driver: ToolDriver, intent: TaskIntent): s
   return "";
 }
 
+export function inferTaskIntentFromSafetyPreset(driver: ToolDriver, preset: string): TaskIntent {
+  const d = String(driver ?? "").trim();
+  const p = String(preset ?? "").trim();
+
+  if (d === "codex") {
+    if (p === "read-only") return "analyze";
+    if (p === "search-browse") return "search-browse";
+    if (p === "danger-full-access") return "install";
+    if (p === "unsafe") return "install";
+    return "code";
+  }
+
+  if (d === "claude-code") {
+    if (p === "search-browse") return "search-browse";
+    if (p === "unsafe") return "install";
+    return "code";
+  }
+
+  return "code";
+}
+
 export function normalizeSafetyPreset(driver: ToolDriver, intent: TaskIntent, raw: string): string {
   const v = String(raw ?? "").trim();
   const allowed = safetyPresetsForDriver(driver).map((p) => p.value);

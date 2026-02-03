@@ -1,9 +1,8 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import type { Tool, ToolDriver, TaskIntent } from "../types";
+import type { Tool, ToolDriver } from "../types";
 import {
   isHighRiskPreset,
-  recommendSafetyPreset,
   safetyPresetsForDriver,
   toolDriverForWorkerType,
 } from "../runSafety";
@@ -20,7 +19,6 @@ const props = defineProps<{
   safetyOverride: boolean;
   installUnlock: boolean;
   autopilotEnabled: boolean;
-  taskIntent: TaskIntent;
   safetyPreset: string;
   highRiskOptIn: boolean;
   starting: boolean;
@@ -35,7 +33,6 @@ const emit = defineEmits<{
   (e: "update:safetyOverride", val: boolean): void;
   (e: "update:installUnlock", val: boolean): void;
   (e: "update:autopilotEnabled", val: boolean): void;
-  (e: "update:taskIntent", val: TaskIntent): void;
   (e: "update:safetyPreset", val: string): void;
   (e: "update:highRiskOptIn", val: boolean): void;
   (e: "close"): void;
@@ -58,10 +55,6 @@ const newRunUseAutopilot = computed<boolean>(
 
 const newRunShowManualSafety = computed<boolean>(
   () => !newRunUseAutopilot.value
-);
-
-const recommendedSafetyPreset = computed<string>(() =>
-  recommendSafetyPreset(newRunDriver.value, props.taskIntent)
 );
 
 function close() {
@@ -180,7 +173,7 @@ watch(
                       根据提示词推断意图并应用最佳实践沙箱默认值。
                     </template>
                     <template v-else>
-                      自动驾驶已禁用：请在下方选择意图/预设。
+                      自动驾驶已禁用：请在下方选择安全预设。
                     </template>
                   </span>
                 </div>
@@ -211,24 +204,12 @@ watch(
                         :checked="safetyOverride"
                         @change="emit('update:safetyOverride', ($event.target as HTMLInputElement).checked)"
                       />
-                      <span>覆盖自动驾驶（手动设置意图/预设）</span>
+                      <span>覆盖自动驾驶（手动设置预设）</span>
                     </label>
                   </div>
 
                   <template v-if="newRunShowManualSafety">
                     <div class="newRunSafetyGrid">
-                      <label>
-                        任务意图
-                        <select
-                          :value="taskIntent"
-                          @change="emit('update:taskIntent', ($event.target as HTMLSelectElement).value as TaskIntent)"
-                        >
-                          <option value="code">code（写代码/跑脚本）</option>
-                          <option value="analyze">analyze（阅读/分析总结）</option>
-                          <option value="search-browse">search-browse（查资料/浏览）</option>
-                          <option value="install">install（下载/安装/执行安装脚本）</option>
-                        </select>
-                      </label>
                       <label>
                         安全预设
                         <select
@@ -244,20 +225,6 @@ watch(
                           </option>
                         </select>
                       </label>
-                    </div>
-                    <div class="tinyHint">
-                      推荐（由意图决定）:
-                      <span class="mono">{{ recommendedSafetyPreset }}</span>
-                      <template v-if="recommendedSafetyPreset !== safetyPreset">
-                        <button
-                          type="button"
-                          class="inlineBtn"
-                          @click="emit('update:safetyPreset', recommendedSafetyPreset)"
-                        >
-                          应用推荐
-                        </button>
-                      </template>
-                      <template v-else>（已应用）</template>
                     </div>
 
                     <div

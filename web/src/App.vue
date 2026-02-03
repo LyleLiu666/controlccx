@@ -59,15 +59,15 @@ import { shouldOfferRehydrateForTask, type ResumeOrigin } from "./rehydrate";
 import { computePopupPosition } from "./menuPosition";
 import { prettifyLogMessage } from "./logPretty";
 import { deriveRunActivity } from "./runActivity";
-import type { RunSafetyPayload, TaskIntent } from "./runSafety";
+import type { RunSafetyPayload } from "./runSafety";
 import {
   buildRunSafetyPayload,
   DEFAULT_RUN_SAFETY_INSTALL_UNLOCK,
   effectiveSafetyPresetForTask,
+  inferTaskIntentFromSafetyPreset,
   isHighRiskPreset,
   normalizeSafetyPreset,
   normalizeTaskIntent,
-  recommendSafetyPreset,
   safetyPresetsForDriver,
 } from "./runSafety";
 import SkillsPanel from "./components/SkillsPanel.vue";
@@ -527,7 +527,6 @@ const LS_KEY_AUTO_DELIVERY_FOREMAN = "controlccx.auto_delivery_foreman.v1";
 const LS_KEY_DELIVERY_FOREMAN_SEEN = "controlccx.delivery_foreman.seen_runs.v1";
 const LS_KEY_CLAUDE_AUTO_APPROVE_LEGACY = "controlccx.claude.auto_approve.v1";
 const LS_KEY_MIGRATE_CLAUDE_DEFAULT_SAFETY_PRESET = "controlccx.migrate.claude_default_safety_preset.v1";
-const LS_KEY_RUN_SAFETY_INTENT_BY_TOOL = "controlccx.run_safety.intent_by_tool.v1";
 const LS_KEY_RUN_SAFETY_PRESET_BY_TOOL = "controlccx.run_safety.preset_by_tool.v1";
 const LS_KEY_RUN_SAFETY_AUTOPILOT = "controlccx.run_safety.autopilot.v1";
 const LS_KEY_RUN_SAFETY_INSTALL_UNLOCK = "controlccx.run_safety.install_unlock.v1";
@@ -573,7 +572,6 @@ const blockedPromptTask = computed<Task | null>(() => {
 });
 
 const runSafetyPresetByTool = ref<Record<string, string>>({});
-const runSafetyIntentByTool = ref<Record<string, string>>({});
 const runSafetyAutopilotEnabled = ref<boolean>(true);
 const runSafetyInstallUnlock = ref<boolean>(DEFAULT_RUN_SAFETY_INSTALL_UNLOCK);
 
@@ -1356,7 +1354,6 @@ const workspaceSelect = ref<string>(loadString(LS_KEY_WORKSPACE_FILTER));
   rehydratePromptSeenRuns.value = new Set(loadStringArray(LS_KEY_REHYDRATE_PROMPT_SEEN));
   blockedPromptSeenRuns.value = new Set(loadStringArray(LS_KEY_BLOCKED_PROMPT_SEEN));
 
-  runSafetyIntentByTool.value = loadStringMap(LS_KEY_RUN_SAFETY_INTENT_BY_TOOL);
   runSafetyPresetByTool.value = loadStringMap(LS_KEY_RUN_SAFETY_PRESET_BY_TOOL);
   runSafetyAutopilotEnabled.value = loadBool(LS_KEY_RUN_SAFETY_AUTOPILOT, true);
   runSafetyInstallUnlock.value = loadBool(
@@ -1479,11 +1476,6 @@ watch(secretaryView, (v) => saveString(LS_KEY_SECRETARY_VIEW, v));
 watch(secretaryScope, (v) => saveString(LS_KEY_SECRETARY_SCOPE, v));
 watch(secretaryFull, (v) => saveBool(LS_KEY_SECRETARY_FULL, Boolean(v)));
 watch(autoDeliveryForeman, (v) => saveBool(LS_KEY_AUTO_DELIVERY_FOREMAN, Boolean(v)));
-watch(
-  runSafetyIntentByTool,
-  (v) => saveStringMap(LS_KEY_RUN_SAFETY_INTENT_BY_TOOL, v),
-  { deep: true },
-);
 watch(
   runSafetyPresetByTool,
   (v) => saveStringMap(LS_KEY_RUN_SAFETY_PRESET_BY_TOOL, v),
@@ -1621,8 +1613,8 @@ async function onCreateTask(opts?: { idempotencyKey?: string }): Promise<boolean
 
     let safety: RunSafetyPayload = {};
     if (!useAutopilot) {
-      const intent = newRunTaskIntent.value;
       const preset = newRunSafetyPreset.value;
+      const intent = inferTaskIntentFromSafetyPreset(driver, preset);
 
       if (
         (driver === "claude-code" || driver === "codex") &&
@@ -1640,7 +1632,6 @@ async function onCreateTask(opts?: { idempotencyKey?: string }): Promise<boolean
       }
 
       // Persist effective choices for future runs.
-      setStringMapKey(runSafetyIntentByTool, newWorkerType.value, intent);
       setStringMapKey(runSafetyPresetByTool, newWorkerType.value, preset);
 
       safety = buildRunSafetyPayload(driver, intent, preset);
@@ -2723,9 +2714,14 @@ async function secretaryResumeSessionRun(s: SessionGroup) {
   errorBanner.value = "";
   try {
     const driver = toolDriverForWorkerType(s.worker_type);
-    const intent = normalizeTaskIntent(runSafetyIntentByTool.value[s.worker_type] ?? s.latest.task_intent ?? "code");
     const savedPreset = runSafetyPresetByTool.value[s.worker_type] ?? "";
-    const preset = normalizeSafetyPreset(driver, intent, savedPreset || effectiveSafetyPresetForTask(driver, s.latest));
+    const basePreset = savedPreset || effectiveSafetyPresetForTask(driver, s.latest);
+    const preset = normalizeSafetyPreset(
+      driver,
+      normalizeTaskIntent(s.latest.task_intent ?? "code"),
+      basePreset,
+    );
+    const intent = inferTaskIntentFromSafetyPreset(driver, preset);
     if (isHighRiskPreset(driver, preset)) {
       const ok = await requestHighRiskConfirm({
         title: "高权限确认",
@@ -2733,8 +2729,8 @@ async function secretaryResumeSessionRun(s: SessionGroup) {
         detail: highRiskPresetSummary(driver, preset),
         confirmLabel: "继续（已知晓权限）",
       });
-        if (!ok) return;
-      }
+      if (!ok) return;
+    }
     const safety = buildRunSafetyPayload(driver, intent, preset);
     openRunLaunchMask({ title: "继续中…", detail: "正在继续会话…" });
     const nt = await continueSessionWithOptions(s.key, { prompt: "continue", ...safety });
@@ -2783,8 +2779,8 @@ async function onResumeTask() {
       }
       payload = buildSafetyEnvelopePayload();
     } else {
-      const intent = resumeTaskIntent.value;
       const preset = resumeSafetyPreset.value;
+      const intent = inferTaskIntentFromSafetyPreset(driver, preset);
       if (
         (driver === "claude-code" || driver === "codex") &&
         isHighRiskPreset(driver, preset) &&
@@ -2800,7 +2796,6 @@ async function onResumeTask() {
         resumeHighRiskOptIn.value = true;
       }
 
-      setStringMapKey(runSafetyIntentByTool, sess.worker_type, intent);
       setStringMapKey(runSafetyPresetByTool, sess.worker_type, preset);
 
       const envelope = buildSafetyEnvelopePayload();
@@ -3311,15 +3306,11 @@ function buildSafetyEnvelopePayload(): Pick<RunSafetyPayload, "safety_envelope">
 }
 
 const newRunDriver = computed<ToolDriver>(() => toolDriverForWorkerType(newWorkerType.value));
-const newRunTaskIntent = computed<TaskIntent>({
-  get: () => normalizeTaskIntent(runSafetyIntentByTool.value[newWorkerType.value] ?? "code"),
-  set: (value) => setStringMapKey(runSafetyIntentByTool, newWorkerType.value, value),
-});
 const newRunSafetyPreset = computed<string>({
   get: () =>
     normalizeSafetyPreset(
       newRunDriver.value,
-      newRunTaskIntent.value,
+      "code",
       runSafetyPresetByTool.value[newWorkerType.value] ?? "",
     ),
   set: (value) => setStringMapKey(runSafetyPresetByTool, newWorkerType.value, value),
@@ -3330,7 +3321,7 @@ const newRunUseAutopilot = computed<boolean>(
 );
 const newRunShowManualSafety = computed<boolean>(() => !newRunUseAutopilot.value);
 
-watch([newWorkerType, newRunTaskIntent, newRunSafetyPreset], () => {
+watch([newWorkerType, newRunSafetyPreset], () => {
   newRunHighRiskOptIn.value = false;
 });
 
@@ -3674,25 +3665,13 @@ const selectedSession = computed(() => {
 const resumeDriver = computed<ToolDriver>(() =>
   toolDriverForWorkerType(selectedSession.value?.worker_type ?? ""),
 );
-const resumeTaskIntent = computed<TaskIntent>({
-  get: () => {
-    const sess = selectedSession.value;
-    if (!sess) return "code";
-    const raw = runSafetyIntentByTool.value[sess.worker_type] ?? sess.latest.task_intent ?? "code";
-    return normalizeTaskIntent(raw);
-  },
-  set: (value) => {
-    const sess = selectedSession.value;
-    if (!sess) return;
-    setStringMapKey(runSafetyIntentByTool, sess.worker_type, value);
-  },
-});
 const resumeSafetyPreset = computed<string>({
   get: () => {
     const sess = selectedSession.value;
     if (!sess) return "";
     const raw = runSafetyPresetByTool.value[sess.worker_type] ?? sess.latest.safety_preset ?? "";
-    return normalizeSafetyPreset(resumeDriver.value, resumeTaskIntent.value, raw);
+    const intent = normalizeTaskIntent(sess.latest.task_intent ?? "code");
+    return normalizeSafetyPreset(resumeDriver.value, intent, raw);
   },
   set: (value) => {
     const sess = selectedSession.value;
@@ -3700,10 +3679,6 @@ const resumeSafetyPreset = computed<string>({
     setStringMapKey(runSafetyPresetByTool, sess.worker_type, value);
   },
 });
-
-const resumeRecommendedSafetyPreset = computed<string>(() =>
-  recommendSafetyPreset(resumeDriver.value, resumeTaskIntent.value),
-);
 
 const resumeUseAutopilot = computed<boolean>(
   () => runSafetyAutopilotEnabled.value && !resumeSafetyOverride.value,
@@ -3719,7 +3694,7 @@ const resumeAutopilotHighRiskBlocked = computed<boolean>(() => {
   return !isHighRiskAllowedByInstallUnlock(driver, preset);
 });
 
-watch([selectedSessionKey, resumeTaskIntent, resumeSafetyPreset], () => {
+watch([selectedSessionKey, resumeSafetyPreset], () => {
   resumeHighRiskOptIn.value = false;
 });
 
@@ -4502,12 +4477,15 @@ watch(
 	                    toolDriverForWorkerType(selectedSession.worker_type) === 'claude-code'
 	                  "
 	                  class="pill safety"
-	                  :title="`Safety: ${normalizeTaskIntent(selectedSession.latest.task_intent ?? 'code')}/${effectiveSafetyPresetForTask(toolDriverForWorkerType(selectedSession.worker_type), selectedSession.latest)}`"
+	                  :title="`Safety: ${effectiveSafetyPresetForTask(toolDriverForWorkerType(selectedSession.worker_type), selectedSession.latest)}`"
 	                >
 	                  Safety
 	                  {{
-	                    normalizeTaskIntent(selectedSession.latest.task_intent ?? "code")
-	                  }}/{{ effectiveSafetyPresetForTask(toolDriverForWorkerType(selectedSession.worker_type), selectedSession.latest) }}
+	                    effectiveSafetyPresetForTask(
+	                      toolDriverForWorkerType(selectedSession.worker_type),
+	                      selectedSession.latest,
+	                    )
+	                  }}
 	                </span>
 	                <button
 	                  type="button"
@@ -4720,12 +4698,10 @@ watch(
 	                }}</span>
 	                <span class="mono">
 	                  <template v-if="resumeShowManualSafety">
-	                    {{ resumeTaskIntent }}/{{ resumeSafetyPreset }}
+	                    {{ resumeSafetyPreset }}
 	                  </template>
 	                  <template v-else-if="selectedSession">
-	                    {{
-	                      normalizeTaskIntent(selectedSession.latest.task_intent ?? "code")
-	                    }}/{{ effectiveSafetyPresetForTask(resumeDriver, selectedSession.latest) }}
+	                    {{ effectiveSafetyPresetForTask(resumeDriver, selectedSession.latest) }}
 	                  </template>
 	                </span>
 	              </div>
@@ -4762,21 +4738,12 @@ watch(
 		                </label>
 		                <label v-if="runSafetyAutopilotEnabled" class="full">
 		                  <input type="checkbox" v-model="resumeSafetyOverride" />
-		                  <span>覆盖自动驾驶（手动设置意图/预设）</span>
+		                  <span>覆盖自动驾驶（手动设置预设）</span>
 		                </label>
 		              </div>
 
 		              <template v-if="resumeShowManualSafety">
 		                <div class="resumeSafetyGrid">
-		                  <label class="resumeSafetyLabel">
-		                    任务意图
-		                    <select v-model="resumeTaskIntent">
-		                      <option value="code">code（写代码/跑脚本）</option>
-		                      <option value="analyze">analyze（阅读/分析总结）</option>
-		                      <option value="search-browse">search-browse（查资料/浏览）</option>
-		                      <option value="install">install（下载/安装/执行安装脚本）</option>
-		                    </select>
-		                  </label>
 		                  <label class="resumeSafetyLabel">
 		                    安全预设
 		                    <select v-model="resumeSafetyPreset">
@@ -4789,20 +4756,6 @@ watch(
 		                      </option>
 		                    </select>
 		                  </label>
-		                </div>
-		                <div class="tinyHint">
-		                  推荐（由意图决定）:
-		                  <span class="mono">{{ resumeRecommendedSafetyPreset }}</span>
-		                  <template v-if="resumeRecommendedSafetyPreset !== resumeSafetyPreset">
-		                    <button
-		                      type="button"
-		                      class="inlineBtn"
-		                      @click="resumeSafetyPreset = resumeRecommendedSafetyPreset"
-		                    >
-		                      应用推荐
-		                    </button>
-		                  </template>
-		                  <template v-else>（已应用）</template>
 		                </div>
 	                <div
 	                  v-if="resumeDriver === 'claude-code' && resumeSafetyPreset === 'search-browse'"
@@ -5371,7 +5324,6 @@ watch(
       v-model:safetyOverride="newRunSafetyOverride"
       v-model:installUnlock="runSafetyInstallUnlock"
       v-model:autopilotEnabled="runSafetyAutopilotEnabled"
-      v-model:taskIntent="newRunTaskIntent"
       v-model:safetyPreset="newRunSafetyPreset"
       v-model:highRiskOptIn="newRunHighRiskOptIn"
       :missingAuthText="missingAuthText"
