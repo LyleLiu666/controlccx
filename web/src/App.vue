@@ -80,6 +80,9 @@ import AuthSettingsModal from "./components/AuthSettingsModal.vue";
 import ToolsSettingsModal from "./components/ToolsSettingsModal.vue";
 import NewRunModal from "./components/NewRunModal.vue";
 import RunLaunchOverlay from "./components/RunLaunchOverlay.vue";
+import HighRiskConfirmModal from "./components/HighRiskConfirmModal.vue";
+import BlockedPromptModal from "./components/BlockedPromptModal.vue";
+import RehydratePromptModal from "./components/RehydratePromptModal.vue";
 import { useSkills } from "./composables/useSkills";
 import { useSecretaryChat } from "./composables/useSecretaryChat";
 import { useTasks } from "./composables/useTasks";
@@ -159,13 +162,13 @@ function highRiskPresetSummary(driver: ToolDriver, preset: string): string {
   const d = String(driver ?? "").trim();
   const p = String(preset ?? "").trim();
   if (d === "codex" && p === "unsafe") {
-    return "Codex：--dangerously-bypass-approvals-and-sandbox（无 sandbox）";
+    return "Codex：跳过审批 + 关闭 sandbox 隔离（--dangerously-bypass-approvals-and-sandbox）";
   }
   if (d === "codex" && p === "danger-full-access") {
-    return "Codex：--sandbox danger-full-access（可访问 workspace 外）";
+    return "Codex：允许访问 workspace 外（--sandbox danger-full-access）";
   }
   if (d === "claude-code" && p === "unsafe") {
-    return "Claude Code：--dangerously-skip-permissions（跳过权限确认，无 bash sandbox）";
+    return "Claude Code：跳过权限确认 + 关闭 bash sandbox（--dangerously-skip-permissions）";
   }
   if (d && p) return `${d}: ${p}`;
   if (d) return d;
@@ -1624,10 +1627,10 @@ async function onCreateTask(opts?: { idempotencyKey?: string }): Promise<boolean
         !newRunHighRiskOptIn.value
       ) {
         const ok = await requestHighRiskConfirm({
-          title: "高风险确认",
-          message: "该运行需要高风险设置（权限更大）。继续吗？",
+          title: "高权限确认",
+          message: "该运行需要更高权限设置。继续吗？",
           detail: highRiskPresetSummary(driver, preset),
-          confirmLabel: "继续（我已知晓）",
+          confirmLabel: "继续（已知晓权限）",
         });
         if (!ok) return false;
         newRunHighRiskOptIn.value = true;
@@ -2262,10 +2265,10 @@ async function confirmBlockedPromptUnsafe() {
   }
 
   const ok = await requestHighRiskConfirm({
-    title: "高风险确认",
-    message: "该操作会跳过 Claude Code 的权限确认（风险更大）。继续吗？",
+    title: "高权限确认",
+    message: "该操作将跳过 Claude Code 的权限确认，并开放更高权限以继续执行。继续吗？",
     detail: highRiskPresetSummary(driver, "unsafe"),
-    confirmLabel: "继续（高风险）",
+    confirmLabel: "继续（高权限）",
   });
   if (!ok) return;
 
@@ -2393,7 +2396,7 @@ async function buildDeliveryForemanPrompt(t: Task): Promise<string> {
   parts.push("");
   parts.push("请你作为系统秘书/观察者，判断该 run 是否真的完成，以及是否需要工业级交付检查。");
   parts.push("如果未完成：你 SHOULD 优先调用 session_continue 工具继续该会话（会自动选择 resume/rehydrate，尽量不要让用户手动操作），并在回复里说明你做了什么；同时列出需要补齐的关键点。");
-  parts.push("如果你判断不适合自动 resume（例如需要用户选择/高风险/信息不足），才给出用户下一步最小 resume prompt（用户要输入的那句话）。");
+  parts.push("如果你判断不适合自动 resume（例如需要用户选择/高权限/信息不足），才给出用户下一步最小 resume prompt（用户要输入的那句话）。");
   parts.push("如果已完成且属于复杂任务：给出工业级交付 checklist（以可执行步骤/命令为主，不默认执行）。");
   parts.push("如果是简单任务：一句话说明无需工业级交付检查并结束。");
   parts.push("");
@@ -2626,7 +2629,7 @@ async function runAttentionAutopilotLoop() {
         const intent = normalizeTaskIntent(sess.latest.task_intent ?? "code");
         const preset = effectiveSafetyPresetForTask(driver, sess.latest);
         if (isHighRiskPreset(driver, preset)) {
-          attentionAutopilotNote.value = `Autopilot 已跳过 ${short}：高风险设置需要手动继续。`;
+          attentionAutopilotNote.value = `Autopilot 已跳过 ${short}：更高权限设置需要手动确认。`;
           continue;
         }
         const safety = buildRunSafetyPayload(driver, intent, preset);
@@ -2712,10 +2715,10 @@ async function secretaryResumeSessionRun(s: SessionGroup) {
     const preset = normalizeSafetyPreset(driver, intent, savedPreset || effectiveSafetyPresetForTask(driver, s.latest));
     if (isHighRiskPreset(driver, preset)) {
       const ok = await requestHighRiskConfirm({
-        title: "高风险确认",
-        message: "该继续操作需要高风险设置（权限更大）。继续吗？",
+        title: "高权限确认",
+        message: "该继续操作需要更高权限设置。继续吗？",
         detail: highRiskPresetSummary(driver, preset),
-        confirmLabel: "继续（我已知晓）",
+        confirmLabel: "继续（已知晓权限）",
       });
         if (!ok) return;
       }
@@ -2757,10 +2760,10 @@ async function onResumeTask() {
       const preset = effectiveSafetyPresetForTask(driver, sess.latest);
       if (isHighRiskPreset(driver, preset) && !isHighRiskAllowedByInstallUnlock(driver, preset)) {
         const ok = await requestHighRiskConfirm({
-          title: "需要解锁安装/下载",
-          message: "这个任务需要允许下载/安装（风险更高）。点一次「继续」即可放行。",
+          title: "需要开启下载/安装权限",
+          message: "这个任务需要开启下载/安装权限：允许 agent 下载/安装依赖并运行安装命令。点一次「继续」即可启用并运行。",
           detail: highRiskPresetSummary(driver, preset),
-          confirmLabel: "继续（解锁并运行）",
+          confirmLabel: "继续（启用并运行）",
         });
         if (!ok) return;
         runSafetyInstallUnlock.value = true;
@@ -2775,10 +2778,10 @@ async function onResumeTask() {
         !resumeHighRiskOptIn.value
       ) {
         const ok = await requestHighRiskConfirm({
-          title: "高风险确认",
-          message: "该继续操作需要高风险设置（权限更大）。继续吗？",
+          title: "高权限确认",
+          message: "该继续操作需要更高权限设置。继续吗？",
           detail: highRiskPresetSummary(driver, preset),
-          confirmLabel: "继续（我已知晓）",
+          confirmLabel: "继续（已知晓权限）",
         });
         if (!ok) return;
         resumeHighRiskOptIn.value = true;
@@ -4677,12 +4680,14 @@ watch(
               <input
                 v-if="!resumeExpanded"
                 v-model="resumePrompt"
+                class="promptEmphasis"
                 placeholder="继续输入…"
                 @keydown.enter="onResumeEnter"
               />
               <textarea
                 v-else
                 v-model="resumePrompt"
+                class="promptEmphasis"
                 rows="3"
                 placeholder="继续输入…"
               ></textarea>
@@ -4729,7 +4734,7 @@ watch(
 		                <label class="full">
 		                  <input type="checkbox" v-model="runSafetyInstallUnlock" />
 		                  <span class="mono">安装解锁 (Install unlock)</span>
-		                  <span class="tinyHint">允许下载/安装程序（较高风险）</span>
+		                  <span class="tinyHint">开启下载/安装权限（允许 agent 下载/安装依赖）</span>
 		                </label>
 		                <label class="full">
 		                  <input type="checkbox" v-model="runSafetyAutopilotEnabled" />
@@ -4797,24 +4802,24 @@ watch(
 	                >
 	                  <div class="tinyHint warn">
 	                    <template v-if="resumeDriver === 'codex' && resumeSafetyPreset === 'unsafe'">
-	                      Runs Codex with <span class="mono">--dangerously-bypass-approvals-and-sandbox</span> (no sandbox).
+	                      将以 <span class="mono">--dangerously-bypass-approvals-and-sandbox</span> 运行：跳过审批并关闭 sandbox 隔离，agent 可直接执行命令并访问系统资源（文件/网络）。
 	                    </template>
 	                    <template v-else-if="resumeDriver === 'codex' && resumeSafetyPreset === 'danger-full-access'">
-	                      Runs Codex with <span class="mono">--sandbox danger-full-access</span> (can access outside the workspace).
+	                      将以 <span class="mono">--sandbox danger-full-access</span> 运行：允许访问 workspace 外的文件/目录（权限更大）。
 	                    </template>
 	                    <template v-else-if="resumeDriver === 'claude-code' && resumeSafetyPreset === 'unsafe'">
-	                      Runs Claude Code with <span class="mono">--dangerously-skip-permissions</span> and disables bash sandbox (scripts can access system network/files). Use only if you understand the risk.
+	                      将以 <span class="mono">--dangerously-skip-permissions</span> 运行：跳过权限确认，并关闭 bash sandbox（脚本可直接访问系统文件/网络）。
 	                    </template>
 	                  </div>
 	                  <label class="resumeSafetyOptIn">
 	                    <input type="checkbox" v-model="resumeHighRiskOptIn" />
-	                    <span>I understand and want to proceed</span>
+	                    <span>我已知晓将开放的权限并希望继续</span>
 	                  </label>
 	                </div>
 	              </template>
 	              <template v-else>
 	                <div v-if="resumeAutopilotHighRiskBlocked" class="tinyHint warn">
-	                  High-risk run detected. Enable <span class="mono">Install unlock</span> or use manual override.
+	                  检测到需要更高权限的设置。启用 <span class="mono">Install unlock</span> 或使用手动覆盖后继续。
 	                </div>
 	                <div class="tinyHint">
 	                  Uses last run’s safety settings.
@@ -5202,90 +5207,24 @@ watch(
 		      </div>
 		    </div>
 
-        <div
-          v-if="blockedPromptOpen"
-          class="modalOverlay"
-          @click.self="closeBlockedPrompt"
-        >
-          <div class="modal smallModal">
-            <div class="modalHeader">
-              <div class="modalTitle">运行被阻塞（需要确认）</div>
-              <button class="iconBtn" type="button" @click="closeBlockedPrompt">✕</button>
-            </div>
-            <div class="modalBody">
-              <div v-if="blockedPromptError" class="modalError">
-                {{ blockedPromptError }}
-              </div>
-              <div class="confirmText">
-                这个 run 在执行过程中触发了需要人工确认的权限/操作，但当前运行是非交互模式，无法点击批准。
-              </div>
-              <div class="tinyHint">
-                如果你确认操作安全，可以选择「高风险继续」跳过权限确认（风险更大）。
-              </div>
-              <div v-if="blockedPromptTask?.warning" class="tinyHint warn mono">
-                {{ blockedPromptTask.warning }}
-              </div>
-            </div>
-            <div class="modalFooter">
-              <button type="button" @click="closeBlockedPrompt" :disabled="blockedPromptBusy">
-                稍后
-              </button>
-              <button
-                type="button"
-                @click="copyText('workers:\\n  unsafe_automation: true\\n')"
-                :disabled="blockedPromptBusy"
-              >
-                复制配置片段
-              </button>
-              <button
-                type="button"
-                class="dangerBtn"
-                @click="confirmBlockedPromptUnsafe"
-                :disabled="blockedPromptBusy || highRiskConfirmOpen"
-              >
-                {{ blockedPromptBusy ? "处理中..." : "高风险继续" }}
-              </button>
-            </div>
-          </div>
-        </div>
+        <BlockedPromptModal
+          :open="blockedPromptOpen"
+          :busy="blockedPromptBusy"
+          :error="blockedPromptError"
+          :warning="blockedPromptTask?.warning ?? ''"
+          :confirmOpen="highRiskConfirmOpen"
+          @close="closeBlockedPrompt"
+          @copyConfigSnippet="copyText('workers:\\n  unsafe_automation: true\\n')"
+          @proceed="confirmBlockedPromptUnsafe"
+        />
 
-	        <div
-	          v-if="rehydratePromptOpen"
-	          class="modalOverlay"
-	          @click.self="closeRehydratePrompt"
-	        >
-          <div class="modal smallModal">
-            <div class="modalHeader">
-              <div class="modalTitle">无法恢复该会话</div>
-              <button class="iconBtn" type="button" @click="closeRehydratePrompt">✕</button>
-            </div>
-            <div class="modalBody">
-              <div v-if="rehydratePromptError" class="modalError">
-                {{ rehydratePromptError }}
-              </div>
-              <div class="confirmText">
-                Claude Code 找不到该 session（No conversation found）。你可以新建一个会话，把历史上下文带过去继续。
-              </div>
-              <div class="tinyHint">
-                说明：该操作会创建一个新的 <span class="mono">mode=new</span> run（不会复用旧
-                <span class="mono">session_id</span>）。
-              </div>
-            </div>
-            <div class="modalFooter">
-              <button type="button" @click="closeRehydratePrompt" :disabled="rehydratePromptBusy">
-                取消
-              </button>
-              <button
-                type="button"
-                class="primary"
-                @click="confirmRehydratePrompt"
-                :disabled="rehydratePromptBusy"
-              >
-                {{ rehydratePromptBusy ? "处理中..." : "新建会话继续（带上下文）" }}
-              </button>
-            </div>
-          </div>
-        </div>
+        <RehydratePromptModal
+          :open="rehydratePromptOpen"
+          :busy="rehydratePromptBusy"
+          :error="rehydratePromptError"
+          @close="closeRehydratePrompt"
+          @confirm="confirmRehydratePrompt"
+        />
 
 	      <div
 	        v-if="workspaceRenameOpen"
@@ -5426,37 +5365,16 @@ watch(
       @openAuthSettings="openAuthSettings"
     />
 
-    <div
-      v-if="highRiskConfirmOpen"
-      class="modalOverlay"
-      @click.self="cancelHighRiskConfirm"
-    >
-      <div class="modal smallModal">
-        <div class="modalHeader">
-          <div class="modalTitle">{{ highRiskConfirmTitle }}</div>
-          <button class="iconBtn" type="button" @click="cancelHighRiskConfirm">
-            ✕
-          </button>
-        </div>
-        <div class="modalBody">
-          <div class="confirmText">{{ highRiskConfirmMessage }}</div>
-          <div v-if="highRiskConfirmDetail" class="tinyHint warn mono">
-            {{ highRiskConfirmDetail }}
-          </div>
-        </div>
-        <div class="modalFooter">
-          <button type="button" @click="cancelHighRiskConfirm">取消</button>
-          <button
-            type="button"
-            class="dangerBtn"
-            @click="confirmHighRiskConfirm"
-            :disabled="highRiskConfirmBusy"
-          >
-            {{ highRiskConfirmConfirmLabel }}
-          </button>
-        </div>
-      </div>
-    </div>
+    <HighRiskConfirmModal
+      :open="highRiskConfirmOpen"
+      :title="highRiskConfirmTitle"
+      :message="highRiskConfirmMessage"
+      :detail="highRiskConfirmDetail"
+      :confirmLabel="highRiskConfirmConfirmLabel"
+      :busy="highRiskConfirmBusy"
+      @cancel="cancelHighRiskConfirm"
+      @confirm="confirmHighRiskConfirm"
+    />
 
 	    <AuthSettingsModal
 	      :open="authSettingsOpen"

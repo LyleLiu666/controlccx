@@ -127,6 +127,7 @@ watch(
             提示词
             <textarea
               ref="promptEl"
+              class="promptEmphasis"
               :value="prompt"
               @input="updatePrompt"
               rows="6"
@@ -191,7 +192,7 @@ watch(
                     @change="emit('update:installUnlock', ($event.target as HTMLInputElement).checked)"
                   />
                   <span class="mono">安装解锁 (Install unlock)</span>
-                  <span class="tinyHint">允许下载/安装程序（较高风险）</span>
+                  <span class="tinyHint">开启下载/安装权限（允许 agent 下载/安装依赖）</span>
                 </label>
 
                 <div class="newRunSafetyAdvanced">
@@ -293,7 +294,7 @@ watch(
                             newRunDriver === 'codex' && safetyPreset === 'unsafe'
                           "
                         >
-                          以 <span class="mono">--dangerously-bypass-approvals-and-sandbox</span> (无沙箱) 运行 Codex。
+                          将以 <span class="mono">--dangerously-bypass-approvals-and-sandbox</span> 运行：跳过审批并关闭 sandbox 隔离，agent 可直接执行命令并访问系统资源（文件/网络）。
                         </template>
                         <template
                           v-else-if="
@@ -301,7 +302,7 @@ watch(
                             safetyPreset === 'danger-full-access'
                           "
                         >
-                          以 <span class="mono">--sandbox danger-full-access</span> (可访问工作区外部) 运行 Codex。
+                          将以 <span class="mono">--sandbox danger-full-access</span> 运行：允许访问 workspace 外的文件/目录（权限更大）。
                         </template>
                         <template
                           v-else-if="
@@ -309,7 +310,7 @@ watch(
                             safetyPreset === 'unsafe'
                           "
                         >
-                          以 <span class="mono">--dangerously-skip-permissions</span> 运行 Claude Code，并关闭 bash 沙箱（脚本可直接联网/访问系统环境）。仅在明确需要时使用。
+                          将以 <span class="mono">--dangerously-skip-permissions</span> 运行：跳过权限确认，并关闭 bash sandbox（脚本可直接访问系统文件/网络）。
                         </template>
                       </div>
                       <label class="newRunSafetyOptIn">
@@ -318,7 +319,7 @@ watch(
                           :checked="highRiskOptIn"
                           @change="emit('update:highRiskOptIn', ($event.target as HTMLInputElement).checked)"
                         />
-                        <span>我已知晓风险并希望继续</span>
+                        <span>我已知晓将开放的权限并希望继续</span>
                       </label>
                     </div>
                   </template>
