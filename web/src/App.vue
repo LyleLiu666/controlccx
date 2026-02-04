@@ -5039,13 +5039,38 @@ watch(
           </div>
 
 	          <div class="resumeBar">
+              <div class="resumeComposerTop">
+                <div class="resumeComposerTitle">
+                  <span class="resumeComposerDot" aria-hidden="true"></span>
+                  下一步指令
+                </div>
+                <div class="resumeComposerHint">
+                  <template v-if="resumeExpanded">
+                    <span class="kbd">Enter</span>
+                    <span>换行</span>
+                    <span class="dotSep" aria-hidden="true">·</span>
+                    <span class="kbd">⌘/Ctrl+Enter</span>
+                    <span>继续</span>
+                  </template>
+                  <template v-else>
+                    <span class="kbd">Enter</span>
+                    <span>继续</span>
+                  </template>
+                  <template v-if="resumeCanUseSkills">
+                    <span class="dotSep" aria-hidden="true">·</span>
+                    <span class="kbd">/</span>
+                    <span>插入技能</span>
+                  </template>
+                </div>
+              </div>
 	            <div class="resumeRow">
 	              <input
 	                v-if="!resumeExpanded"
 	                ref="resumePromptInputEl"
 	                v-model="resumePrompt"
 	                class="promptEmphasis"
-	                placeholder="继续输入…"
+	                placeholder="输入下一步指令…"
+	                aria-label="继续指令"
 	                @keydown="onResumePromptKeyDown"
 	                @keydown.enter="onResumeEnter"
 	              />
@@ -5055,8 +5080,11 @@ watch(
 	                v-model="resumePrompt"
 	                class="promptEmphasis"
 	                rows="3"
-	                placeholder="继续输入…"
+	                placeholder="输入下一步指令…"
+	                aria-label="继续指令"
 	                @keydown="onResumePromptKeyDown"
+	                @keydown.ctrl.enter="onResumeEnter"
+	                @keydown.meta.enter="onResumeEnter"
 	              ></textarea>
 	              <div
 	                v-if="resumeDriver === 'codex' || resumeDriver === 'claude-code'"

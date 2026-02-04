@@ -3599,8 +3599,80 @@ h2 {
 
 .resumeBar {
   display: grid;
-  gap: 8px;
+  gap: 10px;
   margin-bottom: 12px;
+  padding: 12px;
+  border-radius: var(--radius-lg);
+  border: 1px solid rgba(13, 148, 136, 0.22);
+  background: linear-gradient(135deg, var(--bg-panel) 0%, var(--bg-subtle) 100%);
+  box-shadow: var(--shadow-sm);
+}
+
+:global(:root[data-theme="dark"]) .resumeBar {
+  border-color: rgba(45, 212, 191, 0.18);
+  background: linear-gradient(135deg, rgba(15, 23, 42, 0.92) 0%, rgba(17, 28, 51, 0.92) 100%);
+}
+
+.resumeComposerTop {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 20px;
+}
+
+.resumeComposerTitle {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  font-weight: 900;
+  color: var(--text-main);
+  letter-spacing: -0.01em;
+}
+
+.resumeComposerDot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: var(--color-primary);
+  box-shadow: 0 0 0 4px var(--color-primary-bg);
+}
+
+.resumeComposerHint {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--text-sub);
+  user-select: none;
+}
+
+.kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  line-height: 1;
+  padding: 3px 7px;
+  border-radius: 7px;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  background: rgba(148, 163, 184, 0.16);
+  color: var(--text-main);
+}
+
+:global(:root[data-theme="dark"]) .kbd {
+  border-color: rgba(148, 163, 184, 0.18);
+  background: rgba(148, 163, 184, 0.12);
+  color: var(--text-main);
+}
+
+.dotSep {
+  opacity: 0.6;
 }
 
 .resumeRow {
@@ -3610,8 +3682,18 @@ h2 {
   align-items: start;
 }
 
+.resumeRow :deep(input.promptEmphasis),
+.resumeRow :deep(textarea.promptEmphasis) {
+  font-size: 15px;
+  padding: 12px 14px;
+}
+
+.resumeRow :deep(input.promptEmphasis) {
+  min-height: 46px;
+}
+
 .resumeRow textarea {
-  min-height: 84px;
+  min-height: 96px;
 }
 
 .resumeSafetyControls {
@@ -3619,13 +3701,19 @@ h2 {
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
-  min-height: 40px;
-  padding: 6px 12px;
+  min-height: 46px;
+  padding: 8px 12px;
   border-radius: 999px;
   border: 1px solid rgba(148, 163, 184, 0.35);
   background: rgba(15, 23, 42, 0.12);
   color: var(--text-main);
   opacity: 0.95;
+}
+
+.resumeRow :deep(button.primary) {
+  height: 46px;
+  padding: 0 18px;
+  border-radius: 999px;
 }
 
 .resumeSafetyLabel {
@@ -3702,7 +3790,7 @@ h2 {
 
 .resumeToggle {
   padding: 0 12px;
-  height: 40px;
+  height: 46px;
   font-size: 16px;
   font-weight: 900;
   border-radius: 999px;
