@@ -9,6 +9,11 @@ test("shouldDismissRunLaunchMask keeps mask while queued", () => {
     shouldDismissRunLaunchMask({ status: "queued", started_at: "" } as any),
     false,
   );
+  assert.equal(shouldDismissRunLaunchMask({ status: "waiting" } as any), false);
+  assert.equal(
+    shouldDismissRunLaunchMask({ status: "waiting", started_at: "" } as any),
+    false,
+  );
 });
 
 test("shouldDismissRunLaunchMask dismisses once started or no longer queued", () => {
@@ -18,4 +23,3 @@ test("shouldDismissRunLaunchMask dismisses once started or no longer queued", ()
   assert.equal(shouldDismissRunLaunchMask({ status: "failed" } as any), true);
   assert.equal(shouldDismissRunLaunchMask({ status: "blocked" } as any), true);
 });
-
