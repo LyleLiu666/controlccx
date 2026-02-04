@@ -62,29 +62,31 @@ jobs:
           mkdir -p dist/release
 
           build_one() {
-            local goos="$1"
-            local goarch="$2"
+            local name="$1"
+            local goos="$2"
+            local goarch="$3"
             local ext=""
             if [ "$goos" = "windows" ]; then
               ext=".exe"
             fi
 
-            local dir="dist/release/controlccx_${VERSION}_${goos}_${goarch}"
+            local dir="dist/release/controlccx_${VERSION}_${name}"
             mkdir -p "$dir"
-            echo "Building ${goos}/${goarch}..."
+            echo "Building ${name} (${goos}/${goarch})..."
             CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" \
               go build -o "${dir}/controlccx${ext}" ./cmd/controlccx-server
 
             if [ "$goos" = "windows" ]; then
-              (cd "$dir" && zip -q "../controlccx_${VERSION}_${goos}_${goarch}.zip" "controlccx${ext}")
+              (cd "$dir" && zip -q "../controlccx_${VERSION}_${name}.zip" "controlccx${ext}")
             else
-              (cd "$dir" && tar -czf "../controlccx_${VERSION}_${goos}_${goarch}.tar.gz" "controlccx${ext}")
+              (cd "$dir" && tar -czf "../controlccx_${VERSION}_${name}.tar.gz" "controlccx${ext}")
             fi
           }
 
-          build_one linux amd64
-          build_one darwin amd64
-          build_one windows amd64
+          build_one linux_amd linux amd64
+          build_one mac_amd darwin amd64
+          build_one mac_arm darwin arm64
+          build_one win_amd windows amd64
 
           (cd dist/release && sha256sum *.tar.gz *.zip > SHA256SUMS.txt)
 
