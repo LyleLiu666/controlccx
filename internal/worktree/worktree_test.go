@@ -65,6 +65,32 @@ func TestCreate_CopiesUncommittedChangesIntoWorktree(t *testing.T) {
 	}
 }
 
+func TestCreate_RejectsConversationIDPathTraversal(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not found on PATH")
+	}
+
+	ctx := context.Background()
+	repo := t.TempDir()
+
+	runGit(t, repo, "init")
+	runGit(t, repo, "config", "user.email", "ccx@example.com")
+	runGit(t, repo, "config", "user.name", "ccx")
+
+	writeFile(t, filepath.Join(repo, "a.txt"), "one\n")
+	runGit(t, repo, "add", "a.txt")
+	runGit(t, repo, "commit", "-m", "init")
+
+	_, err := Create(ctx, CreateOptions{
+		BaseWorkDir:     repo,
+		ConversationID:  "../../evil",
+		WorktreeID:      "w-1",
+	})
+	if err == nil {
+		t.Fatalf("expected error")
+	}
+}
+
 func runGit(t *testing.T, dir string, args ...string) {
 	t.Helper()
 	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
@@ -105,4 +131,3 @@ func readFile(t *testing.T, path string) string {
 	}
 	return string(b)
 }
-

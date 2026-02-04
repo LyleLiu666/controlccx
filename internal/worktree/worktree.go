@@ -62,7 +62,11 @@ func Create(ctx context.Context, opts CreateOptions) (Result, error) {
 		return Result{}, errors.New("worktree: empty repo root")
 	}
 
-	dir := filepath.Join(repoRoot, ".ccx", "worktrees", cid, short)
+	worktreesRoot := filepath.Join(repoRoot, ".ccx", "worktrees")
+	dir := filepath.Join(worktreesRoot, cid, short)
+	if !isWithinRoot(dir, worktreesRoot) {
+		return Result{}, fmt.Errorf("worktree: invalid conversation_id %q", cid)
+	}
 	if err := os.MkdirAll(filepath.Dir(dir), 0o755); err != nil {
 		return Result{}, fmt.Errorf("worktree: mkdir parents: %w", err)
 	}
@@ -296,4 +300,3 @@ func copyPath(src, dst string) error {
 	}
 	return nil
 }
-
