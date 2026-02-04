@@ -645,6 +645,9 @@ func (s *Store) FinishTask(ctx context.Context, id string, in FinishTaskInput) e
 		if err := migrateSessionMetaKeyTx(tx, SessionKey(id, ""), SessionKey(id, in.SessionID), nowMs); err != nil {
 			return err
 		}
+		if err := migrateSessionWorkspacesKeyTx(tx, SessionKey(id, ""), SessionKey(id, in.SessionID), nowMs); err != nil {
+			return err
+		}
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -690,6 +693,9 @@ func (s *Store) SetSessionID(ctx context.Context, id, sessionID string) error {
 	nowMs := toMillis(now)
 	if strings.TrimSpace(prevConversationID) == "" {
 		if err := migrateSessionMetaKeyTx(tx, SessionKey(id, ""), SessionKey(id, sessionID), nowMs); err != nil {
+			return err
+		}
+		if err := migrateSessionWorkspacesKeyTx(tx, SessionKey(id, ""), SessionKey(id, sessionID), nowMs); err != nil {
 			return err
 		}
 	}

@@ -107,6 +107,19 @@ func Migrate(ctx context.Context, conn *sql.DB) error {
 			run_id TEXT NOT NULL DEFAULT '',
 			updated_at INTEGER NOT NULL DEFAULT 0
 		);`,
+		`CREATE TABLE IF NOT EXISTS session_workspaces (
+			key TEXT PRIMARY KEY,
+			kind TEXT NOT NULL DEFAULT '',
+			base_workdir TEXT NOT NULL DEFAULT '',
+			repo_root TEXT NOT NULL DEFAULT '',
+			run_root TEXT NOT NULL DEFAULT '',
+			run_workdir TEXT NOT NULL DEFAULT '',
+			base_branch TEXT NOT NULL DEFAULT '',
+			work_branch TEXT NOT NULL DEFAULT '',
+			status TEXT NOT NULL DEFAULT 'active',
+			created_at INTEGER NOT NULL DEFAULT 0,
+			updated_at INTEGER NOT NULL DEFAULT 0
+		);`,
 	)
 
 	for _, stmt := range stmts {

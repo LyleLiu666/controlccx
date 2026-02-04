@@ -55,6 +55,13 @@ func TestStore_EnsureConversationIDs_MigratesLegacyKeys(t *testing.T) {
 	`, SessionKey("", sessionID), "running", 1, 10, "gate", "sum", "{}", "rep", taskIDLegacy, nowMs); err != nil {
 		t.Fatalf("insert acceptance_states: %v", err)
 	}
+	if _, err := conn.ExecContext(ctx, `
+		INSERT INTO session_workspaces (
+			key, kind, base_workdir, run_root, run_workdir, status, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+	`, SessionKey("", sessionID), "copy", baseDir, filepath.Join(baseDir, ".ccx", "workspaces", "legacy"), filepath.Join(baseDir, ".ccx", "workspaces", "legacy"), "active", nowMs, nowMs); err != nil {
+		t.Fatalf("insert session_workspaces: %v", err)
+	}
 
 	// Legacy: task-scoped metadata keyed by t:<task_id>, tasks missing conversation_id.
 	const taskIDNoSession = "task-nosession"
@@ -74,6 +81,13 @@ func TestStore_EnsureConversationIDs_MigratesLegacyKeys(t *testing.T) {
 		INSERT INTO session_meta (key, title, updated_at) VALUES (?, ?, ?);
 	`, SessionKey(taskIDNoSession, ""), "No Session Title", nowMs); err != nil {
 		t.Fatalf("insert session_meta (t:key): %v", err)
+	}
+	if _, err := conn.ExecContext(ctx, `
+		INSERT INTO session_workspaces (
+			key, kind, base_workdir, run_root, run_workdir, status, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+	`, SessionKey(taskIDNoSession, ""), "copy", baseDir, filepath.Join(baseDir, ".ccx", "workspaces", "nosession"), filepath.Join(baseDir, ".ccx", "workspaces", "nosession"), "active", nowMs, nowMs); err != nil {
+		t.Fatalf("insert session_workspaces (t:key): %v", err)
 	}
 
 	if err := store.EnsureConversationIDs(ctx); err != nil {
@@ -106,6 +120,12 @@ func TestStore_EnsureConversationIDs_MigratesLegacyKeys(t *testing.T) {
 	if _, ok, _ := store.GetAcceptanceState(ctx, SessionKey("", sessionID)); ok {
 		t.Fatalf("expected legacy acceptance key removed")
 	}
+	if err := conn.QueryRowContext(ctx, `SELECT key FROM session_workspaces WHERE key = ?;`, legacyKey).Scan(new(string)); err != nil {
+		t.Fatalf("expected session_workspaces at conversation key: %v", err)
+	}
+	if err := conn.QueryRowContext(ctx, `SELECT key FROM session_workspaces WHERE key = ?;`, SessionKey("", sessionID)).Scan(new(string)); err == nil {
+		t.Fatalf("expected legacy session_workspaces key removed")
+	}
 
 	noSession, err := store.GetTask(ctx, taskIDNoSession)
 	if err != nil {
@@ -119,5 +139,11 @@ func TestStore_EnsureConversationIDs_MigratesLegacyKeys(t *testing.T) {
 	}
 	if SessionKeyForTask(noSession) != "c:"+taskIDNoSession {
 		t.Fatalf("no-session key=%q, want %q", SessionKeyForTask(noSession), "c:"+taskIDNoSession)
+	}
+	if err := conn.QueryRowContext(ctx, `SELECT key FROM session_workspaces WHERE key = ?;`, SessionKeyForTask(noSession)).Scan(new(string)); err != nil {
+		t.Fatalf("expected session_workspaces at no-session conversation key: %v", err)
+	}
+	if err := conn.QueryRowContext(ctx, `SELECT key FROM session_workspaces WHERE key = ?;`, SessionKey(taskIDNoSession, "")).Scan(new(string)); err == nil {
+		t.Fatalf("expected legacy no-session session_workspaces key removed")
 	}
 }

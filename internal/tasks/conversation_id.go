@@ -70,6 +70,9 @@ func (s *Store) EnsureConversationIDs(ctx context.Context) error {
 		if err := migrateSessionMetaKeyTx(tx, fromKey, toKey, nowMs); err != nil {
 			return err
 		}
+		if err := migrateSessionWorkspacesKeyTx(tx, fromKey, toKey, nowMs); err != nil {
+			return err
+		}
 		if err := migrateAcceptanceStateKeyTx(tx, fromKey, toKey, nowMs); err != nil {
 			return err
 		}
@@ -142,6 +145,9 @@ func (s *Store) EnsureConversationIDs(ctx context.Context) error {
 		if err := migrateSessionMetaKeyTx(tx, fromSessionKey, toKey, nowMs); err != nil {
 			return err
 		}
+		if err := migrateSessionWorkspacesKeyTx(tx, fromSessionKey, toKey, nowMs); err != nil {
+			return err
+		}
 		if err := migrateAcceptanceStateKeyTx(tx, fromSessionKey, toKey, nowMs); err != nil {
 			return err
 		}
@@ -154,6 +160,9 @@ func (s *Store) EnsureConversationIDs(ctx context.Context) error {
 			}
 			fromTaskKey := SessionKey(id, "")
 			if err := migrateSessionMetaKeyTx(tx, fromTaskKey, toKey, nowMs); err != nil {
+				return err
+			}
+			if err := migrateSessionWorkspacesKeyTx(tx, fromTaskKey, toKey, nowMs); err != nil {
 				return err
 			}
 			if err := migrateAcceptanceStateKeyTx(tx, fromTaskKey, toKey, nowMs); err != nil {
@@ -184,6 +193,9 @@ func (s *Store) EnsureConversationIDs(ctx context.Context) error {
 
 		fromKey := SessionKey(id, "")
 		if err := migrateSessionMetaKeyTx(tx, fromKey, toKey, nowMs); err != nil {
+			return err
+		}
+		if err := migrateSessionWorkspacesKeyTx(tx, fromKey, toKey, nowMs); err != nil {
 			return err
 		}
 		if err := migrateAcceptanceStateKeyTx(tx, fromKey, toKey, nowMs); err != nil {
