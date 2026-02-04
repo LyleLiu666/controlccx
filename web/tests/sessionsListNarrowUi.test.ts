@@ -24,6 +24,12 @@ test("Sessions list is compact (no session id, concise last-run label, narrow la
   assert.doesNotMatch(appVue, />最后\\s*<span/);
   assert.ok(appVue.includes("运行时间："));
 
+  // When there's no session title, do not leave the left side blank: show workdir label instead.
+  assert.match(
+    appVue,
+    /v-if="s\.title"\s+class="rowName"[\s\S]*v-else\s+class="rowName[^\"]*"[\s\S]*workdirLabelForSession\(s\.workdir\)/,
+  );
+
   // Narrow-width handling should avoid overcrowding in the Sessions panel.
   assert.match(
     css,
@@ -32,5 +38,19 @@ test("Sessions list is compact (no session id, concise last-run label, narrow la
   assert.match(
     css,
     /@container \(max-width: 520px\)[\s\S]*\.sessionsPanel \.rowTopRight/,
+  );
+
+  // In narrow mode, avoid big empty area on the left side of the meta row.
+  assert.doesNotMatch(
+    css,
+    /@container \(max-width: 520px\)[\s\S]*?\.sessionsPanel \.rowTopRight\s*{[^}]*justify-content:\s*flex-end/,
+  );
+  assert.match(
+    css,
+    /@container \(max-width: 520px\)[\s\S]*?\.sessionsPanel \.rowTopRight\s*{[^}]*justify-content:\s*flex-start/,
+  );
+  assert.match(
+    css,
+    /@container \(max-width: 520px\)[\s\S]*?\.sessionsPanel \.rowMoreBtn\s*{[^}]*margin-left:\s*auto/,
   );
 });

@@ -4982,6 +4982,9 @@ watch(
 	                <span v-if="s.title" class="rowName" :title="s.title">{{
 	                  s.title
 	                }}</span>
+                  <span v-else class="rowName mono" :title="s.workdir">{{
+                    workdirLabelForSession(s.workdir)
+                  }}</span>
 	                <span v-if="s.deleted_at" class="pill deleted">deleted</span>
               </div>
               <div class="rowTopRight">
@@ -5017,7 +5020,7 @@ watch(
               </div>
             </div>
             <div class="rowSub">
-              <span class="rowWorkdir mono" :title="s.workdir">{{
+              <span v-if="s.title" class="rowWorkdir mono" :title="s.workdir">{{
                 workdirLabelForSession(s.workdir)
               }}</span>
               <span
