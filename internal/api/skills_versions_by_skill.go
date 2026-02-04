@@ -94,8 +94,31 @@ func (a *API) handleSkillVersionsBySkill(w http.ResponseWriter, r *http.Request,
 			return
 		}
 		writeJSON(w, map[string]any{"ok": true})
+	case "restore":
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var body skills.RestoreVersionInput
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, "invalid json", http.StatusBadRequest)
+			return
+		}
+		body.ID = strings.TrimSpace(body.ID)
+		body.BackupNote = strings.TrimSpace(body.BackupNote)
+		out, err := a.SkillVersionsBySkill.Restore(r.Context(), name, body)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if a.Skills != nil && strings.TrimSpace(out.Path) != "" {
+			if err := a.Skills.ResyncManagedCopies(r.Context(), name, out.Path); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+		}
+		writeJSON(w, out)
 	default:
 		http.NotFound(w, r)
 	}
 }
-

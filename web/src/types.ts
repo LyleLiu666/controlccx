@@ -238,6 +238,14 @@ export type PerSkillVersionsListResponse = {
   versions: SkillVersion[];
 };
 
+export type RestoreSkillVersionResult = {
+  ok: boolean;
+  skill?: string;
+  id?: string;
+  backup_id?: string;
+  path?: string;
+};
+
 export type LogEntry = {
   id: number;
   task_id: string;

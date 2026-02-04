@@ -5,6 +5,7 @@ import {
   createSkillVersionBySkill,
   deleteSkillVersionBySkill,
   fetchSkillVersionsBySkill,
+  restoreSkillVersionBySkill,
 } from "../api";
 
 const props = defineProps<{
@@ -25,6 +26,8 @@ const newId = ref("");
 const newNote = ref("");
 const creating = ref(false);
 const deleting = ref<Map<string, boolean>>(new Map());
+const restoring = ref<Map<string, boolean>>(new Map());
+const notice = ref("");
 
 const title = computed(() => {
   const name = String(props.skill ?? "").trim();
@@ -88,6 +91,7 @@ async function createFromForm() {
   if (creating.value) return;
   creating.value = true;
   error.value = "";
+  notice.value = "";
   try {
     await createSkillVersionBySkill(name, {
       id: newId.value.trim(),
@@ -111,6 +115,7 @@ async function deleteByID(id: string) {
   deleting.value.set(v, true);
   deleting.value = new Map(deleting.value);
   error.value = "";
+  notice.value = "";
   try {
     await deleteSkillVersionBySkill(name, { id: v });
     await refresh();
@@ -119,6 +124,38 @@ async function deleteByID(id: string) {
   } finally {
     deleting.value.delete(v);
     deleting.value = new Map(deleting.value);
+  }
+}
+
+async function restoreByID(id: string) {
+  const name = String(props.skill ?? "").trim();
+  const v = String(id ?? "").trim();
+  if (!name || !v) return;
+  if (!window.confirm(
+    `确认恢复到该版本「${v}」？\n\n` +
+      `这会覆盖 ~/.agent/skills/${name}，并影响所有已挂载该技能的 target。\n` +
+      `系统会在恢复前自动生成一份快照用于回滚。`,
+  )) {
+    return;
+  }
+
+  restoring.value.set(v, true);
+  restoring.value = new Map(restoring.value);
+  error.value = "";
+  notice.value = "";
+  try {
+    const out = await restoreSkillVersionBySkill(name, { id: v });
+    if (out?.backup_id) {
+      notice.value = `已恢复。已自动备份为 ${out.backup_id}。`;
+    } else {
+      notice.value = "已恢复。";
+    }
+    await refresh();
+  } catch (e: any) {
+    error.value = e?.message ?? String(e);
+  } finally {
+    restoring.value.delete(v);
+    restoring.value = new Map(restoring.value);
   }
 }
 </script>
@@ -146,6 +183,7 @@ async function deleteByID(id: string) {
         <div v-if="error" class="modalError">{{ error }}</div>
         <div v-else-if="loading" class="loading">加载中…</div>
         <template v-else>
+          <div v-if="notice" class="tinyHint">{{ notice }}</div>
           <div class="tinyHint" v-if="data">
             <div>
               版本目录：<span class="mono">{{ data.versions_root }}</span>
@@ -200,6 +238,15 @@ async function deleteByID(id: string) {
                 </div>
                 <div class="skillsVersionRight">
                   <div class="tinyHint mono" v-if="v.created_at">{{ v.created_at }}</div>
+                  <button
+                    type="button"
+                    class="warnBtn"
+                    @click="restoreByID(v.id)"
+                    :disabled="!!restoring.get(v.id)"
+                    title="恢复到该版本"
+                  >
+                    {{ restoring.get(v.id) ? "…" : "恢复" }}
+                  </button>
                   <button
                     type="button"
                     class="dangerBtn"

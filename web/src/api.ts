@@ -22,6 +22,7 @@ import type {
   InstallGitBatchInput,
   InstallGitBatchResponse,
   PerSkillVersionsListResponse,
+  RestoreSkillVersionResult,
   SkillVersion,
   SkillVersionsListResponse,
   SystemInfo,
@@ -518,4 +519,12 @@ export async function deleteSkillVersionBySkill(
 ): Promise<{ ok: boolean }> {
   const n = String(name ?? "").trim();
   return postJSON<{ ok: boolean }>(`/api/skills/${encodeURIComponent(n)}/versions/delete`, input);
+}
+
+export async function restoreSkillVersionBySkill(
+  name: string,
+  input: { id: string; backup?: boolean; backup_note?: string },
+): Promise<RestoreSkillVersionResult> {
+  const n = String(name ?? "").trim();
+  return postJSON<RestoreSkillVersionResult>(`/api/skills/${encodeURIComponent(n)}/versions/restore`, input);
 }

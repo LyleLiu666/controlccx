@@ -1051,3 +1051,11 @@ func (s *Service) resyncManagedCopies(name string, sourceDir string) error {
 	}
 	return nil
 }
+
+func (s *Service) ResyncManagedCopies(ctx context.Context, name string, sourceDir string) error {
+	_ = ctx
+	if s == nil {
+		return fmt.Errorf("skills: service is nil")
+	}
+	return s.resyncManagedCopies(name, sourceDir)
+}
