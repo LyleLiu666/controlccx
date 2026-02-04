@@ -315,6 +315,7 @@ func (a *API) handleTasks(w http.ResponseWriter, r *http.Request) {
 		})
 
 		// Workdir strategy: allow creating a parallel git worktree when the base workdir is busy.
+		var worktreePrepLogs []string
 		strategy := strings.ToLower(strings.TrimSpace(in.WorkDirStrategy))
 		if strategy == "worktree" {
 			if in.Mode != tasks.ModeNew {
@@ -335,19 +336,67 @@ func (a *API) handleTasks(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 
-			if strings.TrimSpace(in.ConversationID) == "" {
-				in.ConversationID = uuid.NewString()
+			cid := strings.TrimSpace(in.ConversationID)
+			if cid == "" {
+				cid = uuid.NewString()
+			} else {
+				parsed, err := uuid.Parse(cid)
+				if err != nil {
+					writeJSONStatus(w, http.StatusBadRequest, map[string]any{
+						"error":   "invalid_conversation_id",
+						"message": "conversation_id must be a UUID for workdir_strategy=worktree",
+					})
+					return
+				}
+				cid = parsed.String()
 			}
+			in.ConversationID = cid
 
 			base := strings.TrimSpace(in.WorkDir)
 			if base == "" {
 				base = "."
 			}
+			untracked := strings.ToLower(strings.TrimSpace(in.WorktreeUntracked))
+			var untrackedMode worktree.UntrackedMode
+			switch untracked {
+			case "":
+				untrackedMode = worktree.UntrackedModeDefault
+			case "skip":
+				untrackedMode = worktree.UntrackedModeSkip
+			case "force":
+				untrackedMode = worktree.UntrackedModeForce
+			default:
+				writeJSONStatus(w, http.StatusBadRequest, map[string]any{
+					"error":   "invalid_worktree_untracked",
+					"message": "worktree_untracked must be one of: skip, force",
+				})
+				return
+			}
+
 			wt, err := worktree.Create(r.Context(), worktree.CreateOptions{
 				BaseWorkDir:     base,
-				ConversationID: strings.TrimSpace(in.ConversationID),
+				ConversationID: cid,
+				Untracked:      untrackedMode,
+				Logf: func(format string, args ...any) {
+					worktreePrepLogs = append(worktreePrepLogs, fmt.Sprintf(format, args...))
+				},
 			})
 			if err != nil {
+				var tooLarge *worktree.UntrackedTooLargeError
+				if errors.As(err, &tooLarge) {
+					writeJSONStatus(w, http.StatusUnprocessableEntity, map[string]any{
+						"error":           "worktree_untracked_too_large",
+						"message":         err.Error(),
+						"conversation_id": cid,
+						"files":           tooLarge.Files,
+						"bytes":           tooLarge.Bytes,
+						"max_files":       tooLarge.MaxFiles,
+						"max_bytes":       tooLarge.MaxBytes,
+						"largest":         tooLarge.Largest,
+					})
+					return
+				}
+
 				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
 			}
@@ -373,6 +422,14 @@ func (a *API) handleTasks(w http.ResponseWriter, r *http.Request) {
 			}
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
+		}
+
+		for _, msg := range worktreePrepLogs {
+			msg = strings.TrimSpace(msg)
+			if msg == "" {
+				continue
+			}
+			_, _ = a.Tasks.AppendLog(r.Context(), task.ID, tasks.LogSystem, msg)
 		}
 
 		if ap.Applied {

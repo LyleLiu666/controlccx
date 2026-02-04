@@ -94,6 +94,7 @@ type CreateTaskInput struct {
 	BaseWorkDir      string     `json:"base_workdir,omitempty"`
 	WorktreeDir      string     `json:"worktree_dir,omitempty"`
 	WorktreeBranch   string     `json:"worktree_branch,omitempty"`
+	WorktreeUntracked string    `json:"worktree_untracked,omitempty"`
 	UnsafeAutomation bool       `json:"unsafe_automation,omitempty"`
 	// SafetyEnvelope is an optional autopilot hint (UI-level “one-time unlock”).
 	// It is not persisted; it only affects server-side defaults when run safety options are omitted.

@@ -2,12 +2,14 @@ package worktree
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestCreate_CopiesUncommittedChangesIntoWorktree(t *testing.T) {
@@ -32,7 +34,7 @@ func TestCreate_CopiesUncommittedChangesIntoWorktree(t *testing.T) {
 
 	res, err := Create(ctx, CreateOptions{
 		BaseWorkDir:    repo,
-		ConversationID: "c-1",
+		ConversationID: "2a15e00c-e1ff-4834-974e-61176e720568",
 		WorktreeID:     "w-1",
 	})
 	if err != nil {
@@ -126,7 +128,7 @@ func TestCreate_CopiesIgnoredEnvFilesButSkipsVenv(t *testing.T) {
 
 	res, err := Create(ctx, CreateOptions{
 		BaseWorkDir:    repo,
-		ConversationID: "c-1",
+		ConversationID: "2a15e00c-e1ff-4834-974e-61176e720568",
 		WorktreeID:     "w-2",
 	})
 	if err != nil {
@@ -139,6 +141,167 @@ func TestCreate_CopiesIgnoredEnvFilesButSkipsVenv(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(res.Dir, ".venv")); err == nil {
 		t.Fatalf("expected worktree .venv not copied")
+	}
+}
+
+func TestCreate_ExcludesHeavyUntrackedDirsByDefault(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not found on PATH")
+	}
+
+	ctx := context.Background()
+	repo := t.TempDir()
+
+	runGit(t, repo, "init")
+	runGit(t, repo, "config", "user.email", "ccx@example.com")
+	runGit(t, repo, "config", "user.name", "ccx")
+
+	writeFile(t, filepath.Join(repo, "a.txt"), "one\n")
+	runGit(t, repo, "add", "a.txt")
+	runGit(t, repo, "commit", "-m", "init")
+
+	writeFile(t, filepath.Join(repo, "b.txt"), "ok\n")
+	writeFile(t, filepath.Join(repo, ".venv", "pyvenv.cfg"), "home=/usr/bin\n")
+	writeFile(t, filepath.Join(repo, "node_modules", "pkg", "index.js"), "console.log('x')\n")
+
+	res, err := Create(ctx, CreateOptions{
+		BaseWorkDir:    repo,
+		ConversationID: "2a15e00c-e1ff-4834-974e-61176e720568",
+		WorktreeID:     "w-3",
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	if gotB := readFile(t, filepath.Join(res.Dir, "b.txt")); gotB != "ok\n" {
+		t.Fatalf("worktree b.txt=%q, want %q", gotB, "ok\n")
+	}
+	if _, err := os.Stat(filepath.Join(res.Dir, ".venv")); err == nil {
+		t.Fatalf("expected worktree .venv not copied")
+	}
+	if _, err := os.Stat(filepath.Join(res.Dir, "node_modules")); err == nil {
+		t.Fatalf("expected worktree node_modules not copied")
+	}
+}
+
+func TestCreate_UntrackedCapsRequireConfirmationByDefault(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not found on PATH")
+	}
+
+	ctx := context.Background()
+	repo := t.TempDir()
+
+	runGit(t, repo, "init")
+	runGit(t, repo, "config", "user.email", "ccx@example.com")
+	runGit(t, repo, "config", "user.name", "ccx")
+
+	writeFile(t, filepath.Join(repo, "a.txt"), "one\n")
+	runGit(t, repo, "add", "a.txt")
+	runGit(t, repo, "commit", "-m", "init")
+
+	// Create a small file but set a tiny cap so we can test force/skip quickly.
+	bigPath := filepath.Join(repo, "big.bin")
+	f, err := os.Create(bigPath)
+	if err != nil {
+		t.Fatalf("create big: %v", err)
+	}
+	if err := f.Truncate(128); err != nil {
+		_ = f.Close()
+		t.Fatalf("truncate: %v", err)
+	}
+	_ = f.Close()
+
+	_, err = Create(ctx, CreateOptions{
+		BaseWorkDir:       repo,
+		ConversationID:    "2a15e00c-e1ff-4834-974e-61176e720568",
+		WorktreeID:        "w-4",
+		UntrackedMaxBytes: 64,
+	})
+	var tooLarge *UntrackedTooLargeError
+	if !errors.As(err, &tooLarge) {
+		t.Fatalf("expected UntrackedTooLargeError, got %v", err)
+	}
+	if tooLarge.MaxBytes != 64 || tooLarge.Bytes < 128 {
+		t.Fatalf("unexpected caps: %+v", tooLarge)
+	}
+
+	// Skip untracked and proceed.
+	resSkip, err := Create(ctx, CreateOptions{
+		BaseWorkDir:       repo,
+		ConversationID:    "2a15e00c-e1ff-4834-974e-61176e720568",
+		WorktreeID:        "w-5",
+		Untracked:         UntrackedModeSkip,
+		UntrackedMaxBytes: 64,
+	})
+	if err != nil {
+		t.Fatalf("Create skip: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(resSkip.Dir, "big.bin")); err == nil {
+		t.Fatalf("expected big.bin not copied in skip mode")
+	}
+
+	// Force untracked copy and proceed.
+	resForce, err := Create(ctx, CreateOptions{
+		BaseWorkDir:       repo,
+		ConversationID:    "2a15e00c-e1ff-4834-974e-61176e720568",
+		WorktreeID:        "w-6",
+		Untracked:         UntrackedModeForce,
+		UntrackedMaxBytes: 64,
+	})
+	if err != nil {
+		t.Fatalf("Create force: %v", err)
+	}
+	if st, err := os.Stat(filepath.Join(resForce.Dir, "big.bin")); err != nil || st.Size() != 128 {
+		t.Fatalf("expected big.bin copied in force mode; err=%v size=%v", err, func() int64 {
+			if st == nil {
+				return -1
+			}
+			return st.Size()
+		}())
+	}
+}
+
+func TestCreate_RetriesGitLocks(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not found on PATH")
+	}
+
+	ctx := context.Background()
+	repo := t.TempDir()
+
+	runGit(t, repo, "init")
+	runGit(t, repo, "config", "user.email", "ccx@example.com")
+	runGit(t, repo, "config", "user.name", "ccx")
+
+	writeFile(t, filepath.Join(repo, "a.txt"), "one\n")
+	runGit(t, repo, "add", "a.txt")
+	runGit(t, repo, "commit", "-m", "init")
+
+	lockPath := filepath.Join(repo, ".git", "index.lock")
+	writeFile(t, lockPath, "")
+
+	done := make(chan struct{})
+	t.Cleanup(func() {
+		select {
+		case <-done:
+		default:
+			_ = os.Remove(lockPath)
+		}
+	})
+	go func() {
+		time.Sleep(250 * time.Millisecond)
+		_ = os.Remove(lockPath)
+		close(done)
+	}()
+
+	_, err := Create(ctx, CreateOptions{
+		BaseWorkDir:    repo,
+		ConversationID: "2a15e00c-e1ff-4834-974e-61176e720568",
+		WorktreeID:     "w-7",
+	})
+	if err != nil {
+		t.Fatalf("expected Create to succeed after lock clears, got: %v", err)
 	}
 }
 
