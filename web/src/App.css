@@ -2692,6 +2692,24 @@ h2 {
   align-items: center;
 }
 
+.pathActions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.mkdirRow {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 12px;
+  align-items: center;
+}
+
+.mkdirRow input {
+  min-width: 0;
+}
+
 .path {
   padding: 10px 14px;
   border: 1px solid var(--border-color);

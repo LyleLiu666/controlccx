@@ -60,6 +60,7 @@ import { computePopupPosition } from "./menuPosition";
 import { prettifyLogMessage } from "./logPretty";
 import { deriveRunActivity } from "./runActivity";
 import { deriveRunUsage } from "./runUsage";
+import { validateNewFolderName } from "./fsName";
 import type { RunSafetyPayload } from "./runSafety";
 import {
   buildRunSafetyPayload,
@@ -1163,6 +1164,18 @@ const dirEntries = ref<FSListEntry[]>([]);
 const dirLoading = ref(false);
 const dirFilter = ref("");
 const dirError = ref("");
+const dirMkdirOpen = ref(false);
+const dirMkdirName = ref("");
+const dirMkdirBusy = ref(false);
+const dirMkdirInputEl = ref<HTMLInputElement | null>(null);
+
+const dirMkdirCanCreate = computed(() => {
+  if (dirMkdirBusy.value) return false;
+  if (dirLoading.value) return false;
+  if (!dirPath.value.trim()) return false;
+  const v = validateNewFolderName(dirMkdirName.value);
+  return v.ok;
+});
 
 const filteredDirEntries = computed(() => {
   const needle = dirFilter.value.trim().toLowerCase();
@@ -2846,6 +2859,9 @@ async function openDirPicker() {
   dirPickerOpen.value = true;
   dirError.value = "";
   dirFilter.value = "";
+  dirMkdirOpen.value = false;
+  dirMkdirName.value = "";
+  dirMkdirBusy.value = false;
   try {
     dirRoots.value = await fetchFSRoots();
   } catch (e: any) {
@@ -2860,6 +2876,8 @@ async function openDirPicker() {
 async function loadDir(path: string) {
   dirLoading.value = true;
   dirError.value = "";
+  dirMkdirOpen.value = false;
+  dirMkdirName.value = "";
   try {
     const res = await fetchFSList(path);
     dirPath.value = res.path;
@@ -2872,9 +2890,62 @@ async function loadDir(path: string) {
   }
 }
 
-function selectDir(path: string) {
-  newWorkdir.value = path;
-  dirPickerOpen.value = false;
+	function selectDir(path: string) {
+	  newWorkdir.value = path;
+	  dirPickerOpen.value = false;
+	}
+
+	function onDirMkdirKeydown(e: KeyboardEvent) {
+	  if (e.key === "Escape") {
+	    e.preventDefault();
+	    closeDirMkdir();
+	    return;
+	  }
+	  if (e.key !== "Enter") return;
+	  if (isImeComposing(e)) return;
+	  e.preventDefault();
+	  void createDirMkdir();
+	}
+
+	function openDirMkdir() {
+	  if (!dirPath.value.trim()) return;
+	  if (dirMkdirOpen.value) return;
+	  dirMkdirOpen.value = true;
+	  dirMkdirName.value = "";
+  dirError.value = "";
+  void nextTick(() => dirMkdirInputEl.value?.focus());
+}
+
+function closeDirMkdir() {
+  if (dirMkdirBusy.value) return;
+  dirMkdirOpen.value = false;
+  dirMkdirName.value = "";
+}
+
+async function createDirMkdir() {
+  if (dirMkdirBusy.value) return;
+  const base = dirPath.value.trim();
+  if (!base) return;
+
+  const v = validateNewFolderName(dirMkdirName.value);
+  if (!v.ok) {
+    dirError.value = v.error;
+    return;
+  }
+
+  dirMkdirBusy.value = true;
+  dirError.value = "";
+  try {
+    const res = await fsMkdir({ path: v.name, base, recursive: false });
+    dirFilter.value = "";
+    dirMkdirOpen.value = false;
+    dirMkdirName.value = "";
+    await loadDir(res.path);
+  } catch (e: any) {
+    dirError.value = e?.message ?? String(e);
+  } finally {
+    dirMkdirBusy.value = false;
+  }
 }
 
 function resetFilesEditor() {
@@ -5561,26 +5632,55 @@ watch(
             </button>
           </div>
 
-          <div class="pathRow">
-            <button
-              type="button"
-              @click="dirParent && loadDir(dirParent)"
-              :disabled="!dirParent"
-            >
-              Up
-            </button>
-            <div class="path mono">{{ dirPath }}</div>
-            <button
-              type="button"
-              class="primary"
-              @click="selectDir(dirPath)"
-              :disabled="!dirPath"
-            >
-              Select
-            </button>
-          </div>
+	          <div class="pathRow">
+	            <button
+	              type="button"
+	              @click="dirParent && loadDir(dirParent)"
+	              :disabled="!dirParent"
+	            >
+	              Up
+	            </button>
+	            <div class="path mono">{{ dirPath }}</div>
+	            <div class="pathActions">
+	              <button
+	                type="button"
+	                @click="openDirMkdir"
+	                :disabled="dirLoading || !dirPath || dirMkdirOpen"
+	              >
+	                New folder
+	              </button>
+	              <button
+	                type="button"
+	                class="primary"
+	                @click="selectDir(dirPath)"
+	                :disabled="!dirPath"
+	              >
+	                Select
+	              </button>
+	            </div>
+	          </div>
 
-          <div v-if="dirError" class="modalError">{{ dirError }}</div>
+	          <div v-if="dirMkdirOpen" class="mkdirRow">
+	            <input
+	              ref="dirMkdirInputEl"
+	              v-model="dirMkdirName"
+	              placeholder="New folder name"
+	              :disabled="dirMkdirBusy"
+	              @keydown="onDirMkdirKeydown"
+	            />
+	            <button type="button" :disabled="dirMkdirBusy" @click="closeDirMkdir">Cancel</button>
+	            <button
+	              type="button"
+	              class="primary"
+	              :disabled="!dirMkdirCanCreate"
+	              @click="createDirMkdir"
+	            >
+	              <span v-if="dirMkdirBusy" class="loading">Creating...</span>
+	              <span v-else>Create</span>
+	            </button>
+	          </div>
+
+	          <div v-if="dirError" class="modalError">{{ dirError }}</div>
 
           <div class="filterRow">
             <input v-model="dirFilter" placeholder="Filter folders..." />
