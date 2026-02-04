@@ -56,6 +56,9 @@ func (m *Manager) Start(ctx context.Context, taskID string) error {
 	if err != nil {
 		return err
 	}
+	if task.Status != tasks.StatusQueued {
+		return fmt.Errorf("worker: task not queued: %s (status=%s)", taskID, task.Status)
+	}
 
 	runCtx, cancel := context.WithCancel(context.Background())
 	m.mu.Lock()
