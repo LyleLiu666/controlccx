@@ -33,6 +33,24 @@ const title = computed(() => {
 });
 const versions = computed(() => data.value?.versions ?? []);
 const canCreate = computed(() => !!String(props.skill ?? "").trim());
+const manifest = computed(() => data.value?.manifest ?? null);
+const sourceType = computed(() => String(manifest.value?.source_type ?? "").trim());
+const sourceRef = computed(() => String(manifest.value?.source_ref ?? "").trim());
+const sourceBranch = computed(() => String(manifest.value?.source_branch ?? "").trim());
+const sourceSubpath = computed(() => String(manifest.value?.source_subpath ?? "").trim());
+const sourceRevision = computed(() => String(manifest.value?.source_revision ?? "").trim());
+const sourceRefLabel = computed(() => {
+  const t = sourceType.value;
+  if (t === "git") return "Repo";
+  if (t === "local") return "路径";
+  if (t === "import") return "来源";
+  return "source_ref";
+});
+const shortRevision = computed(() => {
+  const r = sourceRevision.value;
+  if (!r) return "";
+  return r.length > 12 ? `${r.slice(0, 8)}…` : r;
+});
 
 async function refresh() {
   const name = String(props.skill ?? "").trim();
@@ -134,6 +152,21 @@ async function deleteByID(id: string) {
             </div>
             <div>
               技能来源：<span class="mono">{{ data.skill_source }}</span>
+            </div>
+            <div v-if="sourceType">
+              来源类型：<span class="pill mono kind">{{ sourceType }}</span>
+            </div>
+            <div v-if="sourceRef">
+              {{ sourceRefLabel }}：<span class="mono">{{ sourceRef }}</span>
+            </div>
+            <div v-if="sourceSubpath">
+              Subpath：<span class="mono">{{ sourceSubpath }}</span>
+            </div>
+            <div v-if="sourceBranch">
+              Branch：<span class="mono">{{ sourceBranch }}</span>
+            </div>
+            <div v-if="sourceRevision" :title="sourceRevision">
+              Revision：<span class="mono">{{ shortRevision }}</span>
             </div>
           </div>
 

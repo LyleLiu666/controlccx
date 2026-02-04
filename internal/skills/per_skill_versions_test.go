@@ -14,6 +14,15 @@ func TestPerSkillVersionsService_ListCreateDelete(t *testing.T) {
 	sourceRoot := filepath.Join(home, ".agent", "skills")
 	mustMkdir(t, filepath.Join(sourceRoot, "skill-a"))
 	mustWrite(t, filepath.Join(sourceRoot, "skill-a", "README.md"), "a\n")
+	if err := writeManagedManifest(filepath.Join(sourceRoot, "skill-a"), ManagedSkillManifest{
+		Name:           "skill-a",
+		SourceType:     "git",
+		SourceRef:      "https://github.com/acme/repo",
+		SourceSubpath:  "skills/skill-a",
+		SourceRevision: "deadbeef",
+	}); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
 
 	svc, err := NewPerSkillVersionsService(PerSkillVersionsOptions{
 		HomeDir: home,
@@ -31,6 +40,9 @@ func TestPerSkillVersionsService_ListCreateDelete(t *testing.T) {
 	}
 	if before.Skill != "skill-a" {
 		t.Fatalf("skill=%q", before.Skill)
+	}
+	if before.Manifest == nil || before.Manifest.SourceType != "git" || before.Manifest.SourceRef != "https://github.com/acme/repo" {
+		t.Fatalf("manifest=%+v", before.Manifest)
 	}
 	if len(before.Versions) != 0 {
 		t.Fatalf("versions=%v", before.Versions)

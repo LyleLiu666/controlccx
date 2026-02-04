@@ -3737,6 +3737,158 @@ h2 {
   min-height: 400px; /* Ensure reasonable height */
 }
 
+.usageMeter {
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: linear-gradient(135deg, var(--bg-panel) 0%, var(--bg-subtle) 100%);
+  padding: 10px 12px;
+  margin-bottom: 10px;
+  box-shadow: var(--shadow-sm);
+}
+
+.usageMeter.placeholder {
+  font-size: 12px;
+  color: var(--text-sub);
+}
+
+.usageSummary {
+  list-style: none;
+  cursor: pointer;
+  display: grid;
+  gap: 8px;
+}
+
+.usageSummary::-webkit-details-marker {
+  display: none;
+}
+
+.usageBar {
+  display: flex;
+  align-items: stretch;
+  height: 10px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: rgba(148, 163, 184, 0.22);
+}
+
+:global(:root[data-theme="dark"]) .usageBar {
+  background: rgba(148, 163, 184, 0.16);
+}
+
+.usageSeg {
+  min-width: 2px;
+}
+
+.usageSeg.input {
+  background: linear-gradient(90deg, #0ea5e9 0%, #38bdf8 100%);
+}
+
+.usageSeg.cacheRead {
+  background: rgba(148, 163, 184, 0.62);
+}
+
+:global(:root[data-theme="dark"]) .usageSeg.cacheRead {
+  background: rgba(148, 163, 184, 0.45);
+}
+
+.usageSeg.cacheCreate {
+  background: linear-gradient(90deg, #a855f7 0%, #c084fc 100%);
+}
+
+.usageSeg.cached {
+  background: rgba(148, 163, 184, 0.42);
+}
+
+:global(:root[data-theme="dark"]) .usageSeg.cached {
+  background: rgba(148, 163, 184, 0.32);
+}
+
+.usageSeg.output {
+  background: linear-gradient(90deg, #22c55e 0%, #4ade80 100%);
+}
+
+.usageNumbers {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--text-sub);
+}
+
+.usageArrow {
+  opacity: 0.7;
+}
+
+.usageCost {
+  margin-left: auto;
+  color: var(--color-primary);
+  font-weight: 800;
+}
+
+.usageDetails {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-color);
+  display: grid;
+  gap: 12px;
+}
+
+.usageGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 18px;
+}
+
+.usageRow {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--text-sub);
+}
+
+.usageModels {
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.5);
+  display: grid;
+  gap: 8px;
+}
+
+:global(:root[data-theme="dark"]) .usageModels {
+  background: rgba(2, 6, 23, 0.22);
+}
+
+.usageModelsTitle {
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--text-main);
+  opacity: 0.9;
+}
+
+.usageModelRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 12px;
+  align-items: baseline;
+  font-size: 12px;
+  color: var(--text-sub);
+}
+
+.usageModelName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+.usageModelCost {
+  color: var(--color-primary);
+  font-weight: 800;
+}
+
 .outputTabs {
   display: flex;
   align-items: center;

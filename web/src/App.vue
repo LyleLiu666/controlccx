@@ -59,6 +59,7 @@ import { shouldOfferRehydrateForTask, type ResumeOrigin } from "./rehydrate";
 import { computePopupPosition } from "./menuPosition";
 import { prettifyLogMessage } from "./logPretty";
 import { deriveRunActivity } from "./runActivity";
+import { deriveRunUsage } from "./runUsage";
 import type { RunSafetyPayload } from "./runSafety";
 import {
   buildRunSafetyPayload,
@@ -80,6 +81,7 @@ import AuthSettingsModal from "./components/AuthSettingsModal.vue";
 import ToolsSettingsModal from "./components/ToolsSettingsModal.vue";
 import NewRunModal from "./components/NewRunModal.vue";
 import RunLaunchOverlay from "./components/RunLaunchOverlay.vue";
+import RunUsageMeter from "./components/RunUsageMeter.vue";
 import HighRiskConfirmModal from "./components/HighRiskConfirmModal.vue";
 import BlockedPromptModal from "./components/BlockedPromptModal.vue";
 import RehydratePromptModal from "./components/RehydratePromptModal.vue";
@@ -375,6 +377,10 @@ const selectedRunActivity = computed(() => {
   if (!t) return null;
   if (!(t.status === "running" || t.status === "queued")) return null;
   return deriveRunActivity(selectedLogs.value);
+});
+
+const selectedRunUsage = computed(() => {
+  return deriveRunUsage(selectedLogs.value);
 });
 
 const acceptanceState = ref<AcceptanceState | null>(null);
@@ -4828,6 +4834,7 @@ watch(
           </div>
 
           <div class="logs">
+            <RunUsageMeter :usage="selectedRunUsage" :status="selectedTask?.status" />
             <div class="outputTabs">
               <button
                 type="button"

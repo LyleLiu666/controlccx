@@ -159,6 +159,20 @@ export type ManagedSkill = {
   updated_at?: string;
 };
 
+export type ManagedSkillManifest = {
+  schema_version?: number;
+  name: string;
+  source_type?: string;
+  source_tool?: string;
+  source_ref?: string;
+  source_branch?: string;
+  source_subpath?: string;
+  source_revision?: string;
+  content_hash?: string;
+  created_at?: string;
+  updated_at?: string;
+};
+
 export type GitSkillCandidate = {
   name: string;
   description?: string;
@@ -202,6 +216,7 @@ export type PerSkillVersionsListResponse = {
   source_root: string;
   skill_source: string;
   versions_root: string;
+  manifest?: ManagedSkillManifest;
   versions: SkillVersion[];
 };
 

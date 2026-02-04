@@ -15,6 +15,7 @@ type PerSkillVersionsListResponse struct {
 	SourceRoot  string    `json:"source_root"`
 	SkillSource string    `json:"skill_source"`
 	VersionsRoot string   `json:"versions_root"`
+	Manifest    *ManagedSkillManifest `json:"manifest,omitempty"`
 	Versions    []Version `json:"versions"`
 }
 
@@ -120,6 +121,14 @@ func (s *PerSkillVersionsService) List(ctx context.Context, skill string) (PerSk
 	}
 	skillVersionsRoot := filepath.Join(s.versionsRoot, skill)
 
+	var manifest *ManagedSkillManifest
+	if m, err := readManagedManifest(skillSource); err == nil {
+		if strings.TrimSpace(m.Name) == "" || strings.TrimSpace(m.Name) == skill {
+			m.Name = skill
+			manifest = &m
+		}
+	}
+
 	entries, err := os.ReadDir(skillVersionsRoot)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -128,6 +137,7 @@ func (s *PerSkillVersionsService) List(ctx context.Context, skill string) (PerSk
 				SourceRoot:   s.sourceRoot,
 				SkillSource:  skillSource,
 				VersionsRoot: skillVersionsRoot,
+				Manifest:     manifest,
 				Versions:     nil,
 			}, nil
 		}
@@ -158,6 +168,7 @@ func (s *PerSkillVersionsService) List(ctx context.Context, skill string) (PerSk
 		SourceRoot:   s.sourceRoot,
 		SkillSource:  skillSource,
 		VersionsRoot: skillVersionsRoot,
+		Manifest:     manifest,
 		Versions:     versions,
 	}, nil
 }
