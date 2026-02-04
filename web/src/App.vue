@@ -81,6 +81,7 @@ import FilesModal from "./components/FilesModal.vue";
 import AuthSettingsModal from "./components/AuthSettingsModal.vue";
 import ToolsSettingsModal from "./components/ToolsSettingsModal.vue";
 import NewRunModal from "./components/NewRunModal.vue";
+import SkillsInsertModal from "./components/SkillsInsertModal.vue";
 import RunLaunchOverlay from "./components/RunLaunchOverlay.vue";
 import RunUsageMeter from "./components/RunUsageMeter.vue";
 import HighRiskConfirmModal from "./components/HighRiskConfirmModal.vue";
@@ -97,6 +98,7 @@ const systemInfo = ref<SystemInfo | null>(null);
 const newWorkerType = ref<WorkerType>("claude-code");
 const newWorkdir = ref<string>(".");
 const newPrompt = ref<string>("");
+const homePromptEl = ref<HTMLTextAreaElement | null>(null);
 const newRunOpen = ref(false);
 const newRunPromptEl = ref<HTMLTextAreaElement | null>(null);
 const newRunStarting = ref(false);
@@ -107,6 +109,8 @@ const newRunHighRiskOptIn = ref(false);
 
 const resumePrompt = ref<string>("");
 const resumeExpanded = ref(true);
+const resumePromptInputEl = ref<HTMLInputElement | null>(null);
+const resumePromptTextEl = ref<HTMLTextAreaElement | null>(null);
 const resumeSafetyOverride = ref(false);
 const resumeHighRiskOptIn = ref(false);
 const errorBanner = ref<string>("");
@@ -3392,6 +3396,7 @@ function buildSafetyEnvelopePayload(): Pick<RunSafetyPayload, "safety_envelope">
 }
 
 const newRunDriver = computed<ToolDriver>(() => toolDriverForWorkerType(newWorkerType.value));
+const homeCanUseSkills = computed<boolean>(() => newRunDriver.value === "claude-code" || newRunDriver.value === "codex");
 const newRunSafetyPreset = computed<string>({
   get: () =>
     normalizeSafetyPreset(
@@ -3755,6 +3760,110 @@ const selectedSession = computed(() => {
 const resumeDriver = computed<ToolDriver>(() =>
   toolDriverForWorkerType(selectedSession.value?.worker_type ?? ""),
 );
+const resumeCanUseSkills = computed<boolean>(() => resumeDriver.value === "claude-code" || resumeDriver.value === "codex");
+
+type SkillsInsertContext = "home" | "resume" | null;
+const skillsInsertOpen = ref(false);
+const skillsInsertContext = ref<SkillsInsertContext>(null);
+
+const skillsInsertDriver = computed<ToolDriver>(() => {
+  switch (skillsInsertContext.value) {
+    case "resume":
+      return resumeDriver.value;
+    case "home":
+    default:
+      return newRunDriver.value;
+  }
+});
+
+const skillsInsertPromptEl = computed<HTMLInputElement | HTMLTextAreaElement | null>(() => {
+  switch (skillsInsertContext.value) {
+    case "resume":
+      return resumeExpanded.value ? resumePromptTextEl.value : resumePromptInputEl.value;
+    case "home":
+      return homePromptEl.value;
+    default:
+      return null;
+  }
+});
+
+const skillsInsertPrompt = computed<string>({
+  get: () => {
+    switch (skillsInsertContext.value) {
+      case "resume":
+        return resumePrompt.value;
+      case "home":
+        return newPrompt.value;
+      default:
+        return "";
+    }
+  },
+  set: (value) => {
+    switch (skillsInsertContext.value) {
+      case "resume":
+        resumePrompt.value = value;
+        break;
+      case "home":
+        newPrompt.value = value;
+        break;
+      default:
+        break;
+    }
+  },
+});
+
+function closeSkillsInsert() {
+  skillsInsertOpen.value = false;
+  skillsInsertContext.value = null;
+}
+
+function atBlankLineStart(el: HTMLTextAreaElement | HTMLInputElement, value: string): boolean {
+  const pos = el.selectionStart ?? 0;
+  const before = value.slice(0, pos);
+  const lineStart = before.lastIndexOf("\n") + 1;
+  const prefix = before.slice(lineStart);
+  return /^\s*$/.test(prefix);
+}
+
+function openSkillsInsertForHome() {
+  if (!homeCanUseSkills.value) return;
+  if (skillsInsertOpen.value) return;
+  skillsInsertContext.value = "home";
+  skillsInsertOpen.value = true;
+}
+
+function openSkillsInsertForResume() {
+  if (!resumeCanUseSkills.value) return;
+  if (skillsInsertOpen.value) return;
+  skillsInsertContext.value = "resume";
+  skillsInsertOpen.value = true;
+}
+
+function onHomePromptKeyDown(ev: KeyboardEvent) {
+  if (ev.key !== "/") return;
+  if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
+  if (!homeCanUseSkills.value) return;
+  if (skillsInsertOpen.value) return;
+  const el = ev.target as HTMLTextAreaElement | HTMLInputElement | null;
+  if (!el) return;
+  const current = String(newPrompt.value ?? "");
+  if (!atBlankLineStart(el, current)) return;
+  ev.preventDefault();
+  openSkillsInsertForHome();
+}
+
+function onResumePromptKeyDown(ev: KeyboardEvent) {
+  if (ev.key !== "/") return;
+  if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
+  if (!resumeCanUseSkills.value) return;
+  if (skillsInsertOpen.value) return;
+  const el = ev.target as HTMLTextAreaElement | HTMLInputElement | null;
+  if (!el) return;
+  const current = String(resumePrompt.value ?? "");
+  if (!atBlankLineStart(el, current)) return;
+  ev.preventDefault();
+  openSkillsInsertForResume();
+}
 const resumeSafetyPreset = computed<string>({
   get: () => {
     const sess = selectedSession.value;
@@ -4509,18 +4618,40 @@ watch(
               <button type="button" @click="openAuthSettings">
                 认证设置
               </button>
-            </div>
-            <label class="full">
-              任务描述
-              <textarea
-                v-model="newPrompt"
-                rows="8"
-                placeholder="描述你要做的事情…"
-                @keydown.meta.enter.prevent="runFromHome"
-                @keydown.ctrl.enter.prevent="runFromHome"
-              ></textarea>
-              <div class="tinyHint">提示：Ctrl/Cmd + Enter 运行。</div>
-            </label>
+	            </div>
+	            <label class="full">
+	              <div class="newRunPromptLabelRow">
+	                <span>任务描述</span>
+	                <button
+	                  type="button"
+	                  class="inlineBtn newRunSkillsOpenBtn"
+	                  @click="openSkillsInsertForHome"
+	                  :disabled="!homeCanUseSkills"
+	                  :title="homeCanUseSkills ? '选择技能（将插入到提示词中）' : '当前工具不支持 skills'"
+	                >
+	                  选择技能
+	                </button>
+	              </div>
+	              <textarea
+	                ref="homePromptEl"
+	                v-model="newPrompt"
+	                class="promptEmphasis"
+	                rows="8"
+	                placeholder="描述你要做的事情…"
+	                @keydown="onHomePromptKeyDown"
+	                @keydown.meta.enter.prevent="runFromHome"
+	                @keydown.ctrl.enter.prevent="runFromHome"
+	              ></textarea>
+	              <div v-if="homeCanUseSkills" class="tinyHint newRunSkillsHint">
+	                技能：点击「选择技能」或在输入框里按 <span class="mono">/</span> 搜索（兼容
+	                TUI）。
+	              </div>
+	              <div v-else class="tinyHint newRunSkillsHint">
+	                当前工具为 <span class="mono">{{ newRunDriver }}</span
+	                >：不支持 skills（仅执行命令）。
+	              </div>
+	              <div class="tinyHint">提示：Ctrl/Cmd + Enter 运行。</div>
+	            </label>
 
             <div class="homeActions full">
               <button
@@ -4770,22 +4901,26 @@ watch(
             <div class="resultBox markdown" v-html="renderMarkdownSafe(acceptanceState.report || acceptanceState.plan_json || '')"></div>
           </div>
 
-          <div class="resumeBar">
-            <div class="resumeRow">
-              <input
-                v-if="!resumeExpanded"
-                v-model="resumePrompt"
-                class="promptEmphasis"
-                placeholder="继续输入…"
-                @keydown.enter="onResumeEnter"
-              />
-              <textarea
-                v-else
-                v-model="resumePrompt"
-                class="promptEmphasis"
-                rows="3"
-                placeholder="继续输入…"
-              ></textarea>
+	          <div class="resumeBar">
+	            <div class="resumeRow">
+	              <input
+	                v-if="!resumeExpanded"
+	                ref="resumePromptInputEl"
+	                v-model="resumePrompt"
+	                class="promptEmphasis"
+	                placeholder="继续输入…"
+	                @keydown="onResumePromptKeyDown"
+	                @keydown.enter="onResumeEnter"
+	              />
+	              <textarea
+	                v-else
+	                ref="resumePromptTextEl"
+	                v-model="resumePrompt"
+	                class="promptEmphasis"
+	                rows="3"
+	                placeholder="继续输入…"
+	                @keydown="onResumePromptKeyDown"
+	              ></textarea>
 	              <div
 	                v-if="resumeDriver === 'codex' || resumeDriver === 'claude-code'"
 	                class="resumeSafetyControls"
@@ -5414,11 +5549,11 @@ watch(
         </div>
       </div>
 	
-	    <NewRunModal
-      v-model:open="newRunOpen"
-      v-model:workdir="newWorkdir"
-      v-model:prompt="newPrompt"
-      v-model:workerType="newWorkerType"
+		    <NewRunModal
+	      v-model:open="newRunOpen"
+	      v-model:workdir="newWorkdir"
+	      v-model:prompt="newPrompt"
+	      v-model:workerType="newWorkerType"
       v-model:safetyOverride="newRunSafetyOverride"
       v-model:installUnlock="runSafetyInstallUnlock"
       v-model:autopilotEnabled="runSafetyAutopilotEnabled"
@@ -5432,13 +5567,22 @@ watch(
       :highRiskConfirmOpen="highRiskConfirmOpen"
       @close="closeNewRun"
       @create="onCreateTaskFromModal"
-      @openDirPicker="openDirPicker"
-      @openAuthSettings="openAuthSettings"
-    />
+	      @openDirPicker="openDirPicker"
+	      @openAuthSettings="openAuthSettings"
+	    />
 
-    <HighRiskConfirmModal
-      :open="highRiskConfirmOpen"
-      :title="highRiskConfirmTitle"
+	    <SkillsInsertModal
+	      :open="skillsInsertOpen"
+	      :driver="skillsInsertDriver"
+	      :prompt="skillsInsertPrompt"
+	      :promptEl="skillsInsertPromptEl"
+	      @close="closeSkillsInsert"
+	      @update:prompt="skillsInsertPrompt = $event"
+	    />
+
+	    <HighRiskConfirmModal
+	      :open="highRiskConfirmOpen"
+	      :title="highRiskConfirmTitle"
       :message="highRiskConfirmMessage"
       :detail="highRiskConfirmDetail"
       :confirmLabel="highRiskConfirmConfirmLabel"
