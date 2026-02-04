@@ -4833,9 +4833,12 @@ watch(
           >
 	            <div class="rowTop">
 	              <div class="rowTopLeft">
-	                <span v-if="s.title" class="rowName" :title="s.title">{{
-	                  s.title
-	                }}</span>
+                <span v-if="s.title" class="rowName" :title="s.title">{{
+                  s.title
+                }}</span>
+                <span v-else class="rowName mono" :title="s.session_id || s.latest.id">{{
+                  sessionShortID(s)
+                }}</span>
 	                <span v-if="s.deleted_at" class="pill deleted">deleted</span>
               </div>
               <div class="rowTopRight">
