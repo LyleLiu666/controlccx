@@ -31,7 +31,7 @@ func TestCreate_CopiesUncommittedChangesIntoWorktree(t *testing.T) {
 	writeFile(t, filepath.Join(repo, "b.txt"), "untracked\n")
 
 	res, err := Create(ctx, CreateOptions{
-		BaseWorkDir:     repo,
+		BaseWorkDir:    repo,
 		ConversationID: "c-1",
 		WorktreeID:     "w-1",
 	})
@@ -82,12 +82,63 @@ func TestCreate_RejectsConversationIDPathTraversal(t *testing.T) {
 	runGit(t, repo, "commit", "-m", "init")
 
 	_, err := Create(ctx, CreateOptions{
-		BaseWorkDir:     repo,
-		ConversationID:  "../../evil",
-		WorktreeID:      "w-1",
+		BaseWorkDir:    repo,
+		ConversationID: "../../evil",
+		WorktreeID:     "w-1",
 	})
 	if err == nil {
 		t.Fatalf("expected error")
+	}
+}
+
+func TestCreate_CopiesIgnoredEnvFilesButSkipsVenv(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not found on PATH")
+	}
+
+	ctx := context.Background()
+	repo := t.TempDir()
+
+	runGit(t, repo, "init")
+	runGit(t, repo, "config", "user.email", "ccx@example.com")
+	runGit(t, repo, "config", "user.name", "ccx")
+
+	writeFile(t, filepath.Join(repo, "a.txt"), "one\n")
+	writeFile(t, filepath.Join(repo, ".gitignore"), ".env\n.venv/\n")
+	runGit(t, repo, "add", "a.txt", ".gitignore")
+	runGit(t, repo, "commit", "-m", "init")
+
+	writeFile(t, filepath.Join(repo, ".env"), "SECRET=1\n")
+	writeFile(t, filepath.Join(repo, ".venv", "pyvenv.cfg"), "home = /usr/bin\n")
+
+	{
+		cmd := exec.Command("git", "-C", repo, "check-ignore", "-q", ".env")
+		if err := cmd.Run(); err != nil {
+			t.Fatalf("expected .env to be ignored: %v", err)
+		}
+	}
+	{
+		cmd := exec.Command("git", "-C", repo, "check-ignore", "-q", ".venv/pyvenv.cfg")
+		if err := cmd.Run(); err != nil {
+			t.Fatalf("expected .venv/pyvenv.cfg to be ignored: %v", err)
+		}
+	}
+
+	res, err := Create(ctx, CreateOptions{
+		BaseWorkDir:    repo,
+		ConversationID: "c-1",
+		WorktreeID:     "w-2",
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	gotEnv := readFile(t, filepath.Join(res.Dir, ".env"))
+	if gotEnv != "SECRET=1\n" {
+		t.Fatalf("worktree .env=%q, want %q", gotEnv, "SECRET=1\n")
+	}
+	if _, err := os.Stat(filepath.Join(res.Dir, ".venv")); err == nil {
+		t.Fatalf("expected worktree .venv not copied")
 	}
 }
 

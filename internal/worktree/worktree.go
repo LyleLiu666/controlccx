@@ -23,6 +23,8 @@ type Result struct {
 	PatchBytes     int
 }
 
+const maxOptionalConfigFileBytes = 1 << 20 // 1 MiB
+
 type CreateOptions struct {
 	// BaseWorkDir is the original workdir the user selected (within a git repo).
 	BaseWorkDir string
@@ -104,6 +106,10 @@ func Create(ctx context.Context, opts CreateOptions) (Result, error) {
 		}
 	}
 
+	if err := copyOptionalIgnoredConfigFiles(repoRoot, dir); err != nil {
+		return Result{}, err
+	}
+
 	return Result{
 		RepoRoot:       repoRoot,
 		BaseWorkDir:    base,
@@ -112,6 +118,46 @@ func Create(ctx context.Context, opts CreateOptions) (Result, error) {
 		UntrackedFiles: len(untracked),
 		PatchBytes:     len(patch),
 	}, nil
+}
+
+func copyOptionalIgnoredConfigFiles(repoRoot, worktreeDir string) error {
+	patterns := []string{".env", ".env.*"}
+	for _, pat := range patterns {
+		matches, err := filepath.Glob(filepath.Join(repoRoot, pat))
+		if err != nil {
+			continue
+		}
+		for _, srcAbs := range matches {
+			rel, err := filepath.Rel(repoRoot, srcAbs)
+			if err != nil {
+				continue
+			}
+			src, err := resolveWithin(repoRoot, rel)
+			if err != nil {
+				continue
+			}
+			dst, err := resolveWithin(worktreeDir, rel)
+			if err != nil {
+				continue
+			}
+
+			info, err := os.Lstat(src)
+			if err != nil {
+				continue
+			}
+			if info.IsDir() {
+				continue
+			}
+			if info.Mode().IsRegular() && info.Size() > maxOptionalConfigFileBytes {
+				continue
+			}
+
+			if err := copyPath(src, dst); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func gitRepoRoot(ctx context.Context, dir string) (string, error) {
