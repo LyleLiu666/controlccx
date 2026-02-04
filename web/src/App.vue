@@ -4831,15 +4831,12 @@ watch(
             @keydown.enter.prevent="onSelectTask(s.latest.id)"
             @keydown.space.prevent="onSelectTask(s.latest.id)"
           >
-            <div class="rowTop">
-              <div class="rowTopLeft">
-                <span class="mono" :title="s.session_id || s.latest.id">{{
-                  sessionShortID(s)
-                }}</span>
-                <span v-if="s.title" class="rowName" :title="s.title">{{
-                  s.title
-                }}</span>
-                <span v-if="s.deleted_at" class="pill deleted">deleted</span>
+	            <div class="rowTop">
+	              <div class="rowTopLeft">
+	                <span v-if="s.title" class="rowName" :title="s.title">{{
+	                  s.title
+	                }}</span>
+	                <span v-if="s.deleted_at" class="pill deleted">deleted</span>
               </div>
               <div class="rowTopRight">
                 <span
@@ -4857,14 +4854,14 @@ watch(
                 >
                 <span class="pill kind">{{ s.runs.length }} 次运行</span>
                 <span
-                  v-if="s.last_run_at"
-                  class="pill time"
-                  :title="`最后运行：${formatLocalDateTime(s.last_run_at)}`"
-                  >最后 <span class="mono">{{ formatSessionLastRunTime(s.last_run_at) }}</span></span
-                >
-                <button
-                  type="button"
-                  class="rowMoreBtn"
+	                  v-if="s.last_run_at"
+	                  class="pill time"
+	                  :title="`运行时间：${formatLocalDateTime(s.last_run_at)}`"
+	                  ><span class="mono">{{ formatSessionLastRunTime(s.last_run_at) }}</span></span
+	                >
+	                <button
+	                  type="button"
+	                  class="rowMoreBtn"
                   title="More"
                   aria-label="Session actions"
                   @click.stop="toggleSessionActionsMenu(s, $event)"
