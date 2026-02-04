@@ -8,9 +8,41 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 )
+
+func pathExists(path string) (bool, error) {
+	_, err := os.Lstat(path)
+	if err == nil {
+		return true, nil
+	}
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	return false, err
+}
+
+func nextVersionedSkillName(root, base string, now time.Time) (string, error) {
+	day := now.Local().Format("20060102")
+	for i := 1; i < 1000; i++ {
+		id := fmt.Sprintf("%s-%02d", day, i)
+		name := fmt.Sprintf("%s@%s", base, id)
+		if !isSafeName(name) {
+			continue
+		}
+		dest := filepath.Join(filepath.Clean(root), name)
+		exists, err := pathExists(dest)
+		if err != nil {
+			return "", fmt.Errorf("skills: check versioned name: %w", err)
+		}
+		if !exists {
+			return name, nil
+		}
+	}
+	return "", fmt.Errorf("skills: cannot allocate versioned name for %q", base)
+}
 
 type ToolInfo struct {
 	Key         string   `json:"key"`
@@ -531,15 +563,21 @@ func (s *Service) InstallGit(ctx context.Context, input InstallGitInput) (Manage
 		return ManagedSkill{}, err
 	}
 	dest := filepath.Join(root, name)
-	if _, err := os.Stat(dest); err == nil {
-		if !input.Overwrite {
-			return ManagedSkill{}, errTargetExists(dest)
-		}
-		if err := os.RemoveAll(dest); err != nil {
-			return ManagedSkill{}, fmt.Errorf("skills: overwrite remove dest: %w", err)
-		}
-	} else if err != nil && !os.IsNotExist(err) {
+	if exists, err := pathExists(dest); err != nil {
 		return ManagedSkill{}, fmt.Errorf("skills: stat dest: %w", err)
+	} else if exists {
+		if input.Overwrite {
+			if err := os.RemoveAll(dest); err != nil {
+				return ManagedSkill{}, fmt.Errorf("skills: overwrite remove dest: %w", err)
+			}
+		} else {
+			next, err := nextVersionedSkillName(root, name, time.Now())
+			if err != nil {
+				return ManagedSkill{}, err
+			}
+			name = next
+			dest = filepath.Join(root, name)
+		}
 	}
 
 	copySrc, err := safeRepoSubpath(repoDir, subpath)
@@ -655,18 +693,48 @@ func (s *Service) InstallGitBatch(ctx context.Context, input InstallGitBatchInpu
 		items = append(items, InstallGitBatchItem{Subpath: subpath, Name: name})
 	}
 
-	// Preflight destination collisions to fail fast (before any deletes/writes).
+	// Preflight destination collisions (before any deletes/writes).
+	// If overwrite=false, auto-version colliding names to keep installs non-destructive.
+	now := time.Now()
+	seenResolved := make(map[string]bool, len(items))
 	for _, it := range items {
-		dest := filepath.Join(root, it.Name)
-		if _, err := os.Stat(dest); err == nil {
-			if !input.Overwrite {
-				return nil, errTargetExists(dest)
-			}
-			continue
-		} else if err != nil && !os.IsNotExist(err) {
+		name := it.Name
+		dest := filepath.Join(root, name)
+		exists, err := pathExists(dest)
+		if err != nil {
 			return nil, fmt.Errorf("skills: stat dest: %w", err)
 		}
+		if exists && !input.Overwrite {
+			next, err := nextVersionedSkillName(root, name, now)
+			if err != nil {
+				return nil, err
+			}
+			name = next
+		}
+		if seenResolved[name] {
+			return nil, fmt.Errorf("skills: duplicate resolved skill name: %s", name)
+		}
+		seenResolved[name] = true
 	}
+
+	resolvedItems := make([]InstallGitBatchItem, 0, len(items))
+	for _, it := range items {
+		name := it.Name
+		dest := filepath.Join(root, name)
+		exists, err := pathExists(dest)
+		if err != nil {
+			return nil, fmt.Errorf("skills: stat dest: %w", err)
+		}
+		if exists && !input.Overwrite {
+			next, err := nextVersionedSkillName(root, name, now)
+			if err != nil {
+				return nil, err
+			}
+			name = next
+		}
+		resolvedItems = append(resolvedItems, InstallGitBatchItem{Subpath: it.Subpath, Name: name})
+	}
+	items = resolvedItems
 
 	installed := make([]ManagedSkill, 0, len(items))
 	for _, it := range items {
@@ -712,16 +780,18 @@ func (s *Service) InstallGitBatch(ctx context.Context, input InstallGitBatchInpu
 		fp, _ = dirFingerprint(tmp)
 
 		dest := filepath.Join(root, it.Name)
-		if _, err := os.Stat(dest); err == nil {
+		if exists, err := pathExists(dest); err != nil {
+			_ = os.RemoveAll(tmp)
+			return nil, fmt.Errorf("skills: stat dest: %w", err)
+		} else if exists {
 			if !input.Overwrite {
+				_ = os.RemoveAll(tmp)
 				return nil, errTargetExists(dest)
 			}
 			if err := os.RemoveAll(dest); err != nil {
+				_ = os.RemoveAll(tmp)
 				return nil, fmt.Errorf("skills: overwrite remove dest: %w", err)
 			}
-		} else if err != nil && !os.IsNotExist(err) {
-			_ = os.RemoveAll(tmp)
-			return nil, fmt.Errorf("skills: stat dest: %w", err)
 		}
 
 		if err := os.Rename(tmp, dest); err != nil {

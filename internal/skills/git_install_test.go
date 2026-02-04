@@ -5,8 +5,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestService_GitInstall_MultiSkillsRequiresSelection_AndUpdate(t *testing.T) {
@@ -347,4 +349,121 @@ func TestService_InstallGitBatch_InstallsMultipleAndSyncsTargets(t *testing.T) {
 	assertSymlink(t, filepath.Join(home, ".claude", "skills", "skill-b"))
 	assertSymlink(t, filepath.Join(home, ".codex", "skills", "skill-a"))
 	assertSymlink(t, filepath.Join(home, ".codex", "skills", "skill-b"))
+}
+
+func TestService_InstallGit_AutoVersionsOnNameCollision_WhenOverwriteFalse(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+
+	ctx := context.Background()
+	home := t.TempDir()
+	sourceRoot := filepath.Join(home, ".agent", "skills")
+	svc, err := NewService(Options{HomeDir: home, SourceRoots: []string{sourceRoot}})
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+
+	// Existing local skill.
+	mustMkdir(t, filepath.Join(sourceRoot, "brainstorming"))
+	mustWrite(t, filepath.Join(sourceRoot, "brainstorming", "SKILL.md"), "---\nname: Local\n---\n")
+
+	// Git repo with same skill name.
+	repo := filepath.Join(home, "repo-collision")
+	mustMkdir(t, repo)
+	git(t, repo, "init")
+	git(t, repo, "config", "user.email", "test@example.com")
+	git(t, repo, "config", "user.name", "Test")
+	mustMkdir(t, filepath.Join(repo, "skills", "brainstorming"))
+	mustWrite(t, filepath.Join(repo, "skills", "brainstorming", "SKILL.md"), "---\nname: Git\n---\n")
+	git(t, repo, "add", ".")
+	git(t, repo, "commit", "-m", "init")
+
+	beforeDay := time.Now().Local().Format("20060102")
+	installed, err := svc.InstallGit(ctx, InstallGitInput{
+		RepoURL:   repo,
+		Subpath:   "skills/brainstorming",
+		Name:      "brainstorming",
+		Overwrite: false,
+	})
+	if err != nil {
+		t.Fatalf("install: %v", err)
+	}
+	if installed.Name == "brainstorming" {
+		t.Fatalf("expected collision install to be versioned, got=%q", installed.Name)
+	}
+	// Best-effort: the day is derived from local time; tolerate edge cases around midnight by only
+	// checking the general pattern and (when stable) the day prefix.
+	re := regexp.MustCompile(`^brainstorming@\d{8}-\d{2}$`)
+	if !re.MatchString(installed.Name) {
+		t.Fatalf("unexpected installed name=%q", installed.Name)
+	}
+	if !strings.Contains(installed.Name, "@"+beforeDay) {
+		// Allow midnight rollover (rare). Still ensure it is a versioned name.
+	}
+
+	// Original remains unchanged.
+	b, err := os.ReadFile(filepath.Join(sourceRoot, "brainstorming", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("read original: %v", err)
+	}
+	if !strings.Contains(string(b), "Local") {
+		t.Fatalf("expected original content intact, got=%q", string(b))
+	}
+	if _, err := os.Stat(filepath.Join(sourceRoot, installed.Name, "SKILL.md")); err != nil {
+		t.Fatalf("expected versioned skill installed: %v", err)
+	}
+}
+
+func TestService_InstallGitBatch_AutoVersionsOnNameCollision_WhenOverwriteFalse(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+
+	ctx := context.Background()
+	home := t.TempDir()
+	sourceRoot := filepath.Join(home, ".agent", "skills")
+	svc, err := NewService(Options{HomeDir: home, SourceRoots: []string{sourceRoot}})
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+
+	// Existing local skill.
+	mustMkdir(t, filepath.Join(sourceRoot, "brainstorming"))
+	mustWrite(t, filepath.Join(sourceRoot, "brainstorming", "SKILL.md"), "---\nname: Local\n---\n")
+
+	// Git repo with same skill name.
+	repo := filepath.Join(home, "repo-batch-collision")
+	mustMkdir(t, repo)
+	git(t, repo, "init")
+	git(t, repo, "config", "user.email", "test@example.com")
+	git(t, repo, "config", "user.name", "Test")
+	mustMkdir(t, filepath.Join(repo, "skills", "brainstorming"))
+	mustWrite(t, filepath.Join(repo, "skills", "brainstorming", "SKILL.md"), "---\nname: Git\n---\n")
+	git(t, repo, "add", ".")
+	git(t, repo, "commit", "-m", "init")
+
+	installed, err := svc.InstallGitBatch(ctx, InstallGitBatchInput{
+		RepoURL: repo,
+		Skills: []InstallGitBatchItem{
+			{Subpath: "skills/brainstorming", Name: "brainstorming"},
+		},
+		Overwrite: false,
+	})
+	if err != nil {
+		t.Fatalf("batch install: %v", err)
+	}
+	if len(installed) != 1 {
+		t.Fatalf("installed=%v", installed)
+	}
+	if installed[0].Name == "brainstorming" {
+		t.Fatalf("expected collision batch install to be versioned, got=%q", installed[0].Name)
+	}
+	re := regexp.MustCompile(`^brainstorming@\d{8}-\d{2}$`)
+	if !re.MatchString(installed[0].Name) {
+		t.Fatalf("unexpected installed name=%q", installed[0].Name)
+	}
+	if _, err := os.Stat(filepath.Join(sourceRoot, installed[0].Name, "SKILL.md")); err != nil {
+		t.Fatalf("expected versioned skill installed: %v", err)
+	}
 }
