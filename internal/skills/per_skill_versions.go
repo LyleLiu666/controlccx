@@ -8,6 +8,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 type PerSkillVersionsListResponse struct {
@@ -33,6 +35,20 @@ type PerSkillVersionsService struct {
 	fallbackRoots []string
 	versionsRoot string
 	now          func() time.Time
+}
+
+type RestoreVersionInput struct {
+	ID         string `json:"id"`
+	Backup     *bool  `json:"backup,omitempty"`
+	BackupNote string `json:"backup_note,omitempty"`
+}
+
+type RestoreVersionResult struct {
+	OK       bool   `json:"ok"`
+	Skill    string `json:"skill,omitempty"`
+	ID       string `json:"id,omitempty"`
+	BackupID string `json:"backup_id,omitempty"`
+	Path     string `json:"path,omitempty"`
 }
 
 func NewPerSkillVersionsService(opts PerSkillVersionsOptions) (*PerSkillVersionsService, error) {
@@ -230,6 +246,133 @@ func (s *PerSkillVersionsService) Create(ctx context.Context, skill string, inpu
 	}
 
 	return Version{ID: id, CreatedAt: createdAt, Note: strings.TrimSpace(input.Note)}, nil
+}
+
+func (s *PerSkillVersionsService) Restore(ctx context.Context, skill string, input RestoreVersionInput) (RestoreVersionResult, error) {
+	_ = ctx
+	skill = strings.TrimSpace(skill)
+	if !isSafeName(skill) {
+		return RestoreVersionResult{}, fmt.Errorf("skills: invalid skill name")
+	}
+
+	id := strings.TrimSpace(input.ID)
+	if !isSafeVersionID(id) {
+		return RestoreVersionResult{}, fmt.Errorf("skills: invalid version id")
+	}
+
+	versionPath := filepath.Join(s.versionsRoot, skill, id)
+	if st, err := os.Stat(versionPath); err != nil || !st.IsDir() {
+		if err != nil && os.IsNotExist(err) {
+			return RestoreVersionResult{}, fmt.Errorf("skills: version not found: %s", id)
+		}
+		if err != nil {
+			return RestoreVersionResult{}, fmt.Errorf("skills: stat version: %w", err)
+		}
+		return RestoreVersionResult{}, fmt.Errorf("skills: version is not a directory: %s", id)
+	}
+
+	if err := os.MkdirAll(s.sourceRoot, 0o755); err != nil {
+		return RestoreVersionResult{}, fmt.Errorf("skills: ensure source root %q: %w", s.sourceRoot, err)
+	}
+	dest := filepath.Join(s.sourceRoot, skill)
+
+	hasDest := false
+	if st, err := os.Stat(dest); err == nil && st.IsDir() {
+		hasDest = true
+	} else if err != nil && !os.IsNotExist(err) {
+		return RestoreVersionResult{}, fmt.Errorf("skills: stat dest: %w", err)
+	}
+
+	backup := true
+	if input.Backup != nil {
+		backup = *input.Backup
+	}
+	var backupID string
+	if backup && hasDest {
+		note := strings.TrimSpace(input.BackupNote)
+		if note == "" {
+			note = fmt.Sprintf("auto-backup before restore %s", id)
+		}
+		v, err := s.Create(ctx, skill, CreateVersionInput{Note: note})
+		if err != nil {
+			return RestoreVersionResult{}, err
+		}
+		backupID = v.ID
+	}
+
+	tmp, err := os.MkdirTemp(s.sourceRoot, ".tmp-controlccx-skill-restore-")
+	if err != nil {
+		return RestoreVersionResult{}, fmt.Errorf("skills: create staging: %w", err)
+	}
+	cleanup := true
+	defer func() {
+		if cleanup {
+			_ = os.RemoveAll(tmp)
+		}
+	}()
+
+	ignore := map[string]bool{
+		versionsManifestFile: true,
+		managedManifestFile:  true,
+	}
+	if err := copyDirFiltered(versionPath, tmp, ignore); err != nil {
+		return RestoreVersionResult{}, fmt.Errorf("skills: restore copy: %w", err)
+	}
+
+	var baseManifest *ManagedSkillManifest
+	if hasDest {
+		if m, err := readManagedManifest(dest); err == nil {
+			if strings.TrimSpace(m.Name) == "" || strings.TrimSpace(m.Name) == skill {
+				m.Name = skill
+				baseManifest = &m
+			}
+		}
+	}
+	if baseManifest == nil {
+		if m, err := readManagedManifest(versionPath); err == nil {
+			if strings.TrimSpace(m.Name) == "" || strings.TrimSpace(m.Name) == skill {
+				m.Name = skill
+				baseManifest = &m
+			}
+		}
+	}
+
+	if baseManifest != nil {
+		fp, err := dirFingerprint(tmp)
+		if err != nil {
+			return RestoreVersionResult{}, fmt.Errorf("skills: fingerprint: %w", err)
+		}
+		baseManifest.ContentHash = fp
+		if err := writeManagedManifest(tmp, *baseManifest); err != nil {
+			return RestoreVersionResult{}, err
+		}
+	}
+
+	if hasDest {
+		backupPath := filepath.Join(s.sourceRoot, fmt.Sprintf(".controlccx-skill-restore-%s-%s", skill, uuid.NewString()))
+		if err := os.Rename(dest, backupPath); err != nil {
+			return RestoreVersionResult{}, fmt.Errorf("skills: prepare swap: %w", err)
+		}
+		if err := os.Rename(tmp, dest); err != nil {
+			_ = os.Rename(backupPath, dest)
+			return RestoreVersionResult{}, fmt.Errorf("skills: finalize swap: %w", err)
+		}
+		cleanup = false
+		_ = os.RemoveAll(backupPath)
+	} else {
+		if err := os.Rename(tmp, dest); err != nil {
+			return RestoreVersionResult{}, fmt.Errorf("skills: finalize restore: %w", err)
+		}
+		cleanup = false
+	}
+
+	return RestoreVersionResult{
+		OK:       true,
+		Skill:    skill,
+		ID:       id,
+		BackupID: backupID,
+		Path:     dest,
+	}, nil
 }
 
 func (s *PerSkillVersionsService) Delete(ctx context.Context, skill, id string) error {

@@ -13,13 +13,12 @@ test("Sessions list is compact (no session id, concise last-run label, narrow la
   const css = readFileSync(cssUrl, "utf8");
 
   // Session id short code is noisy in the list; keep it out of the row template.
-  // UPDATE: We now use it as a fallback when title is missing, so this check is removed.
-  // const sessionIdTitleNeedle = ':title="s.session_id || s.latest.id"';
-  // assert.equal(
-  //   appVue.includes(sessionIdTitleNeedle),
-  //   false,
-  //   `App.vue should not include ${sessionIdTitleNeedle} (read from ${appVueUrl.pathname})`,
-  // );
+  const sessionIdTitleNeedle = ':title="s.session_id || s.latest.id"';
+  assert.equal(
+    appVue.includes(sessionIdTitleNeedle),
+    false,
+    `App.vue should not include ${sessionIdTitleNeedle} (read from ${appVueUrl.pathname})`,
+  );
 
   // The time pill should not render the redundant "最后" prefix.
   assert.doesNotMatch(appVue, />最后\\s*<span/);

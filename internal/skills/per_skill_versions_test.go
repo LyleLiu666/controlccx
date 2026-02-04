@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -128,4 +129,121 @@ func TestPerSkillVersionsService_CreateFallsBackToTargetRoots(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(wantPath, "README.md")); err != nil {
 		t.Fatalf("expected snapshot file: %v", err)
 	}
+}
+
+func TestPerSkillVersionsService_Restore(t *testing.T) {
+	ctx := context.Background()
+	home := t.TempDir()
+	sourceRoot := filepath.Join(home, ".agent", "skills")
+	skillRoot := filepath.Join(sourceRoot, "skill-a")
+	mustMkdir(t, skillRoot)
+	mustWrite(t, filepath.Join(skillRoot, "README.md"), "v1\n")
+	if err := writeManagedManifest(skillRoot, ManagedSkillManifest{
+		Name:       "skill-a",
+		SourceType: "git",
+		SourceRef:  "https://github.com/acme/repo",
+	}); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	svc, err := NewPerSkillVersionsService(PerSkillVersionsOptions{
+		HomeDir: home,
+		Now: func() time.Time {
+			return time.Date(2026, 2, 4, 10, 0, 0, 0, time.Local)
+		},
+	})
+	if err != nil {
+		t.Fatalf("new per-skill versions service: %v", err)
+	}
+
+	if _, err := svc.Create(ctx, "skill-a", CreateVersionInput{ID: "20260204-01", Note: "v1"}); err != nil {
+		t.Fatalf("create v1: %v", err)
+	}
+
+	mustWrite(t, filepath.Join(skillRoot, "README.md"), "v2\n")
+	if _, err := svc.Create(ctx, "skill-a", CreateVersionInput{ID: "20260204-02", Note: "v2"}); err != nil {
+		t.Fatalf("create v2: %v", err)
+	}
+
+	res, err := svc.Restore(ctx, "skill-a", RestoreVersionInput{ID: "20260204-01"})
+	if err != nil {
+		t.Fatalf("restore: %v", err)
+	}
+	if res.BackupID != "20260204-03" {
+		t.Fatalf("backup_id=%q", res.BackupID)
+	}
+	if got := mustRead(t, filepath.Join(skillRoot, "README.md")); got != "v1\n" {
+		t.Fatalf("restored README=%q", got)
+	}
+	if _, err := os.Stat(filepath.Join(skillRoot, versionsManifestFile)); !os.IsNotExist(err) {
+		t.Fatalf("did not expect %s to be restored into skill dir, err=%v", versionsManifestFile, err)
+	}
+
+	m, err := readManagedManifest(skillRoot)
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	if m.SourceType != "git" || m.SourceRef != "https://github.com/acme/repo" {
+		t.Fatalf("manifest source=%+v", m)
+	}
+	if strings.TrimSpace(m.ContentHash) == "" {
+		t.Fatalf("expected content_hash to be set")
+	}
+
+	backupPath := filepath.Join(home, ".agent", "skills_versions", "by_skill", "skill-a", "20260204-03", "README.md")
+	if got := mustRead(t, backupPath); got != "v2\n" {
+		t.Fatalf("backup README=%q", got)
+	}
+}
+
+func TestPerSkillVersionsService_RestoreCreatesSkillIfMissing(t *testing.T) {
+	ctx := context.Background()
+	home := t.TempDir()
+	sourceRoot := filepath.Join(home, ".agent", "skills")
+	skillRoot := filepath.Join(sourceRoot, "skill-a")
+	mustMkdir(t, skillRoot)
+	mustWrite(t, filepath.Join(skillRoot, "README.md"), "v1\n")
+	if err := writeManagedManifest(skillRoot, ManagedSkillManifest{
+		Name:       "skill-a",
+		SourceType: "git",
+		SourceRef:  "https://github.com/acme/repo",
+	}); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	svc, err := NewPerSkillVersionsService(PerSkillVersionsOptions{
+		HomeDir: home,
+		Now: func() time.Time {
+			return time.Date(2026, 2, 4, 10, 0, 0, 0, time.Local)
+		},
+	})
+	if err != nil {
+		t.Fatalf("new per-skill versions service: %v", err)
+	}
+
+	if _, err := svc.Create(ctx, "skill-a", CreateVersionInput{ID: "20260204-01", Note: "v1"}); err != nil {
+		t.Fatalf("create v1: %v", err)
+	}
+	if err := os.RemoveAll(skillRoot); err != nil {
+		t.Fatalf("remove skill: %v", err)
+	}
+
+	if _, err := svc.Restore(ctx, "skill-a", RestoreVersionInput{ID: "20260204-01"}); err != nil {
+		t.Fatalf("restore: %v", err)
+	}
+	if got := mustRead(t, filepath.Join(skillRoot, "README.md")); got != "v1\n" {
+		t.Fatalf("restored README=%q", got)
+	}
+	if _, err := readManagedManifest(skillRoot); err != nil {
+		t.Fatalf("expected manifest to exist after restore, err=%v", err)
+	}
+}
+
+func mustRead(t *testing.T, path string) string {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	return string(b)
 }
