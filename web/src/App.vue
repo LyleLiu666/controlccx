@@ -91,6 +91,7 @@ import HighRiskConfirmModal from "./components/HighRiskConfirmModal.vue";
 import BlockedPromptModal from "./components/BlockedPromptModal.vue";
 import RehydratePromptModal from "./components/RehydratePromptModal.vue";
 import WorkdirBusyModal from "./components/WorkdirBusyModal.vue";
+import WorktreeUntrackedModal from "./components/WorktreeUntrackedModal.vue";
 import { useSkills } from "./composables/useSkills";
 import { useSecretaryChat } from "./composables/useSecretaryChat";
 import { useTasks } from "./composables/useTasks";
@@ -101,7 +102,9 @@ type CreateTaskPayload = {
   worker_type: WorkerType;
   prompt: string;
   workdir: string;
+  conversation_id?: string;
   workdir_strategy?: string;
+  worktree_untracked?: string;
   unsafe_automation?: boolean;
   safety_envelope?: string;
   safety_preset?: string;
@@ -116,6 +119,16 @@ type CreateTaskPayload = {
 
 type CreateTaskOptions = {
   idempotencyKey?: string;
+};
+
+type WorktreeUntrackedTooLargePayload = {
+  message: string;
+  conversationID: string;
+  files: number;
+  bytes: number;
+  maxFiles: number;
+  maxBytes: number;
+  largest: { path: string; bytes: number }[];
 };
 
 const systemInfo = ref<SystemInfo | null>(null);
@@ -150,6 +163,14 @@ const workdirBusyExistingStatus = ref("");
 const workdirBusyPendingInput = ref<CreateTaskPayload | null>(null);
 const workdirBusyPendingOpts = ref<CreateTaskOptions | undefined>(undefined);
 let workdirBusyOnSuccess: (() => void) | null = null;
+
+const worktreeUntrackedOpen = ref(false);
+const worktreeUntrackedBusy = ref(false);
+const worktreeUntrackedError = ref("");
+const worktreeUntrackedData = ref<WorktreeUntrackedTooLargePayload | null>(null);
+const worktreeUntrackedPendingInput = ref<CreateTaskPayload | null>(null);
+const worktreeUntrackedPendingOpts = ref<CreateTaskOptions | undefined>(undefined);
+let worktreeUntrackedOnSuccess: (() => void) | null = null;
 
 const runLaunchMaskOpen = ref(false);
 const runLaunchMaskTitle = ref("启动中…");
@@ -220,6 +241,34 @@ function extractWorkdirBusyPayload(e: unknown): {
   };
 }
 
+function extractWorktreeUntrackedTooLargePayload(e: unknown): WorktreeUntrackedTooLargePayload | null {
+  if (!isAPIError(e) || e.status !== 422) return null;
+  const d = e.data;
+  if (!d || typeof d !== "object") return null;
+  if (String((d as any).error ?? "").trim() !== "worktree_untracked_too_large") return null;
+
+  const conversationID = String((d as any).conversation_id ?? "").trim();
+  if (!conversationID) return null;
+
+  const largestRaw = Array.isArray((d as any).largest) ? (d as any).largest : [];
+  const largest = largestRaw
+    .map((x: any) => ({
+      path: String(x?.path ?? "").trim(),
+      bytes: Number(x?.bytes ?? 0),
+    }))
+    .filter((x: any) => x.path && Number.isFinite(x.bytes) && x.bytes > 0);
+
+  return {
+    message: String((d as any).message ?? e.message ?? "").trim(),
+    conversationID,
+    files: Number((d as any).files ?? 0) || 0,
+    bytes: Number((d as any).bytes ?? 0) || 0,
+    maxFiles: Number((d as any).max_files ?? 0) || 0,
+    maxBytes: Number((d as any).max_bytes ?? 0) || 0,
+    largest,
+  };
+}
+
 function openWorkdirBusyModal(opts: {
   busy: { message: string; workdir: string; existingTaskID: string; existingStatus: string };
   pendingInput: CreateTaskPayload;
@@ -252,6 +301,76 @@ function closeWorkdirBusyModal() {
   workdirBusyOnSuccess = null;
 }
 
+function openWorktreeUntrackedModal(opts: {
+  data: WorktreeUntrackedTooLargePayload;
+  pendingInput: CreateTaskPayload;
+  pendingOpts?: CreateTaskOptions;
+  onSuccess?: () => void;
+}) {
+  if (worktreeUntrackedOpen.value) return;
+  worktreeUntrackedBusy.value = false;
+  worktreeUntrackedError.value = "";
+  worktreeUntrackedData.value = { ...opts.data };
+  worktreeUntrackedPendingInput.value = { ...opts.pendingInput };
+  worktreeUntrackedPendingOpts.value = opts.pendingOpts ? { ...opts.pendingOpts } : undefined;
+  worktreeUntrackedOnSuccess = opts.onSuccess ?? null;
+  worktreeUntrackedOpen.value = true;
+}
+
+function closeWorktreeUntrackedModal() {
+  worktreeUntrackedOpen.value = false;
+  worktreeUntrackedBusy.value = false;
+  worktreeUntrackedError.value = "";
+  worktreeUntrackedData.value = null;
+  worktreeUntrackedPendingInput.value = null;
+  worktreeUntrackedPendingOpts.value = undefined;
+  worktreeUntrackedOnSuccess = null;
+}
+
+async function confirmWorktreeUntracked(mode: "skip" | "force") {
+  if (worktreeUntrackedBusy.value) return;
+  const pending = worktreeUntrackedPendingInput.value;
+  const data = worktreeUntrackedData.value;
+  if (!pending || !data) {
+    closeWorktreeUntrackedModal();
+    return;
+  }
+  worktreeUntrackedBusy.value = true;
+  worktreeUntrackedError.value = "";
+  try {
+    openRunLaunchMask({ title: "启动中…", detail: "正在创建任务…" });
+    const t = await createTask(
+      {
+        ...pending,
+        conversation_id: data.conversationID,
+        workdir_strategy: "worktree",
+        worktree_untracked: mode,
+      },
+      worktreeUntrackedPendingOpts.value,
+    );
+    trackRunLaunchMaskForTask(t);
+    upsertTask(t);
+    selectedTaskId.value = t.id;
+    await loadLogs(t.id);
+    const onSuccess = worktreeUntrackedOnSuccess;
+    closeWorktreeUntrackedModal();
+    onSuccess?.();
+  } catch (e: any) {
+    closeRunLaunchMask();
+    worktreeUntrackedError.value = e?.message ?? String(e);
+  } finally {
+    worktreeUntrackedBusy.value = false;
+  }
+}
+
+async function confirmWorktreeUntrackedSkip() {
+  return confirmWorktreeUntracked("skip");
+}
+
+async function confirmWorktreeUntrackedForce() {
+  return confirmWorktreeUntracked("force");
+}
+
 async function viewWorkdirBusyExisting() {
   const id = workdirBusyExistingTaskID.value.trim();
   if (!id) {
@@ -271,10 +390,11 @@ async function confirmWorkdirBusyStrategy(strategy: "wait" | "worktree") {
   }
   workdirBusyBusy.value = true;
   workdirBusyError.value = "";
+  const createdInput: CreateTaskPayload = { ...pending, workdir_strategy: strategy };
   try {
     openRunLaunchMask({ title: "启动中…", detail: "正在创建任务…" });
     const t = await createTask(
-      { ...pending, workdir_strategy: strategy },
+      createdInput,
       workdirBusyPendingOpts.value,
     );
     trackRunLaunchMaskForTask(t);
@@ -286,6 +406,19 @@ async function confirmWorkdirBusyStrategy(strategy: "wait" | "worktree") {
     onSuccess?.();
   } catch (e: any) {
     closeRunLaunchMask();
+    const untracked = extractWorktreeUntrackedTooLargePayload(e);
+    if (untracked) {
+      const pendingOpts = workdirBusyPendingOpts.value;
+      const onSuccess = workdirBusyOnSuccess;
+      closeWorkdirBusyModal();
+      openWorktreeUntrackedModal({
+        data: untracked,
+        pendingInput: createdInput,
+        pendingOpts,
+        onSuccess: onSuccess ?? undefined,
+      });
+      return;
+    }
     workdirBusyError.value = e?.message ?? String(e);
   } finally {
     workdirBusyBusy.value = false;
@@ -1949,6 +2082,19 @@ async function onCreateTask(opts?: { idempotencyKey?: string }): Promise<boolean
       openWorkdirBusyModal({
         busy,
         pendingInput: createdInput,
+        pendingOpts: opts,
+        onSuccess: () => {
+          newPrompt.value = "";
+          if (newRunOpen.value) closeNewRun();
+        },
+      });
+      return false;
+    }
+    const untracked = extractWorktreeUntrackedTooLargePayload(e);
+    if (untracked && createdInput) {
+      openWorktreeUntrackedModal({
+        data: untracked,
+        pendingInput: { ...createdInput, workdir_strategy: "worktree" },
         pendingOpts: opts,
         onSuccess: () => {
           newPrompt.value = "";
@@ -6014,6 +6160,20 @@ watch(
           @wait="confirmWorkdirBusyWait"
           @worktree="confirmWorkdirBusyWorktree"
           @viewExisting="viewWorkdirBusyExisting"
+        />
+
+        <WorktreeUntrackedModal
+          :open="worktreeUntrackedOpen"
+          :busy="worktreeUntrackedBusy"
+          :error="worktreeUntrackedError"
+          :files="worktreeUntrackedData?.files ?? 0"
+          :bytes="worktreeUntrackedData?.bytes ?? 0"
+          :maxFiles="worktreeUntrackedData?.maxFiles ?? 0"
+          :maxBytes="worktreeUntrackedData?.maxBytes ?? 0"
+          :largest="worktreeUntrackedData?.largest ?? []"
+          @close="closeWorktreeUntrackedModal"
+          @skip="confirmWorktreeUntrackedSkip"
+          @force="confirmWorktreeUntrackedForce"
         />
 
 	    <SkillsInsertModal

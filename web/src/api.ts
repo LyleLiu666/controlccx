@@ -128,7 +128,9 @@ export async function createTask(input: {
   worker_type: WorkerType;
   prompt: string;
   workdir: string;
+  conversation_id?: string;
   workdir_strategy?: string;
+  worktree_untracked?: string;
   unsafe_automation?: boolean;
   safety_envelope?: string;
   safety_preset?: string;
