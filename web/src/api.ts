@@ -13,6 +13,7 @@ import type {
   FSWriteResponse,
   LogEntry,
   ToolsListResponse,
+  ToolsStatusResponse,
   SkillsListResponse,
   SkillsToolsResponse,
   OnboardingPlan,
@@ -54,6 +55,10 @@ async function postJSON<T>(
 
 export async function fetchSystemInfo(): Promise<SystemInfo> {
   return getJSON<SystemInfo>("/api/system");
+}
+
+export async function fetchToolsStatus(): Promise<ToolsStatusResponse> {
+  return getJSON<ToolsStatusResponse>("/api/tools/status");
 }
 
 export async function fetchTasks(limit = 200, includeDeleted = false): Promise<Task[]> {

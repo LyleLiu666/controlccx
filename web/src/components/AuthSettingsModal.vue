@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import type { AuthStatus } from "../types";
+import type { AuthStatus, ToolStatus } from "../types";
 
 type StoredAuthKey =
   | "anthropic_base_url"
@@ -18,6 +18,7 @@ const props = defineProps<{
   error: string;
   storagePath: string;
   authStatus: AuthStatus | null;
+  toolsStatus: ToolStatus[] | null;
   autoDeliveryForeman: boolean;
   anthropicBaseURL: string;
   anthropicApiKey: string;
@@ -81,6 +82,17 @@ const codexReasoningEffortModel = computed({
   get: () => props.codexReasoningEffort,
   set: (value: string) => emit("update:codexReasoningEffort", value),
 });
+
+const claudeToolStatus = computed<ToolStatus | null>(
+  () => props.toolsStatus?.find((t) => t.id === "claude-code") ?? null,
+);
+const codexToolStatus = computed<ToolStatus | null>(
+  () => props.toolsStatus?.find((t) => t.id === "codex") ?? null,
+);
+const showCliInstallGuide = computed<boolean>(() => {
+  if (!claudeToolStatus.value || !codexToolStatus.value) return false;
+  return !claudeToolStatus.value.available && !codexToolStatus.value.available;
+});
 </script>
 
 <template>
@@ -100,6 +112,52 @@ const codexReasoningEffortModel = computed({
         </div>
 
         <div v-if="error" class="modalError">{{ error }}</div>
+
+        <div v-if="showCliInstallGuide" class="settingsSection">
+          <div class="settingsSectionTitle">快速开始</div>
+          <div class="tinyHint">
+            未检测到可用的 Claude Code / Codex 命令。你需要先安装 Claude Code（推荐）或在
+            Tools 里配置可执行文件路径。
+          </div>
+          <ol class="setupSteps">
+            <li>
+              安装
+              <a
+                href="https://nodejs.org/en/download/"
+                target="_blank"
+                rel="noopener noreferrer"
+                >Node.js 18 或更新版本环境</a
+              >。
+            </li>
+            <li>
+              Windows 用户需安装
+              <a
+                href="https://git-scm.com/download/win"
+                target="_blank"
+                rel="noopener noreferrer"
+                >Git for Windows</a
+              >。
+            </li>
+            <li>
+              在命令行界面，执行以下命令安装 Claude Code：<br />
+              <span class="mono">npm install -g @anthropic-ai/claude-code</span>
+            </li>
+            <li>
+              安装结束后，执行以下命令查看安装结果：<br />
+              <span class="mono">claude --version</span>
+            </li>
+          </ol>
+          <div class="setupProvider">
+            邀请注册火山作为 provider：
+            <a
+              href="https://volcengine.com/L/N2h_TKPIsvA/"
+              target="_blank"
+              rel="noopener noreferrer"
+              >volcengine.com</a
+            >
+            ，邀请码：<span class="mono">RTGWR7T3</span>
+          </div>
+        </div>
 
         <div class="settingsSection">
           <div class="settingsSectionTitle">Automation</div>
@@ -339,4 +397,3 @@ const codexReasoningEffortModel = computed({
     </div>
   </div>
 </template>
-

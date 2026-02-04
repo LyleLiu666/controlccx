@@ -14,6 +14,7 @@ import type {
   FSRoot,
   LogEntry,
   Tool,
+  ToolStatus,
   ToolDriver,
   ToolsListResponse,
   SystemInfo,
@@ -32,6 +33,7 @@ import {
   fetchFSRoots,
   fetchLogs,
   fetchTools,
+  fetchToolsStatus,
   fetchSystemInfo,
   fsDelete,
   fsMkdir,
@@ -261,6 +263,7 @@ const authCodexReasoningEffort = ref("");
 const toolsLoading = ref(false);
 const toolsError = ref("");
 const toolsList = ref<Tool[]>([]);
+const toolsStatus = ref<ToolStatus[]>([]);
 const toolsSettingsOpen = ref(false);
 const toolsSaving = ref(false);
 const toolsSelectedID = ref<string>("");
@@ -552,8 +555,36 @@ const autoDeliveryForeman = ref<boolean>(true);
 const deliveryForemanSeenRuns = ref<Set<string>>(new Set());
 const deliveryForemanRunning = ref(false);
 const deliveryForemanQueue = ref<Task[]>([]);
+const deliveryForemanCurrent = ref<Task | null>(null);
 const deliveryForemanToast = ref("");
 const deliveryForemanToastOpen = ref(false);
+
+type SecretaryReviewPhase = "queued" | "reviewing";
+const secretaryReviewBySession = computed<Record<string, SecretaryReviewPhase>>(() => {
+  const out: Record<string, SecretaryReviewPhase> = {};
+  for (const t of deliveryForemanQueue.value) {
+    const k = sessionKeyForTask(t);
+    if (k) out[k] = "queued";
+  }
+  const cur = deliveryForemanCurrent.value;
+  if (cur) {
+    const k = sessionKeyForTask(cur);
+    if (k) out[k] = "reviewing";
+  }
+  return out;
+});
+
+function secretaryReviewLabel(phase: SecretaryReviewPhase): string {
+  if (phase === "queued") return "秘书审阅排队";
+  return "秘书审阅中";
+}
+
+function secretaryReviewTitle(phase: SecretaryReviewPhase): string {
+  if (phase === "queued") {
+    return "已加入 Delivery Foreman 队列：秘书即将进行交付审阅，可能会触发自动继续/重试。";
+  }
+  return "Delivery Foreman 审阅中：秘书正在进行交付审阅，可能会触发自动继续/重试。";
+}
 
 const attentionAutopilotEnabled = ref<boolean>(true);
 const attentionAutopilotRunning = ref(false);
@@ -2184,6 +2215,11 @@ function onOpenSkillsFromMenu() {
   closeHeaderMoreMenu();
 }
 
+function onToggleSkillsFromHeader() {
+  if (skillsOpen.value) closeSkillsPage();
+  else void openSkillsPage();
+}
+
 function onOpenSettingsFromMenu() {
   openAuthSettings();
   closeHeaderMoreMenu();
@@ -2509,13 +2545,18 @@ async function buildDeliveryForemanPrompt(t: Task): Promise<string> {
 }
 
 async function runDeliveryForemanOnce(t: Task) {
+  deliveryForemanCurrent.value = t;
   showDeliveryForemanToast("Delivery Foreman: analyzing completed run…");
-  const prompt = await buildDeliveryForemanPrompt(t);
-  chat.value = await sendChatAndReload(prompt, { sendChat, fetchChat });
-  if (selectedSessionKey.value === sessionKeyForTask(t)) {
-    await refreshAcceptance();
+  try {
+    const prompt = await buildDeliveryForemanPrompt(t);
+    chat.value = await sendChatAndReload(prompt, { sendChat, fetchChat });
+    if (selectedSessionKey.value === sessionKeyForTask(t)) {
+      await refreshAcceptance();
+    }
+    showDeliveryForemanToast("Delivery Foreman: suggestion ready (open Secretary to view).");
+  } finally {
+    if (deliveryForemanCurrent.value?.id === t.id) deliveryForemanCurrent.value = null;
   }
-  showDeliveryForemanToast("Delivery Foreman: suggestion ready (open Secretary to view).");
 }
 
 async function refreshAcceptance() {
@@ -3349,10 +3390,20 @@ async function refreshTools() {
       const ok = toolsList.value.some((t) => t.id === newWorkerType.value);
       if (!ok) newWorkerType.value = toolsList.value[0].id;
     }
+    await refreshToolsStatus();
   } catch (e: any) {
     toolsError.value = e?.message ?? String(e);
   } finally {
     toolsLoading.value = false;
+  }
+}
+
+async function refreshToolsStatus() {
+  try {
+    const res = await fetchToolsStatus();
+    toolsStatus.value = res.tools ?? [];
+  } catch {
+    // ignore; UI still works (runs will surface tool errors)
   }
 }
 
@@ -3363,6 +3414,17 @@ function toolForID(id: string): Tool | null {
 }
 
 const newTool = computed(() => toolForID(newWorkerType.value));
+
+const claudeToolStatus = computed<ToolStatus | null>(
+  () => toolsStatus.value.find((t) => t.id === "claude-code") ?? null,
+);
+const codexToolStatus = computed<ToolStatus | null>(
+  () => toolsStatus.value.find((t) => t.id === "codex") ?? null,
+);
+const noWorkerCliDetected = computed<boolean>(() => {
+  if (!claudeToolStatus.value || !codexToolStatus.value) return false;
+  return !claudeToolStatus.value.available && !codexToolStatus.value.available;
+});
 
 function toolDriverForWorkerType(workerType: string): ToolDriver {
   const id = String(workerType ?? "").trim();
@@ -3594,6 +3656,7 @@ onMounted(async () => {
   if (selectedTaskId.value) await loadLogs(selectedTaskId.value);
   await refreshAuth();
   await refreshTools();
+  if (missingAuthText.value && !authSettingsOpen.value) openAuthSettings();
   connectEvents();
   window.addEventListener("keydown", onGlobalKeyDown);
   window.addEventListener("popstate", onRoutePopState);
@@ -4217,6 +4280,15 @@ watch(
           {{ systemInfo.os }}/{{ systemInfo.arch }} ·
           {{ systemInfo.hostname }} · Go {{ systemInfo.go_version }}
         </div>
+        <button
+          type="button"
+          class="headerSkillsBtn"
+          :class="{ active: skillsOpen }"
+          @click="onToggleSkillsFromHeader"
+          :title="skillsOpen ? '关闭技能页' : '打开技能页'"
+        >
+          技能
+        </button>
 	        <button type="button" class="primary" @click="openNewRun">
 	          新建运行
 	        </button>
@@ -4541,6 +4613,12 @@ watch(
                   >⚠</span
                 >
                 <span class="pill" :class="s.status">{{ s.status }}</span>
+                <span
+                  v-if="secretaryReviewBySession[s.key]"
+                  class="pill review"
+                  :title="secretaryReviewTitle(secretaryReviewBySession[s.key])"
+                  >{{ secretaryReviewLabel(secretaryReviewBySession[s.key]) }}</span
+                >
                 <span class="pill kind">{{ s.runs.length }} 次运行</span>
                 <span
                   v-if="s.last_run_at"
@@ -4613,6 +4691,59 @@ watch(
                 <button type="button" @click="openDirPicker">选择</button>
               </div>
             </label>
+            <div v-if="noWorkerCliDetected" class="setupHint full">
+              <details class="setupDetails">
+                <summary>未检测到 Claude Code / Codex：点此查看 Claude Code 安装指南</summary>
+                <ol class="setupSteps">
+                  <li>
+                    安装
+                    <a
+                      href="https://nodejs.org/en/download/"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      >Node.js 18 或更新版本环境</a
+                    >。
+                  </li>
+                  <li>
+                    Windows 用户需安装
+                    <a
+                      href="https://git-scm.com/download/win"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      >Git for Windows</a
+                    >。
+                  </li>
+                  <li>
+                    在命令行界面执行：
+                    <span class="mono">npm install -g @anthropic-ai/claude-code</span>
+                  </li>
+                  <li>
+                    安装结束后验证：
+                    <span class="mono">claude --version</span>
+                  </li>
+                </ol>
+                <div class="setupProvider">
+                  邀请注册火山作为 provider：
+                  <a
+                    href="https://volcengine.com/L/N2h_TKPIsvA/"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    >volcengine.com</a
+                  >
+                  ，邀请码：<span class="mono">RTGWR7T3</span>
+                </div>
+                <div class="tinyHint">
+                  如果已安装但仍未检测到，请在「Tools」里把
+                  <span class="mono">command</span> 指到实际可执行文件路径。
+                </div>
+              </details>
+              <div class="setupActions">
+                <button type="button" @click="openToolsSettings">Tools 设置</button>
+                <button type="button" @click="openAuthSettings">
+                  认证设置
+                </button>
+              </div>
+            </div>
             <div v-if="missingAuthText" class="authHint full">
               <div class="text">{{ missingAuthText }}</div>
               <button type="button" @click="openAuthSettings">
@@ -4691,6 +4822,12 @@ watch(
                 <span class="pill" :class="selectedSession.status">{{
                   selectedSession.status
                 }}</span>
+                <span
+                  v-if="secretaryReviewBySession[selectedSession.key]"
+                  class="pill review"
+                  :title="secretaryReviewTitle(secretaryReviewBySession[selectedSession.key])"
+                  >{{ secretaryReviewLabel(secretaryReviewBySession[selectedSession.key]) }}</span
+                >
                 <span
                   v-if="acceptanceState"
                   class="pill acceptance"
@@ -5597,6 +5734,7 @@ watch(
 	      :error="authSettingsError"
 	      :storagePath="authInfo?.storage_path ?? ''"
 	      :authStatus="authStatus"
+	      :toolsStatus="toolsStatus"
 	      v-model:autoDeliveryForeman="autoDeliveryForeman"
 	      v-model:anthropicBaseURL="authAnthropicBaseURL"
 	      v-model:anthropicApiKey="authAnthropicApiKey"

@@ -23,6 +23,19 @@ export type ToolsListResponse = {
   tools: Tool[];
 };
 
+export type ToolStatus = {
+  id: string;
+  driver: ToolDriver;
+  command: string;
+  available: boolean;
+  resolved_path?: string;
+  error?: string;
+};
+
+export type ToolsStatusResponse = {
+  tools: ToolStatus[];
+};
+
 export type Task = {
   id: string;
   conversation_id: string;

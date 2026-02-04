@@ -12,7 +12,10 @@ test("run detail shows token usage meter when usage is available", () => {
 
   assert.ok(appVue.includes("<RunUsageMeter"));
   assert.ok(appVue.includes(':usage="selectedRunUsage"'));
-  assert.ok(css.includes(".usageMeter {"));
-  assert.ok(css.includes(".usageSeg.input {"));
-  assert.ok(css.includes(".usageSeg.output {"));
+  assert.ok(css.includes(":deep(.usageMeter) {"));
+  assert.ok(css.includes(":deep(.usageBar) {"));
+  assert.ok(css.includes(":deep(.usageSeg.input) {"));
+  assert.ok(css.includes(":deep(.usageSeg.output) {"));
+  assert.ok(css.includes(":deep(.usageRow) {"));
+  assert.ok(css.includes(':global(:root[data-theme="dark"]) :deep(.usageBar) {'));
 });
