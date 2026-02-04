@@ -633,15 +633,15 @@ func pickResumeTargetAuto(all []tasks.Task) (tasks.Task, bool) {
 	}
 
 	runningBySession := map[string]bool{}
-	for _, t := range all {
-		sid := strings.TrimSpace(t.SessionID)
-		if sid == "" {
-			continue
+		for _, t := range all {
+			sid := strings.TrimSpace(t.SessionID)
+			if sid == "" {
+				continue
+			}
+			if t.Status == tasks.StatusRunning || t.Status == tasks.StatusQueued || t.Status == tasks.StatusWaiting {
+				runningBySession[sid] = true
+			}
 		}
-		if t.Status == tasks.StatusRunning || t.Status == tasks.StatusQueued {
-			runningBySession[sid] = true
-		}
-	}
 
 	sort.SliceStable(all, func(i, j int) bool {
 		return all[i].UpdatedAt.After(all[j].UpdatedAt)

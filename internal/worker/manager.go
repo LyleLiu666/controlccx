@@ -769,15 +769,15 @@ func (m *Manager) maybeAutoContinueApprovalBlocked(task tasks.Task, driver tasks
 	// Avoid duplicate continuations if something else already started a new run for this conversation.
 	runs, err := m.store.ListTasksByConversationID(context.Background(), conversationID, 50, tasks.ListTasksOptions{IncludeDeleted: true})
 	if err == nil {
-		for _, t := range runs {
-			if t.ID == task.ID {
-				continue
-			}
-			if t.Status == tasks.StatusQueued || t.Status == tasks.StatusRunning {
-				return
+			for _, t := range runs {
+				if t.ID == task.ID {
+					continue
+				}
+				if t.Status == tasks.StatusQueued || t.Status == tasks.StatusWaiting || t.Status == tasks.StatusRunning {
+					return
+				}
 			}
 		}
-	}
 
 	evidence, err := m.collectApprovalEvidence(task.ID, task.Prompt)
 	if err != nil {

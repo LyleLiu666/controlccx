@@ -461,12 +461,12 @@ func (a *API) handleSessionByKey(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		for _, t := range runs {
-			if t.Status == tasks.StatusRunning || t.Status == tasks.StatusQueued {
-				http.Error(w, "session already has a running task (task_id="+t.ID+" status="+string(t.Status)+")", http.StatusConflict)
-				return
+			for _, t := range runs {
+				if t.Status == tasks.StatusRunning || t.Status == tasks.StatusQueued || t.Status == tasks.StatusWaiting {
+					http.Error(w, "session already has a running task (task_id="+t.ID+" status="+string(t.Status)+")", http.StatusConflict)
+					return
+				}
 			}
-		}
 
 		if latest.Status == tasks.StatusBlocked {
 			http.Error(w, "当前会话存在被阻塞的 run（需要人工确认/放权）。请先处理阻塞或选择高风险继续。", http.StatusConflict)
@@ -948,19 +948,19 @@ func (a *API) handleTaskByID(w http.ResponseWriter, r *http.Request) {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
-			for _, t := range all {
-				if t.ID == prev.ID {
-					continue
-				}
-				if strings.TrimSpace(t.SessionID) != sid {
-					continue
-				}
-				if t.Status == tasks.StatusRunning || t.Status == tasks.StatusQueued {
-					http.Error(w, "session already has a running task (task_id="+t.ID+" status="+string(t.Status)+")", http.StatusConflict)
-					return
+				for _, t := range all {
+					if t.ID == prev.ID {
+						continue
+					}
+					if strings.TrimSpace(t.SessionID) != sid {
+						continue
+					}
+					if t.Status == tasks.StatusRunning || t.Status == tasks.StatusQueued || t.Status == tasks.StatusWaiting {
+						http.Error(w, "session already has a running task (task_id="+t.ID+" status="+string(t.Status)+")", http.StatusConflict)
+						return
+					}
 				}
 			}
-		}
 
 		// SafetyEnvelope is an autopilot hint (UI-level “one-time unlock”); it does not count as an explicit safety override.
 		explicitSafety := body.UnsafeAutomation ||

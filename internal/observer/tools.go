@@ -317,14 +317,14 @@ func (s *Service) agentTools() map[string]Tool {
 				if err != nil {
 					return nil, err
 				}
-				for _, t := range all {
-					if strings.TrimSpace(t.SessionID) != sid {
-						continue
+					for _, t := range all {
+						if strings.TrimSpace(t.SessionID) != sid {
+							continue
+						}
+						if t.Status == tasks.StatusRunning || t.Status == tasks.StatusQueued || t.Status == tasks.StatusWaiting {
+							return nil, fmt.Errorf("session already has a running task (task_id=%s status=%s)", t.ID, t.Status)
+						}
 					}
-					if t.Status == tasks.StatusRunning || t.Status == tasks.StatusQueued {
-						return nil, fmt.Errorf("session already has a running task (task_id=%s status=%s)", t.ID, t.Status)
-					}
-				}
 
 				prompt := stringArg(args, "prompt")
 				if prompt == "" {
@@ -434,11 +434,11 @@ func (s *Service) agentTools() map[string]Tool {
 					return nil, fmt.Errorf("session is deleted; cannot continue (conversation_id=%s)", strings.TrimSpace(latest.ConversationID))
 				}
 
-				for _, t := range runs {
-					if t.Status == tasks.StatusRunning || t.Status == tasks.StatusQueued {
-						return nil, fmt.Errorf("session already has a running task (task_id=%s status=%s)", t.ID, t.Status)
+					for _, t := range runs {
+						if t.Status == tasks.StatusRunning || t.Status == tasks.StatusQueued || t.Status == tasks.StatusWaiting {
+							return nil, fmt.Errorf("session already has a running task (task_id=%s status=%s)", t.ID, t.Status)
+						}
 					}
-				}
 
 				prompt := strings.TrimSpace(stringArg(args, "prompt"))
 				if prompt == "" {
