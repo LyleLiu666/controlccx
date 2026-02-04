@@ -223,6 +223,10 @@ func ensureTaskRunOptionsColumns(ctx context.Context, tx *sql.Tx) error {
 	for _, c := range []col{
 		{Name: "safety_preset", Def: "safety_preset TEXT NOT NULL DEFAULT ''"},
 		{Name: "task_intent", Def: "task_intent TEXT NOT NULL DEFAULT ''"},
+		{Name: "workdir_strategy", Def: "workdir_strategy TEXT NOT NULL DEFAULT ''"},
+		{Name: "base_workdir", Def: "base_workdir TEXT NOT NULL DEFAULT ''"},
+		{Name: "worktree_dir", Def: "worktree_dir TEXT NOT NULL DEFAULT ''"},
+		{Name: "worktree_branch", Def: "worktree_branch TEXT NOT NULL DEFAULT ''"},
 		{Name: "codex_sandbox", Def: "codex_sandbox TEXT NOT NULL DEFAULT ''"},
 		{Name: "codex_approval_policy", Def: "codex_approval_policy TEXT NOT NULL DEFAULT ''"},
 		{Name: "codex_search", Def: "codex_search INTEGER NOT NULL DEFAULT 0"},

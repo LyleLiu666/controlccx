@@ -23,6 +23,9 @@ import (
 	"controlccx/internal/tasks"
 	"controlccx/internal/tooling"
 	"controlccx/internal/worker"
+	"controlccx/internal/worktree"
+
+	"github.com/google/uuid"
 )
 
 type API struct {
@@ -311,11 +314,61 @@ func (a *API) handleTasks(w http.ResponseWriter, r *http.Request) {
 			Classify: runsafe.ClassifyOptions{LLM: llm},
 		})
 
+		// Workdir strategy: allow creating a parallel git worktree when the base workdir is busy.
+		strategy := strings.ToLower(strings.TrimSpace(in.WorkDirStrategy))
+		if strategy == "worktree" {
+			if in.Mode != tasks.ModeNew {
+				http.Error(w, "workdir_strategy=worktree is only supported for mode=new", http.StatusBadRequest)
+				return
+			}
+
+			// Preserve idempotency semantics: do not create a new worktree for replays.
+			if a.Tasks != nil {
+				if k := strings.TrimSpace(in.IdempotencyKey); k != "" {
+					if existing, ok, err := a.Tasks.GetTaskByIdempotencyKey(r.Context(), k); err != nil {
+						http.Error(w, err.Error(), http.StatusBadRequest)
+						return
+					} else if ok {
+						writeJSON(w, existing)
+						return
+					}
+				}
+			}
+
+			if strings.TrimSpace(in.ConversationID) == "" {
+				in.ConversationID = uuid.NewString()
+			}
+
+			base := strings.TrimSpace(in.WorkDir)
+			if base == "" {
+				base = "."
+			}
+			wt, err := worktree.Create(r.Context(), worktree.CreateOptions{
+				BaseWorkDir:     base,
+				ConversationID: strings.TrimSpace(in.ConversationID),
+			})
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			in.WorkDirStrategy = "worktree"
+			in.BaseWorkDir = strings.TrimSpace(wt.RepoRoot)
+			in.WorktreeDir = strings.TrimSpace(wt.Dir)
+			in.WorktreeBranch = strings.TrimSpace(wt.Branch)
+			in.WorkDir = wt.Dir
+		}
+
 		task, err := a.Tasks.CreateTask(r.Context(), in)
 		if err != nil {
 			var busy *tasks.WorkDirBusyError
 			if errors.As(err, &busy) {
-				http.Error(w, err.Error(), http.StatusConflict)
+				writeJSONStatus(w, http.StatusConflict, map[string]any{
+					"error":            "workdir_busy",
+					"message":          err.Error(),
+					"workdir":          strings.TrimSpace(busy.WorkDir),
+					"existing_task_id": strings.TrimSpace(busy.ExistingTaskID),
+					"existing_status":  busy.ExistingStatus,
+				})
 				return
 			}
 			http.Error(w, err.Error(), http.StatusBadRequest)
@@ -510,7 +563,13 @@ func (a *API) handleSessionByKey(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				var busy *tasks.WorkDirBusyError
 				if errors.As(err, &busy) {
-					http.Error(w, err.Error(), http.StatusConflict)
+					writeJSONStatus(w, http.StatusConflict, map[string]any{
+						"error":            "workdir_busy",
+						"message":          err.Error(),
+						"workdir":          strings.TrimSpace(busy.WorkDir),
+						"existing_task_id": strings.TrimSpace(busy.ExistingTaskID),
+						"existing_status":  busy.ExistingStatus,
+					})
 					return
 				}
 				http.Error(w, err.Error(), http.StatusBadRequest)
@@ -619,7 +678,13 @@ func (a *API) handleSessionByKey(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			var busy *tasks.WorkDirBusyError
 			if errors.As(err, &busy) {
-				http.Error(w, err.Error(), http.StatusConflict)
+				writeJSONStatus(w, http.StatusConflict, map[string]any{
+					"error":            "workdir_busy",
+					"message":          err.Error(),
+					"workdir":          strings.TrimSpace(busy.WorkDir),
+					"existing_task_id": strings.TrimSpace(busy.ExistingTaskID),
+					"existing_status":  busy.ExistingStatus,
+				})
 				return
 			}
 			http.Error(w, err.Error(), http.StatusBadRequest)
@@ -972,7 +1037,13 @@ func (a *API) handleTaskByID(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			var busy *tasks.WorkDirBusyError
 			if errors.As(err, &busy) {
-				http.Error(w, err.Error(), http.StatusConflict)
+				writeJSONStatus(w, http.StatusConflict, map[string]any{
+					"error":            "workdir_busy",
+					"message":          err.Error(),
+					"workdir":          strings.TrimSpace(busy.WorkDir),
+					"existing_task_id": strings.TrimSpace(busy.ExistingTaskID),
+					"existing_status":  busy.ExistingStatus,
+				})
 				return
 			}
 			http.Error(w, err.Error(), http.StatusBadRequest)
@@ -1119,7 +1190,13 @@ func (a *API) handleTaskByID(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			var busy *tasks.WorkDirBusyError
 			if errors.As(err, &busy) {
-				http.Error(w, err.Error(), http.StatusConflict)
+				writeJSONStatus(w, http.StatusConflict, map[string]any{
+					"error":            "workdir_busy",
+					"message":          err.Error(),
+					"workdir":          strings.TrimSpace(busy.WorkDir),
+					"existing_task_id": strings.TrimSpace(busy.ExistingTaskID),
+					"existing_status":  busy.ExistingStatus,
+				})
 				return
 			}
 			http.Error(w, err.Error(), http.StatusBadRequest)

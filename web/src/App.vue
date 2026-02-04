@@ -47,6 +47,7 @@ import {
   upsertTool,
   updateAuth,
   fetchAcceptance,
+  isAPIError,
 } from "./api";
 import { appendChatMessageUnique, sendChatAndReload } from "./chatOps";
 import {
@@ -89,11 +90,33 @@ import RunUsageMeter from "./components/RunUsageMeter.vue";
 import HighRiskConfirmModal from "./components/HighRiskConfirmModal.vue";
 import BlockedPromptModal from "./components/BlockedPromptModal.vue";
 import RehydratePromptModal from "./components/RehydratePromptModal.vue";
+import WorkdirBusyModal from "./components/WorkdirBusyModal.vue";
 import { useSkills } from "./composables/useSkills";
 import { useSecretaryChat } from "./composables/useSecretaryChat";
 import { useTasks } from "./composables/useTasks";
 import { useLiveFeed } from "./composables/useLiveFeed";
 import { shouldDismissRunLaunchMask } from "./runLaunchMask";
+
+type CreateTaskPayload = {
+  worker_type: WorkerType;
+  prompt: string;
+  workdir: string;
+  workdir_strategy?: string;
+  unsafe_automation?: boolean;
+  safety_envelope?: string;
+  safety_preset?: string;
+  task_intent?: string;
+  codex_sandbox?: string;
+  codex_approval_policy?: string;
+  codex_search?: boolean;
+  claude_permission_mode?: string;
+  claude_sandbox?: boolean;
+  claude_webfetch_domains?: string[];
+};
+
+type CreateTaskOptions = {
+  idempotencyKey?: string;
+};
 
 const systemInfo = ref<SystemInfo | null>(null);
 
@@ -116,6 +139,17 @@ const resumePromptTextEl = ref<HTMLTextAreaElement | null>(null);
 const resumeSafetyOverride = ref(false);
 const resumeHighRiskOptIn = ref(false);
 const errorBanner = ref<string>("");
+
+const workdirBusyOpen = ref(false);
+const workdirBusyBusy = ref(false);
+const workdirBusyError = ref("");
+const workdirBusyMessage = ref("");
+const workdirBusyWorkdir = ref("");
+const workdirBusyExistingTaskID = ref("");
+const workdirBusyExistingStatus = ref("");
+const workdirBusyPendingInput = ref<CreateTaskPayload | null>(null);
+const workdirBusyPendingOpts = ref<CreateTaskOptions | undefined>(undefined);
+let workdirBusyOnSuccess: (() => void) | null = null;
 
 const runLaunchMaskOpen = ref(false);
 const runLaunchMaskTitle = ref("启动中…");
@@ -165,6 +199,105 @@ function maybeDismissRunLaunchMaskForTask(next: Task) {
   if (!id) return;
   if (next.id !== id) return;
   if (shouldDismissRunLaunchMask(next)) closeRunLaunchMask();
+}
+
+function extractWorkdirBusyPayload(e: unknown): {
+  message: string;
+  workdir: string;
+  existingTaskID: string;
+  existingStatus: string;
+} | null {
+  if (!isAPIError(e) || e.status !== 409) return null;
+  const d = e.data;
+  if (!d || typeof d !== "object") return null;
+  if (String((d as any).error ?? "").trim() !== "workdir_busy") return null;
+
+  return {
+    message: String((d as any).message ?? e.message ?? "").trim(),
+    workdir: String((d as any).workdir ?? "").trim(),
+    existingTaskID: String((d as any).existing_task_id ?? "").trim(),
+    existingStatus: String((d as any).existing_status ?? "").trim(),
+  };
+}
+
+function openWorkdirBusyModal(opts: {
+  busy: { message: string; workdir: string; existingTaskID: string; existingStatus: string };
+  pendingInput: CreateTaskPayload;
+  pendingOpts?: CreateTaskOptions;
+  onSuccess?: () => void;
+}) {
+  if (workdirBusyOpen.value) return;
+  workdirBusyBusy.value = false;
+  workdirBusyError.value = "";
+  workdirBusyMessage.value = opts.busy.message;
+  workdirBusyWorkdir.value = opts.busy.workdir;
+  workdirBusyExistingTaskID.value = opts.busy.existingTaskID;
+  workdirBusyExistingStatus.value = opts.busy.existingStatus;
+  workdirBusyPendingInput.value = { ...opts.pendingInput };
+  workdirBusyPendingOpts.value = opts.pendingOpts ? { ...opts.pendingOpts } : undefined;
+  workdirBusyOnSuccess = opts.onSuccess ?? null;
+  workdirBusyOpen.value = true;
+}
+
+function closeWorkdirBusyModal() {
+  workdirBusyOpen.value = false;
+  workdirBusyBusy.value = false;
+  workdirBusyError.value = "";
+  workdirBusyMessage.value = "";
+  workdirBusyWorkdir.value = "";
+  workdirBusyExistingTaskID.value = "";
+  workdirBusyExistingStatus.value = "";
+  workdirBusyPendingInput.value = null;
+  workdirBusyPendingOpts.value = undefined;
+  workdirBusyOnSuccess = null;
+}
+
+async function viewWorkdirBusyExisting() {
+  const id = workdirBusyExistingTaskID.value.trim();
+  if (!id) {
+    closeWorkdirBusyModal();
+    return;
+  }
+  closeWorkdirBusyModal();
+  await onSelectTask(id);
+}
+
+async function confirmWorkdirBusyStrategy(strategy: "wait" | "worktree") {
+  if (workdirBusyBusy.value) return;
+  const pending = workdirBusyPendingInput.value;
+  if (!pending) {
+    closeWorkdirBusyModal();
+    return;
+  }
+  workdirBusyBusy.value = true;
+  workdirBusyError.value = "";
+  try {
+    openRunLaunchMask({ title: "启动中…", detail: "正在创建任务…" });
+    const t = await createTask(
+      { ...pending, workdir_strategy: strategy },
+      workdirBusyPendingOpts.value,
+    );
+    trackRunLaunchMaskForTask(t);
+    upsertTask(t);
+    selectedTaskId.value = t.id;
+    await loadLogs(t.id);
+    const onSuccess = workdirBusyOnSuccess;
+    closeWorkdirBusyModal();
+    onSuccess?.();
+  } catch (e: any) {
+    closeRunLaunchMask();
+    workdirBusyError.value = e?.message ?? String(e);
+  } finally {
+    workdirBusyBusy.value = false;
+  }
+}
+
+async function confirmWorkdirBusyWait() {
+  return confirmWorkdirBusyStrategy("wait");
+}
+
+async function confirmWorkdirBusyWorktree() {
+  return confirmWorkdirBusyStrategy("worktree");
 }
 
 function highRiskPresetSummary(driver: ToolDriver, preset: string): string {
@@ -383,7 +516,7 @@ const selectedRunInstruction = computed(() => {
 const selectedRunActivity = computed(() => {
   const t = selectedTask.value;
   if (!t) return null;
-  if (!(t.status === "running" || t.status === "queued")) return null;
+  if (!(t.status === "running" || t.status === "queued" || t.status === "waiting")) return null;
   return deriveRunActivity(selectedLogs.value);
 });
 
@@ -1049,20 +1182,27 @@ async function replaySelectedRun() {
   if (!t) return;
   if (!confirm("确认重放该 run 吗？（将使用相同的 tool/workdir/prompt 创建一个新任务）")) return;
   errorBanner.value = "";
+  let createdInput: CreateTaskPayload | null = null;
   try {
     openRunLaunchMask({ title: "启动中…", detail: "正在创建任务…" });
-    const next = await createTask({
+    createdInput = {
       worker_type: t.worker_type,
       prompt: t.prompt,
       workdir: t.workdir,
       unsafe_automation: t.unsafe_automation || undefined,
-    });
+    };
+    const next = await createTask(createdInput);
     trackRunLaunchMaskForTask(next);
     upsertTask(next);
     selectedTaskId.value = next.id;
     await loadLogs(next.id);
   } catch (e: any) {
     closeRunLaunchMask();
+    const busy = extractWorkdirBusyPayload(e);
+    if (busy && createdInput) {
+      openWorkdirBusyModal({ busy, pendingInput: createdInput });
+      return;
+    }
     const msg = e?.message ?? String(e);
     if (attentionAutopilotIsNoConversationFound(msg)) {
       stopAttentionAutopilotForSession(sessionKeyForTask(t));
@@ -1072,6 +1212,90 @@ async function replaySelectedRun() {
       return;
     }
     errorBanner.value = msg;
+  }
+}
+
+function selectedWorktreeMeta(): { baseWorkdir: string; worktreeDir: string; branch: string } | null {
+  const t = selectedTask.value;
+  if (!t) return null;
+  if (String(t.workdir_strategy ?? "").trim() !== "worktree") return null;
+  const base = String(t.base_workdir ?? "").trim();
+  const wt = String(t.worktree_dir ?? "").trim() || String(t.workdir ?? "").trim();
+  const branch = String(t.worktree_branch ?? "").trim();
+  if (!base || !wt || !branch) return null;
+  return { baseWorkdir: base, worktreeDir: wt, branch };
+}
+
+function buildMergeBackPrompt(meta: { baseWorkdir: string; worktreeDir: string; branch: string }): string {
+  return `你正在执行「Merge Back」助手：把 worktree 的改动合并回 base repo。
+
+关键信息：
+- BaseWorkDir: ${meta.baseWorkdir}
+- WorktreeDir: ${meta.worktreeDir}
+- WorktreeBranch: ${meta.branch}
+
+目标：
+- 将 WorktreeBranch 的改动合并到 BaseWorkDir 当前分支（或用户指定分支）。
+
+严格流程（必须执行）：
+1) 检查 base repo 是否干净：\`git status --porcelain\`（在 BaseWorkDir）。
+2) 检查 worktree 是否有未提交改动：\`git -C "${meta.worktreeDir}" status --porcelain\`。
+   - 若有未提交改动：优先在 worktree 分支提交一个临时 commit（message: "ccx: worktree changes"），除非用户明确要求不提交。
+3) 确认 base repo 当前分支与远端状态（不要 push；任何远端操作必须先问用户确认）。
+4) 合并：\`git merge --no-ff "${meta.branch}"\`。
+5) 若出现冲突：
+   - 列出冲突文件清单；
+   - 对每个冲突，解释两边差异，并让用户做出明确选择（ours / theirs / 手动合并）；
+   - 根据用户选择解决冲突并继续 merge。
+6) 合并完成后输出：\`git status\`，并根据项目情况建议运行测试。
+
+约束：
+- 不要删除/移动 worktree 目录。
+- 不要 force push。`;
+}
+
+async function mergeBackSelectedWorktree() {
+  const t = selectedTask.value;
+  if (!t) return;
+  const meta = selectedWorktreeMeta();
+  if (!meta) {
+    errorBanner.value = "该 run 不是 worktree 运行，或缺少 worktree 元信息，无法合并。";
+    return;
+  }
+  if (t.status === "running" || t.status === "queued" || t.status === "waiting") {
+    errorBanner.value = "该 worktree run 仍在运行/排队中，建议结束后再合并。";
+    return;
+  }
+
+  const msg = `确认创建一个新的 Merge Back run 吗？\n\n- worktree: ${meta.branch}\n- base: ${meta.baseWorkdir}\n\n（将创建一个新任务，在 base repo 中执行合并；冲突时会引导你选择。）`;
+  if (!confirm(msg)) return;
+
+  errorBanner.value = "";
+  try {
+    openRunLaunchMask({ title: "启动中…", detail: "正在创建 Merge Back 任务…" });
+    const input: CreateTaskPayload = {
+      worker_type: t.worker_type,
+      prompt: buildMergeBackPrompt(meta),
+      workdir: meta.baseWorkdir,
+      workdir_strategy: "wait",
+      unsafe_automation: t.unsafe_automation || undefined,
+      safety_preset: t.safety_preset,
+      task_intent: t.task_intent,
+      codex_sandbox: t.codex_sandbox,
+      codex_approval_policy: t.codex_approval_policy,
+      codex_search: t.codex_search,
+      claude_permission_mode: t.claude_permission_mode,
+      claude_sandbox: t.claude_sandbox,
+      claude_webfetch_domains: t.claude_webfetch_domains,
+    };
+    const next = await createTask(input);
+    trackRunLaunchMaskForTask(next);
+    upsertTask(next);
+    selectedTaskId.value = next.id;
+    await loadLogs(next.id);
+  } catch (e: any) {
+    closeRunLaunchMask();
+    errorBanner.value = e?.message ?? String(e);
   }
 }
 
@@ -1555,7 +1779,7 @@ watch(feedCoachDismissed, (v) => saveBool(LS_KEY_COACH_FEED, v));
 
 function desiredOutputTabForTask(t: Task | null): "result" | "logs" {
   if (!t) return "result";
-  if (t.status === "running" || t.status === "queued") return "logs";
+  if (t.status === "running" || t.status === "queued" || t.status === "waiting") return "logs";
   return "result";
 }
 
@@ -1670,6 +1894,7 @@ async function refreshAuth() {
 
 async function onCreateTask(opts?: { idempotencyKey?: string }): Promise<boolean> {
   errorBanner.value = "";
+  let createdInput: CreateTaskPayload | null = null;
   try {
     const driver = newRunDriver.value;
     const useAutopilot = runSafetyAutopilotEnabled.value && !newRunSafetyOverride.value;
@@ -1703,16 +1928,14 @@ async function onCreateTask(opts?: { idempotencyKey?: string }): Promise<boolean
     const envelope = buildSafetyEnvelopePayload();
 
     openRunLaunchMask({ title: "启动中…", detail: "正在创建任务…" });
-    const t = await createTask(
-      {
-        worker_type: newWorkerType.value,
-        prompt: newPrompt.value,
-        workdir: newWorkdir.value,
-        ...envelope,
-        ...safety,
-      },
-      opts,
-    );
+    createdInput = {
+      worker_type: newWorkerType.value,
+      prompt: newPrompt.value,
+      workdir: newWorkdir.value,
+      ...envelope,
+      ...safety,
+    };
+    const t = await createTask(createdInput, opts);
     trackRunLaunchMaskForTask(t);
     upsertTask(t);
     selectedTaskId.value = t.id;
@@ -1721,6 +1944,19 @@ async function onCreateTask(opts?: { idempotencyKey?: string }): Promise<boolean
     return true;
   } catch (e: any) {
     closeRunLaunchMask();
+    const busy = extractWorkdirBusyPayload(e);
+    if (busy && createdInput) {
+      openWorkdirBusyModal({
+        busy,
+        pendingInput: createdInput,
+        pendingOpts: opts,
+        onSuccess: () => {
+          newPrompt.value = "";
+          if (newRunOpen.value) closeNewRun();
+        },
+      });
+      return false;
+    }
     errorBanner.value = e?.message ?? String(e);
     return false;
   }
@@ -2394,7 +2630,7 @@ async function maybePromptBlocked(prev: Task | undefined, next: Task) {
   const prevStatus = prev?.status ?? "";
   const nextStatus = next.status ?? "";
   if (isTerminalStatus(prevStatus) || nextStatus !== "blocked") return;
-  if (!(prevStatus === "running" || prevStatus === "queued" || prevStatus === "")) return;
+  if (!(prevStatus === "running" || prevStatus === "queued" || prevStatus === "waiting" || prevStatus === "")) return;
 
   // Non-disruptive: only prompt when the blocked run belongs to the current session view.
   const nextSessionKey = sessionKeyForTask(next);
@@ -2415,7 +2651,7 @@ async function maybePromptRehydrate(prev: Task | undefined, next: Task) {
   const prevStatus = prev?.status ?? "";
   const nextStatus = next.status ?? "";
   if (isTerminalStatus(prevStatus) || !isTerminalStatus(nextStatus)) return;
-  if (!(prevStatus === "running" || prevStatus === "queued" || prevStatus === "")) return;
+  if (!(prevStatus === "running" || prevStatus === "queued" || prevStatus === "waiting" || prevStatus === "")) return;
 
   const origin = resumeOriginByRunID.get(next.id) ?? "";
   if (!shouldOfferRehydrateForTask(next, origin)) return;
@@ -2597,7 +2833,7 @@ async function maybeTriggerDeliveryForeman(prev: Task | undefined, next: Task) {
 
   // Only auto-trigger on transitions into terminal states.
   if (isTerminalStatus(prevStatus) || !isTerminalStatus(nextStatus)) return;
-  if (!(prevStatus === "running" || prevStatus === "queued" || prevStatus === "")) return;
+  if (!(prevStatus === "running" || prevStatus === "queued" || prevStatus === "waiting" || prevStatus === "")) return;
 
   persistDeliveryForemanSeen(runID);
 
@@ -2671,7 +2907,7 @@ async function runAttentionAutopilotLoop() {
       if (sess.deleted_at) continue;
       if (!sess.session_id) continue;
       if (sess.status !== "interrupted") continue;
-      if (sess.latest.status === "running" || sess.latest.status === "queued") continue;
+      if (sess.latest.status === "running" || sess.latest.status === "queued" || sess.latest.status === "waiting") continue;
 
       const now = Date.now();
       const last = attentionAutopilotSeenAtMs(attentionAutopilotSeen.value, key);
@@ -2780,7 +3016,7 @@ async function secretaryResumeSessionRun(s: SessionGroup) {
     errorBanner.value = "该会话还没有 session_id，无法继续。";
     return;
   }
-  if (s.latest.status === "running" || s.latest.status === "queued") {
+  if (s.latest.status === "running" || s.latest.status === "queued" || s.latest.status === "waiting") {
     errorBanner.value = "该会话仍在运行中，暂不需要继续。";
     return;
   }
@@ -4906,6 +5142,23 @@ watch(
                 >
                   Cancel
                 </button>
+                <button
+                  v-if="
+                    selectedTask?.workdir_strategy === 'worktree' &&
+                    String(selectedTask?.base_workdir ?? '').trim() &&
+                    String(selectedTask?.worktree_branch ?? '').trim()
+                  "
+                  type="button"
+                  @click="mergeBackSelectedWorktree"
+                  :disabled="
+                    selectedTask?.status === 'running' ||
+                    selectedTask?.status === 'queued' ||
+                    selectedTask?.status === 'waiting'
+                  "
+                  title="Merge worktree branch back to base repo"
+                >
+                  Merge Back
+                </button>
                 <details class="detailMore compact">
                   <summary title="More" aria-label="More">⋯</summary>
                   <div class="detailMorePopup">
@@ -4959,6 +5212,20 @@ watch(
                       </div>
                       <div>
                         <span class="k">Runs</span> {{ selectedSession.runs.length }}
+                      </div>
+                      <div
+                        v-if="selectedTask?.workdir_strategy === 'worktree' && selectedTask?.worktree_branch"
+                        class="full"
+                      >
+                        <span class="k">Worktree</span>
+                        <span class="mono">{{ selectedTask.worktree_branch }}</span>
+                      </div>
+                      <div
+                        v-if="selectedTask?.workdir_strategy === 'worktree' && selectedTask?.base_workdir"
+                        class="full"
+                      >
+                        <span class="k">Base</span>
+                        <span class="mono">{{ selectedTask.base_workdir }}</span>
                       </div>
                       <div v-if="selectedSession.title" class="full">
                         <span class="k">Title</span>
@@ -5312,10 +5579,12 @@ watch(
             <div v-if="outputTab === 'result'" class="resultPanel">
               <div v-if="!selectedResultText" class="empty">
                 {{
-                  selectedTask?.status === "running" ||
-                  selectedTask?.status === "queued"
-                    ? "Task is running…"
-                    : "No result yet."
+                  selectedTask?.status === "waiting"
+                    ? "Task is waiting…"
+                    : selectedTask?.status === "running" ||
+                        selectedTask?.status === "queued"
+                      ? "Task is running…"
+                      : "No result yet."
                 }}
               </div>
               <template v-else>
@@ -5735,6 +6004,20 @@ watch(
 	      @openDirPicker="openDirPicker"
 	      @openAuthSettings="openAuthSettings"
 	    />
+
+        <WorkdirBusyModal
+          :open="workdirBusyOpen"
+          :busy="workdirBusyBusy"
+          :error="workdirBusyError"
+          :message="workdirBusyMessage"
+          :workdir="workdirBusyWorkdir"
+          :existingTaskID="workdirBusyExistingTaskID"
+          :existingStatus="workdirBusyExistingStatus"
+          @close="closeWorkdirBusyModal"
+          @wait="confirmWorkdirBusyWait"
+          @worktree="confirmWorkdirBusyWorktree"
+          @viewExisting="viewWorkdirBusyExisting"
+        />
 
 	    <SkillsInsertModal
 	      :open="skillsInsertOpen"

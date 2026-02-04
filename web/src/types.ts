@@ -1,5 +1,6 @@
 export type TaskStatus =
   | "queued"
+  | "waiting"
   | "running"
   | "succeeded"
   | "failed"
@@ -43,6 +44,7 @@ export type Task = {
   mode: "new" | "resume";
   status: TaskStatus;
   unsafe_automation?: boolean;
+  workdir_strategy?: string;
   safety_preset?: string;
   task_intent?: string;
   codex_sandbox?: string;
@@ -53,6 +55,9 @@ export type Task = {
   claude_webfetch_domains?: string[];
   prompt: string;
   workdir: string;
+  base_workdir?: string;
+  worktree_dir?: string;
+  worktree_branch?: string;
   session_id: string;
   session_title?: string;
   session_deleted_at?: string;

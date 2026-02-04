@@ -3167,6 +3167,11 @@ h2 {
   color: white;
 }
 
+.pill.waiting {
+  background: linear-gradient(135deg, #64748b 0%, #475569 100%);
+  color: white;
+}
+
 .pill.blocked {
   background: linear-gradient(135deg, #f97316 0%, #ea580c 100%);
   color: white;

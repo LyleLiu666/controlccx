@@ -239,6 +239,7 @@ func (m *Manager) run(ctx context.Context, task tasks.Task) error {
 	if status == tasks.StatusBlocked && isApprovalBlockedReason(blockedReason, task.Warning) {
 		m.maybeAutoContinueApprovalBlocked(task, driver, sidToPersist)
 	}
+	m.maybeStartNextWaitingForWorkdir(task.WorkDir)
 	return nil
 }
 
@@ -254,6 +255,30 @@ func sessionIDToPersist(task tasks.Task, observed string) (string, string) {
 		return "", fmt.Sprintf("resume warning: session_id changed (requested=%q observed=%q). Keeping requested session_id for this run.", requested, observed)
 	}
 	return observed, ""
+}
+
+func (m *Manager) maybeStartNextWaitingForWorkdir(workdir string) {
+	if m == nil || m.store == nil {
+		return
+	}
+
+	next, ok, err := m.store.DequeueNextWaitingForWorkdir(context.Background(), workdir)
+	if err != nil || !ok {
+		return
+	}
+
+	_, _ = m.store.AppendLog(context.Background(), next.ID, tasks.LogSystem, fmt.Sprintf("wait-queue: workdir available; starting after previous run finished (workdir=%s)", filepath.Clean(workdir)))
+	m.publishTaskUpdatedForce(next.ID)
+	if err := m.Start(context.Background(), next.ID); err != nil {
+		_ = m.store.FinishTask(context.Background(), next.ID, tasks.FinishTaskInput{
+			Status:     tasks.StatusFailed,
+			ExitCode:   nil,
+			Error:      err.Error(),
+			SessionID:  "",
+			FinishedAt: time.Now().UTC(),
+		})
+		m.publishTaskUpdatedForce(next.ID)
+	}
 }
 
 func (m *Manager) buildToolCommand(task tasks.Task) (ToolCommand, tasks.WorkerType, error) {

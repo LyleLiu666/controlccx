@@ -31,9 +31,59 @@ import type {
   WorkerType,
 } from "./types";
 
+export class APIError extends Error {
+  status: number;
+  statusText: string;
+  data: any;
+  rawText: string;
+
+  constructor(opts: { status: number; statusText: string; message: string; data: any; rawText: string }) {
+    super(opts.message);
+    this.name = "APIError";
+    this.status = opts.status;
+    this.statusText = opts.statusText;
+    this.data = opts.data;
+    this.rawText = opts.rawText;
+  }
+}
+
+export function isAPIError(e: unknown): e is APIError {
+  return e instanceof APIError;
+}
+
+async function parseErrorPayload(res: Response): Promise<{ data: any; rawText: string }> {
+  const rawText = await res.text();
+  const ct = String(res.headers.get("Content-Type") || "").toLowerCase();
+  if (ct.includes("application/json")) {
+    try {
+      return { data: JSON.parse(rawText), rawText };
+    } catch {
+      // fall back to raw text
+    }
+  }
+  return { data: rawText, rawText };
+}
+
+async function buildAPIError(res: Response): Promise<APIError> {
+  const { data, rawText } = await parseErrorPayload(res);
+  const msg =
+    typeof data?.message === "string" && data.message.trim()
+      ? String(data.message)
+      : rawText.trim()
+        ? `${res.status} ${rawText.trim()}`
+        : `${res.status} ${res.statusText}`;
+  return new APIError({
+    status: res.status,
+    statusText: res.statusText,
+    message: msg,
+    data,
+    rawText,
+  });
+}
+
 async function getJSON<T>(path: string): Promise<T> {
   const res = await fetch(path, { credentials: "same-origin" });
-  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  if (!res.ok) throw await buildAPIError(res);
   return (await res.json()) as T;
 }
 
@@ -49,7 +99,7 @@ async function postJSON<T>(
     body: JSON.stringify(body),
     credentials: "same-origin",
   });
-  if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
+  if (!res.ok) throw await buildAPIError(res);
   return (await res.json()) as T;
 }
 
@@ -77,6 +127,7 @@ export async function createTask(input: {
   worker_type: WorkerType;
   prompt: string;
   workdir: string;
+  workdir_strategy?: string;
   unsafe_automation?: boolean;
   safety_envelope?: string;
   safety_preset?: string;

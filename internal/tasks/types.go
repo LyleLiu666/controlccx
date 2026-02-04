@@ -6,6 +6,7 @@ type Status string
 
 const (
 	StatusQueued      Status = "queued"
+	StatusWaiting     Status = "waiting"
 	StatusRunning     Status = "running"
 	StatusSucceeded   Status = "succeeded"
 	StatusFailed      Status = "failed"
@@ -36,6 +37,7 @@ type Task struct {
 	Mode                  Mode       `json:"mode"`
 	Status                Status     `json:"status"`
 	UnsafeAutomation      bool       `json:"unsafe_automation,omitempty"`
+	WorkDirStrategy       string     `json:"workdir_strategy,omitempty"`
 	SafetyPreset          string     `json:"safety_preset,omitempty"`
 	TaskIntent            string     `json:"task_intent,omitempty"`
 	CodexSandbox          string     `json:"codex_sandbox,omitempty"`
@@ -46,6 +48,9 @@ type Task struct {
 	ClaudeWebFetchDomains []string   `json:"claude_webfetch_domains,omitempty"`
 	Prompt                string     `json:"prompt"`
 	WorkDir               string     `json:"workdir"`
+	BaseWorkDir           string     `json:"base_workdir,omitempty"`
+	WorktreeDir           string     `json:"worktree_dir,omitempty"`
+	WorktreeBranch        string     `json:"worktree_branch,omitempty"`
 	SessionID             string     `json:"session_id"`
 	SessionTitle          string     `json:"session_title,omitempty"`
 	SessionDeletedAt      *time.Time `json:"session_deleted_at,omitempty"`
@@ -85,6 +90,10 @@ type CreateTaskInput struct {
 	Mode             Mode       `json:"mode"`
 	ConversationID   string     `json:"conversation_id,omitempty"`
 	IdempotencyKey   string     `json:"idempotency_key,omitempty"`
+	WorkDirStrategy  string     `json:"workdir_strategy,omitempty"`
+	BaseWorkDir      string     `json:"base_workdir,omitempty"`
+	WorktreeDir      string     `json:"worktree_dir,omitempty"`
+	WorktreeBranch   string     `json:"worktree_branch,omitempty"`
 	UnsafeAutomation bool       `json:"unsafe_automation,omitempty"`
 	// SafetyEnvelope is an optional autopilot hint (UI-level “one-time unlock”).
 	// It is not persisted; it only affects server-side defaults when run safety options are omitted.

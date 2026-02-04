@@ -2,6 +2,7 @@ package worker
 
 import (
 	"encoding/json"
+	"fmt"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -16,6 +17,52 @@ type ToolCommand struct {
 	Dir     string
 	Stdin   string
 	Warning string
+}
+
+const worktreePromptSentinel = "CCX_WORKTREE_MODE"
+
+func effectivePromptForTask(task tasks.Task) string {
+	prompt := task.Prompt
+	if strings.ToLower(strings.TrimSpace(task.WorkDirStrategy)) != "worktree" {
+		return prompt
+	}
+	if strings.TrimSpace(prompt) == "" {
+		return prompt
+	}
+	if strings.Contains(prompt, worktreePromptSentinel) {
+		return prompt
+	}
+
+	base := strings.TrimSpace(task.BaseWorkDir)
+	wt := strings.TrimSpace(task.WorktreeDir)
+	branch := strings.TrimSpace(task.WorktreeBranch)
+
+	header := strings.TrimSpace(fmt.Sprintf(
+		`[%s]
+你正在一个 Git worktree 中执行（并发开发模式）。
+
+BaseWorkDir（不要直接改这里）: %s
+WorktreeDir（当前工作目录）: %s
+WorktreeBranch: %s
+
+硬性规则（必须遵守）：
+1) 只修改 WorktreeDir 下的文件；禁止修改 BaseWorkDir 下的文件。
+2) 所有 git 操作都在 WorktreeDir 中进行（或使用 git -C WorktreeDir）。
+3) 不要删除/移动 worktree 目录（.ccx/worktrees/...）。
+
+完成后请输出：
+- `+"`git status`"+`（worktree）
+- 关键改动摘要
+- 合并回 base repo 的建议步骤（如需）`,
+		worktreePromptSentinel,
+		base,
+		wt,
+		branch,
+	))
+	if header == "" {
+		return prompt
+	}
+	return header + "\n\n---\n\n" + prompt
 }
 
 func BuildToolCommand(cfg config.Config, task tasks.Task) (ToolCommand, error) {
@@ -45,6 +92,7 @@ func buildClaude(cfg config.Config, task tasks.Task) (ToolCommand, error) {
 		cmd = "claude"
 	}
 	workdir := filepath.Clean(task.WorkDir)
+	prompt := effectivePromptForTask(task)
 
 	args := []string{"-p"}
 	if cfg.Workers.UnsafeAutomation || task.UnsafeAutomation {
@@ -66,7 +114,7 @@ func buildClaude(cfg config.Config, task tasks.Task) (ToolCommand, error) {
 		Command: cmd,
 		Args:    args,
 		Dir:     workdir,
-		Stdin:   task.Prompt,
+		Stdin:   prompt,
 	}
 
 	// On Windows, run Claude Code via Git Bash for more consistent behavior.
@@ -79,7 +127,7 @@ func buildClaude(cfg config.Config, task tasks.Task) (ToolCommand, error) {
 		quoted := shellJoin(cmd, args)
 		tool.Command = gitBash
 		tool.Args = []string{"-lc", quoted}
-		tool.Stdin = task.Prompt
+		tool.Stdin = prompt
 	}
 
 	return tool, nil
@@ -98,6 +146,7 @@ func buildCodex(cfg config.Config, task tasks.Task) (ToolCommand, error) {
 	}
 
 	workdir := filepath.Clean(task.WorkDir)
+	prompt := effectivePromptForTask(task)
 
 	unsafe := cfg.Workers.UnsafeAutomation || task.UnsafeAutomation
 
@@ -135,7 +184,7 @@ func buildCodex(cfg config.Config, task tasks.Task) (ToolCommand, error) {
 		Command: cmd,
 		Args:    args,
 		Dir:     workdir,
-		Stdin:   task.Prompt,
+		Stdin:   prompt,
 	}
 
 	if runtime.GOOS == "windows" {

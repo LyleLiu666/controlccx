@@ -330,14 +330,19 @@ function onMarkdownClick(e: MouseEvent) {
                     !s.session_id ||
                     !!s.deleted_at ||
                     s.latest.status === 'running' ||
-                    s.latest.status === 'queued'
+                    s.latest.status === 'queued' ||
+                    s.latest.status === 'waiting'
                   "
                   title="继续会话"
                 >
                   继续
                 </button>
                 <button
-                  v-if="s.latest.status === 'running' || s.latest.status === 'queued'"
+                  v-if="
+                    s.latest.status === 'running' ||
+                    s.latest.status === 'queued' ||
+                    s.latest.status === 'waiting'
+                  "
                   type="button"
                   class="secAction"
                   @click="emit('cancelSession', s)"

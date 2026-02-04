@@ -53,6 +53,15 @@ func (s *Store) CreateTask(ctx context.Context, in CreateTaskInput) (Task, error
 	}
 	workdir := filepath.Clean(in.WorkDir)
 	idempotencyKey := strings.TrimSpace(in.IdempotencyKey)
+	workdirStrategy := strings.ToLower(strings.TrimSpace(in.WorkDirStrategy))
+	switch workdirStrategy {
+	case "", "exclusive":
+		// ok
+	case "wait", "worktree":
+		// ok
+	default:
+		return Task{}, fmt.Errorf("tasks: invalid workdir_strategy %q", strings.TrimSpace(in.WorkDirStrategy))
+	}
 
 	now := s.now().UTC()
 	id := uuid.NewString()
@@ -85,23 +94,30 @@ func (s *Store) CreateTask(ctx context.Context, in CreateTaskInput) (Task, error
 		}
 	}
 
-	// Mutual exclusion: disallow concurrent queued/running tasks per workdir.
+	initialStatus := StatusQueued
+
+	// Mutual exclusion: disallow concurrent queued/running/waiting tasks per workdir.
 	{
 		var existingID, existingStatus string
 		err := tx.QueryRowContext(ctx, `
 			SELECT id, status
 			FROM tasks
 			WHERE workdir = ?
-				AND status IN (?, ?)
+				AND status IN (?, ?, ?)
 			ORDER BY created_at DESC
 			LIMIT 1;
-		`, workdir, string(StatusQueued), string(StatusRunning)).Scan(&existingID, &existingStatus)
+		`, workdir, string(StatusQueued), string(StatusWaiting), string(StatusRunning)).Scan(&existingID, &existingStatus)
 		if err == nil {
-			return Task{}, &WorkDirBusyError{
-				WorkDir:         workdir,
-				ExistingWorkDir: workdir,
-				ExistingTaskID:  existingID,
-				ExistingStatus:  Status(existingStatus),
+			switch workdirStrategy {
+			case "wait":
+				initialStatus = StatusWaiting
+			default:
+				return Task{}, &WorkDirBusyError{
+					WorkDir:         workdir,
+					ExistingWorkDir: workdir,
+					ExistingTaskID:  existingID,
+					ExistingStatus:  Status(existingStatus),
+				}
 			}
 		}
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
@@ -131,7 +147,7 @@ func (s *Store) CreateTask(ctx context.Context, in CreateTaskInput) (Task, error
 			id, worker_type, mode, status, prompt, workdir, session_id, conversation_id, idempotency_key, warning,
 			created_at, updated_at, stderr_count, keyword_count, score
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0);
-	`, id, string(in.WorkerType), string(in.Mode), string(StatusQueued), in.Prompt, workdir, in.SessionID, conversationID, idempotencyKey, in.Warning, createdAt, createdAt)
+	`, id, string(in.WorkerType), string(in.Mode), string(initialStatus), in.Prompt, workdir, in.SessionID, conversationID, idempotencyKey, in.Warning, createdAt, createdAt)
 	if err != nil {
 		return Task{}, fmt.Errorf("tasks: insert: %w", err)
 	}
@@ -163,6 +179,24 @@ func (s *Store) CreateTask(ctx context.Context, in CreateTaskInput) (Task, error
 
 	safetyPreset := strings.TrimSpace(in.SafetyPreset)
 	taskIntent := strings.TrimSpace(in.TaskIntent)
+	persistedWorkdirStrategy := workdirStrategy
+	if persistedWorkdirStrategy == "" || persistedWorkdirStrategy == "exclusive" {
+		persistedWorkdirStrategy = ""
+	}
+	baseWorkDir := strings.TrimSpace(in.BaseWorkDir)
+	worktreeDir := strings.TrimSpace(in.WorktreeDir)
+	worktreeBranch := strings.TrimSpace(in.WorktreeBranch)
+	if workdirStrategy != "worktree" {
+		baseWorkDir = ""
+		worktreeDir = ""
+		worktreeBranch = ""
+	} else {
+		baseWorkDir = filepath.Clean(baseWorkDir)
+		worktreeDir = filepath.Clean(worktreeDir)
+		if strings.TrimSpace(baseWorkDir) == "" || strings.TrimSpace(worktreeDir) == "" || worktreeBranch == "" {
+			return Task{}, errors.New("tasks: worktree strategy requires base_workdir, worktree_dir, and worktree_branch")
+		}
+	}
 	codexSandbox := strings.TrimSpace(in.CodexSandbox)
 	codexApproval := strings.TrimSpace(in.CodexApprovalPolicy)
 	codexSearch := 0
@@ -186,11 +220,13 @@ func (s *Store) CreateTask(ctx context.Context, in CreateTaskInput) (Task, error
 		INSERT OR REPLACE INTO task_run_options (
 			task_id, unsafe_automation,
 			safety_preset, task_intent,
+			workdir_strategy, base_workdir, worktree_dir, worktree_branch,
 			codex_sandbox, codex_approval_policy, codex_search,
 			claude_permission_mode, claude_sandbox, claude_webfetch_domains_json
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 	`, id, unsafeInt,
 		safetyPreset, taskIntent,
+		persistedWorkdirStrategy, baseWorkDir, worktreeDir, worktreeBranch,
 		codexSandbox, codexApproval, codexSearch,
 		claudePermissionMode, claudeSandbox, claudeDomainsJSON,
 	)
@@ -205,12 +241,42 @@ func (s *Store) CreateTask(ctx context.Context, in CreateTaskInput) (Task, error
 	return s.GetTask(ctx, id)
 }
 
+func (s *Store) GetTaskByIdempotencyKey(ctx context.Context, key string) (Task, bool, error) {
+	if s == nil || s.db == nil {
+		return Task{}, false, errors.New("tasks: store not initialized")
+	}
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return Task{}, false, nil
+	}
+
+	var id string
+	err := s.db.QueryRowContext(ctx, `
+		SELECT id
+		FROM tasks
+		WHERE idempotency_key = ?
+		LIMIT 1;
+	`, key).Scan(&id)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return Task{}, false, nil
+		}
+		return Task{}, false, fmt.Errorf("tasks: get by idempotency_key: %w", err)
+	}
+	t, err := s.GetTask(ctx, strings.TrimSpace(id))
+	if err != nil {
+		return Task{}, false, err
+	}
+	return t, true, nil
+}
+
 func (s *Store) GetTask(ctx context.Context, id string) (Task, error) {
 	row := s.db.QueryRowContext(ctx, `
 		SELECT
 			t.id, t.conversation_id, t.worker_type, t.mode, t.status,
 			COALESCE(o.unsafe_automation, 0),
 			COALESCE(o.safety_preset, ''), COALESCE(o.task_intent, ''),
+			COALESCE(o.workdir_strategy, ''), COALESCE(o.base_workdir, ''), COALESCE(o.worktree_dir, ''), COALESCE(o.worktree_branch, ''),
 			COALESCE(o.codex_sandbox, ''), COALESCE(o.codex_approval_policy, ''), COALESCE(o.codex_search, 0),
 			COALESCE(o.claude_permission_mode, ''), COALESCE(o.claude_sandbox, 0), COALESCE(o.claude_webfetch_domains_json, ''),
 			t.prompt, t.workdir, t.session_id, COALESCE(sm.title, ''), sm.deleted_at,
@@ -253,6 +319,7 @@ func (s *Store) ListTasksWithOptions(ctx context.Context, limit int, opts ListTa
 			t.id, t.conversation_id, t.worker_type, t.mode, t.status,
 			COALESCE(o.unsafe_automation, 0),
 			COALESCE(o.safety_preset, ''), COALESCE(o.task_intent, ''),
+			COALESCE(o.workdir_strategy, ''), COALESCE(o.base_workdir, ''), COALESCE(o.worktree_dir, ''), COALESCE(o.worktree_branch, ''),
 			COALESCE(o.codex_sandbox, ''), COALESCE(o.codex_approval_policy, ''), COALESCE(o.codex_search, 0),
 			COALESCE(o.claude_permission_mode, ''), COALESCE(o.claude_sandbox, 0), COALESCE(o.claude_webfetch_domains_json, ''),
 			t.prompt, t.workdir, t.session_id, COALESCE(sm.title, ''), sm.deleted_at,
@@ -342,6 +409,7 @@ func (s *Store) ListTasksByConversationID(ctx context.Context, conversationID st
 			t.id, t.conversation_id, t.worker_type, t.mode, t.status,
 			COALESCE(o.unsafe_automation, 0),
 			COALESCE(o.safety_preset, ''), COALESCE(o.task_intent, ''),
+			COALESCE(o.workdir_strategy, ''), COALESCE(o.base_workdir, ''), COALESCE(o.worktree_dir, ''), COALESCE(o.worktree_branch, ''),
 			COALESCE(o.codex_sandbox, ''), COALESCE(o.codex_approval_policy, ''), COALESCE(o.codex_search, 0),
 			COALESCE(o.claude_permission_mode, ''), COALESCE(o.claude_sandbox, 0), COALESCE(o.claude_webfetch_domains_json, ''),
 			t.prompt, t.workdir, t.session_id, COALESCE(sm.title, ''), sm.deleted_at,
@@ -407,6 +475,80 @@ func (s *Store) SetRunning(ctx context.Context, id string) error {
 		return fmt.Errorf("tasks: set running: %w", err)
 	}
 	return nil
+}
+
+// DequeueNextWaitingForWorkdir moves the oldest waiting task for workdir into queued,
+// as long as no other queued/running task exists for that workdir.
+func (s *Store) DequeueNextWaitingForWorkdir(ctx context.Context, workdir string) (Task, bool, error) {
+	if s == nil || s.db == nil {
+		return Task{}, false, errors.New("tasks: store not initialized")
+	}
+	if workdir == "" {
+		workdir = "."
+	}
+	workdir = filepath.Clean(workdir)
+
+	now := s.now().UTC()
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return Task{}, false, fmt.Errorf("tasks: begin dequeue waiting: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	// Only one active task per workdir: if something is queued/running, keep waiting.
+	{
+		var existingID string
+		err := tx.QueryRowContext(ctx, `
+			SELECT id
+			FROM tasks
+			WHERE workdir = ? AND status IN (?, ?)
+			ORDER BY created_at DESC
+			LIMIT 1;
+		`, workdir, string(StatusQueued), string(StatusRunning)).Scan(&existingID)
+		if err == nil {
+			return Task{}, false, nil
+		}
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return Task{}, false, fmt.Errorf("tasks: check active for dequeue: %w", err)
+		}
+	}
+
+	var id string
+	err = tx.QueryRowContext(ctx, `
+		SELECT id
+		FROM tasks
+		WHERE workdir = ? AND status = ?
+		ORDER BY created_at ASC
+		LIMIT 1;
+	`, workdir, string(StatusWaiting)).Scan(&id)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return Task{}, false, nil
+		}
+		return Task{}, false, fmt.Errorf("tasks: select waiting: %w", err)
+	}
+
+	res, err := tx.ExecContext(ctx, `
+		UPDATE tasks
+		SET status = ?, updated_at = ?
+		WHERE id = ? AND status = ?;
+	`, string(StatusQueued), toMillis(now), strings.TrimSpace(id), string(StatusWaiting))
+	if err != nil {
+		return Task{}, false, fmt.Errorf("tasks: promote waiting: %w", err)
+	}
+	if rows, _ := res.RowsAffected(); rows == 0 {
+		return Task{}, false, nil
+	}
+
+	if err := tx.Commit(); err != nil {
+		return Task{}, false, fmt.Errorf("tasks: commit dequeue waiting: %w", err)
+	}
+	next, err := s.GetTask(ctx, strings.TrimSpace(id))
+	if err != nil {
+		return Task{}, false, err
+	}
+	return next, true, nil
 }
 
 func (s *Store) SetBlocked(ctx context.Context, id string) error {
@@ -837,6 +979,10 @@ func scanTask(row rowScanner) (Task, error) {
 		unsafeAutomation          int
 		safetyPreset              string
 		taskIntent                string
+		workdirStrategy           string
+		baseWorkDir               string
+		worktreeDir               string
+		worktreeBranch            string
 		codexSandbox              string
 		codexApproval             string
 		codexSearch               int
@@ -853,6 +999,7 @@ func scanTask(row rowScanner) (Task, error) {
 		&t.ID, &t.ConversationID, &workerType, &mode, &status,
 		&unsafeAutomation,
 		&safetyPreset, &taskIntent,
+		&workdirStrategy, &baseWorkDir, &worktreeDir, &worktreeBranch,
 		&codexSandbox, &codexApproval, &codexSearch,
 		&claudePermissionMode, &claudeSandbox, &claudeWebFetchDomainsJSON,
 		&t.Prompt, &t.WorkDir, &t.SessionID, &sessionTitle, &sessionDeletedAt,
@@ -872,6 +1019,7 @@ func scanTask(row rowScanner) (Task, error) {
 	t.Status = Status(status)
 	t.ConversationID = strings.TrimSpace(t.ConversationID)
 	t.UnsafeAutomation = unsafeAutomation != 0
+	t.WorkDirStrategy = strings.TrimSpace(workdirStrategy)
 	t.SafetyPreset = strings.TrimSpace(safetyPreset)
 	t.TaskIntent = strings.TrimSpace(taskIntent)
 	t.CodexSandbox = strings.TrimSpace(codexSandbox)
@@ -886,6 +1034,9 @@ func scanTask(row rowScanner) (Task, error) {
 		}
 	}
 	t.SessionTitle = strings.TrimSpace(sessionTitle)
+	t.BaseWorkDir = strings.TrimSpace(baseWorkDir)
+	t.WorktreeDir = strings.TrimSpace(worktreeDir)
+	t.WorktreeBranch = strings.TrimSpace(worktreeBranch)
 	t.CreatedAt = fromMillis(createdAt)
 	t.UpdatedAt = fromMillis(updatedAt)
 
