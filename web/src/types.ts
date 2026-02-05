@@ -272,6 +272,31 @@ export type TaskTraceResponse = {
   invocation?: TaskInvocation | null;
 };
 
+export type SessionWorkspace = {
+  key: string;
+  kind: string;
+  base_workdir: string;
+  repo_root: string;
+  run_root: string;
+  run_workdir: string;
+  base_branch: string;
+  work_branch: string;
+  status: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type SessionWorkspaceGetResponse = {
+  ok: boolean;
+  workspace?: SessionWorkspace | null;
+};
+
+export type SessionWorkspaceMergeResponse = {
+  workspace: SessionWorkspace;
+  applied?: string[];
+  conflicts?: string[];
+};
+
 export type ChatMessage = {
   id: number;
   time: string;

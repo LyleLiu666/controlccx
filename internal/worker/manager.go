@@ -18,6 +18,7 @@ import (
 	"controlccx/internal/config"
 	"controlccx/internal/events"
 	"controlccx/internal/execenv"
+	"controlccx/internal/runworkspace"
 	"controlccx/internal/tasks"
 	"controlccx/internal/tooling"
 )
@@ -28,6 +29,7 @@ type Manager struct {
 	hub   *events.Hub
 	auth  *auth.Store
 	tools *tooling.Service
+	ws    *runworkspace.Service
 
 	mu      sync.Mutex
 	cancels map[string]context.CancelFunc
@@ -37,12 +39,17 @@ type Manager struct {
 }
 
 func NewManager(cfg config.Config, store *tasks.Store, hub *events.Hub, authStore *auth.Store, tools *tooling.Service) *Manager {
+	var ws *runworkspace.Service
+	if store != nil {
+		ws = runworkspace.NewService(store, runworkspace.Options{})
+	}
 	return &Manager{
 		cfg:     cfg,
 		store:   store,
 		hub:     hub,
 		auth:    authStore,
 		tools:   tools,
+		ws:      ws,
 		cancels: make(map[string]context.CancelFunc),
 	}
 }
@@ -107,7 +114,44 @@ func (m *Manager) run(ctx context.Context, task tasks.Task) error {
 	}
 	m.publishTaskUpdated(task.ID)
 
-	tool, driver, err := m.buildToolCommand(task)
+	// Run workspace: execute inside a session-scoped isolated directory (run_workdir).
+	effective := task
+	if m != nil && m.ws != nil {
+		if strings.ToLower(strings.TrimSpace(task.WorkDirStrategy)) != "worktree" {
+			ens, err := m.ws.EnsureForTask(ctx, task)
+			if err != nil {
+				m.appendLog(task.ID, tasks.LogSystem, fmt.Sprintf("workspace setup error: %v", err))
+				_ = m.store.FinishTask(context.Background(), task.ID, tasks.FinishTaskInput{
+					Status:     tasks.StatusFailed,
+					ExitCode:   nil,
+					Error:      err.Error(),
+					SessionID:  "",
+					FinishedAt: time.Now().UTC(),
+				})
+				m.publishTaskUpdated(task.ID)
+				return err
+			}
+			ws := ens.Workspace
+			if strings.TrimSpace(ws.RunWorkDir) != "" {
+				effective.WorkDir = strings.TrimSpace(ws.RunWorkDir)
+			}
+			effective.WorkDirStrategy = "workspace"
+			effective.BaseWorkDir = strings.TrimSpace(ws.BaseWorkDir)
+			effective.WorktreeDir = strings.TrimSpace(ws.RunWorkDir)
+			effective.WorktreeBranch = strings.TrimSpace(ws.WorkBranch)
+
+			m.appendLog(task.ID, tasks.LogSystem, fmt.Sprintf("workspace: kind=%s base=%s run=%s", strings.TrimSpace(ws.Kind), filepath.Clean(ws.BaseWorkDir), filepath.Clean(ws.RunWorkDir)))
+			for _, msg := range ens.Logs {
+				msg = strings.TrimSpace(msg)
+				if msg == "" {
+					continue
+				}
+				m.appendLog(task.ID, tasks.LogSystem, msg)
+			}
+		}
+	}
+
+	tool, driver, err := m.buildToolCommand(effective)
 	if err != nil {
 		m.appendLog(task.ID, tasks.LogSystem, fmt.Sprintf("worker setup error: %v", err))
 		_ = m.store.FinishTask(context.Background(), task.ID, tasks.FinishTaskInput{
@@ -772,15 +816,15 @@ func (m *Manager) maybeAutoContinueApprovalBlocked(task tasks.Task, driver tasks
 	// Avoid duplicate continuations if something else already started a new run for this conversation.
 	runs, err := m.store.ListTasksByConversationID(context.Background(), conversationID, 50, tasks.ListTasksOptions{IncludeDeleted: true})
 	if err == nil {
-			for _, t := range runs {
-				if t.ID == task.ID {
-					continue
-				}
-				if t.Status == tasks.StatusQueued || t.Status == tasks.StatusWaiting || t.Status == tasks.StatusRunning {
-					return
-				}
+		for _, t := range runs {
+			if t.ID == task.ID {
+				continue
+			}
+			if t.Status == tasks.StatusQueued || t.Status == tasks.StatusWaiting || t.Status == tasks.StatusRunning {
+				return
 			}
 		}
+	}
 
 	evidence, err := m.collectApprovalEvidence(task.ID, task.Prompt)
 	if err != nil {

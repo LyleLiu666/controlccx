@@ -26,6 +26,8 @@ import type {
   SkillVersion,
   SkillVersionsListResponse,
   SystemInfo,
+  SessionWorkspaceGetResponse,
+  SessionWorkspaceMergeResponse,
   Task,
   TaskTraceResponse,
   Tool,
@@ -219,6 +221,18 @@ export async function renameSession(key: string, title: string): Promise<{ ok: b
 
 export async function deleteSession(key: string): Promise<{ ok: boolean }> {
   return postJSON(`/api/sessions/${encodeURIComponent(key)}/delete`, {});
+}
+
+export async function fetchSessionWorkspace(key: string): Promise<SessionWorkspaceGetResponse> {
+  return getJSON<SessionWorkspaceGetResponse>(`/api/sessions/${encodeURIComponent(key)}/workspace`);
+}
+
+export async function mergeSessionWorkspace(key: string): Promise<SessionWorkspaceMergeResponse> {
+  return postJSON<SessionWorkspaceMergeResponse>(`/api/sessions/${encodeURIComponent(key)}/workspace/merge`, {});
+}
+
+export async function discardSessionWorkspace(key: string): Promise<{ ok: boolean }> {
+  return postJSON<{ ok: boolean }>(`/api/sessions/${encodeURIComponent(key)}/workspace/discard`, {});
 }
 
 export async function fetchLogs(taskId: string, after = 0, limit = 500): Promise<LogEntry[]> {

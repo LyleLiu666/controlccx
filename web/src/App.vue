@@ -97,6 +97,7 @@ import { useSkills } from "./composables/useSkills";
 import { useSecretaryChat } from "./composables/useSecretaryChat";
 import { useTasks } from "./composables/useTasks";
 import { useLiveFeed } from "./composables/useLiveFeed";
+import { useSessionWorkspace } from "./composables/useSessionWorkspace";
 import { shouldDismissRunLaunchMask } from "./runLaunchMask";
 
 type CreateTaskPayload = {
@@ -1945,6 +1946,7 @@ watch(outputTab, (v) => {
   if (v !== "trace") return;
   if (!selectedTaskId.value) return;
   void loadTrace(selectedTaskId.value);
+  if (selectedSessionKey.value) void loadSessionWorkspace(selectedSessionKey.value, { force: true });
 });
 
 watch([workspaceFilters, sessionSearch], () => {
@@ -3548,6 +3550,82 @@ function openWorkspaceFilesInNewTab() {
   openInNewTab(`/files?base=${encodePathForQueryValue(base)}`);
 }
 
+function openRunWorkspaceFilesInNewTab() {
+  const ws = selectedSessionWorkspace.value;
+  if (!ws) return;
+  const base = String(ws.run_workdir ?? "").trim() || String(ws.run_root ?? "").trim();
+  if (!base) return;
+  openInNewTab(`/files?base=${encodePathForQueryValue(base)}`);
+}
+
+function selectedSessionWorkspaceMeta() {
+  const ws = selectedSessionWorkspace.value;
+  if (!ws) return null;
+  const kind = String(ws.kind ?? "").trim();
+  const status = String(ws.status ?? "").trim();
+  const base = String(ws.base_workdir ?? "").trim();
+  const run = String(ws.run_workdir ?? "").trim();
+  if (!kind || !base || !run) return null;
+  return { kind, status, base, run };
+}
+
+async function mergeBackSelectedWorkspace() {
+  const t = selectedTask.value;
+  if (t && (t.status === "running" || t.status === "queued" || t.status === "waiting")) {
+    sessionWorkspaceNotice.value = "";
+    return;
+  }
+  const key = String(selectedSessionKey.value ?? "").trim();
+  const meta = selectedSessionWorkspaceMeta();
+  if (!key || !meta) {
+    sessionWorkspaceNotice.value = "";
+    return;
+  }
+
+  const msg = `确认合并/应用该 workspace 的改动回原目录吗？\n\n- kind: ${meta.kind}\n- base: ${meta.base}\n- run: ${meta.run}\n\n（copy 会检测冲突并跳过；git-worktree 会执行 git merge。）`;
+  if (!confirm(msg)) return;
+
+  sessionWorkspaceNotice.value = "";
+  const res = await mergeSessionWorkspace(key);
+  if (!res) {
+    sessionWorkspaceNotice.value = "";
+    return;
+  }
+
+  if ((res.conflicts ?? []).length) {
+    const list = (res.conflicts ?? []).slice(0, 6).join(", ");
+    const more = (res.conflicts ?? []).length > 6 ? "…" : "";
+    sessionWorkspaceNotice.value = `已应用 ${res.applied?.length ?? 0} 个文件，但有冲突已跳过：${list}${more}`;
+    return;
+  }
+  sessionWorkspaceNotice.value = "已合并回原目录。";
+}
+
+async function discardSelectedWorkspace() {
+  const t = selectedTask.value;
+  if (t && (t.status === "running" || t.status === "queued" || t.status === "waiting")) {
+    sessionWorkspaceNotice.value = "";
+    return;
+  }
+  const key = String(selectedSessionKey.value ?? "").trim();
+  const meta = selectedSessionWorkspaceMeta();
+  if (!key || !meta) {
+    sessionWorkspaceNotice.value = "";
+    return;
+  }
+
+  const msg = `确认丢弃该 workspace 吗？\n\n- kind: ${meta.kind}\n- run: ${meta.run}\n\n（将删除 workspace 目录；该操作不可撤销。）`;
+  if (!confirm(msg)) return;
+
+  sessionWorkspaceNotice.value = "";
+  const ok = await discardSessionWorkspace(key);
+  if (!ok) {
+    sessionWorkspaceNotice.value = "";
+    return;
+  }
+  sessionWorkspaceNotice.value = "已丢弃 workspace。";
+}
+
 async function filesSave() {
   if (filesSaving.value) return;
   if (filesSelectedKind.value !== "file") return;
@@ -4106,6 +4184,17 @@ const selectedSessionKey = computed(() => {
   if (!t) return "";
   return sessionKeyForTask(t);
 });
+
+const {
+  workspaceLoading: sessionWorkspaceLoading,
+  workspaceError: sessionWorkspaceError,
+  selectedWorkspace: selectedSessionWorkspace,
+  loadWorkspace: loadSessionWorkspace,
+  mergeWorkspace: mergeSessionWorkspace,
+  discardWorkspace: discardSessionWorkspace,
+} = useSessionWorkspace(selectedSessionKey);
+
+const sessionWorkspaceNotice = ref("");
 
 const sessionsAll = computed<SessionGroup[]>(() => {
   const groups = new Map<string, Task[]>();
@@ -5340,6 +5429,13 @@ watch(
                     <div class="detailPopupWorkdir mono" :title="selectedSession.workdir">
                       {{ selectedSession.workdir }}
                     </div>
+                    <div
+                      v-if="selectedSessionWorkspace?.run_workdir"
+                      class="detailPopupWorkdir mono"
+                      :title="selectedSessionWorkspace.run_workdir"
+                    >
+                      run: {{ selectedSessionWorkspace.run_workdir }}
+                    </div>
                     <div class="detailMoreActions">
                       <button
                         type="button"
@@ -5354,6 +5450,43 @@ watch(
                         title="Copy workdir"
                       >
                         Copy workdir
+                      </button>
+                      <button
+                        v-if="selectedSessionWorkspace?.run_workdir"
+                        type="button"
+                        @click="openRunWorkspaceFilesInNewTab"
+                        title="Open run workspace"
+                      >
+                        Open run workspace
+                      </button>
+                      <button
+                        v-if="selectedSessionWorkspace?.run_workdir"
+                        type="button"
+                        @click="mergeBackSelectedWorkspace"
+                        :disabled="
+                          sessionWorkspaceLoading ||
+                          selectedTask?.status === 'running' ||
+                          selectedTask?.status === 'queued' ||
+                          selectedTask?.status === 'waiting'
+                        "
+                        title="Merge/apply workspace changes back to base workdir"
+                      >
+                        Merge back
+                      </button>
+                      <button
+                        v-if="selectedSessionWorkspace?.run_workdir"
+                        type="button"
+                        class="dangerBtn"
+                        @click="discardSelectedWorkspace"
+                        :disabled="
+                          sessionWorkspaceLoading ||
+                          selectedTask?.status === 'running' ||
+                          selectedTask?.status === 'queued' ||
+                          selectedTask?.status === 'waiting'
+                        "
+                        title="Discard workspace (delete)"
+                      >
+                        Discard workspace
                       </button>
                       <button
                         type="button"
@@ -5371,6 +5504,9 @@ watch(
                         Delete session
                       </button>
                     </div>
+                    <div v-if="sessionWorkspaceError" class="modalError">{{ sessionWorkspaceError }}</div>
+                    <div v-else-if="sessionWorkspaceLoading" class="tinyHint">Workspace…</div>
+                    <div v-if="sessionWorkspaceNotice" class="tinyHint">{{ sessionWorkspaceNotice }}</div>
                     <div class="detailMoreGrid">
                       <div>
                         <span class="k">Session</span>
@@ -5401,6 +5537,12 @@ watch(
                       >
                         <span class="k">Base</span>
                         <span class="mono">{{ selectedTask.base_workdir }}</span>
+                      </div>
+                      <div v-if="selectedSessionWorkspace" class="full">
+                        <span class="k">Workspace</span>
+                        <span class="mono"
+                          >{{ selectedSessionWorkspace.kind }} · {{ selectedSessionWorkspace.status }}</span
+                        >
                       </div>
                       <div v-if="selectedSession.title" class="full">
                         <span class="k">Title</span>
@@ -5792,6 +5934,20 @@ watch(
                   No trace yet.
                 </div>
                 <div v-else class="traceBox">
+                  <div v-if="selectedSessionWorkspace" class="traceRow">
+                    <span class="k">workspace</span>
+                    <span class="mono"
+                      >{{ selectedSessionWorkspace.kind }} · {{ selectedSessionWorkspace.status }}</span
+                    >
+                  </div>
+                  <div v-if="selectedSessionWorkspace?.base_workdir" class="traceRow">
+                    <span class="k">base</span>
+                    <span class="mono">{{ selectedSessionWorkspace.base_workdir }}</span>
+                  </div>
+                  <div v-if="selectedSessionWorkspace?.run_workdir" class="traceRow">
+                    <span class="k">run</span>
+                    <span class="mono">{{ selectedSessionWorkspace.run_workdir }}</span>
+                  </div>
                   <div class="traceRow">
                     <span class="k">cmd</span>
                     <span class="mono">{{ selectedTrace.invocation.cmd }}</span>

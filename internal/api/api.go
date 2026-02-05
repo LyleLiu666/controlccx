@@ -18,6 +18,7 @@ import (
 	"controlccx/internal/events"
 	"controlccx/internal/observer"
 	"controlccx/internal/runsafe"
+	"controlccx/internal/runworkspace"
 	"controlccx/internal/skills"
 	"controlccx/internal/systeminfo"
 	"controlccx/internal/tasks"
@@ -41,6 +42,7 @@ type API struct {
 	SkillVersionsBySkill *skills.PerSkillVersionsService
 	SkillAutoVersionScan *skills.AutoVersionScanner
 	Tools                *tooling.Service
+	Workspaces           *runworkspace.Service
 }
 
 func (a *API) Handler() http.Handler {
@@ -761,6 +763,70 @@ func (a *API) handleSessionByKey(w http.ResponseWriter, r *http.Request) {
 			_ = a.Workers.Start(r.Context(), newTask.ID)
 		}
 		writeJSON(w, newTask)
+	case "workspace":
+		if a.Tasks == nil {
+			http.Error(w, "tasks store not configured", http.StatusServiceUnavailable)
+			return
+		}
+		if a.Workspaces == nil {
+			http.Error(w, "workspaces not configured", http.StatusServiceUnavailable)
+			return
+		}
+
+		conversationID, err := resolveConversationIDForSessionKey(r.Context(), a.Tasks, key)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		canonicalKey := tasks.ConversationKey(conversationID)
+		if canonicalKey == "" {
+			http.Error(w, "conversation_id is required", http.StatusBadRequest)
+			return
+		}
+
+		if len(parts) == 2 {
+			if r.Method != http.MethodGet {
+				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+				return
+			}
+			ws, ok, err := a.Workspaces.Get(r.Context(), canonicalKey)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			if !ok {
+				writeJSON(w, map[string]any{"ok": false, "workspace": nil})
+				return
+			}
+			writeJSON(w, map[string]any{"ok": true, "workspace": ws})
+			return
+		}
+
+		switch parts[2] {
+		case "merge":
+			if r.Method != http.MethodPost {
+				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+				return
+			}
+			res, err := a.Workspaces.Merge(r.Context(), canonicalKey)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			writeJSON(w, res)
+		case "discard":
+			if r.Method != http.MethodPost {
+				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+				return
+			}
+			if err := a.Workspaces.Discard(r.Context(), canonicalKey); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			writeJSON(w, map[string]any{"ok": true})
+		default:
+			http.NotFound(w, r)
+		}
 	case "rename":
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)

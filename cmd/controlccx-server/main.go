@@ -23,6 +23,7 @@ import (
 	"controlccx/internal/db"
 	"controlccx/internal/events"
 	"controlccx/internal/observer"
+	"controlccx/internal/runworkspace"
 	"controlccx/internal/skills"
 	"controlccx/internal/tasks"
 	"controlccx/internal/tooling"
@@ -112,6 +113,7 @@ func main() {
 		log.Fatal(err)
 	}
 	autoScan := skills.NewAutoVersionScanner(skillsSvc, perSkillVersionsSvc, skills.AutoVersionScanOptions{})
+	workspacesSvc := runworkspace.NewService(taskStore, runworkspace.Options{})
 
 	apiSvc := &api.API{
 		Tasks:                taskStore,
@@ -125,6 +127,7 @@ func main() {
 		SkillVersionsBySkill: perSkillVersionsSvc,
 		SkillAutoVersionScan: autoScan,
 		Tools:                toolsSvc,
+		Workspaces:           workspacesSvc,
 	}
 
 	mux := http.NewServeMux()
