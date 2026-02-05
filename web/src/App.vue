@@ -579,6 +579,11 @@ function openSkillVersions(name: string, hasSource: boolean) {
   skillVersionsOpen.value = true;
 }
 
+function closeSkillVersions() {
+  skillVersionsOpen.value = false;
+  if (skillsOpen.value) void refreshSkills();
+}
+
 const outputTab = ref<"result" | "logs" | "trace">("result");
 const resultPreviewTab = ref<"markdown" | "raw" | "html">("markdown");
 const logPreviewTab = ref<"pretty" | "raw">("pretty");
@@ -6276,7 +6281,7 @@ watch(
           :open="skillVersionsOpen"
           :skill="skillVersionsSkill"
           :has-source="skillVersionsHasSource"
-          @close="skillVersionsOpen = false"
+          @close="closeSkillVersions"
         />
 	
 		    <div

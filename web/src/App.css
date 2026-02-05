@@ -1839,6 +1839,20 @@ h2 {
   min-width: 0;
 }
 
+:deep(.newVersionPill) {
+  white-space: nowrap;
+}
+
+@container (max-width: 520px) {
+  :deep(.skillsNameTop) {
+    flex-wrap: wrap;
+  }
+
+  :deep(.skillsNameTop .mono) {
+    flex-basis: 100%;
+  }
+}
+
 :deep(.skillsName .mono) {
   overflow: hidden;
   text-overflow: ellipsis;

@@ -148,6 +148,12 @@ function takeoverTitle(target: SkillTarget): string {
   const t = targetLabel(target);
   return `接管 ${t} 目标中的同名条目（将覆盖并改为受控关联）`;
 }
+
+function newVersionTitle(skill: Skill): string {
+  const at = String(skill.new_version_at ?? "").trim();
+  if (at) return `已自动生成新快照（不自动切换）。${at}`;
+  return "已自动生成新快照（不自动切换）。点击“版本”查看。";
+}
 </script>
 
 <template>
@@ -231,6 +237,12 @@ function takeoverTitle(target: SkillTarget): string {
             <div class="skillsName">
               <div class="skillsNameTop">
                 <div class="mono">{{ s.name }}</div>
+                <span
+                  v-if="s.new_version"
+                  class="pill warn mono newVersionPill"
+                  :title="newVersionTitle(s)"
+                  >新版本</span
+                >
                 <button
                   type="button"
                   class="skillActionBtn"

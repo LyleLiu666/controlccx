@@ -259,6 +259,16 @@ type versionManifest struct {
 	Note       string `json:"note,omitempty"`
 	SourceRoot string `json:"source_root"`
 	Skill      string `json:"skill,omitempty"`
+
+	// Optional metadata for change detection / provenance (backward compatible).
+	ContentHash     string `json:"content_hash,omitempty"`
+	SourceType      string `json:"source_type,omitempty"`
+	SourceRef       string `json:"source_ref,omitempty"`
+	SourceRevision  string `json:"source_revision,omitempty"`
+	SourceUpdatedAt string `json:"source_updated_at,omitempty"`
+
+	Auto     bool   `json:"auto,omitempty"`
+	AutoKind string `json:"auto_kind,omitempty"` // "baseline" | "update"
 }
 
 func writeVersionManifest(dir string, m versionManifest) error {

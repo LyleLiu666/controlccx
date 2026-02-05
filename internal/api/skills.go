@@ -17,6 +17,12 @@ func (a *API) handleSkills(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "skills service not configured", http.StatusNotImplemented)
 		return
 	}
+
+	// Trigger background auto-scan (throttled). Do not block the list call.
+	if a.SkillAutoVersionScan != nil {
+		a.SkillAutoVersionScan.TriggerAsync(r.Context(), false)
+	}
+
 	out, err := a.Skills.List(r.Context())
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -58,6 +64,19 @@ func (a *API) handleSkills(w http.ResponseWriter, r *http.Request) {
 			end = total
 		}
 		items = items[offset:end]
+	}
+
+	if a.SkillAutoVersionScan != nil {
+		for i := range items {
+			st, err := a.SkillAutoVersionScan.Status(items[i].Name)
+			if err != nil {
+				continue
+			}
+			items[i].VersionsCount = st.VersionsCount
+			items[i].LatestVersionID = st.LatestVersionID
+			items[i].NewVersion = st.NewVersion
+			items[i].NewVersionAt = st.NewVersionAt
+		}
 	}
 
 	type skillsPage struct {

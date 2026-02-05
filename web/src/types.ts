@@ -118,6 +118,10 @@ export type Skill = {
   sources?: string[];
   source?: string;
   targets?: SkillTargetState[];
+  versions_count?: number;
+  latest_version_id?: string;
+  new_version?: boolean;
+  new_version_at?: string;
 };
 
 export type SkillsListResponse = {

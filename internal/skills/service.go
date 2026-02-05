@@ -15,9 +15,9 @@ import (
 type Target string
 
 const (
-	TargetClaudeCode Target = "claude_code"
-	TargetCodex      Target = "codex"
-	TargetCursor     Target = "cursor"
+	TargetClaudeCode  Target = "claude_code"
+	TargetCodex       Target = "codex"
+	TargetCursor      Target = "cursor"
 	TargetAntigravity Target = "antigravity"
 	TargetOpencode    Target = "opencode"
 )
@@ -54,6 +54,12 @@ type Skill struct {
 	Sources         []string      `json:"sources,omitempty"`
 	PreferredSource string        `json:"source,omitempty"`
 	Targets         []TargetState `json:"targets,omitempty"`
+
+	// Optional per-skill snapshot status (filled by API layer when enabled).
+	VersionsCount   int    `json:"versions_count,omitempty"`
+	LatestVersionID string `json:"latest_version_id,omitempty"`
+	NewVersion      bool   `json:"new_version,omitempty"`
+	NewVersionAt    string `json:"new_version_at,omitempty"`
 }
 
 type ListResponse struct {
@@ -132,9 +138,9 @@ func NewService(opts Options) (*Service, error) {
 		homeDir:     home,
 		sourceRoots: dedupePaths(normalizedRoots),
 		targetRoots: map[Target][]string{
-			TargetClaudeCode: {claudeRoot},
-			TargetCodex:      codexRoots,
-			TargetCursor:     {cursorRoot},
+			TargetClaudeCode:  {claudeRoot},
+			TargetCodex:       codexRoots,
+			TargetCursor:      {cursorRoot},
 			TargetAntigravity: {antigravityRoot},
 			TargetOpencode:    {opencodeRoot},
 		},

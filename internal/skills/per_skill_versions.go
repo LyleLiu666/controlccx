@@ -13,28 +13,28 @@ import (
 )
 
 type PerSkillVersionsListResponse struct {
-	Skill       string    `json:"skill"`
-	SourceRoot  string    `json:"source_root"`
-	SkillSource string    `json:"skill_source"`
-	VersionsRoot string   `json:"versions_root"`
-	Manifest    *ManagedSkillManifest `json:"manifest,omitempty"`
-	Versions    []Version `json:"versions"`
+	Skill        string                `json:"skill"`
+	SourceRoot   string                `json:"source_root"`
+	SkillSource  string                `json:"skill_source"`
+	VersionsRoot string                `json:"versions_root"`
+	Manifest     *ManagedSkillManifest `json:"manifest,omitempty"`
+	Versions     []Version             `json:"versions"`
 }
 
 type PerSkillVersionsOptions struct {
-	HomeDir      string
-	SourceRoot   string
+	HomeDir       string
+	SourceRoot    string
 	FallbackRoots []string
-	VersionsRoot string
-	Now          func() time.Time
+	VersionsRoot  string
+	Now           func() time.Time
 }
 
 type PerSkillVersionsService struct {
-	homeDir      string
-	sourceRoot   string
+	homeDir       string
+	sourceRoot    string
 	fallbackRoots []string
-	versionsRoot string
-	now          func() time.Time
+	versionsRoot  string
+	now           func() time.Time
 }
 
 type RestoreVersionInput struct {
@@ -116,11 +116,11 @@ func NewPerSkillVersionsService(opts PerSkillVersionsOptions) (*PerSkillVersions
 	}
 
 	return &PerSkillVersionsService{
-		homeDir:      home,
-		sourceRoot:   sourceRoot,
+		homeDir:       home,
+		sourceRoot:    sourceRoot,
 		fallbackRoots: dedupePaths(normalizedFallback),
-		versionsRoot: versionsRoot,
-		now:          now,
+		versionsRoot:  versionsRoot,
+		now:           now,
 	}, nil
 }
 
@@ -226,18 +226,27 @@ func (s *PerSkillVersionsService) Create(ctx context.Context, skill string, inpu
 	if err != nil {
 		return Version{}, err
 	}
-	if err := copyDir(src, tmpDir); err != nil {
+	if err := copyDirFiltered(src, tmpDir, fingerprintIgnoreNames); err != nil {
 		return Version{}, fmt.Errorf("skills: snapshot %q: %w", skill, err)
 	}
 
 	createdAt := s.now().UTC().Format(time.RFC3339)
-	if err := writeVersionManifest(tmpDir, versionManifest{
-		ID:         id,
-		CreatedAt:  createdAt,
-		Note:       strings.TrimSpace(input.Note),
-		SourceRoot: s.sourceRoot,
-		Skill:      skill,
-	}); err != nil {
+	contentHash, _ := dirFingerprint(tmpDir)
+	meta := versionManifest{
+		ID:          id,
+		CreatedAt:   createdAt,
+		Note:        strings.TrimSpace(input.Note),
+		SourceRoot:  s.sourceRoot,
+		Skill:       skill,
+		ContentHash: contentHash,
+	}
+	if m, err := readManagedManifest(src); err == nil {
+		meta.SourceType = strings.TrimSpace(m.SourceType)
+		meta.SourceRef = strings.TrimSpace(m.SourceRef)
+		meta.SourceRevision = strings.TrimSpace(m.SourceRevision)
+		meta.SourceUpdatedAt = strings.TrimSpace(m.UpdatedAt)
+	}
+	if err := writeVersionManifest(tmpDir, meta); err != nil {
 		return Version{}, err
 	}
 

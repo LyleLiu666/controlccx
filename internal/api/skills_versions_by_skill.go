@@ -42,6 +42,10 @@ func (a *API) handleSkillVersionsBySkill(w http.ResponseWriter, r *http.Request,
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
+		// Opening the versions panel acknowledges "new version" and ensures baseline/update snapshots exist.
+		if a.SkillAutoVersionScan != nil {
+			_ = a.SkillAutoVersionScan.EnsureSkill(r.Context(), name, true)
+		}
 		out, err := a.SkillVersionsBySkill.List(r.Context(), name)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)

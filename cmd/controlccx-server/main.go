@@ -111,6 +111,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	autoScan := skills.NewAutoVersionScanner(skillsSvc, perSkillVersionsSvc, skills.AutoVersionScanOptions{})
 
 	apiSvc := &api.API{
 		Tasks:                taskStore,
@@ -122,6 +123,7 @@ func main() {
 		Skills:               skillsSvc,
 		SkillVersions:        skillVersionsSvc,
 		SkillVersionsBySkill: perSkillVersionsSvc,
+		SkillAutoVersionScan: autoScan,
 		Tools:                toolsSvc,
 	}
 
@@ -136,6 +138,30 @@ func main() {
 		ReadTimeout:  30 * time.Second,
 		WriteTimeout: 0,
 		IdleTimeout:  60 * time.Second,
+	}
+
+	if autoScan != nil {
+		stopAutoScan := make(chan struct{})
+		srv.RegisterOnShutdown(func() {
+			close(stopAutoScan)
+		})
+
+		// Kick off a best-effort scan on startup (async).
+		autoScan.TriggerAsync(context.Background(), true)
+
+		// Scheduled scan every 3 hours.
+		go func() {
+			ticker := time.NewTicker(3 * time.Hour)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ticker.C:
+					autoScan.TriggerAsync(context.Background(), true)
+				case <-stopAutoScan:
+					return
+				}
+			}
+		}()
 	}
 
 	go func() {
