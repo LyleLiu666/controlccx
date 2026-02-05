@@ -184,10 +184,13 @@ onMounted(() => {
 <template>
   <div class="contextPanel">
     <div class="contextHeader">
-      <div class="contextTitle">上下文 / 模板</div>
+      <div class="contextHeaderLeft">
+        <div class="contextTitle">上下文 / 模板</div>
+        <div class="contextSubtitle">Project Context 与 Prompt Templates（会压缩/限长）</div>
+      </div>
       <span class="h2Spacer"></span>
-      <button type="button" class="h2Btn" @click="emit('back')" aria-label="Back">
-        ✕
+      <button type="button" class="contextCloseBtn" @click="emit('back')" aria-label="Close">
+        <span aria-hidden="true">×</span>
       </button>
     </div>
 
@@ -198,17 +201,19 @@ onMounted(() => {
     <div class="contextGrid">
       <section class="contextSection">
         <div class="contextSectionTitle">
-          Project Context
+          <div class="contextSectionTitleLeft">Project Context</div>
           <span class="h2Spacer"></span>
-          <button
-            type="button"
-            class="primary"
-            @click="saveContext"
-            :disabled="contextLoading || contextSaving || !contextDirty"
-            :title="contextDirty ? '保存 Project Context' : '无更改'"
-          >
-            {{ contextSaving ? "保存中…" : "保存" }}
-          </button>
+          <div class="contextSectionTitleActions">
+            <button
+              type="button"
+              class="primary"
+              @click="saveContext"
+              :disabled="contextLoading || contextSaving || !contextDirty"
+              :title="contextDirty ? '保存 Project Context' : '无更改'"
+            >
+              {{ contextSaving ? "保存中…" : "保存" }}
+            </button>
+          </div>
         </div>
         <textarea
           v-model="contextDraft"
@@ -230,29 +235,29 @@ onMounted(() => {
 
       <section class="contextSection">
         <div class="contextSectionTitle">
-          Prompt Templates
+          <div class="contextSectionTitleLeft">Prompt Templates</div>
           <span class="h2Spacer"></span>
-          <button type="button" @click="loadTemplates" :disabled="templatesLoading || templatesSaving">
-            刷新
-          </button>
-          <button type="button" class="primary" @click="newTemplate('task')" :disabled="templatesSaving">
-            新建任务模板
-          </button>
-          <button type="button" class="primary" @click="newTemplate('chat')" :disabled="templatesSaving">
-            新建对话模板
-          </button>
+          <div class="contextSectionTitleActions">
+            <button type="button" @click="loadTemplates" :disabled="templatesLoading || templatesSaving">刷新</button>
+            <button type="button" class="primary" @click="newTemplate('task')" :disabled="templatesSaving">
+              新建任务模板
+            </button>
+            <button type="button" class="primary" @click="newTemplate('chat')" :disabled="templatesSaving">
+              新建对话模板
+            </button>
+          </div>
         </div>
 
         <div class="templatesToolbar">
-          <label>
-            Kind
+          <label class="templatesKindFilter">
+            <span class="fieldLabel">Kind</span>
             <select v-model="templatesKind" :disabled="templatesLoading || templatesSaving">
               <option value="all">all</option>
               <option value="task">task</option>
               <option value="chat">chat</option>
             </select>
           </label>
-          <div class="tinyHint">
+          <div class="tinyHint templatesHint">
             New Run 使用 <span class="mono">task</span> 模板；Secretary 使用 <span class="mono">chat</span> 模板。
           </div>
         </div>
@@ -260,7 +265,7 @@ onMounted(() => {
         <div class="templatesBody">
           <div class="templatesList">
             <div v-if="templatesLoading" class="loading">加载中…</div>
-            <div v-else-if="!templates.length" class="tinyHint">暂无模板</div>
+            <div v-else-if="!templates.length" class="templatesEmpty">暂无模板</div>
             <button
               v-for="t in templates"
               :key="t.id"
@@ -279,19 +284,19 @@ onMounted(() => {
           </div>
 
           <div class="templatesEditor">
-            <label class="full">
-              Title
+            <label class="templatesField templatesFieldTitle">
+              <span class="fieldLabel">Title</span>
               <input v-model="editorTitle" placeholder="模板标题" @input="editorDirty = true" />
             </label>
-            <label>
-              Kind
-              <select v-model="editorKind" @change="editorDirty = true">
+            <label class="templatesField templatesFieldKind">
+              <span class="fieldLabel">Kind</span>
+              <select v-model="editorKind" @change="editorDirty = true" aria-label="Template kind">
                 <option value="task">task</option>
                 <option value="chat">chat</option>
               </select>
             </label>
-            <label class="full">
-              Content
+            <label class="templatesField full">
+              <span class="fieldLabel">Content</span>
               <textarea
                 v-model="editorContent"
                 rows="9"
@@ -322,4 +327,3 @@ onMounted(() => {
     </div>
   </div>
 </template>
-
