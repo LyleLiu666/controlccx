@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import SkillsInsertModal from "./SkillsInsertModal.vue";
+import WorkdirCombobox from "./WorkdirCombobox.vue";
 import type { Tool, ToolDriver } from "../types";
 import {
   isHighRiskPreset,
@@ -8,10 +9,14 @@ import {
   toolDriverForWorkerType,
 } from "../runSafety";
 
+type WorkdirOption = { value: string; label: string; subLabel?: string };
+
 const props = defineProps<{
   open: boolean;
   workdir: string;
   prompt: string;
+  workdirPinnedOptions: WorkdirOption[];
+  workdirRecentOptions: WorkdirOption[];
   missingAuthText: string;
   toolsList: Tool[];
   toolsError: string;
@@ -62,10 +67,6 @@ function close() {
   closeSkillsPicker();
   emit("update:open", false);
   emit("close");
-}
-
-function updateWorkdir(e: Event) {
-  emit("update:workdir", (e.target as HTMLInputElement).value);
 }
 
 function updatePrompt(e: Event) {
@@ -140,11 +141,12 @@ watch(
           <label class="full">
             工作目录
             <div class="workdirRow">
-              <input
-                :value="workdir"
-                @input="updateWorkdir"
-                list="workdirSuggestions"
+              <WorkdirCombobox
+                :modelValue="workdir"
+                :pinned="workdirPinnedOptions"
+                :recent="workdirRecentOptions"
                 placeholder="."
+                @update:modelValue="emit('update:workdir', $event)"
               />
               <button type="button" @click="emit('openDirPicker')">浏览</button>
             </div>

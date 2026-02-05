@@ -92,6 +92,7 @@ import BlockedPromptModal from "./components/BlockedPromptModal.vue";
 import RehydratePromptModal from "./components/RehydratePromptModal.vue";
 import WorkdirBusyModal from "./components/WorkdirBusyModal.vue";
 import WorktreeUntrackedModal from "./components/WorktreeUntrackedModal.vue";
+import WorkdirCombobox from "./components/WorkdirCombobox.vue";
 import { useSkills } from "./composables/useSkills";
 import { useSecretaryChat } from "./composables/useSecretaryChat";
 import { useTasks } from "./composables/useTasks";
@@ -4393,25 +4394,23 @@ const recentWorkspacesUnpinned = computed(() => {
   );
 });
 
-const workdirSuggestions = computed<string[]>(() => {
-  const out: string[] = [];
-  const seen = new Set<string>();
+type WorkdirOption = { value: string; label: string; subLabel?: string };
 
-  const add = (p: string) => {
-    const raw = String(p ?? "").trim();
-    if (!raw) return;
-    const key = normalizePathForCompare(raw);
-    if (!key) return;
-    if (seen.has(key)) return;
-    seen.add(key);
-    out.push(raw);
-  };
+const workdirPinnedOptions = computed<WorkdirOption[]>(() =>
+  pinnedWorkspaces.value.map((p) => {
+    const name = pinnedWorkspaceName(p);
+    if (name) return { value: p, label: name, subLabel: p };
+    return { value: p, label: p };
+  }),
+);
 
-  for (const p of pinnedWorkspaces.value) add(p);
-  for (const p of recentWorkspaces.value) add(p);
-
-  return out.slice(0, 12);
-});
+const workdirRecentOptions = computed<WorkdirOption[]>(() =>
+  recentWorkspacesUnpinned.value.map((p) => {
+    const label = workdirLabelForSession(p) || p;
+    if (label && label !== p) return { value: p, label, subLabel: p };
+    return { value: p, label: p, subLabel: p };
+  }),
+);
 
 const secretarySessionsAll = computed(() => {
   const scope = secretaryScope.value;
@@ -5089,10 +5088,11 @@ watch(
             <label class="full">
               工作目录
               <div class="workdirRow">
-                <input
+                <WorkdirCombobox
                   v-model="newWorkdir"
+                  :pinned="workdirPinnedOptions"
+                  :recent="workdirRecentOptions"
                   placeholder="."
-                  list="workdirSuggestions"
                 />
                 <button type="button" @click="openDirPicker">选择</button>
               </div>
@@ -6163,6 +6163,8 @@ watch(
       v-model:autopilotEnabled="runSafetyAutopilotEnabled"
       v-model:safetyPreset="newRunSafetyPreset"
       v-model:highRiskOptIn="newRunHighRiskOptIn"
+      :workdirPinnedOptions="workdirPinnedOptions"
+      :workdirRecentOptions="workdirRecentOptions"
       :missingAuthText="missingAuthText"
       :toolsList="toolsList"
       :toolsError="toolsError"
@@ -6527,10 +6529,6 @@ watch(
         </button>
       </div>
     </teleport>
-
-    <datalist id="workdirSuggestions">
-      <option v-for="p in workdirSuggestions" :key="p" :value="p" />
-    </datalist>
   </div>
 </template>
 

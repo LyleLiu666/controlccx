@@ -9,19 +9,24 @@ function readText(relativePath: string) {
 test("Workdir picker supports recent dropdown + typing (New Run modal + Home)", () => {
   const appVue = readText("../src/App.vue");
   const newRunModal = readText("../src/components/NewRunModal.vue");
+  const combobox = readText("../src/components/WorkdirCombobox.vue");
 
-  // A shared datalist provides recent directories while keeping free-typing.
-  assert.match(appVue, /<datalist\s+id="workdirSuggestions">/);
-  assert.match(appVue, /v-for="p in workdirSuggestions"/);
+  // Home form workdir input keeps free typing but adds a custom suggestions menu.
+  assert.ok(appVue.includes("<WorkdirCombobox"));
+  assert.ok(appVue.includes('v-model="newWorkdir"'));
+  assert.ok(appVue.includes(':pinned="workdirPinnedOptions"'));
+  assert.ok(appVue.includes(':recent="workdirRecentOptions"'));
 
-  // Home form workdir input uses the shared suggestions.
-  assert.match(
-    appVue,
-    /<input[^>]*v-model="newWorkdir"[^>]*\slist="workdirSuggestions"/,
+  // NewRunModal workdir input uses the same combobox pattern.
+  assert.ok(newRunModal.includes("<WorkdirCombobox"));
+  assert.ok(newRunModal.includes(':modelValue="workdir"'));
+  assert.ok(
+    newRunModal.includes(`@update:modelValue="emit('update:workdir', $event)"`),
   );
 
-  // NewRunModal workdir input uses the shared suggestions.
-  assert.match(newRunModal, /\slist="workdirSuggestions"/);
+  // The combobox itself is built around an <input> (typing) + a toggle button (dropdown).
+  assert.ok(combobox.includes("@input=\"onInput\""));
+  assert.ok(combobox.includes('class="workdirComboToggle"'));
 });
 
 test("New Run modal spacing avoids cramped skills hint / advanced menu", () => {
@@ -39,4 +44,3 @@ test("New Run modal spacing avoids cramped skills hint / advanced menu", () => {
     /:deep\(\.newRunPromptLabelRow\)\s*{[^}]*justify-content:\s*flex-start[^}]*}/,
   );
 });
-
