@@ -11,7 +11,7 @@ import (
 	"controlccx/internal/tasks"
 )
 
-func TestObserverRespond_DeliveryForemanFallback_UpdatesAcceptanceState(t *testing.T) {
+func TestObserverRespond_DeliveryForemanRequiresLLM_NoDeterministicFallback(t *testing.T) {
 	ctx := context.Background()
 	dbPath := filepath.Join(t.TempDir(), "controlccx.db")
 
@@ -61,18 +61,15 @@ func TestObserverRespond_DeliveryForemanFallback_UpdatesAcceptanceState(t *testi
 	if err != nil {
 		t.Fatalf("respond: %v", err)
 	}
-	if !strings.Contains(reply.Message, "验收") {
-		t.Fatalf("reply=%q, want contains 验收", reply.Message)
+	if !strings.Contains(reply.Message, "ANTHROPIC_AUTH_TOKEN") {
+		t.Fatalf("reply=%q, want config hint mentioning ANTHROPIC_AUTH_TOKEN", reply.Message)
 	}
 
-	st, ok, err := store.GetAcceptanceState(ctx, tasks.SessionKeyForTask(task))
+	_, ok, err := store.GetAcceptanceState(ctx, tasks.SessionKeyForTask(task))
 	if err != nil {
 		t.Fatalf("get acceptance: %v", err)
 	}
-	if !ok {
-		t.Fatalf("expected acceptance state present")
-	}
-	if st.Status == "" {
-		t.Fatalf("unexpected acceptance status: %+v", st)
+	if ok {
+		t.Fatalf("expected no acceptance state without LLM (no deterministic fallback)")
 	}
 }

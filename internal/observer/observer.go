@@ -14,7 +14,6 @@ import (
 	"unicode/utf8"
 
 	"controlccx/internal/chat"
-	"controlccx/internal/systeminfo"
 	"controlccx/internal/tasks"
 )
 
@@ -29,7 +28,8 @@ type Service struct {
 	// AgentMaxSteps limits the tool-call loop iterations. If zero, a default is used.
 	AgentMaxSteps int
 
-	// ForceAgent disables heuristic fallback when an LLM backend is configured.
+	// ForceAgent is kept for backwards compatibility. The Secretary is LLM-only:
+	// Respond will not fall back to deterministic/heuristic answers.
 	ForceAgent bool
 }
 
@@ -64,25 +64,24 @@ func (s *Service) RespondWithOptions(ctx context.Context, userMessage string, op
 		return Reply{Message: "请先描述你的问题。"}, nil
 	}
 
-	lower := strings.ToLower(msg)
-	if looksLikeResumeQuery(msg, lower) {
-		return s.handleResumeQuery(ctx, msg, lower)
+	backend := s.selectBackend(opts.Backend)
+	if backend == nil {
+		return Reply{Message: llmUnavailableMessage(opts.Backend)}, nil
 	}
 
-	backend := s.selectBackend(opts.Backend)
-	if backend != nil {
-		llmMsg := msg
-		if s.Chat != nil {
-			ctxText, err := s.recentChatContext(ctx, msg)
-			if err == nil && strings.TrimSpace(ctxText) != "" {
-				llmMsg = ctxText + "\n\nCurrent user message:\n" + msg
-			}
+	llmMsg := msg
+	if s.Chat != nil {
+		ctxText, err := s.recentChatContext(ctx, msg)
+		if err == nil && strings.TrimSpace(ctxText) != "" {
+			llmMsg = ctxText + "\n\nCurrent user message:\n" + msg
 		}
-		agent := Agent{
-			LLM:      backend,
-			Tools:    s.agentTools(),
-			MaxSteps: pickMaxSteps(opts.MaxSteps, s.AgentMaxSteps),
-			SystemPrompt: `你是 ControlCCX 的秘书（一个具备 tool 调用能力的 agent）。
+	}
+
+	agent := Agent{
+		LLM:      backend,
+		Tools:    s.agentTools(),
+		MaxSteps: pickMaxSteps(opts.MaxSteps, s.AgentMaxSteps),
+		SystemPrompt: `你是 ControlCCX 的秘书（一个具备 tool 调用能力的 agent）。
 
 你必须优先使用提供的 tools 获取信息来回答问题，不能编造任务/日志/系统信息。
 
@@ -124,70 +123,56 @@ func (s *Service) RespondWithOptions(ctx context.Context, userMessage string, op
 同时兼容 legacy JSON 格式：
 {"action":"tool","tool":"<tool_name>","args":{...}}
 {"action":"final","message":"<中文回答>"}`,
-			OnToolCall:   opts.OnToolCall,
-			OnToolResult: opts.OnToolResult,
-		}
-
-		ans, err := agent.Run(ctx, llmMsg)
-		if err == nil && strings.TrimSpace(ans) != "" {
-			return Reply{Message: ans}, nil
-		}
-		if s.ForceAgent {
-			if err == nil {
-				err = fmt.Errorf("llm agent returned empty response")
-			}
-			return Reply{}, err
-		}
-		// Fall back to deterministic heuristics if the agent is unavailable/fails.
+		OnToolCall:   opts.OnToolCall,
+		OnToolResult: opts.OnToolResult,
 	}
 
-	if s.ForceAgent && strings.TrimSpace(opts.Backend) != "" && backend == nil {
-		return Reply{}, fmt.Errorf("llm backend not available for backend=%q", strings.TrimSpace(opts.Backend))
-	}
-
-	if looksLikeDeliveryForemanPrompt(msg, lower) {
-		return s.handleDeliveryForemanFallback(ctx, msg)
-	}
-
-	all, err := s.Store.ListTasks(ctx, 500)
+	ans, err := agent.Run(ctx, llmMsg)
 	if err != nil {
-		return Reply{}, err
+		return Reply{Message: llmFailedMessage(opts.Backend, backend, err)}, nil
 	}
-
-	if looksLikeCountQuery(msg, lower) {
-		running := 0
-		for _, t := range all {
-			if t.Status == tasks.StatusRunning {
-				running++
-			}
-		}
-		return Reply{Message: fmt.Sprintf("当前有 %d 个任务在执行（running）。", running)}, nil
+	ans = strings.TrimSpace(ans)
+	if ans == "" {
+		return Reply{Message: llmFailedMessage(opts.Backend, backend, fmt.Errorf("llm agent returned empty response"))}, nil
 	}
+	return Reply{Message: ans}, nil
+}
 
-	if looksLikeProblemQuery(msg, lower) {
-		if len(all) == 0 {
-			return Reply{Message: "当前还没有任务。"}, nil
-		}
-		sort.SliceStable(all, func(i, j int) bool {
-			if all[i].Score == all[j].Score {
-				return all[i].CreatedAt.After(all[j].CreatedAt)
-			}
-			return all[i].Score > all[j].Score
-		})
-		top := all[0]
-		return Reply{Message: fmt.Sprintf("我认为问题最多的是任务 %s（score=%d, status=%s, stderr=%d）。", top.ID, top.Score, top.Status, top.StderrCount)}, nil
+func llmUnavailableMessage(requestedBackend string) string {
+	b := strings.ToLower(strings.TrimSpace(requestedBackend))
+	if b == "" || b == "auto" {
+		b = ""
 	}
-
-	if looksLikeLengthQuery(msg, lower) {
-		return s.answerLengthQuery(ctx, msg, all)
+	if b != "" {
+		b = fmt.Sprintf("（backend=%s）", b)
 	}
+	return strings.TrimSpace(fmt.Sprintf(`秘书不可用%s：未配置可用的 LLM backend。
 
-	if strings.Contains(lower, "system") || strings.Contains(msg, "系统") || strings.Contains(msg, "机器") {
-		info := systeminfo.Snapshot()
-		return Reply{Message: fmt.Sprintf("系统信息：%s %s，主机名 %s。", info.OS, info.Arch, info.Hostname)}, nil
+最小修复步骤：
+1) 安装并配置 Claude Code 或 Codex CLI（可在 config.yaml 的 paths.claude / paths.codex 指定路径）
+2) 配置凭据：Claude Code 使用 ANTHROPIC_API_KEY 或 ANTHROPIC_AUTH_TOKEN；Codex 使用 OPENAI_API_KEY
+3) 然后重试`, b))
+}
+
+func llmFailedMessage(requestedBackend string, backend Backend, err error) string {
+	name := ""
+	if backend != nil {
+		name = strings.TrimSpace(backend.Name())
 	}
+	req := strings.TrimSpace(requestedBackend)
+	if req == "" {
+		req = "auto"
+	}
+	detail := ""
+	if err != nil {
+		detail = truncateDisplay(strings.TrimSpace(err.Error()), 800)
+	}
+	return strings.TrimSpace(fmt.Sprintf(`秘书调用 LLM 失败（backend=%s, provider=%s）：%s
 
-	return Reply{Message: "我可以回答：当前运行任务数量、最有问题的任务、任务结果字数是否达标、以及服务器系统信息。你也可以直接问：'我们有几个任务在执行' / '哪个任务问题比较多' / '刚刚那个写脱口秀的任务字数够不够'。"}, nil
+提示：
+- 确认 Claude Code/Codex CLI 可执行（PATH 或 config.yaml 的 paths.*）
+- 确认凭据已配置：ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN / OPENAI_API_KEY
+- 重新打开面板或重试`, req, name, detail))
 }
 
 var reRunIDLine = regexp.MustCompile(`(?m)^\s*run_id:\s*([0-9a-fA-F-]{8,64})\s*$`)

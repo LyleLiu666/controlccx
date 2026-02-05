@@ -66,6 +66,19 @@ func NewClaudeCLIBackend(cfg config.Config, authStore *auth.Store) Backend {
 
 func (b *ClaudeCLIBackend) Name() string { return "claude-cli" }
 
+const slimClaudeSystemPrompt = ""
+
+func (b *ClaudeCLIBackend) buildArgs() []string {
+	return []string{
+		"-p",
+		"--tools", "",
+		"--system-prompt", slimClaudeSystemPrompt,
+		"--output-format", "stream-json",
+		"--verbose",
+		"-",
+	}
+}
+
 func (b *ClaudeCLIBackend) Complete(ctx context.Context, prompt string) (string, error) {
 	ctx, cancel := withDefaultTimeout(ctx, 60*time.Second)
 	defer cancel()
@@ -75,13 +88,7 @@ func (b *ClaudeCLIBackend) Complete(ctx context.Context, prompt string) (string,
 		cmdPath = "claude"
 	}
 
-	args := []string{
-		"-p",
-		"--tools", "",
-		"--output-format", "stream-json",
-		"--verbose",
-		"-",
-	}
+	args := b.buildArgs()
 
 	toolCmd := exec.CommandContext(ctx, cmdPath, args...)
 	toolCmd.Dir = b.cfg.Paths.DataDir

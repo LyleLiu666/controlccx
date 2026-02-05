@@ -51,6 +51,18 @@ func TestComputeStatus_PrefersEnvOverStored(t *testing.T) {
 	}
 }
 
+func TestComputeStatus_ClaudeAuthToken_EnablesAvailability(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("ANTHROPIC_AUTH_TOKEN", "env-token-123456")
+	st := ComputeStatus(Secrets{})
+	if st.Claude.AuthToken.Effective != "env" {
+		t.Fatalf("effective=%q, want env", st.Claude.AuthToken.Effective)
+	}
+	if !st.Claude.Available {
+		t.Fatalf("expected claude available with ANTHROPIC_AUTH_TOKEN")
+	}
+}
+
 func TestComputeStatus_UsesStoredWhenEnvMissing(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "")
 	st := ComputeStatus(Secrets{OpenAIAPIKey: "stored-openai-abcdef"})

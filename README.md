@@ -76,6 +76,18 @@ Workers inherit environment variables from the ControlCCX server process. You ca
 - Claude Code (subscription token): `ANTHROPIC_AUTH_TOKEN` (or run `claude /login` once in a terminal on this machine)
 - Codex: `OPENAI_API_KEY`
 
+## Secretary (Observer) is LLM-only (禁止 deterministic/heuristic)
+
+The built-in Secretary (Observer) is an **agentic** role: it MUST use an LLM backend (Claude Code CLI / Codex CLI) and tools to reason, inspect real system state, and perform actions.
+
+ControlCCX intentionally does **not** provide deterministic/heuristic “fallback answers” for the Secretary (e.g. “count tasks from DB without LLM”, or “auto resume when LLM is missing”). If the LLM backend is not configured/available, the Secretary will fail-fast and tell you the minimal fix steps.
+
+Claude Code compatible vendors (e.g. Kimi/Minimax/GLM gateways) are supported via standard env vars:
+
+- `ANTHROPIC_BASE_URL`
+- `ANTHROPIC_AUTH_TOKEN` (required to support)
+- `ANTHROPIC_MODEL`
+
 ## Approvals (三档审批策略)
 
 部分 worker（尤其是 Claude Code）在调用工具/执行敏感动作时会要求 approval。ControlCCX 计划使用“驾驶室 + 秘书（Secretary）”的三档审批策略：
