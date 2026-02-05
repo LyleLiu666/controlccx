@@ -92,6 +92,7 @@ import RunLaunchOverlay from "./components/RunLaunchOverlay.vue";
 import RunUsageMeter from "./components/RunUsageMeter.vue";
 import HighRiskConfirmModal from "./components/HighRiskConfirmModal.vue";
 import SkillMountConfirmModal from "./components/SkillMountConfirmModal.vue";
+import RunningSessionsStartupModal from "./components/RunningSessionsStartupModal.vue";
 import BlockedPromptModal from "./components/BlockedPromptModal.vue";
 import RehydratePromptModal from "./components/RehydratePromptModal.vue";
 import WorkdirBusyModal from "./components/WorkdirBusyModal.vue";
@@ -105,6 +106,7 @@ import { useLiveFeed } from "./composables/useLiveFeed";
 import { useSessionWorkspace } from "./composables/useSessionWorkspace";
 import { shouldDismissRunLaunchMask } from "./runLaunchMask";
 import { buildSkillMountPlan, type SkillMountConfirmItem } from "./skillsPreflight";
+import { listRunningSessionCandidates, type RunningSessionCandidate } from "./runningSessions";
 
 type CreateTaskPayload = {
   worker_type: WorkerType;
@@ -192,6 +194,29 @@ const highRiskConfirmDetail = ref("");
 const highRiskConfirmConfirmLabel = ref("继续");
 const highRiskConfirmBusy = ref(false);
 let highRiskConfirmResolve: ((ok: boolean) => void) | null = null;
+
+const runningSessionsStartupOpen = ref(false);
+const runningSessionsStartupItems = ref<RunningSessionCandidate[]>([]);
+let runningSessionsStartupShown = false;
+
+function closeRunningSessionsStartupModal() {
+  runningSessionsStartupOpen.value = false;
+  runningSessionsStartupItems.value = [];
+}
+
+function selectRunningSessionFromStartup(runID: string) {
+  closeRunningSessionsStartupModal();
+  void onSelectTask(String(runID ?? "").trim());
+}
+
+function maybeOpenRunningSessionsStartupModal() {
+  if (runningSessionsStartupShown) return;
+  runningSessionsStartupShown = true;
+  const items = listRunningSessionCandidates(Array.from(tasks.value.values()));
+  if (items.length === 0) return;
+  runningSessionsStartupItems.value = items;
+  runningSessionsStartupOpen.value = true;
+}
 
 const skillMountConfirmOpen = ref(false);
 const skillMountConfirmBusy = ref(false);
@@ -4277,10 +4302,11 @@ const missingAuthText = computed(() => {
 
 onMounted(async () => {
   await refresh();
+  maybeOpenRunningSessionsStartupModal();
   if (selectedTaskId.value) await loadLogs(selectedTaskId.value);
   await refreshAuth();
   await refreshTools();
-  if (missingAuthText.value && !authSettingsOpen.value) openAuthSettings();
+  if (missingAuthText.value && !authSettingsOpen.value && !runningSessionsStartupOpen.value) openAuthSettings();
   connectEvents();
   window.addEventListener("keydown", onGlobalKeyDown);
   window.addEventListener("popstate", onRoutePopState);
@@ -6541,6 +6567,13 @@ watch(
 		      @close="closeSkillsInsert"
 		      @update:prompt="skillsInsertPrompt = $event"
 		    />
+
+        <RunningSessionsStartupModal
+          :open="runningSessionsStartupOpen"
+          :items="runningSessionsStartupItems"
+          @close="closeRunningSessionsStartupModal"
+          @select="selectRunningSessionFromStartup"
+        />
 
 		    <SkillMountConfirmModal
 		      :open="skillMountConfirmOpen"

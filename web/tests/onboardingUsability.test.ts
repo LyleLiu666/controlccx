@@ -32,7 +32,7 @@ test("missing auth auto-opens Auth Settings", () => {
   const appVue = readText("../src/App.vue");
   assert.match(
     appVue,
-    /if \(missingAuthText\.value && !authSettingsOpen\.value\) openAuthSettings\(\);/,
+    /if \(missingAuthText\.value && !authSettingsOpen\.value && !runningSessionsStartupOpen\.value\) openAuthSettings\(\);/,
   );
 });
 
