@@ -2,7 +2,9 @@ package tasks
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -120,27 +122,56 @@ func (s *Store) UpsertSessionWorkspace(ctx context.Context, in UpsertSessionWork
 		status = "active"
 	}
 
+	hasWorkspaceID, err := s.sessionWorkspacesHasWorkspaceID(ctx)
+	if err != nil {
+		return SessionWorkspace{}, err
+	}
+
 	nowMs := toMillis(s.now().UTC())
-	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO session_workspaces (
-			key, kind, base_workdir, repo_root, run_root, run_workdir,
-			base_branch, work_branch, status,
-			created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT(key) DO UPDATE SET
-			kind = excluded.kind,
-			base_workdir = excluded.base_workdir,
-			repo_root = excluded.repo_root,
-			run_root = excluded.run_root,
-			run_workdir = excluded.run_workdir,
-			base_branch = excluded.base_branch,
-			work_branch = excluded.work_branch,
-			status = excluded.status,
-			updated_at = excluded.updated_at;
-	`, key, kind, baseWorkDir, repoRoot, runRoot, runWorkDir,
-		strings.TrimSpace(in.BaseBranch), strings.TrimSpace(in.WorkBranch), status,
-		nowMs, nowMs,
-	)
+	if hasWorkspaceID {
+		workspaceID := legacyWorkspaceID(key, runRoot, runWorkDir)
+		_, err = s.db.ExecContext(ctx, `
+			INSERT INTO session_workspaces (
+				key, workspace_id, kind, base_workdir, repo_root, run_root, run_workdir,
+				base_branch, work_branch, status,
+				created_at, updated_at
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			ON CONFLICT(key) DO UPDATE SET
+				kind = excluded.kind,
+				base_workdir = excluded.base_workdir,
+				repo_root = excluded.repo_root,
+				run_root = excluded.run_root,
+				run_workdir = excluded.run_workdir,
+				base_branch = excluded.base_branch,
+				work_branch = excluded.work_branch,
+				status = excluded.status,
+				updated_at = excluded.updated_at;
+		`, key, workspaceID, kind, baseWorkDir, repoRoot, runRoot, runWorkDir,
+			strings.TrimSpace(in.BaseBranch), strings.TrimSpace(in.WorkBranch), status,
+			nowMs, nowMs,
+		)
+	} else {
+		_, err = s.db.ExecContext(ctx, `
+			INSERT INTO session_workspaces (
+				key, kind, base_workdir, repo_root, run_root, run_workdir,
+				base_branch, work_branch, status,
+				created_at, updated_at
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			ON CONFLICT(key) DO UPDATE SET
+				kind = excluded.kind,
+				base_workdir = excluded.base_workdir,
+				repo_root = excluded.repo_root,
+				run_root = excluded.run_root,
+				run_workdir = excluded.run_workdir,
+				base_branch = excluded.base_branch,
+				work_branch = excluded.work_branch,
+				status = excluded.status,
+				updated_at = excluded.updated_at;
+		`, key, kind, baseWorkDir, repoRoot, runRoot, runWorkDir,
+			strings.TrimSpace(in.BaseBranch), strings.TrimSpace(in.WorkBranch), status,
+			nowMs, nowMs,
+		)
+	}
 	if err != nil {
 		return SessionWorkspace{}, fmt.Errorf("tasks: upsert session workspace: %w", err)
 	}
@@ -149,6 +180,88 @@ func (s *Store) UpsertSessionWorkspace(ctx context.Context, in UpsertSessionWork
 		return SessionWorkspace{}, err
 	}
 	return out, nil
+}
+
+func (s *Store) sessionWorkspacesHasWorkspaceID(ctx context.Context) (bool, error) {
+	if s == nil || s.db == nil {
+		return false, errors.New("tasks: store not initialized")
+	}
+
+	s.sessionWorkspacesHasWorkspaceIDMu.Lock()
+	if s.sessionWorkspacesHasWorkspaceIDKnown {
+		has := s.sessionWorkspacesHasWorkspaceIDValue
+		s.sessionWorkspacesHasWorkspaceIDMu.Unlock()
+		return has, nil
+	}
+	s.sessionWorkspacesHasWorkspaceIDMu.Unlock()
+
+	rows, err := s.db.QueryContext(ctx, `PRAGMA table_info(session_workspaces);`)
+	if err != nil {
+		return false, fmt.Errorf("tasks: session_workspaces schema: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	has := false
+	for rows.Next() {
+		var (
+			cid     int
+			name    string
+			typ     string
+			notnull int
+			dflt    sql.NullString
+			pk      int
+		)
+		if err := rows.Scan(&cid, &name, &typ, &notnull, &dflt, &pk); err != nil {
+			return false, fmt.Errorf("tasks: session_workspaces schema: %w", err)
+		}
+		if name == "workspace_id" {
+			has = true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return false, fmt.Errorf("tasks: session_workspaces schema: %w", err)
+	}
+
+	s.sessionWorkspacesHasWorkspaceIDMu.Lock()
+	s.sessionWorkspacesHasWorkspaceIDKnown = true
+	s.sessionWorkspacesHasWorkspaceIDValue = has
+	s.sessionWorkspacesHasWorkspaceIDMu.Unlock()
+	return has, nil
+}
+
+func legacyWorkspaceID(key, runRoot, runWorkDir string) string {
+	if id := extractWorkspaceID(runRoot); id != "" {
+		return id
+	}
+	if id := extractWorkspaceID(runWorkDir); id != "" {
+		return id
+	}
+	return stableWorkspaceID(key)
+}
+
+func extractWorkspaceID(path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return ""
+	}
+	slash := filepath.ToSlash(filepath.Clean(path))
+	parts := strings.Split(slash, "/")
+	for i := 0; i < len(parts)-1; i++ {
+		if parts[i] != "workspaces" || i+1 >= len(parts) {
+			continue
+		}
+		id := strings.TrimSpace(parts[i+1])
+		if id == "" || id == "." {
+			continue
+		}
+		return id
+	}
+	return ""
+}
+
+func stableWorkspaceID(key string) string {
+	sum := sha256.Sum256([]byte(strings.TrimSpace(key)))
+	return hex.EncodeToString(sum[:])[:12]
 }
 
 func (s *Store) DeleteSessionWorkspace(ctx context.Context, key string) error {

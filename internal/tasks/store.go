@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -16,6 +17,10 @@ import (
 type Store struct {
 	db  *sql.DB
 	now func() time.Time
+
+	sessionWorkspacesHasWorkspaceIDMu    sync.Mutex
+	sessionWorkspacesHasWorkspaceIDKnown bool
+	sessionWorkspacesHasWorkspaceIDValue bool
 }
 
 func NewStore(db *sql.DB) *Store {
