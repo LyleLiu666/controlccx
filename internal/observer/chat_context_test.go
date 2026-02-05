@@ -66,6 +66,32 @@ func TestObserver_AgentIncludesRecentChatContext(t *testing.T) {
 	}
 }
 
+func TestObserver_AgentIncludesProjectContext(t *testing.T) {
+	ctx := context.Background()
+	conn, err := db.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "controlccx.db")})
+	if err != nil {
+		t.Fatalf("db open: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+
+	taskStore := tasks.NewStore(conn)
+
+	if _, err := taskStore.SetProjectContext(ctx, "Project: CCX"); err != nil {
+		t.Fatalf("SetProjectContext: %v", err)
+	}
+
+	backend := &promptProbeBackend{wantSubstr: "Project: CCX"}
+	obs := &Service{Store: taskStore, LLM: backend}
+
+	reply, err := obs.Respond(ctx, "hello")
+	if err != nil {
+		t.Fatalf("respond: %v", err)
+	}
+	if reply.Message != "OK" {
+		t.Fatalf("reply=%q, want OK (agent should see project context)", reply.Message)
+	}
+}
+
 func TestObserver_ChatHistoryTool_DefaultsToMostRecent(t *testing.T) {
 	ctx := context.Background()
 	conn, err := db.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "controlccx.db")})

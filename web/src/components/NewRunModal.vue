@@ -2,7 +2,8 @@
 import { computed, ref, watch } from "vue";
 import SkillsInsertModal from "./SkillsInsertModal.vue";
 import WorkdirCombobox from "./WorkdirCombobox.vue";
-import type { Tool, ToolDriver } from "../types";
+import type { PromptTemplate, Tool, ToolDriver } from "../types";
+import { fetchPromptTemplates } from "../api";
 import {
   isHighRiskPreset,
   safetyPresetsForDriver,
@@ -63,6 +64,32 @@ const newRunShowManualSafety = computed<boolean>(
   () => !newRunUseAutopilot.value
 );
 
+const taskTemplates = ref<PromptTemplate[]>([]);
+const taskTemplatesLoading = ref(false);
+const taskTemplatesError = ref("");
+const selectedTaskTemplateID = ref("");
+
+async function loadTaskTemplates() {
+  if (taskTemplatesLoading.value) return;
+  taskTemplatesLoading.value = true;
+  taskTemplatesError.value = "";
+  try {
+    taskTemplates.value = await fetchPromptTemplates("task");
+  } catch (e: any) {
+    taskTemplatesError.value = e?.message ?? String(e);
+  } finally {
+    taskTemplatesLoading.value = false;
+  }
+}
+
+function applyTaskTemplate() {
+  const id = String(selectedTaskTemplateID.value ?? "").trim();
+  if (!id) return;
+  const tpl = taskTemplates.value.find((t) => t.id === id);
+  if (!tpl) return;
+  emit("update:prompt", String(tpl.content ?? ""));
+}
+
 function close() {
   closeSkillsPicker();
   emit("update:open", false);
@@ -112,6 +139,8 @@ watch(
   () => props.open,
   async (open) => {
     if (open) {
+      selectedTaskTemplateID.value = "";
+      void loadTaskTemplates();
       // Small delay to allow render
       setTimeout(() => {
         if (skillsPickerOpen.value) return;
@@ -170,6 +199,28 @@ watch(
                 选择技能
               </button>
             </div>
+            <div class="newRunTemplatesRow">
+              <span class="tinyHint">模板</span>
+              <select
+                v-model="selectedTaskTemplateID"
+                :disabled="taskTemplatesLoading || !taskTemplates.length"
+                title="选择一个 task 模板并应用到提示词"
+              >
+                <option value="">(选择任务模板…)</option>
+                <option v-for="t in taskTemplates" :key="t.id" :value="t.id">
+                  {{ t.title }}
+                </option>
+              </select>
+              <button
+                type="button"
+                @click="applyTaskTemplate"
+                :disabled="taskTemplatesLoading || !selectedTaskTemplateID"
+              >
+                应用
+              </button>
+              <span v-if="taskTemplatesLoading" class="tinyHint">加载中…</span>
+            </div>
+            <div v-if="taskTemplatesError" class="tinyHint warn">{{ taskTemplatesError }}</div>
             <textarea
               ref="promptEl"
               class="promptEmphasis"
@@ -184,6 +235,9 @@ watch(
             </div>
             <div v-else class="tinyHint newRunSkillsHint">
               当前工具为 <span class="mono">{{ newRunDriver }}</span>：不支持 skills（仅执行命令）。
+            </div>
+            <div class="tinyHint">
+              Project Context（如已设置）会自动注入到运行 prompt（压缩/限长），不改写任务列表里的提示词。
             </div>
           </label>
 

@@ -18,10 +18,13 @@ import type {
   SkillsToolsResponse,
   OnboardingPlan,
   ManagedSkill,
+  ProjectContext,
   GitCandidatesResponse,
   InstallGitBatchInput,
   InstallGitBatchResponse,
   PerSkillVersionsListResponse,
+  PromptTemplate,
+  PromptTemplateKind,
   RestoreSkillVersionResult,
   SkillVersion,
   SkillVersionsListResponse,
@@ -124,6 +127,36 @@ export async function fetchTasks(limit = 200, includeDeleted = false): Promise<T
 export async function fetchAcceptance(key: string): Promise<AcceptanceResponse> {
   const qs = new URLSearchParams({ key: String(key ?? "") });
   return getJSON<AcceptanceResponse>(`/api/acceptance?${qs.toString()}`);
+}
+
+export async function fetchProjectContext(): Promise<ProjectContext> {
+  return getJSON<ProjectContext>("/api/context");
+}
+
+export async function setProjectContext(content: string): Promise<{ ok: boolean }> {
+  return postJSON<{ ok: boolean }>("/api/context", { content: String(content ?? "") });
+}
+
+export async function fetchPromptTemplates(kind: PromptTemplateKind | "all" = "all"): Promise<PromptTemplate[]> {
+  const qs = new URLSearchParams();
+  const k = String(kind ?? "").trim();
+  if (k) qs.set("kind", k);
+  const res = await getJSON<{ templates: PromptTemplate[] }>(`/api/templates?${qs.toString()}`);
+  return res.templates ?? [];
+}
+
+export async function upsertPromptTemplate(input: {
+  id?: string;
+  title: string;
+  kind: PromptTemplateKind;
+  content: string;
+}): Promise<PromptTemplate> {
+  const res = await postJSON<{ template: PromptTemplate }>("/api/templates/upsert", input);
+  return res.template;
+}
+
+export async function deletePromptTemplate(id: string): Promise<{ ok: boolean }> {
+  return postJSON<{ ok: boolean }>("/api/templates/delete", { id: String(id ?? "") });
 }
 
 export async function createTask(input: {

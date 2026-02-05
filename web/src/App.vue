@@ -93,6 +93,7 @@ import RehydratePromptModal from "./components/RehydratePromptModal.vue";
 import WorkdirBusyModal from "./components/WorkdirBusyModal.vue";
 import WorktreeUntrackedModal from "./components/WorktreeUntrackedModal.vue";
 import WorkdirCombobox from "./components/WorkdirCombobox.vue";
+import ContextPanel from "./components/ContextPanel.vue";
 import { useSkills } from "./composables/useSkills";
 import { useSecretaryChat } from "./composables/useSecretaryChat";
 import { useTasks } from "./composables/useTasks";
@@ -681,6 +682,7 @@ type FileNode = {
 };
 
 const filesOpen = ref(false);
+const contextOpen = ref(false);
 const filesBase = ref("");
 const filesRoot = ref<FileNode | null>(null);
 const filesLoading = ref(false);
@@ -2284,6 +2286,10 @@ function goHome() {
   runsOpen.value = false;
   sessionsDrawerOpen.value = false;
   selectedTaskId.value = "";
+  if (contextOpen.value) {
+    closeContextPage();
+    return;
+  }
   if (skillsOpen.value) {
     closeSkillsPage();
     return;
@@ -2455,7 +2461,26 @@ function encodePathForQueryValue(path: string): string {
 async function openSkillsPage() {
   navigateTo("/skills");
   sessionsDrawerOpen.value = false;
+  contextOpen.value = false;
   await openSkills();
+}
+
+function openContextPage() {
+  navigateTo("/context");
+  sessionsDrawerOpen.value = false;
+  skillsGovernanceOpen.value = false;
+  skillsOpen.value = false;
+
+  if (filesOpen.value) {
+    closeFiles();
+    if (filesOpen.value) return;
+  }
+  contextOpen.value = true;
+}
+
+function closeContextPage() {
+  contextOpen.value = false;
+  navigateTo("/");
 }
 
 
@@ -2543,15 +2568,32 @@ function applyRouteFromLocation() {
         return;
       }
     }
+    contextOpen.value = false;
     void openSkillsPage();
+    return;
+  }
+  if (path === "/context") {
+    if (filesOpen.value) {
+      closeFiles();
+      if (filesOpen.value) {
+        restoreFilesRoute();
+        return;
+      }
+    }
+    sessionsDrawerOpen.value = false;
+    skillsGovernanceOpen.value = false;
+    skillsOpen.value = false;
+    contextOpen.value = true;
     return;
   }
   if (path === "/files") {
     skillsOpen.value = false;
+    contextOpen.value = false;
     void openFilesPageFromLocation();
     return;
   }
   if (skillsOpen.value) skillsOpen.value = false;
+  if (contextOpen.value) contextOpen.value = false;
   if (filesOpen.value) {
     closeFiles();
     if (filesOpen.value) restoreFilesRoute();
@@ -2602,6 +2644,11 @@ function onOpenLiveFromMenu() {
 
 function onOpenSkillsFromMenu() {
   void openSkillsPage();
+  closeHeaderMoreMenu();
+}
+
+function onOpenContextFromMenu() {
+  openContextPage();
   closeHeaderMoreMenu();
 }
 
@@ -4805,6 +4852,9 @@ watch(
               <button type="button" class="headerMoreItem" @click="onOpenSkillsFromMenu">
                 技能
               </button>
+              <button type="button" class="headerMoreItem" @click="onOpenContextFromMenu">
+                上下文
+              </button>
               <button type="button" class="headerMoreItem" @click="onOpenSettingsFromMenu">
                 设置
               </button>
@@ -4842,6 +4892,12 @@ watch(
 	              @openVersions="openSkillVersions"
 	            />
           </div>
+	      </section>
+
+	      <section v-else-if="contextOpen" class="panel contextPagePanel">
+	        <div class="contextPageWrap">
+	          <ContextPanel @back="closeContextPage" />
+	        </div>
 	      </section>
 
       <FilesModal

@@ -1,6 +1,7 @@
 package worker
 
 import (
+	"context"
 	"path/filepath"
 	"testing"
 
@@ -18,7 +19,7 @@ func TestManager_buildToolCommand_CodexDefaults(t *testing.T) {
 		Prompt:     "hi",
 	}
 
-	tool, _, err := m.buildToolCommand(task)
+	tool, _, err := m.buildToolCommand(context.Background(), task)
 	if err != nil {
 		t.Fatalf("buildToolCommand: %v", err)
 	}
@@ -56,7 +57,7 @@ func TestManager_buildToolCommand_CodexUsesStoredModelAndEffort(t *testing.T) {
 		Prompt:     "hi",
 	}
 
-	tool, _, err := m.buildToolCommand(task)
+	tool, _, err := m.buildToolCommand(context.Background(), task)
 	if err != nil {
 		t.Fatalf("buildToolCommand: %v", err)
 	}

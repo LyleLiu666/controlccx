@@ -151,7 +151,7 @@ func (m *Manager) run(ctx context.Context, task tasks.Task) error {
 		}
 	}
 
-	tool, driver, err := m.buildToolCommand(effective)
+	tool, driver, err := m.buildToolCommand(ctx, effective)
 	if err != nil {
 		m.appendLog(task.ID, tasks.LogSystem, fmt.Sprintf("worker setup error: %v", err))
 		_ = m.store.FinishTask(context.Background(), task.ID, tasks.FinishTaskInput{
@@ -328,7 +328,7 @@ func (m *Manager) maybeStartNextWaitingForWorkdir(workdir string) {
 	}
 }
 
-func (m *Manager) buildToolCommand(task tasks.Task) (ToolCommand, tasks.WorkerType, error) {
+func (m *Manager) buildToolCommand(ctx context.Context, task tasks.Task) (ToolCommand, tasks.WorkerType, error) {
 	driver := task.WorkerType
 	cfg := m.cfg
 	extraArgs := []string(nil)
@@ -387,6 +387,16 @@ func (m *Manager) buildToolCommand(task tasks.Task) (ToolCommand, tasks.WorkerTy
 	}
 	if len(extraArgs) > 0 && (driver == tasks.WorkerClaudeCode || driver == tasks.WorkerCodex) {
 		tool.Args = insertArgsBeforeStdinMarker(tool.Args, extraArgs)
+	}
+
+	if m != nil && m.store != nil && task.Mode == tasks.ModeNew && (driver == tasks.WorkerClaudeCode || driver == tasks.WorkerCodex) {
+		pc, ok, err := m.store.GetProjectContext(ctx)
+		if err == nil && ok {
+			c, _ := tasks.CompressProjectContext(pc.Content, tasks.MaxProjectContextRunesForWorker)
+			if strings.TrimSpace(c) != "" && strings.TrimSpace(tool.Stdin) != "" {
+				tool.Stdin = "Project Context:\n" + c + "\n\n---\n\n" + tool.Stdin
+			}
+		}
 	}
 	return tool, driver, nil
 }

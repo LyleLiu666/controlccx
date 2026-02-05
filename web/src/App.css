@@ -411,6 +411,12 @@
   max-height: calc(100dvh - 110px);
 }
 
+.contextPagePanel {
+  grid-column: 1 / -1;
+  max-height: calc(100vh - 110px);
+  max-height: calc(100dvh - 110px);
+}
+
 .filesPageBody {
   padding: 20px;
   display: flex;
@@ -1014,6 +1020,18 @@ h2 {
 
 :deep(.newRunPromptLabelRow span) {
   font-weight: 700;
+}
+
+:deep(.newRunTemplatesRow) {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 8px 0 6px;
+}
+
+:deep(.newRunTemplatesRow select) {
+  min-width: min(360px, 100%);
 }
 
 :deep(.newRunSkillsOpenBtn) {
@@ -1935,6 +1953,184 @@ h2 {
   padding: 20px;
   min-height: 0;
   overflow: hidden;
+}
+
+:deep(.contextPageWrap) {
+  display: flex;
+  flex-direction: column;
+  padding: 20px;
+  min-height: 0;
+  overflow: hidden;
+}
+
+:deep(.contextPanel) {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-height: 0;
+  flex: 1;
+}
+
+:deep(.contextHeader) {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 16px 20px;
+  color: rgba(255, 255, 255, 0.95);
+  background: linear-gradient(135deg, #0d9488 0%, #0891b2 100%);
+  border-radius: 14px;
+}
+
+:deep(.contextTitle) {
+  font-weight: 800;
+  font-size: 15px;
+}
+
+:deep(.contextGrid) {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr);
+  gap: 14px;
+  overflow: hidden;
+  align-items: start;
+}
+
+:deep(.contextSection) {
+  border: 1px solid var(--border-color);
+  border-radius: 14px;
+  background: var(--bg-subtle);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  overflow: hidden;
+}
+
+:deep(.contextSectionTitle) {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--text-main);
+}
+
+:deep(.contextSection textarea),
+:deep(.templatesEditor textarea),
+:deep(.templatesEditor input),
+:deep(.templatesToolbar select) {
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+  background: var(--bg-panel);
+  color: var(--text-main);
+  font-size: 13px;
+  box-sizing: border-box;
+}
+
+:deep(.contextSection textarea) {
+  width: 100%;
+  min-height: 180px;
+  resize: vertical;
+}
+
+:deep(.templatesToolbar) {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+:deep(.templatesBody) {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(220px, 0.9fr) minmax(0, 1.1fr);
+  gap: 12px;
+  overflow: hidden;
+}
+
+:deep(.templatesList) {
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  background: var(--bg-panel);
+  padding: 8px;
+  overflow: auto;
+  min-height: 0;
+}
+
+:deep(.templatesItem) {
+  width: 100%;
+  text-align: left;
+  padding: 10px 10px;
+  border-radius: 12px;
+  border: 1px solid transparent;
+  background: transparent;
+}
+
+:deep(.templatesItem:hover) {
+  background: var(--bg-subtle);
+}
+
+:deep(.templatesItem.active) {
+  border-color: rgba(20, 184, 166, 0.35);
+  background: rgba(20, 184, 166, 0.08);
+}
+
+:deep(.templatesItemTop) {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  justify-content: space-between;
+}
+
+:deep(.templatesItemTitle) {
+  font-weight: 800;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:deep(.templatesEditor) {
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  background: var(--bg-panel);
+  padding: 12px;
+  overflow: auto;
+  min-height: 0;
+  display: grid;
+  gap: 12px;
+}
+
+:deep(.templatesEditor input),
+:deep(.templatesEditor textarea),
+:deep(.templatesEditor select) {
+  width: 100%;
+}
+
+:deep(.templatesActions) {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+@container (max-width: 520px) {
+  :deep(.contextGrid) {
+    grid-template-columns: 1fr;
+  }
+
+  :deep(.templatesBody) {
+    grid-template-columns: 1fr;
+  }
+
+  :deep(.contextHeader) {
+    flex-wrap: wrap;
+  }
 }
 
 :deep(.skillsVersionsHeader) {
@@ -4896,6 +5092,17 @@ h2 {
 
 :deep(.msg .content.chatMarkdown a:hover) {
   text-decoration: underline;
+}
+
+:deep(.secChatTemplatesRow) {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+:deep(.secChatTemplatesRow select) {
+  min-width: min(420px, 100%);
 }
 
 :deep(.secChat .input) {

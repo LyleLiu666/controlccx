@@ -80,6 +80,20 @@ func Migrate(ctx context.Context, conn *sql.DB) error {
 			claude_webfetch_domains_json TEXT NOT NULL DEFAULT '',
 			FOREIGN KEY(task_id) REFERENCES tasks(id) ON DELETE CASCADE
 		);`,
+		`CREATE TABLE IF NOT EXISTS project_context (
+			key TEXT PRIMARY KEY,
+			content TEXT NOT NULL DEFAULT '',
+			updated_at INTEGER NOT NULL DEFAULT 0
+		);`,
+		`CREATE TABLE IF NOT EXISTS prompt_templates (
+			id TEXT PRIMARY KEY,
+			title TEXT NOT NULL DEFAULT '',
+			kind TEXT NOT NULL DEFAULT '',
+			content TEXT NOT NULL DEFAULT '',
+			created_at INTEGER NOT NULL DEFAULT 0,
+			updated_at INTEGER NOT NULL DEFAULT 0
+		);`,
+		`CREATE INDEX IF NOT EXISTS idx_prompt_templates_kind_updated_at ON prompt_templates(kind, updated_at);`,
 		`CREATE TABLE IF NOT EXISTS task_invocations (
 			task_id TEXT PRIMARY KEY,
 			cmd TEXT NOT NULL,

@@ -52,6 +52,10 @@ func (a *API) Handler() http.Handler {
 	mux.HandleFunc("/api/tasks/", a.handleTaskByID)
 	mux.HandleFunc("/api/sessions/", a.handleSessionByKey)
 	mux.HandleFunc("/api/acceptance", a.handleAcceptance)
+	mux.HandleFunc("/api/context", a.handleProjectContext)
+	mux.HandleFunc("/api/templates", a.handlePromptTemplates)
+	mux.HandleFunc("/api/templates/upsert", a.handlePromptTemplatesUpsert)
+	mux.HandleFunc("/api/templates/delete", a.handlePromptTemplatesDelete)
 	mux.HandleFunc("/api/tools", a.handleTools)
 	mux.HandleFunc("/api/tools/status", a.handleToolsStatus)
 	mux.HandleFunc("/api/tools/upsert", a.handleToolsUpsert)
@@ -84,6 +88,119 @@ func (a *API) Handler() http.Handler {
 	mux.HandleFunc("/api/auth", a.handleAuth)
 	mux.HandleFunc("/api/auth/status", a.handleAuthStatus)
 	return mux
+}
+
+func (a *API) handleProjectContext(w http.ResponseWriter, r *http.Request) {
+	if a.Tasks == nil {
+		http.Error(w, "tasks store not configured", http.StatusServiceUnavailable)
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		ctx, ok, err := a.Tasks.GetProjectContext(r.Context())
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		type resp struct {
+			Content   string     `json:"content"`
+			UpdatedAt *time.Time `json:"updated_at,omitempty"`
+		}
+		out := resp{Content: strings.TrimSpace(ctx.Content)}
+		if ok && !ctx.UpdatedAt.IsZero() {
+			v := ctx.UpdatedAt
+			out.UpdatedAt = &v
+		}
+		writeJSON(w, out)
+	case http.MethodPost:
+		var body struct {
+			Content string `json:"content"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, "invalid json", http.StatusBadRequest)
+			return
+		}
+		if _, err := a.Tasks.SetProjectContext(r.Context(), body.Content); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		writeJSON(w, map[string]any{"ok": true})
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func (a *API) handlePromptTemplates(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if a.Tasks == nil {
+		http.Error(w, "tasks store not configured", http.StatusServiceUnavailable)
+		return
+	}
+	kind := strings.TrimSpace(r.URL.Query().Get("kind"))
+	templates, err := a.Tasks.ListPromptTemplates(r.Context(), kind)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	writeJSON(w, map[string]any{"templates": templates})
+}
+
+func (a *API) handlePromptTemplatesUpsert(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if a.Tasks == nil {
+		http.Error(w, "tasks store not configured", http.StatusServiceUnavailable)
+		return
+	}
+	var body struct {
+		ID      string `json:"id"`
+		Title   string `json:"title"`
+		Kind    string `json:"kind"`
+		Content string `json:"content"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+	tpl, err := a.Tasks.UpsertPromptTemplate(r.Context(), tasks.UpsertPromptTemplateInput{
+		ID:      body.ID,
+		Title:   body.Title,
+		Kind:    body.Kind,
+		Content: body.Content,
+	})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	writeJSON(w, map[string]any{"template": tpl})
+}
+
+func (a *API) handlePromptTemplatesDelete(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if a.Tasks == nil {
+		http.Error(w, "tasks store not configured", http.StatusServiceUnavailable)
+		return
+	}
+	var body struct {
+		ID string `json:"id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+	if err := a.Tasks.DeletePromptTemplate(r.Context(), body.ID); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	writeJSON(w, map[string]any{"ok": true})
 }
 
 func (a *API) handleAcceptance(w http.ResponseWriter, r *http.Request) {

@@ -93,6 +93,22 @@ export type AcceptanceResponse = {
   state: AcceptanceState | null;
 };
 
+export type ProjectContext = {
+  content: string;
+  updated_at?: string;
+};
+
+export type PromptTemplateKind = "task" | "chat";
+
+export type PromptTemplate = {
+  id: string;
+  title: string;
+  kind: PromptTemplateKind;
+  content: string;
+  created_at?: string;
+  updated_at?: string;
+};
+
 export type SkillTargetRoot = {
   target: "cursor" | "claude_code" | "codex" | "antigravity" | "opencode";
   root: string;

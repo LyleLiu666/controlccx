@@ -76,6 +76,19 @@ func (s *Service) RespondWithOptions(ctx context.Context, userMessage string, op
 			llmMsg = ctxText + "\n\nCurrent user message:\n" + msg
 		}
 	}
+	if s.Store != nil {
+		pc, ok, err := s.Store.GetProjectContext(ctx)
+		if err == nil && ok {
+			c, truncated := tasks.CompressProjectContext(pc.Content, tasks.MaxProjectContextRunesForObserver)
+			if strings.TrimSpace(c) != "" {
+				note := ""
+				if truncated {
+					note = " (compressed/truncated)"
+				}
+				llmMsg = "Project Context" + note + ":\n" + c + "\n\n---\n\n" + llmMsg
+			}
+		}
+	}
 
 	agent := Agent{
 		LLM:      backend,
@@ -618,15 +631,15 @@ func pickResumeTargetAuto(all []tasks.Task) (tasks.Task, bool) {
 	}
 
 	runningBySession := map[string]bool{}
-		for _, t := range all {
-			sid := strings.TrimSpace(t.SessionID)
-			if sid == "" {
-				continue
-			}
-			if t.Status == tasks.StatusRunning || t.Status == tasks.StatusQueued || t.Status == tasks.StatusWaiting {
-				runningBySession[sid] = true
-			}
+	for _, t := range all {
+		sid := strings.TrimSpace(t.SessionID)
+		if sid == "" {
+			continue
 		}
+		if t.Status == tasks.StatusRunning || t.Status == tasks.StatusQueued || t.Status == tasks.StatusWaiting {
+			runningBySession[sid] = true
+		}
+	}
 
 	sort.SliceStable(all, func(i, j int) bool {
 		return all[i].UpdatedAt.After(all[j].UpdatedAt)

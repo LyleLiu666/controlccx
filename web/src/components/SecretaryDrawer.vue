@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import mermaid from "mermaid";
 import { computed, nextTick, onMounted, ref, watch } from "vue";
-import type { ChatMessage, Task, WorkerType } from "../types";
+import type { ChatMessage, PromptTemplate, Task, WorkerType } from "../types";
+import { fetchPromptTemplates } from "../api";
 
 type SessionGroup = {
   key: string;
@@ -93,6 +94,33 @@ const chatInputEl = ref<HTMLTextAreaElement | null>(null);
 const chatMsgsEl = ref<HTMLDivElement | null>(null);
 const chatIsComposing = ref(false);
 
+const chatTemplates = ref<PromptTemplate[]>([]);
+const chatTemplatesLoading = ref(false);
+const chatTemplatesError = ref("");
+const selectedChatTemplateID = ref("");
+
+async function loadChatTemplates() {
+  if (chatTemplatesLoading.value) return;
+  chatTemplatesLoading.value = true;
+  chatTemplatesError.value = "";
+  try {
+    chatTemplates.value = await fetchPromptTemplates("chat");
+  } catch (e: any) {
+    chatTemplatesError.value = e?.message ?? String(e);
+  } finally {
+    chatTemplatesLoading.value = false;
+  }
+}
+
+function applyChatTemplate() {
+  const id = String(selectedChatTemplateID.value ?? "").trim();
+  if (!id) return;
+  const tpl = chatTemplates.value.find((t) => t.id === id);
+  if (!tpl) return;
+  chatInputModel.value = String(tpl.content ?? "");
+  void focusChat();
+}
+
 function shortSessionLabel(s: SessionGroup): string {
   const key = String(s?.key ?? "").trim();
   if (key.startsWith("c:")) return key.slice(2, 10);
@@ -171,6 +199,7 @@ watch(
 );
 
 onMounted(async () => {
+  void loadChatTemplates();
   applyMermaidTheme();
   await focusChat();
   await renderChatMermaidIfNeeded();
@@ -430,6 +459,39 @@ function onMarkdownClick(e: MouseEvent) {
                     @click="onMarkdownClick"
                   ></div>
                 </div>
+              </div>
+              <div class="secChatTemplatesRow">
+                <span class="tinyHint">模板</span>
+                <select
+                  v-model="selectedChatTemplateID"
+                  :disabled="chatTemplatesLoading || !chatTemplates.length"
+                  title="选择一个 chat 模板并应用到输入框"
+                >
+                  <option value="">(选择对话模板…)</option>
+                  <option v-for="t in chatTemplates" :key="t.id" :value="t.id">
+                    {{ t.title }}
+                  </option>
+                </select>
+                <button
+                  type="button"
+                  @click="applyChatTemplate"
+                  :disabled="chatTemplatesLoading || !selectedChatTemplateID"
+                >
+                  应用
+                </button>
+                <button
+                  type="button"
+                  @click="loadChatTemplates"
+                  :disabled="chatTemplatesLoading"
+                  title="刷新模板列表"
+                >
+                  刷新
+                </button>
+                <span v-if="chatTemplatesLoading" class="tinyHint">加载中…</span>
+              </div>
+              <div v-if="chatTemplatesError" class="tinyHint warn">{{ chatTemplatesError }}</div>
+              <div class="tinyHint">
+                Project Context（如已设置）会自动注入到对话（压缩/限长）。
               </div>
               <div class="input">
                 <textarea
