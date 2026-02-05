@@ -143,6 +143,7 @@ watch(
               <input
                 :value="workdir"
                 @input="updateWorkdir"
+                list="workdirSuggestions"
                 placeholder="."
               />
               <button type="button" @click="emit('openDirPicker')">浏览</button>

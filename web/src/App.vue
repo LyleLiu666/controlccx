@@ -4393,6 +4393,26 @@ const recentWorkspacesUnpinned = computed(() => {
   );
 });
 
+const workdirSuggestions = computed<string[]>(() => {
+  const out: string[] = [];
+  const seen = new Set<string>();
+
+  const add = (p: string) => {
+    const raw = String(p ?? "").trim();
+    if (!raw) return;
+    const key = normalizePathForCompare(raw);
+    if (!key) return;
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push(raw);
+  };
+
+  for (const p of pinnedWorkspaces.value) add(p);
+  for (const p of recentWorkspaces.value) add(p);
+
+  return out.slice(0, 12);
+});
+
 const secretarySessionsAll = computed(() => {
   const scope = secretaryScope.value;
   if (scope === "all") return sessionsAll.value;
@@ -5069,7 +5089,11 @@ watch(
             <label class="full">
               工作目录
               <div class="workdirRow">
-                <input v-model="newWorkdir" placeholder="." />
+                <input
+                  v-model="newWorkdir"
+                  placeholder="."
+                  list="workdirSuggestions"
+                />
                 <button type="button" @click="openDirPicker">选择</button>
               </div>
             </label>
@@ -6503,6 +6527,10 @@ watch(
         </button>
       </div>
     </teleport>
+
+    <datalist id="workdirSuggestions">
+      <option v-for="p in workdirSuggestions" :key="p" :value="p" />
+    </datalist>
   </div>
 </template>
 
