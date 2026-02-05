@@ -93,6 +93,9 @@ func buildClaude(cfg config.Config, task tasks.Task) (ToolCommand, error) {
 	}
 	workdir := filepath.Clean(task.WorkDir)
 	prompt := effectivePromptForTask(task)
+	if normalized, changes := normalizePromptSkillTokensForExecution(task.WorkerType, prompt); changes > 0 {
+		prompt = normalized
+	}
 
 	args := []string{"-p"}
 	if cfg.Workers.UnsafeAutomation || task.UnsafeAutomation {
@@ -147,6 +150,9 @@ func buildCodex(cfg config.Config, task tasks.Task) (ToolCommand, error) {
 
 	workdir := filepath.Clean(task.WorkDir)
 	prompt := effectivePromptForTask(task)
+	if normalized, changes := normalizePromptSkillTokensForExecution(task.WorkerType, prompt); changes > 0 {
+		prompt = normalized
+	}
 
 	unsafe := cfg.Workers.UnsafeAutomation || task.UnsafeAutomation
 

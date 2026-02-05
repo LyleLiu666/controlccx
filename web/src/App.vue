@@ -13,6 +13,7 @@ import type {
   FSListEntry,
   FSRoot,
   LogEntry,
+  Skill,
   Tool,
   ToolStatus,
   ToolDriver,
@@ -32,6 +33,7 @@ import {
   fetchFSRead,
   fetchFSRoots,
   fetchLogs,
+  fetchSkills,
   fetchTools,
   fetchToolsStatus,
   fetchSystemInfo,
@@ -39,6 +41,7 @@ import {
   fsMkdir,
   fsWrite,
   deleteTool,
+  linkSkill,
   renameSession,
   continueSessionWithOptions,
   resumeTaskWithOptions,
@@ -88,6 +91,7 @@ import SkillsInsertModal from "./components/SkillsInsertModal.vue";
 import RunLaunchOverlay from "./components/RunLaunchOverlay.vue";
 import RunUsageMeter from "./components/RunUsageMeter.vue";
 import HighRiskConfirmModal from "./components/HighRiskConfirmModal.vue";
+import SkillMountConfirmModal from "./components/SkillMountConfirmModal.vue";
 import BlockedPromptModal from "./components/BlockedPromptModal.vue";
 import RehydratePromptModal from "./components/RehydratePromptModal.vue";
 import WorkdirBusyModal from "./components/WorkdirBusyModal.vue";
@@ -100,6 +104,7 @@ import { useTasks } from "./composables/useTasks";
 import { useLiveFeed } from "./composables/useLiveFeed";
 import { useSessionWorkspace } from "./composables/useSessionWorkspace";
 import { shouldDismissRunLaunchMask } from "./runLaunchMask";
+import { buildSkillMountPlan, type SkillMountConfirmItem } from "./skillsPreflight";
 
 type CreateTaskPayload = {
   worker_type: WorkerType;
@@ -187,6 +192,17 @@ const highRiskConfirmDetail = ref("");
 const highRiskConfirmConfirmLabel = ref("继续");
 const highRiskConfirmBusy = ref(false);
 let highRiskConfirmResolve: ((ok: boolean) => void) | null = null;
+
+const skillMountConfirmOpen = ref(false);
+const skillMountConfirmBusy = ref(false);
+const skillMountConfirmError = ref("");
+const skillMountConfirmDriver = ref<ToolDriver>("exec");
+const skillMountConfirmTarget = ref<
+  "cursor" | "claude_code" | "codex" | "antigravity" | "opencode" | ""
+>("");
+const skillMountConfirmItems = ref<SkillMountConfirmItem[]>([]);
+const skillMountConfirmNamesToMount = ref<string[]>([]);
+let skillMountConfirmResolve: ((proceed: boolean) => void) | null = null;
 
 function openRunLaunchMask(opts: { title: string; detail?: string }) {
   runLaunchMaskOpen.value = true;
@@ -489,6 +505,79 @@ async function confirmHighRiskConfirm() {
 function cancelHighRiskConfirm() {
   closeHighRiskConfirm(false);
 }
+
+function requestSkillMountConfirm(opts: {
+  driver: ToolDriver;
+  target: "cursor" | "claude_code" | "codex" | "antigravity" | "opencode";
+  items: SkillMountConfirmItem[];
+  namesToMount: string[];
+}): Promise<boolean> {
+  if (skillMountConfirmOpen.value) return Promise.resolve(false);
+  skillMountConfirmDriver.value = opts.driver;
+  skillMountConfirmTarget.value = opts.target;
+  skillMountConfirmItems.value = opts.items.slice();
+  skillMountConfirmNamesToMount.value = opts.namesToMount.slice();
+  skillMountConfirmBusy.value = false;
+  skillMountConfirmError.value = "";
+  skillMountConfirmOpen.value = true;
+  return new Promise((resolve) => {
+    skillMountConfirmResolve = resolve;
+  });
+}
+
+function closeSkillMountConfirm(proceed: boolean) {
+  if (!skillMountConfirmOpen.value) return;
+  skillMountConfirmOpen.value = false;
+  skillMountConfirmBusy.value = false;
+  skillMountConfirmError.value = "";
+  skillMountConfirmTarget.value = "";
+  skillMountConfirmItems.value = [];
+  skillMountConfirmNamesToMount.value = [];
+  const resolve = skillMountConfirmResolve;
+  skillMountConfirmResolve = null;
+  resolve?.(proceed);
+}
+
+async function confirmSkillMountAndContinue() {
+  if (skillMountConfirmBusy.value) return;
+  const target = skillMountConfirmTarget.value;
+  if (!target) {
+    closeSkillMountConfirm(true);
+    return;
+  }
+  const names = skillMountConfirmNamesToMount.value.slice().filter(Boolean);
+  if (names.length === 0) {
+    closeSkillMountConfirm(true);
+    return;
+  }
+
+  skillMountConfirmBusy.value = true;
+  skillMountConfirmError.value = "";
+
+  const errors: string[] = [];
+  for (const name of names) {
+    try {
+      await linkSkill({ name, target, auto_import: true, prefer_tool: target });
+    } catch (e: any) {
+      errors.push(`${name}: ${e?.message ?? String(e)}`);
+    }
+  }
+  if (errors.length) {
+    skillMountConfirmError.value = errors.join("\n");
+    skillMountConfirmBusy.value = false;
+    return;
+  }
+  closeSkillMountConfirm(true);
+}
+
+function continueSkillMountConfirm() {
+  closeSkillMountConfirm(true);
+}
+
+function cancelSkillMountConfirm() {
+  closeSkillMountConfirm(false);
+}
+
 const {
   chat,
   chatInput,
@@ -2035,11 +2124,33 @@ async function refreshAuth() {
   }
 }
 
+async function maybeConfirmSkillMountForNewRun(driver: ToolDriver, prompt: string): Promise<boolean> {
+  if (driver !== "codex" && driver !== "claude-code") return true;
+  const rawPrompt = String(prompt ?? "");
+  if (!rawPrompt.trim()) return true;
+
+  let skills: Skill[] = [];
+  try {
+    const res = await fetchSkills({ limit: 500, offset: 0 });
+    skills = Array.isArray(res.skills) ? res.skills : [];
+  } catch (e: any) {
+    errorBanner.value =
+      "⚠️ 无法读取 skills 列表，已跳过挂载检查（仍可创建 run）。错误：" + (e?.message ?? String(e));
+    return true;
+  }
+
+  const plan = buildSkillMountPlan({ driver, prompt: rawPrompt, skills });
+  if (!plan) return true;
+  return requestSkillMountConfirm({ driver, target: plan.target, items: plan.items, namesToMount: plan.namesToMount });
+}
+
 async function onCreateTask(opts?: { idempotencyKey?: string }): Promise<boolean> {
   errorBanner.value = "";
   let createdInput: CreateTaskPayload | null = null;
   try {
     const driver = newRunDriver.value;
+    const skillsOk = await maybeConfirmSkillMountForNewRun(driver, newPrompt.value);
+    if (!skillsOk) return false;
     const useAutopilot = runSafetyAutopilotEnabled.value && !newRunSafetyOverride.value;
 
     let safety: RunSafetyPayload = {};
@@ -6422,20 +6533,31 @@ watch(
           @force="confirmWorktreeUntrackedForce"
         />
 
-	    <SkillsInsertModal
-	      :open="skillsInsertOpen"
-	      :driver="skillsInsertDriver"
-	      :prompt="skillsInsertPrompt"
-	      :promptEl="skillsInsertPromptEl"
-	      @close="closeSkillsInsert"
-	      @update:prompt="skillsInsertPrompt = $event"
-	    />
+		    <SkillsInsertModal
+		      :open="skillsInsertOpen"
+		      :driver="skillsInsertDriver"
+		      :prompt="skillsInsertPrompt"
+		      :promptEl="skillsInsertPromptEl"
+		      @close="closeSkillsInsert"
+		      @update:prompt="skillsInsertPrompt = $event"
+		    />
 
-	    <HighRiskConfirmModal
-	      :open="highRiskConfirmOpen"
-	      :title="highRiskConfirmTitle"
-      :message="highRiskConfirmMessage"
-      :detail="highRiskConfirmDetail"
+		    <SkillMountConfirmModal
+		      :open="skillMountConfirmOpen"
+		      :driver="skillMountConfirmDriver"
+		      :items="skillMountConfirmItems"
+		      :busy="skillMountConfirmBusy"
+		      :error="skillMountConfirmError"
+		      @cancel="cancelSkillMountConfirm"
+		      @continue="continueSkillMountConfirm"
+		      @mount="confirmSkillMountAndContinue"
+		    />
+
+		    <HighRiskConfirmModal
+		      :open="highRiskConfirmOpen"
+		      :title="highRiskConfirmTitle"
+	      :message="highRiskConfirmMessage"
+	      :detail="highRiskConfirmDetail"
       :confirmLabel="highRiskConfirmConfirmLabel"
       :busy="highRiskConfirmBusy"
       @cancel="cancelHighRiskConfirm"
