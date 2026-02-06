@@ -57,6 +57,7 @@ const emit = defineEmits<{
   (e: "dismissAttention", session: SessionGroup): void;
   (e: "sendChat"): void;
   (e: "openAuthSettings"): void;
+  (e: "openProvidersSettings"): void;
   (e: "markdownClick", ev: MouseEvent): void;
 }>();
 
@@ -462,11 +463,15 @@ function onMarkdownClick(e: MouseEvent) {
                   </label>
                 </div>
                 <div class="chatSettingsHint">
-                  Agent 仅切换后端；模型和 token 在
+                  Agent 仅覆盖本次对话后端；默认后端/模型/token 推荐在
+                  <button type="button" class="secInlineLink" @click="emit('openProvidersSettings')">
+                    Providers
+                  </button>
+                  中配置（或在
                   <button type="button" class="secInlineLink" @click="emit('openAuthSettings')">
                     认证设置
                   </button>
-                  中配置。
+                  中直接填写）。
                 </div>
               </details>
               <div class="msgs" ref="chatMsgsEl">

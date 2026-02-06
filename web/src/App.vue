@@ -6710,6 +6710,7 @@ watch(
 	      @dismissAttention="dismissAttentionSession"
 	      @sendChat="sendChatMessageGuarded"
 	      @openAuthSettings="openAuthSettings"
+	      @openProvidersSettings="openProvidersSettings"
 	      @markdownClick="onResultMarkdownClick"
 	    />
 
