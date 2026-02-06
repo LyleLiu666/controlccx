@@ -43,8 +43,12 @@ func CreateRotatingBackup(srcPath string, backupDir string, keep int) (string, e
 	if err != nil {
 		return "", err
 	}
+	ext := filepath.Ext(srcPath)
+	if strings.TrimSpace(ext) == "" {
+		ext = ".bak"
+	}
 	// Include fractional seconds so lexicographic order matches creation order even under fast successive backups.
-	name := fmt.Sprintf("%s-%s.json", time.Now().UTC().Format("20060102-150405.000000000"), suffix)
+	name := fmt.Sprintf("%s-%s%s", time.Now().UTC().Format("20060102-150405.000000000"), suffix, ext)
 	dest := filepath.Join(filepath.Clean(backupDir), name)
 
 	if err := writeFileAtomic(dest, data, 0o600); err != nil {

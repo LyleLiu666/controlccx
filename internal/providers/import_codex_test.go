@@ -52,3 +52,13 @@ func TestImportCodexLive_ConfigOptional(t *testing.T) {
 		t.Fatalf("expected api key")
 	}
 }
+
+func TestImportCodexLive_InvalidAuthJSONReturnsError(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "auth.json"), []byte("{"), 0o600); err != nil {
+		t.Fatalf("write auth.json: %v", err)
+	}
+	if _, err := ImportCodexLive(dir); err == nil {
+		t.Fatalf("expected error")
+	}
+}

@@ -31,7 +31,10 @@ func ImportCodexLive(homeDir string) (CodexLiveImport, error) {
 	authPath := filepath.Join(homeDir, "auth.json")
 	if b, err := os.ReadFile(authPath); err == nil {
 		out.AuthPath = authPath
-		apiKey, _ := parseCodexAuthJSON(b)
+		apiKey, err := parseCodexAuthJSON(b)
+		if err != nil {
+			return CodexLiveImport{}, fmt.Errorf("providers: codex import: parse auth.json: %w", err)
+		}
 		out.Target.APIKey = strings.TrimSpace(apiKey)
 	} else if !os.IsNotExist(err) {
 		return CodexLiveImport{}, fmt.Errorf("providers: codex import: read auth.json: %w", err)
@@ -50,15 +53,15 @@ func ImportCodexLive(homeDir string) (CodexLiveImport, error) {
 	return out, nil
 }
 
-func parseCodexAuthJSON(b []byte) (openaiAPIKey string, ok bool) {
+func parseCodexAuthJSON(b []byte) (openaiAPIKey string, err error) {
 	var v map[string]any
 	if err := json.Unmarshal(b, &v); err != nil {
-		return "", false
+		return "", err
 	}
 	if s, ok := v["OPENAI_API_KEY"].(string); ok && strings.TrimSpace(s) != "" {
-		return s, true
+		return s, nil
 	}
-	return "", false
+	return "", nil
 }
 
 type codexConfig struct {

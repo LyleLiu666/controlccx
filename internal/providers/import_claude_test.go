@@ -52,3 +52,13 @@ func TestImportClaudeLive_MissingFileIsOk(t *testing.T) {
 		t.Fatalf("expected empty settings path, got %q", out.SettingsPath)
 	}
 }
+
+func TestImportClaudeLive_InvalidSettingsJSONReturnsError(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "settings.json"), []byte("{"), 0o600); err != nil {
+		t.Fatalf("write settings.json: %v", err)
+	}
+	if _, err := ImportClaudeLive(dir); err == nil {
+		t.Fatalf("expected error")
+	}
+}
