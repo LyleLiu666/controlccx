@@ -25,6 +25,7 @@ import (
 	"controlccx/internal/db"
 	"controlccx/internal/events"
 	"controlccx/internal/observer"
+	"controlccx/internal/providers"
 	"controlccx/internal/runworkspace"
 	"controlccx/internal/skills"
 	"controlccx/internal/tasks"
@@ -180,6 +181,11 @@ func main() {
 		log.Fatal(err)
 	}
 
+	providersStore, err := providers.NewStore(cfg.Paths.DataDir)
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	hub := events.NewHub()
 	chatStore := chat.NewStore(conn)
 	simpleHTTPBackend := observer.NewSimpleHTTPBackend(cfg, authStore)
@@ -218,6 +224,7 @@ func main() {
 		Chat:                 chatStore,
 		Hub:                  hub,
 		Auth:                 authStore,
+		Providers:            providersStore,
 		Skills:               skillsSvc,
 		SkillVersions:        skillVersionsSvc,
 		SkillVersionsBySkill: perSkillVersionsSvc,

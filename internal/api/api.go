@@ -17,6 +17,7 @@ import (
 	"controlccx/internal/chat"
 	"controlccx/internal/events"
 	"controlccx/internal/observer"
+	"controlccx/internal/providers"
 	"controlccx/internal/runsafe"
 	"controlccx/internal/runworkspace"
 	"controlccx/internal/skills"
@@ -36,6 +37,7 @@ type API struct {
 	Hub                  *events.Hub
 	FSRoots              []FSRoot
 	Auth                 *auth.Store
+	Providers            *providers.Store
 	Skills               *skills.Service
 	SkillVersions        *skills.VersionsService
 	SkillVersionsBySkill *skills.PerSkillVersionsService
@@ -59,6 +61,15 @@ func (a *API) Handler() http.Handler {
 	mux.HandleFunc("/api/tools/status", a.handleToolsStatus)
 	mux.HandleFunc("/api/tools/upsert", a.handleToolsUpsert)
 	mux.HandleFunc("/api/tools/delete", a.handleToolsDelete)
+	mux.HandleFunc("/api/providers", a.handleProviders)
+	mux.HandleFunc("/api/providers/upsert", a.handleProvidersUpsert)
+	mux.HandleFunc("/api/providers/delete", a.handleProvidersDelete)
+	mux.HandleFunc("/api/providers/duplicate", a.handleProvidersDuplicate)
+	mux.HandleFunc("/api/providers/reorder", a.handleProvidersReorder)
+	mux.HandleFunc("/api/providers/activate", a.handleProvidersActivate)
+	mux.HandleFunc("/api/providers/speedtest", a.handleProvidersSpeedTest)
+	mux.HandleFunc("/api/providers/import/live", a.handleProvidersImportLive)
+	mux.HandleFunc("/api/providers/export", a.handleProvidersExport)
 	mux.HandleFunc("/api/skills", a.handleSkills)
 	mux.HandleFunc("/api/skills/link", a.handleSkillsLink)
 	mux.HandleFunc("/api/skills/unlink", a.handleSkillsUnlink)
