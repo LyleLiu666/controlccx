@@ -4,6 +4,8 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -108,6 +110,64 @@ func TestSimpleHTTPBackend_Complete_OpenAIStyle(t *testing.T) {
 	}
 	if out != "ok from choices" {
 		t.Fatalf("out=%q", out)
+	}
+}
+
+func TestSimpleHTTPBackend_Complete_UsesClaudeLiveConfig(t *testing.T) {
+	const authToken = "token-live-123"
+	var gotAuthHeader string
+	var gotAPIKeyHeader string
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuthHeader = strings.TrimSpace(r.Header.Get("Authorization"))
+		gotAPIKeyHeader = strings.TrimSpace(r.Header.Get("x-api-key"))
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"content":[{"type":"text","text":"ok from live"}]}`))
+	}))
+	defer srv.Close()
+
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("ANTHROPIC_BASE_URL", "")
+	t.Setenv("ANTHROPIC_AUTH_TOKEN", "")
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("ANTHROPIC_MODEL", "")
+
+	claudeDir := filepath.Join(home, ".claude")
+	if err := os.MkdirAll(claudeDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	settingsPath := filepath.Join(claudeDir, "settings.json")
+	if err := os.WriteFile(settingsPath, []byte(`{
+  "env": {
+    "ANTHROPIC_BASE_URL": "`+srv.URL+`",
+    "ANTHROPIC_AUTH_TOKEN": "`+authToken+`",
+    "ANTHROPIC_MODEL": "claude-live-test"
+  }
+}
+`), 0o600); err != nil {
+		t.Fatalf("write settings: %v", err)
+	}
+
+	store, err := auth.Load(filepath.Join(t.TempDir(), "secrets.json"))
+	if err != nil {
+		t.Fatalf("auth load: %v", err)
+	}
+	cfg := config.Default()
+	b := NewSimpleHTTPBackend(cfg, store)
+	out, err := b.Complete(context.Background(), "hello")
+	if err != nil {
+		t.Fatalf("complete: %v", err)
+	}
+	if out != "ok from live" {
+		t.Fatalf("out=%q", out)
+	}
+	if gotAuthHeader != "Bearer "+authToken {
+		t.Fatalf("Authorization=%q", gotAuthHeader)
+	}
+	if gotAPIKeyHeader != authToken {
+		t.Fatalf("x-api-key=%q", gotAPIKeyHeader)
 	}
 }
 

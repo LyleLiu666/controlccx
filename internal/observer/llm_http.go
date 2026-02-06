@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -48,20 +49,42 @@ func (b *SimpleHTTPBackend) Complete(ctx context.Context, prompt string) (string
 	if baseURL == "" {
 		baseURL = defaultSimpleHTTPBaseURL
 	}
-	endpoint, err := normalizeMessagesEndpoint(baseURL)
-	if err != nil {
-		return "", err
-	}
 
 	authToken := strings.TrimSpace(b.resolveAnthropicAuthToken())
 	apiKey := strings.TrimSpace(b.resolveAnthropicAPIKey())
+	var live map[string]string
 	if authToken == "" && apiKey == "" {
-		return "", fmt.Errorf("simple-http missing credentials: set ANTHROPIC_AUTH_TOKEN (preferred) or ANTHROPIC_API_KEY")
+		live = readClaudeLiveEnvBestEffort()
+		if baseURL == defaultSimpleHTTPBaseURL {
+			if v := strings.TrimSpace(live["ANTHROPIC_BASE_URL"]); v != "" {
+				baseURL = v
+			}
+		}
+		if v := strings.TrimSpace(live["ANTHROPIC_AUTH_TOKEN"]); v != "" {
+			authToken = v
+		}
+		if v := strings.TrimSpace(live["ANTHROPIC_API_KEY"]); v != "" {
+			apiKey = v
+		}
+		if authToken == "" && apiKey == "" {
+			return "", fmt.Errorf("simple-http missing credentials: set ANTHROPIC_AUTH_TOKEN (preferred) or ANTHROPIC_API_KEY (or run `claude /login` to generate ~/.claude/settings.json)")
+		}
 	}
 
 	model := strings.TrimSpace(b.resolveAnthropicModel())
 	if model == "" {
-		model = defaultSimpleHTTPModel
+		if live == nil {
+			live = readClaudeLiveEnvBestEffort()
+		}
+		model = strings.TrimSpace(live["ANTHROPIC_MODEL"])
+		if model == "" {
+			model = defaultSimpleHTTPModel
+		}
+	}
+
+	endpoint, err := normalizeMessagesEndpoint(baseURL)
+	if err != nil {
+		return "", err
 	}
 
 	body := map[string]any{
@@ -123,6 +146,52 @@ func (b *SimpleHTTPBackend) Complete(ctx context.Context, prompt string) (string
 		return "", fmt.Errorf("simple-http empty completion from %s", endpoint)
 	}
 	return strings.TrimSpace(text), nil
+}
+
+func readClaudeLiveEnvBestEffort() map[string]string {
+	home, err := os.UserHomeDir()
+	if err != nil || strings.TrimSpace(home) == "" {
+		return nil
+	}
+	dir := filepath.Join(filepath.Clean(home), ".claude")
+	path := ""
+	for _, name := range []string{"settings.json", "claude.json"} {
+		p := filepath.Join(dir, name)
+		info, err := os.Stat(p)
+		if err != nil || info == nil || info.IsDir() || info.Size() <= 0 {
+			continue
+		}
+		path = p
+		break
+	}
+	if path == "" {
+		return nil
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	var v map[string]any
+	if err := json.Unmarshal(b, &v); err != nil {
+		return nil
+	}
+	raw, ok := v["env"].(map[string]any)
+	if !ok || len(raw) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(raw))
+	for k, vv := range raw {
+		ks := strings.TrimSpace(k)
+		if ks == "" {
+			continue
+		}
+		s, ok := vv.(string)
+		if !ok {
+			continue
+		}
+		out[ks] = s
+	}
+	return out
 }
 
 func normalizeMessagesEndpoint(base string) (string, error) {
