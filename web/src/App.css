@@ -63,6 +63,15 @@
   --glass-highlight: rgba(255, 255, 255, 0.08);
 }
 
+:global(:root[data-fx="reduced"]) {
+  --glass-blur: 0px;
+}
+
+:global(:root[data-fx="reduced"]) :deep(*) {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
 :global(html),
 :global(body) {
   margin: 0;

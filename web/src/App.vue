@@ -676,6 +676,7 @@ async function sendChatMessageGuarded() {
 }
 
 const theme = ref<"light" | "dark">("light");
+const fxReduced = ref(false);
 const headerMoreEl = ref<HTMLDetailsElement | null>(null);
 const skillsGovernanceOpen = ref(false);
 const skillsGovernancePrefill = ref<{ name?: string } | null>(null);
@@ -1815,6 +1816,7 @@ const LS_KEY_SECRETARY_SCOPE = "controlccx.secretary.scope.v1";
 const LS_KEY_SECRETARY_FULL = "controlccx.secretary.full.v1";
 const LS_KEY_SECRETARY_WIDTH = "controlccx.secretary.width.v1";
 const LS_KEY_THEME = "controlccx.theme.v1";
+const LS_KEY_FX_REDUCED = "controlccx.fx.reduced.v1";
 const LS_KEY_FEED_SCOPE = "controlccx.feed.scope.v1";
 const LS_KEY_FEED_WRAP = "controlccx.feed.wrap.v1";
 const LS_KEY_FEED_MODE = "controlccx.feed.mode.v1";
@@ -1942,6 +1944,41 @@ function applyTheme(t: "light" | "dark") {
   }
 }
 
+function shouldDefaultReducedFx(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    if (typeof window.matchMedia === "function") {
+      if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return true;
+      try {
+        if (window.matchMedia("(prefers-reduced-transparency: reduce)").matches) return true;
+      } catch {
+        // ignore
+      }
+    }
+    const nav = window.navigator as any;
+    const ua = String(nav?.userAgent ?? "");
+    const isWindows = /Windows/i.test(ua);
+    const hc = typeof nav?.hardwareConcurrency === "number" ? nav.hardwareConcurrency : 0;
+    const mem = typeof nav?.deviceMemory === "number" ? nav.deviceMemory : 0;
+    const saveData = Boolean(nav?.connection?.saveData);
+    const lowCpu = hc > 0 && hc <= 4;
+    const lowMem = mem > 0 && mem <= 4;
+    return saveData || (isWindows && (lowCpu || lowMem));
+  } catch {
+    return false;
+  }
+}
+
+function applyFxReduced(v: boolean) {
+  fxReduced.value = Boolean(v);
+  try {
+    if (fxReduced.value) document.documentElement.dataset.fx = "reduced";
+    else delete document.documentElement.dataset.fx;
+  } catch {
+    // ignore
+  }
+}
+
 function parseLogTimeMs(ts: string): number {
   const s = (ts ?? "").trim();
   const n = Date.parse(s);
@@ -2058,6 +2095,8 @@ const workspaceSelect = ref<string>(loadString(LS_KEY_WORKSPACE_FILTER));
     applyTheme(prefersDark ? "dark" : "light");
   }
 
+  applyFxReduced(loadBool(LS_KEY_FX_REDUCED, shouldDefaultReducedFx()));
+
   feedCoachDismissed.value = loadBool(LS_KEY_COACH_FEED, false);
 
   // Back-compat: if old single filter exists, seed multi filters.
@@ -2132,6 +2171,7 @@ watch(runSafetyAutopilotEnabled, (v) => saveBool(LS_KEY_RUN_SAFETY_AUTOPILOT, Bo
 watch(runSafetyInstallUnlock, (v) => saveBool(LS_KEY_RUN_SAFETY_INSTALL_UNLOCK, Boolean(v)));
 watch(attentionAutopilotEnabled, (v) => saveBool(LS_KEY_ATTENTION_AUTOPILOT, Boolean(v)));
 watch(theme, (v) => saveString(LS_KEY_THEME, v));
+watch(fxReduced, (v) => saveBool(LS_KEY_FX_REDUCED, Boolean(v)));
 watch(liveScope, (v) => saveString(LS_KEY_FEED_SCOPE, v));
 watch(liveWrap, (v) => saveBool(LS_KEY_FEED_WRAP, v));
 watch(liveMode, (v) => saveString(LS_KEY_FEED_MODE, v));
@@ -2880,8 +2920,17 @@ function toggleTheme() {
   applyTheme(theme.value === "dark" ? "light" : "dark");
 }
 
+function toggleFxReduced() {
+  applyFxReduced(!fxReduced.value);
+}
+
 function onToggleThemeFromMenu() {
   toggleTheme();
+  closeHeaderMoreMenu();
+}
+
+function onToggleReducedFxFromMenu() {
+  toggleFxReduced();
   closeHeaderMoreMenu();
 }
 
@@ -5365,6 +5414,18 @@ watch(
             <div class="headerMorePopup">
               <button type="button" class="headerMoreItem" @click="onToggleThemeFromMenu">
                 {{ theme === "dark" ? "白天" : "夜间" }}
+              </button>
+              <button
+                type="button"
+                class="headerMoreItem"
+                @click="onToggleReducedFxFromMenu"
+                :title="
+                  fxReduced
+                    ? '恢复模糊/玻璃效果'
+                    : '减少模糊/玻璃效果（低功耗设备更流畅）'
+                "
+              >
+                {{ fxReduced ? "恢复特效" : "减少特效" }}
               </button>
               <button
                 type="button"
