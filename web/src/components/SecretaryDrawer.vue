@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import mermaid from "mermaid";
 import { computed, nextTick, onMounted, ref, watch } from "vue";
-import type { ChatMessage, PromptTemplate, Task, WorkerType } from "../types";
+import type { AuthStatus, ChatMessage, PromptTemplate, Task, WorkerType } from "../types";
 import { fetchPromptTemplates } from "../api";
 
 type SessionGroup = {
@@ -37,6 +37,7 @@ const props = defineProps<{
   chatSending: boolean;
   chatInput: string;
   theme: "light" | "dark";
+  authStatus: AuthStatus | null;
   renderMarkdownSafe: (content: string) => string;
 }>();
 
@@ -95,6 +96,35 @@ const chatInputModel = computed({
 });
 
 const secretaryAvailable = computed<boolean>(() => props.secretaryAvailable !== false);
+
+const chatAuthHintText = computed(() => {
+  const st = props.authStatus;
+  if (!st) return "";
+  const backend = props.chatBackend;
+
+  if (backend === "codex") {
+    if (st.codex.available) return "";
+    return "codex 未检测到可用鉴权：请设置 OPENAI_API_KEY（或在 认证设置 中填写）。";
+  }
+
+  if (backend === "claude" || backend === "simple-http") {
+    if (st.claude.available) return "";
+    return "claude 未检测到可用鉴权：请设置 ANTHROPIC_AUTH_TOKEN / ANTHROPIC_API_KEY，或运行 `claude /login`。";
+  }
+
+  // auto
+  if (st.claude.available) return "";
+  if (st.codex.available) {
+    return "当前只检测到 codex 鉴权：建议切换 Agent 为 codex，或在 Providers 里把 Secretary backend 设为 codex。";
+  }
+  return "未检测到可用鉴权：请先配置 ANTHROPIC_AUTH_TOKEN / ANTHROPIC_API_KEY 或 OPENAI_API_KEY（或运行 `claude /login`）。";
+});
+
+const canQuickSwitchToCodex = computed(() => {
+  const st = props.authStatus;
+  if (!st) return false;
+  return props.chatBackend === "auto" && st.codex.available && !st.claude.available;
+});
 
 const chatInputEl = ref<HTMLTextAreaElement | null>(null);
 const chatMsgsEl = ref<HTMLDivElement | null>(null);
@@ -426,6 +456,25 @@ function onMarkdownClick(e: MouseEvent) {
             <div class="text">需要关注：{{ needsAttentionSessions.length }} 个会话</div>
             <button type="button" @click="viewModel = 'overview'" title="打开概览">
               查看
+            </button>
+          </div>
+
+          <div v-if="secretaryAvailable && chatAuthHintText" class="secDegradedHint" role="note">
+            <div class="text">{{ chatAuthHintText }}</div>
+            <button
+              v-if="canQuickSwitchToCodex"
+              type="button"
+              class="secInlineLink"
+              @click="chatBackendModel = 'codex'"
+              title="把本次对话后端切换为 codex"
+            >
+              切到 codex
+            </button>
+            <button type="button" class="secInlineLink" @click="emit('openProvidersSettings')">
+              Providers
+            </button>
+            <button type="button" class="secInlineLink" @click="emit('openAuthSettings')">
+              认证设置
             </button>
           </div>
 

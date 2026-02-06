@@ -6701,6 +6701,7 @@ watch(
 	      :chatStreamToolError="chatStreamToolError"
 	      :chatSending="chatSending"
 	      :theme="theme"
+	      :authStatus="authStatus"
 	      :renderMarkdownSafe="renderMarkdownSafe"
 	      @close="closeSecretary"
 	      @startResize="startSecretaryResize"
