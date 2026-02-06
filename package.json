@@ -9,7 +9,8 @@
     "start": "node scripts/start.mjs",
     "test": "go test ./... && pnpm -C web test",
     "smoke": "node scripts/smoke.mjs",
-    "resilience": "node scripts/resilience.mjs"
+    "resilience": "node scripts/resilience.mjs",
+    "startup-open-check": "node scripts/startup_open_check.mjs"
   },
   "devDependencies": {
     "concurrently": "^9.0.0"
