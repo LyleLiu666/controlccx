@@ -7236,6 +7236,7 @@ watch(
           :secretarySimpleHTTPApiKeyHint="providerSecretarySimpleHTTPApiKeyHint"
           :secretarySimpleHTTPAuthTokenHint="providerSecretarySimpleHTTPAuthTokenHint"
           :secretarySyncLive="false"
+          v-model:chatBackend="chatBackend"
           :speedTesting="providerSpeedTesting"
           :speedTestTarget="providerSpeedTestTarget"
           :claudeSpeedTest="providerClaudeSpeedTest"

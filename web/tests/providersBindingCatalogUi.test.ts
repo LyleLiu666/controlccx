@@ -6,16 +6,17 @@ function readText(relativePath: string) {
   return readFileSync(new URL(relativePath, import.meta.url), "utf8");
 }
 
-test("Providers modal uses Chinese action labels with clear save/activate semantics", () => {
+test("Providers modal is binding-first and surfaces a supported-types catalog", () => {
   const modal = readText("../src/components/ProvidersSettingsModal.vue");
-  // Binding ("挂钩") and profile library ("提供方库") are separated for clarity.
   for (const s of [
     "挂钩",
     "提供方库",
-    "去挂钩",
-    "仅保存",
-    "仅保存（不切换当前工具）",
+    "支持的提供方类型",
+    "Claude Code",
+    "Codex",
+    "秘书",
   ]) {
     assert.ok(modal.includes(s), `expected Providers modal to include ${JSON.stringify(s)}`);
   }
 });
+

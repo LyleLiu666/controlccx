@@ -8,7 +8,7 @@ function readText(relativePath: string) {
 
 test("Providers modal supports Secretary simple-http auth fields", () => {
   const modal = readText("../src/components/ProvidersSettingsModal.vue");
-  assert.match(modal, /Simple HTTP Auth \(Anthropic\)/);
+  assert.match(modal, /Simple HTTP（Anthropic 兼容）/);
   assert.match(modal, /v-model=\"secretarySimpleHTTPBaseURLModel\"/);
   assert.match(modal, /v-model=\"secretarySimpleHTTPAuthTokenModel\"/);
   assert.match(modal, /v-model=\"secretarySimpleHTTPApiKeyModel\"/);

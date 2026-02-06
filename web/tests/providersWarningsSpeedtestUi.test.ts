@@ -10,7 +10,7 @@ test("Providers settings modal surfaces env override warnings and speed test act
   const modal = readText("../src/components/ProvidersSettingsModal.vue");
   assert.match(modal, /authStatus/);
   assert.match(modal, /warnings/);
-  assert.match(modal, />\s*Speed test\s*</);
+  assert.match(modal, />\s*速度测试\s*</);
   assert.match(modal, /emit\('speedtest'/);
 });
 
@@ -19,4 +19,3 @@ test("App wires Providers warnings and speed test handlers", () => {
   assert.match(appVue, /:authStatus=\"authStatus\"/);
   assert.match(appVue, /@speedtest=\"runProviderSpeedTest\"/);
 });
-

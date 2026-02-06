@@ -8,9 +8,9 @@ function readText(relativePath: string) {
 
 test("Providers settings modal exposes import/export actions", () => {
   const modal = readText("../src/components/ProvidersSettingsModal.vue");
-  assert.match(modal, />\s*Import live\s*</);
-  assert.match(modal, />\s*Export\s*</);
-  assert.match(modal, />\s*Export secrets\s*</);
+  assert.match(modal, />\s*从 CLI 导入\s*</);
+  assert.match(modal, />\s*导出\s*</);
+  assert.match(modal, />\s*导出密钥\s*</);
   assert.match(modal, /emit\('importLive'\)/);
   assert.match(modal, /emit\('export',\s*false\)/);
   assert.match(modal, /emit\('export',\s*true\)/);
@@ -21,4 +21,3 @@ test("App wires Providers import/export actions", () => {
   assert.match(appVue, /@importLive=\"importProvidersFromLive\"/);
   assert.match(appVue, /@export=\"exportProvidersToFile\"/);
 });
-
