@@ -26,6 +26,7 @@ import type {
   ProviderSpeedTestResult,
   WorkerType,
 } from "./types";
+import { highlightCodeForPreview } from "./highlight";
 import {
   cancelTask,
   createTask,
@@ -835,6 +836,8 @@ const filePreviewLoading = ref(false);
 const filePreviewError = ref("");
 const filePreviewBoxEl = ref<HTMLDivElement | null>(null);
 const filePreviewTab = ref<"preview" | "raw" | "html">("preview");
+const FILE_PREVIEW_MAX_PREVIEW_BYTES_CODE = 120_000;
+const FILE_PREVIEW_MAX_PREVIEW_BYTES_MARKDOWN = 240_000;
 
 const {
   tasks,
@@ -1359,6 +1362,22 @@ const filePreviewIsMarkdown = computed(() => {
   return p.endsWith(".md") || p.endsWith(".markdown");
 });
 
+const filePreviewPreviewDisabled = computed(() => {
+  if (filePreviewLoading.value) return true;
+  if (filePreviewTruncated.value) return true;
+  const size = filePreviewSize.value > 0 ? filePreviewSize.value : filePreviewContent.value.length;
+  const max = filePreviewIsMarkdown.value
+    ? FILE_PREVIEW_MAX_PREVIEW_BYTES_MARKDOWN
+    : FILE_PREVIEW_MAX_PREVIEW_BYTES_CODE;
+  return size > max;
+});
+
+const filePreviewPreviewDisabledTitle = computed(() => {
+  if (!filePreviewPreviewDisabled.value) return "";
+  if (filePreviewTruncated.value) return "文件已截断：Preview 已禁用，请用 Raw。";
+  return "文件过大：Preview 已禁用，请用 Raw。";
+});
+
 const filePreviewMarkdownHtml = computed(() => {
   const text = filePreviewContent.value ?? "";
   if (!text.trim()) return "";
@@ -1369,44 +1388,11 @@ const filePreviewMarkdownHtml = computed(() => {
   }
 });
 
-function highlightLangFromPath(path: string): string | null {
-  const p = (path ?? "").toLowerCase();
-  if (p.endsWith(".ts") || p.endsWith(".mts") || p.endsWith(".cts")) return "typescript";
-  if (p.endsWith(".tsx")) return "tsx";
-  if (p.endsWith(".js") || p.endsWith(".mjs") || p.endsWith(".cjs")) return "javascript";
-  if (p.endsWith(".jsx")) return "jsx";
-  if (p.endsWith(".vue")) return "xml";
-  if (p.endsWith(".json")) return "json";
-  if (p.endsWith(".yaml") || p.endsWith(".yml")) return "yaml";
-  if (p.endsWith(".toml")) return "toml";
-  if (p.endsWith(".md") || p.endsWith(".markdown")) return "markdown";
-  if (p.endsWith(".go")) return "go";
-  if (p.endsWith(".py")) return "python";
-  if (p.endsWith(".sh") || p.endsWith(".bash") || p.endsWith(".zsh")) return "bash";
-  if (p.endsWith(".ps1")) return "powershell";
-  if (p.endsWith(".sql")) return "sql";
-  if (p.endsWith(".css")) return "css";
-  if (p.endsWith(".html") || p.endsWith(".htm")) return "xml";
-  if (p.endsWith(".xml")) return "xml";
-  if (p.endsWith(".diff") || p.endsWith(".patch")) return "diff";
-  if (p.endsWith(".txt") || p.endsWith(".log")) return "plaintext";
-  return null;
-}
-
 const filePreviewCodeHtml = computed(() => {
   const text = filePreviewContent.value ?? "";
   if (!text) return "";
   const path = filePreviewResolvedPath.value || filePreviewRawPath.value;
-  const lang = highlightLangFromPath(path);
-  try {
-    if (lang === "plaintext") return escapeHtml(text);
-    if (lang && hljs.getLanguage(lang)) {
-      return hljs.highlight(text, { language: lang, ignoreIllegals: true }).value;
-    }
-    return hljs.highlightAuto(text).value;
-  } catch {
-    return escapeHtml(text);
-  }
+  return highlightCodeForPreview(text, path).html;
 });
 
 const filePreviewRawHtml = computed(() => {
@@ -1436,19 +1422,13 @@ const filesPreviewHtml = computed(() => {
 });
 
 const filesCodeHtml = computed(() => {
+  if (!filesOpen.value) return "";
+  if (filesView.value !== "preview") return "";
+  if (filesIsMarkdown.value) return "";
   const text = filesFileContent.value ?? "";
   if (!text) return "";
   const path = filesSelectedPath.value;
-  const lang = highlightLangFromPath(path);
-  try {
-    if (lang === "plaintext") return escapeHtml(text);
-    if (lang && hljs.getLanguage(lang)) {
-      return hljs.highlight(text, { language: lang, ignoreIllegals: true }).value;
-    }
-    return hljs.highlightAuto(text).value;
-  } catch {
-    return escapeHtml(text);
-  }
+  return highlightCodeForPreview(text, path).html;
 });
 
 const filteredLogs = computed(() => {
@@ -1712,6 +1692,7 @@ async function openFilePreview(path: string, base: string) {
   const p = (path ?? "").trim();
   if (!p) return;
   filePreviewOpen.value = true;
+  filePreviewTab.value = "raw";
   filePreviewLoading.value = true;
   filePreviewError.value = "";
   filePreviewRawPath.value = p;
@@ -1722,10 +1703,23 @@ async function openFilePreview(path: string, base: string) {
   filePreviewTruncated.value = false;
   try {
     const res = await fetchFSRead(p, base);
-    filePreviewResolvedPath.value = res.path;
-    filePreviewSize.value = res.size ?? 0;
-    filePreviewTruncated.value = Boolean(res.truncated);
-    filePreviewContent.value = res.content ?? "";
+    const resolvedPath = String(res.path ?? "");
+    const size = res.size ?? 0;
+    const truncated = Boolean(res.truncated);
+    const content = res.content ?? "";
+
+    filePreviewResolvedPath.value = resolvedPath;
+    filePreviewSize.value = size;
+    filePreviewTruncated.value = truncated;
+    filePreviewContent.value = content;
+
+    const lower = (resolvedPath || p).trim().toLowerCase();
+    const isMarkdown = lower.endsWith(".md") || lower.endsWith(".markdown");
+    const max = isMarkdown ? FILE_PREVIEW_MAX_PREVIEW_BYTES_MARKDOWN : FILE_PREVIEW_MAX_PREVIEW_BYTES_CODE;
+    const effectiveSize = size > 0 ? size : content.length;
+    if (!truncated && effectiveSize > 0 && effectiveSize <= max) {
+      filePreviewTab.value = "preview";
+    }
   } catch (e: any) {
     filePreviewError.value = e?.message ?? String(e);
   } finally {
@@ -7144,6 +7138,8 @@ watch(
                 type="button"
                 class="tabBtn"
                 :class="{ active: filePreviewTab === 'preview' }"
+                :disabled="filePreviewPreviewDisabled"
+                :title="filePreviewPreviewDisabled ? filePreviewPreviewDisabledTitle : ''"
                 @click="filePreviewTab = 'preview'"
               >
                 Preview
