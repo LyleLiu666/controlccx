@@ -55,8 +55,8 @@ func TestAPI_Providers_UpsertActivateSpeedTest(t *testing.T) {
 
 	// Upsert.
 	var created providers.Profile
+	rawToken := "sk-ant-test-abcdef"
 	{
-		rawToken := "sk-ant-test-abcdef"
 		reqBody, _ := json.Marshal(map[string]any{
 			"profile": providers.Profile{
 				Name: "P1",
@@ -125,9 +125,15 @@ func TestAPI_Providers_UpsertActivateSpeedTest(t *testing.T) {
 		created.Targets.Claude.BaseURL = backend.URL
 		reqBody, _ := json.Marshal(map[string]any{
 			"profile": providers.Profile{
-				ID:      created.ID,
-				Name:    created.Name,
-				Targets: created.Targets,
+				ID:   created.ID,
+				Name: created.Name,
+				Targets: providers.Targets{
+					Claude: providers.ClaudeTarget{
+						BaseURL: backend.URL,
+						Model:   created.Targets.Claude.Model,
+						// Leave secrets empty; API MUST keep the existing stored secrets.
+					},
+				},
 			},
 		})
 		res, err := http.Post(srv.URL+"/api/providers/upsert", "application/json", bytes.NewReader(reqBody))
@@ -135,6 +141,9 @@ func TestAPI_Providers_UpsertActivateSpeedTest(t *testing.T) {
 			t.Fatalf("post upsert2: %v", err)
 		}
 		res.Body.Close()
+		if got := providersStore.Profiles()[0].Targets.Claude.AuthToken; got != rawToken {
+			t.Fatalf("expected stored auth token preserved, got=%q", got)
+		}
 
 		reqBody, _ = json.Marshal(map[string]any{
 			"target":     "claude",

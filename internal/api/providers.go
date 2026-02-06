@@ -53,12 +53,47 @@ func (a *API) handleProvidersUpsert(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid json", http.StatusBadRequest)
 		return
 	}
-	p, err := a.Providers.Upsert(body.Profile)
+	p := body.Profile
+	if strings.TrimSpace(p.ID) != "" {
+		if existing, ok := a.Providers.Get(p.ID); ok {
+			p = mergeProviderProfileForUpsert(existing, p)
+		}
+	}
+	p, err := a.Providers.Upsert(p)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	writeJSON(w, map[string]any{"profile": providers.MaskProfile(p)})
+}
+
+func mergeProviderProfileForUpsert(existing providers.Profile, incoming providers.Profile) providers.Profile {
+	// Only special-case secrets to prevent clients from echoing masked placeholders
+	// back into storage. Everything else is treated as a full replacement.
+	incoming.Name = strings.TrimSpace(incoming.Name)
+	if incoming.Name == "" {
+		incoming.Name = existing.Name
+	}
+
+	if isMaskedSecretPlaceholder(incoming.Targets.Claude.APIKey) || strings.TrimSpace(incoming.Targets.Claude.APIKey) == "" {
+		incoming.Targets.Claude.APIKey = existing.Targets.Claude.APIKey
+	}
+	if isMaskedSecretPlaceholder(incoming.Targets.Claude.AuthToken) || strings.TrimSpace(incoming.Targets.Claude.AuthToken) == "" {
+		incoming.Targets.Claude.AuthToken = existing.Targets.Claude.AuthToken
+	}
+	if isMaskedSecretPlaceholder(incoming.Targets.Codex.APIKey) || strings.TrimSpace(incoming.Targets.Codex.APIKey) == "" {
+		incoming.Targets.Codex.APIKey = existing.Targets.Codex.APIKey
+	}
+	return incoming
+}
+
+func isMaskedSecretPlaceholder(s string) bool {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return false
+	}
+	// MaskSecret uses either ellipsis or asterisks for short strings.
+	return strings.Contains(s, "…") || strings.Contains(s, "*")
 }
 
 func (a *API) handleProvidersDelete(w http.ResponseWriter, r *http.Request) {
