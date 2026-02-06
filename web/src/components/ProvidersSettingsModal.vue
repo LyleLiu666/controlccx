@@ -40,6 +40,8 @@ const emit = defineEmits<{
   (e: "close"): void;
   (e: "newProfile"): void;
   (e: "refresh"): void;
+  (e: "importLive"): void;
+  (e: "export", includeSecrets: boolean): void;
   (e: "selectProfile", profile: ProviderProfile): void;
   (e: "delete"): void;
   (e: "save"): void;
@@ -144,6 +146,30 @@ const secretarySyncLiveModel = computed({
           :disabled="loading || saving"
         >
           Refresh
+        </button>
+        <button
+          type="button"
+          class="headerMiniBtn"
+          @click="emit('importLive')"
+          :disabled="loading || saving"
+        >
+          Import live
+        </button>
+        <button
+          type="button"
+          class="headerMiniBtn"
+          @click="emit('export', false)"
+          :disabled="loading || saving"
+        >
+          Export
+        </button>
+        <button
+          type="button"
+          class="headerMiniBtn"
+          @click="emit('export', true)"
+          :disabled="loading || saving"
+        >
+          Export secrets
         </button>
         <button class="iconBtn" type="button" @click="emit('close')">✕</button>
       </div>
@@ -434,4 +460,3 @@ const secretarySyncLiveModel = computed({
   justify-content: flex-end;
 }
 </style>
-

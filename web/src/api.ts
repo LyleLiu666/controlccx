@@ -6,6 +6,8 @@ import type {
   ChatMessage,
   ProviderActivateResponse,
   ProviderDeleteResponse,
+  ProviderExportResponse,
+  ProviderImportLiveResponse,
   ProviderProfile,
   ProvidersListResponse,
   ProviderSpeedTestResponse,
@@ -474,6 +476,19 @@ export async function speedtestProvider(input: {
   timeout_ms?: number;
 }): Promise<ProviderSpeedTestResponse> {
   return postJSON<ProviderSpeedTestResponse>("/api/providers/speedtest", input);
+}
+
+export async function importProvidersLive(input: {
+  name?: string;
+  claude_home_dir?: string;
+  codex_home_dir?: string;
+}): Promise<ProviderImportLiveResponse> {
+  return postJSON<ProviderImportLiveResponse>("/api/providers/import/live", input);
+}
+
+export async function exportProviders(includeSecrets: boolean): Promise<ProviderExportResponse> {
+  const qs = includeSecrets ? "?include_secrets=1" : "";
+  return getJSON<ProviderExportResponse>(`/api/providers/export${qs}`);
 }
 
 export async function fetchTools(): Promise<ToolsListResponse> {

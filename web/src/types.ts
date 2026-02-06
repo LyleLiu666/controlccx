@@ -521,3 +521,14 @@ export type ProviderSpeedTestResult = {
 export type ProviderSpeedTestResponse = {
   result: ProviderSpeedTestResult;
 };
+
+export type ProviderImportLiveResponse = {
+  profile: ProviderProfile;
+  live?: any;
+};
+
+export type ProviderExportResponse = {
+  profiles: ProviderProfile[];
+  active: ProviderActiveSelection;
+  hint?: string;
+};

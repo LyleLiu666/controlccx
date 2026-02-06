@@ -44,6 +44,8 @@ import {
   upsertProvider,
   deleteProvider,
   activateProvider,
+  importProvidersLive,
+  exportProviders,
   fsDelete,
   fsMkdir,
   fsWrite,
@@ -4300,6 +4302,56 @@ async function activateProviderTarget(target: "claude" | "codex" | "secretary") 
   }
 }
 
+async function importProvidersFromLive() {
+  providersError.value = "";
+  providersSaving.value = true;
+  try {
+    const res = await importProvidersLive({ name: "Current" });
+    await refreshProviders(res.profile.id);
+  } catch (e: any) {
+    providersError.value = e?.message ?? String(e);
+  } finally {
+    providersSaving.value = false;
+  }
+}
+
+function downloadJSON(filename: string, data: any) {
+  if (typeof window === "undefined") return;
+  const text = JSON.stringify(data, null, 2);
+  const blob = new Blob([text], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1_000);
+}
+
+async function exportProvidersToFile(includeSecrets: boolean) {
+  providersError.value = "";
+  if (includeSecrets) {
+    const ok = await requestHighRiskConfirm({
+      title: "Export Provider Secrets",
+      message: "This will download provider secrets in plain JSON.",
+      detail: "Store the file securely and avoid sharing it.",
+      confirmLabel: "Export",
+    });
+    if (!ok) return;
+  }
+  providersSaving.value = true;
+  try {
+    const data = await exportProviders(includeSecrets);
+    const name = includeSecrets
+      ? "controlccx-providers.secrets.json"
+      : "controlccx-providers.json";
+    downloadJSON(name, data);
+  } catch (e: any) {
+    providersError.value = e?.message ?? String(e);
+  } finally {
+    providersSaving.value = false;
+  }
+}
+
 async function refreshTools() {
   toolsError.value = "";
   toolsLoading.value = true;
@@ -6984,6 +7036,8 @@ watch(
           @close="providersSettingsOpen = false"
           @newProfile="startNewProvider"
           @refresh="refreshProviders"
+          @importLive="importProvidersFromLive"
+          @export="exportProvidersToFile"
           @selectProfile="loadProviderIntoEditor"
           @delete="deleteProviderProfile"
           @save="saveProviderProfile"
