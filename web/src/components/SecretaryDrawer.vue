@@ -325,10 +325,10 @@ function onMarkdownClick(e: MouseEvent) {
         <button
           class="secHeaderAction"
           type="button"
-          @click="emit('openAuthSettings')"
-          title="打开秘书 LLM 认证设置"
+          @click="emit('openProvidersSettings')"
+          title="打开 Providers（秘书后端/模型/token）"
         >
-          秘书设置
+          Providers
         </button>
         <button
           class="iconBtn"
