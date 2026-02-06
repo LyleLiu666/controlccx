@@ -718,7 +718,7 @@ function activateProfileForTarget(profile: ProviderProfile, target: ProviderTarg
   flex-direction: column;
   gap: 12px;
   min-height: 0;
-  overflow: hidden;
+  overflow: auto;
 }
 
 .providersMeta {

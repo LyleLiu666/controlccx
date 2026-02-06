@@ -20,7 +20,7 @@ test("Providers modal scoped styles keep body/list/editor scrollable", () => {
   const modal = readText("../src/components/ProvidersSettingsModal.vue");
   assert.match(
     modal,
-    /\.providersBody\s*\{[^}]*display:\s*flex;[^}]*flex-direction:\s*column;[^}]*min-height:\s*0;[^}]*overflow:\s*hidden;/s,
+    /\.providersBody\s*\{[^}]*display:\s*flex;[^}]*flex-direction:\s*column;[^}]*min-height:\s*0;[^}]*overflow:\s*auto;/s,
   );
   assert.match(
     modal,
