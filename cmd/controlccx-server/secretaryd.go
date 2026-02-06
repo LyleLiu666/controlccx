@@ -20,6 +20,7 @@ import (
 	"controlccx/internal/db"
 	"controlccx/internal/events"
 	"controlccx/internal/observer"
+	"controlccx/internal/providers"
 	"controlccx/internal/tasks"
 )
 
@@ -64,6 +65,11 @@ func runSecretaryd(cfg config.Config, secretaryAddr string, runnerBaseURL string
 		return err
 	}
 	chatStore := chat.NewStore(conn)
+
+	providersStore, err := providers.NewStore(cfg.Paths.DataDir)
+	if err != nil {
+		return err
+	}
 
 	runnerClient, err := daemon.NewRunnerClient(runnerBaseURL, daemon.RunnerClientOptions{Token: instanceToken})
 	if err != nil {
@@ -153,6 +159,11 @@ func runSecretaryd(cfg config.Config, secretaryAddr string, runnerBaseURL string
 			if authStore != nil {
 				_ = authStore.Reload()
 			}
+			if providersStore != nil {
+				_ = providersStore.Reload()
+			}
+
+			body.Backend = resolveSecretaryBackend(body.Backend, providersStore)
 
 			wantStream := body.Stream ||
 				strings.TrimSpace(r.URL.Query().Get("stream")) == "1" ||
