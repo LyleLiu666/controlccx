@@ -55,9 +55,9 @@ const editEnvModel = computed({
   <div v-if="open" class="modalOverlay" @click.self="emit('close')">
     <div class="modal toolsModal">
       <div class="modalHeader">
-        <div class="modalTitle">Tools</div>
+        <div class="modalTitle">工具设置</div>
         <button type="button" class="headerMiniBtn" @click="emit('newTool')">
-          New
+          新建
         </button>
         <button
           type="button"
@@ -65,17 +65,29 @@ const editEnvModel = computed({
           @click="emit('refresh')"
           :disabled="loading || saving"
         >
-          Refresh
+          刷新
         </button>
         <button class="iconBtn" type="button" @click="emit('close')">✕</button>
       </div>
 
       <div class="modalBody toolsBody">
+        <div class="setupHint">
+          <div><strong>怎么新增工具？</strong></div>
+          <ol class="setupSteps">
+            <li>先点“新建”，填写 `id`、`command`，driver 建议默认 `exec`。</li>
+            <li>再点“保存”；保存成功后会出现在左侧工具列表。</li>
+            <li>`claude-code` / `codex` 是系统内置入口，通常只需改命令或环境变量。</li>
+          </ol>
+        </div>
+
         <div v-if="error" class="modalError">{{ error }}</div>
-        <div v-else-if="loading" class="loading">Loading...</div>
+        <div v-else-if="loading" class="loading">加载中...</div>
         <template v-else>
           <div class="toolsSplit">
             <div class="toolsList">
+              <div class="toolsListTitleRow">
+                <div class="tinyHint">工具列表（点击切换）</div>
+              </div>
               <button
                 v-for="t in tools"
                 :key="t.id"
@@ -93,15 +105,15 @@ const editEnvModel = computed({
             <div class="toolsEditor">
               <div class="toolsEditorGrid">
                 <label class="full">
-                  id
+                  工具 ID
                   <input
                     v-model="editIDModel"
-                    placeholder="my-tool"
+                    placeholder="my-tool（唯一）"
                     autocomplete="off"
                   />
                 </label>
                 <label>
-                  driver
+                  驱动
                   <select v-model="editDriverModel">
                     <option value="claude-code">claude-code</option>
                     <option value="codex">codex</option>
@@ -109,15 +121,15 @@ const editEnvModel = computed({
                   </select>
                 </label>
                 <label class="full">
-                  command
+                  命令
                   <input
                     v-model="editCommandModel"
-                    placeholder="claude"
+                    placeholder="例如：claude / codex / bash"
                     autocomplete="off"
                   />
                 </label>
                 <label class="full">
-                  args (space separated)
+                  参数（空格分隔）
                   <textarea
                     v-model="editArgsModel"
                     rows="2"
@@ -125,13 +137,14 @@ const editEnvModel = computed({
                   ></textarea>
                 </label>
                 <label class="full">
-                  env (KEY=VALUE per line)
+                  环境变量（每行一个 KEY=VALUE）
                   <textarea
                     v-model="editEnvModel"
                     rows="6"
                     placeholder="ANTHROPIC_BASE_URL=https://..."
                   ></textarea>
                 </label>
+                <div class="tinyHint">保存按钮需要填写：工具 ID + 命令。</div>
               </div>
             </div>
           </div>
@@ -139,9 +152,9 @@ const editEnvModel = computed({
       </div>
 
       <div class="modalFooter">
-        <button type="button" @click="emit('close')">Close</button>
+        <button type="button" @click="emit('close')">关闭</button>
         <button type="button" @click="emit('delete')" :disabled="saving || !editID.trim()">
-          Delete
+          删除
         </button>
         <button
           type="button"
@@ -149,10 +162,9 @@ const editEnvModel = computed({
           @click="emit('save')"
           :disabled="saving || !editID.trim() || !editCommand.trim()"
         >
-          {{ saving ? "Saving..." : "Save" }}
+          {{ saving ? "保存中..." : "保存" }}
         </button>
       </div>
     </div>
   </div>
 </template>
-

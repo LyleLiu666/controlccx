@@ -4381,54 +4381,52 @@ async function deleteProviderProfile() {
 async function activateProviderTarget(target: "claude" | "codex" | "secretary") {
   providersError.value = "";
   let id = providerEditID.value.trim();
-  if (!id && !providerEditName.value.trim()) {
+  if (!providerEditName.value.trim()) {
     providersError.value = "name is required";
     return;
   }
   providersSaving.value = true;
   try {
-    if (!id) {
-      const profile: ProviderProfile = {
-        id: "",
-        name: providerEditName.value.trim(),
-        targets: {
-          claude: {
-            base_url: providerClaudeBaseURL.value.trim(),
-            api_key: providerClaudeApiKey.value.trim(),
-            auth_token: providerClaudeAuthToken.value.trim(),
-            model: providerClaudeModel.value.trim(),
-            small_fast_model: providerClaudeSmallFastModel.value.trim(),
-          },
-          codex: {
-            base_url: providerCodexBaseURL.value.trim(),
-            api_key: providerCodexApiKey.value.trim(),
-            model: providerCodexModel.value.trim(),
-            reasoning_effort: providerCodexReasoningEffort.value.trim(),
-          },
-          secretary: {
-            backend: providerSecretaryBackend.value,
-            simple_http: {
-              base_url: providerSecretarySimpleHTTPBaseURL.value.trim(),
-              api_key: providerSecretarySimpleHTTPApiKey.value.trim(),
-              auth_token: providerSecretarySimpleHTTPAuthToken.value.trim(),
-              model: providerSecretarySimpleHTTPModel.value.trim(),
-            },
+    const profile: ProviderProfile = {
+      id,
+      name: providerEditName.value.trim(),
+      targets: {
+        claude: {
+          base_url: providerClaudeBaseURL.value.trim(),
+          api_key: providerClaudeApiKey.value.trim(),
+          auth_token: providerClaudeAuthToken.value.trim(),
+          model: providerClaudeModel.value.trim(),
+          small_fast_model: providerClaudeSmallFastModel.value.trim(),
+        },
+        codex: {
+          base_url: providerCodexBaseURL.value.trim(),
+          api_key: providerCodexApiKey.value.trim(),
+          model: providerCodexModel.value.trim(),
+          reasoning_effort: providerCodexReasoningEffort.value.trim(),
+        },
+        secretary: {
+          backend: providerSecretaryBackend.value,
+          simple_http: {
+            base_url: providerSecretarySimpleHTTPBaseURL.value.trim(),
+            api_key: providerSecretarySimpleHTTPApiKey.value.trim(),
+            auth_token: providerSecretarySimpleHTTPAuthToken.value.trim(),
+            model: providerSecretarySimpleHTTPModel.value.trim(),
           },
         },
-        sync_live: {
-          claude: providerClaudeSyncLive.value,
-          codex: providerCodexSyncLive.value,
-          secretary: false,
-        },
-      };
-      const res = await upsertProvider(profile);
-      providerClaudeApiKey.value = "";
-      providerClaudeAuthToken.value = "";
-      providerCodexApiKey.value = "";
-      providerSecretarySimpleHTTPApiKey.value = "";
-      providerSecretarySimpleHTTPAuthToken.value = "";
-      id = res.profile.id;
-    }
+      },
+      sync_live: {
+        claude: providerClaudeSyncLive.value,
+        codex: providerCodexSyncLive.value,
+        secretary: false,
+      },
+    };
+    const res = await upsertProvider(profile);
+    providerClaudeApiKey.value = "";
+    providerClaudeAuthToken.value = "";
+    providerCodexApiKey.value = "";
+    providerSecretarySimpleHTTPApiKey.value = "";
+    providerSecretarySimpleHTTPAuthToken.value = "";
+    id = res.profile.id;
     await activateProvider({ target, id });
     await refreshProviders(id);
     refreshAuth();
@@ -4641,7 +4639,7 @@ function openToolsSettings() {
 function startNewTool() {
   toolsSelectedID.value = "";
   toolEditID.value = "";
-  toolEditDriver.value = "claude-code";
+  toolEditDriver.value = "exec";
   toolEditCommand.value = "";
   toolEditArgs.value = "";
   toolEditEnv.value = "";

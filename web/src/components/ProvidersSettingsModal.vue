@@ -254,9 +254,10 @@ function activateProfileForTarget(profile: ProviderProfile, target: ProviderTarg
               点击 <span class="mono">New</span> 新建 profile，填写右侧信息（同一份 profile 可以分别配置 Claude Code / Codex / 秘书）。
             </li>
             <li>
-              点击底部 <span class="mono">Save</span> 保存；或直接点击右侧的
-              <span class="mono">启用到 Claude Code</span> / <span class="mono">启用到 Codex</span> /
-              <span class="mono">启用到 秘书</span>（会自动保存并启用）。
+              点击底部 <span class="mono">仅保存</span> 保存草稿（不切换当前工具）；或直接点击右侧的
+              <span class="mono">保存并启用到 Claude Code</span> /
+              <span class="mono">保存并启用到 Codex</span> /
+              <span class="mono">保存并启用到 秘书</span>（会先保存再切换）。
             </li>
             <li>
               启用只影响后续新 run；已在运行的任务不会被打断或重启。
@@ -463,13 +464,14 @@ function activateProfileForTarget(profile: ProviderProfile, target: ProviderTarg
                       </div>
                     </div>
                     <div class="providerActions">
+                      <div class="tinyHint providerActionsHint">会先保存当前配置，再切换 Claude Code 到该 profile。</div>
                       <button
                         type="button"
                         class="primary"
                         @click="emit('activate', 'claude')"
                         :disabled="saving || !editName.trim()"
                       >
-                        启用到 Claude Code
+                        保存并启用到 Claude Code
                       </button>
                     </div>
                   </div>
@@ -556,13 +558,14 @@ function activateProfileForTarget(profile: ProviderProfile, target: ProviderTarg
                       </div>
                     </div>
                     <div class="providerActions">
+                      <div class="tinyHint providerActionsHint">会先保存当前配置，再切换 Codex 到该 profile。</div>
                       <button
                         type="button"
                         class="primary"
                         @click="emit('activate', 'codex')"
                         :disabled="saving || !editName.trim()"
                       >
-                        启用到 Codex
+                        保存并启用到 Codex
                       </button>
                     </div>
                   </div>
@@ -640,13 +643,14 @@ function activateProfileForTarget(profile: ProviderProfile, target: ProviderTarg
                       <span>Sync live config on activate (n/a)</span>
                     </label>
                     <div class="providerActions">
+                      <div class="tinyHint providerActionsHint">会先保存当前配置，再切换 秘书 到该 profile。</div>
                       <button
                         type="button"
                         class="primary"
                         @click="emit('activate', 'secretary')"
                         :disabled="saving || !editName.trim()"
                       >
-                        启用到 秘书
+                        保存并启用到 秘书
                       </button>
                     </div>
                   </div>
@@ -658,17 +662,18 @@ function activateProfileForTarget(profile: ProviderProfile, target: ProviderTarg
       </div>
 
       <div class="modalFooter">
-        <button type="button" @click="emit('close')">Close</button>
+        <button type="button" @click="emit('close')">关闭</button>
         <button type="button" @click="emit('delete')" :disabled="saving || !editID.trim()">
-          Delete
+          删除
         </button>
         <button
           type="button"
           class="primary"
           @click="emit('save')"
+          title="仅保存（不切换当前工具）"
           :disabled="saving || !editName.trim()"
         >
-          {{ saving ? "Saving..." : "Save" }}
+          {{ saving ? "保存中..." : "仅保存" }}
         </button>
       </div>
     </div>
@@ -760,6 +765,16 @@ function activateProfileForTarget(profile: ProviderProfile, target: ProviderTarg
   border-radius: 14px;
   min-height: 160px;
   color: var(--text-sub);
+}
+
+.setupHint {
+  border: 1px solid color-mix(in srgb, var(--border-color) 76%, rgba(20, 184, 166, 0.24) 24%);
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--bg-panel) 90%, rgba(20, 184, 166, 0.06)),
+      color-mix(in srgb, var(--bg-subtle) 90%, rgba(14, 116, 144, 0.08))
+    );
 }
 
 .providersSplit {
@@ -987,7 +1002,15 @@ function activateProfileForTarget(profile: ProviderProfile, target: ProviderTarg
 
 .providerActions {
   display: flex;
-  justify-content: flex-end;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.providerActionsHint {
+  flex: 1;
+  min-width: 240px;
 }
 
 .providerTestRow {
