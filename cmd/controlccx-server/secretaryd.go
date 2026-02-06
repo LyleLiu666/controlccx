@@ -33,6 +33,16 @@ func runSecretaryd(cfg config.Config, secretaryAddr string, runnerBaseURL string
 		return errors.New("secretaryd: runner base url is required")
 	}
 
+	lock, err := daemon.AcquireSingleInstanceLock(cfg.Paths.DataDir, "secretaryd", secretaryAddr)
+	if err != nil {
+		if errors.Is(err, daemon.ErrAlreadyRunning) {
+			log.Printf("secretaryd already running; exiting\n")
+			return nil
+		}
+		return err
+	}
+	defer func() { _ = lock.Release() }()
+
 	ctx := context.Background()
 	instanceToken, err := daemon.LoadOrCreateInstanceToken(cfg.Paths.DataDir)
 	if err != nil {

@@ -28,6 +28,16 @@ func runRunnerd(cfg config.Config, runnerAddr string) error {
 		return errors.New("runnerd: addr is required")
 	}
 
+	lock, err := daemon.AcquireSingleInstanceLock(cfg.Paths.DataDir, "runnerd", runnerAddr)
+	if err != nil {
+		if errors.Is(err, daemon.ErrAlreadyRunning) {
+			log.Printf("runnerd already running; exiting\n")
+			return nil
+		}
+		return err
+	}
+	defer func() { _ = lock.Release() }()
+
 	ctx := context.Background()
 	instanceToken, err := daemon.LoadOrCreateInstanceToken(cfg.Paths.DataDir)
 	if err != nil {

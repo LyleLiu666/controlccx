@@ -8,7 +8,8 @@
     "build": "node scripts/build.mjs",
     "start": "node scripts/start.mjs",
     "test": "go test ./... && pnpm -C web test",
-    "smoke": "node scripts/smoke.mjs"
+    "smoke": "node scripts/smoke.mjs",
+    "resilience": "node scripts/resilience.mjs"
   },
   "devDependencies": {
     "concurrently": "^9.0.0"
