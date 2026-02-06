@@ -33,6 +33,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: "close"): void;
   (e: "openTools"): void;
+  (e: "openProviders"): void;
   (e: "save"): void;
   (e: "clearStored", key: StoredAuthKey): void;
   (e: "update:autoDeliveryForeman", value: boolean): void;
@@ -102,6 +103,9 @@ const showCliInstallGuide = computed<boolean>(() => {
         <div class="modalTitle">Auth Settings</div>
         <button type="button" class="headerMiniBtn" @click="emit('openTools')">
           Tools
+        </button>
+        <button type="button" class="headerMiniBtn" @click="emit('openProviders')">
+          Providers
         </button>
         <button class="iconBtn" type="button" @click="emit('close')">✕</button>
       </div>

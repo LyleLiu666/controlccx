@@ -442,3 +442,82 @@ export type AuthPatch = {
   codex_model?: string;
   codex_reasoning_effort?: string;
 };
+
+export type ProviderActiveSelection = {
+  claude?: string;
+  codex?: string;
+  secretary?: string;
+};
+
+export type ProviderSyncLive = {
+  claude?: boolean;
+  codex?: boolean;
+  secretary?: boolean;
+};
+
+export type ProviderClaudeTarget = {
+  base_url?: string;
+  api_key?: string;
+  auth_token?: string;
+  model?: string;
+  small_fast_model?: string;
+};
+
+export type ProviderCodexTarget = {
+  base_url?: string;
+  api_key?: string;
+  model?: string;
+  reasoning_effort?: string;
+};
+
+export type ProviderSecretaryTarget = {
+  backend?: "auto" | "simple-http" | "claude" | "codex";
+};
+
+export type ProviderTargets = {
+  claude?: ProviderClaudeTarget;
+  codex?: ProviderCodexTarget;
+  secretary?: ProviderSecretaryTarget;
+};
+
+export type ProviderProfile = {
+  id: string;
+  name: string;
+  targets: ProviderTargets;
+  sync_live?: ProviderSyncLive;
+  created_at?: string;
+  updated_at?: string;
+};
+
+export type ProvidersListResponse = {
+  profiles: ProviderProfile[];
+  active: ProviderActiveSelection;
+  storage_path?: string;
+};
+
+export type ProviderUpsertResponse = {
+  profile: ProviderProfile;
+};
+
+export type ProviderDeleteResponse = {
+  ok: boolean;
+};
+
+export type ProviderActivateResponse = {
+  profile: ProviderProfile;
+  active: ProviderActiveSelection;
+  auth_status: AuthStatus;
+};
+
+export type ProviderSpeedTestResult = {
+  url: string;
+  ok: boolean;
+  status_code?: number;
+  latency_ms?: number;
+  error?: string;
+  hint?: string;
+};
+
+export type ProviderSpeedTestResponse = {
+  result: ProviderSpeedTestResult;
+};

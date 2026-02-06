@@ -20,6 +20,9 @@ import type {
   ToolsListResponse,
   SystemInfo,
   Task,
+  ProviderActiveSelection,
+  ProviderProfile,
+  ProvidersListResponse,
   WorkerType,
 } from "./types";
 import {
@@ -37,6 +40,10 @@ import {
   fetchTools,
   fetchToolsStatus,
   fetchSystemInfo,
+  fetchProviders,
+  upsertProvider,
+  deleteProvider,
+  activateProvider,
   fsDelete,
   fsMkdir,
   fsWrite,
@@ -86,6 +93,7 @@ import LiveDrawer from "./components/LiveDrawer.vue";
 import FilesModal from "./components/FilesModal.vue";
 import AuthSettingsModal from "./components/AuthSettingsModal.vue";
 import ToolsSettingsModal from "./components/ToolsSettingsModal.vue";
+import ProvidersSettingsModal from "./components/ProvidersSettingsModal.vue";
 import NewRunModal from "./components/NewRunModal.vue";
 import SkillsInsertModal from "./components/SkillsInsertModal.vue";
 import RunLaunchOverlay from "./components/RunLaunchOverlay.vue";
@@ -698,6 +706,57 @@ const toolEditDriver = ref<ToolDriver>("claude-code");
 const toolEditCommand = ref("");
 const toolEditArgs = ref("");
 const toolEditEnv = ref("");
+
+const providersInfo = ref<ProvidersListResponse | null>(null);
+const providersSettingsOpen = ref(false);
+const providersLoading = ref(false);
+const providersSaving = ref(false);
+const providersError = ref("");
+
+const providersProfiles = computed<ProviderProfile[]>(
+  () => providersInfo.value?.profiles ?? [],
+);
+const providersActive = computed<ProviderActiveSelection>(
+  () => providersInfo.value?.active ?? {},
+);
+const providersStoragePath = computed<string>(
+  () => providersInfo.value?.storage_path ?? "",
+);
+
+const providerEditID = ref("");
+const providerEditName = ref("");
+
+const providerClaudeBaseURL = ref("");
+const providerClaudeApiKey = ref("");
+const providerClaudeAuthToken = ref("");
+const providerClaudeModel = ref("");
+const providerClaudeSmallFastModel = ref("");
+const providerClaudeSyncLive = ref(false);
+
+const providerCodexBaseURL = ref("");
+const providerCodexApiKey = ref("");
+const providerCodexModel = ref("");
+const providerCodexReasoningEffort = ref("");
+const providerCodexSyncLive = ref(false);
+
+const providerSecretaryBackend = ref<"auto" | "simple-http" | "claude" | "codex">(
+  "auto",
+);
+
+const selectedProvider = computed<ProviderProfile | null>(() => {
+  const id = providerEditID.value.trim();
+  if (!id) return null;
+  return providersProfiles.value.find((p) => p.id === id) ?? null;
+});
+const providerClaudeApiKeyHint = computed<string>(
+  () => selectedProvider.value?.targets?.claude?.api_key ?? "",
+);
+const providerClaudeAuthTokenHint = computed<string>(
+  () => selectedProvider.value?.targets?.claude?.auth_token ?? "",
+);
+const providerCodexApiKeyHint = computed<string>(
+  () => selectedProvider.value?.targets?.codex?.api_key ?? "",
+);
 
 const {
   skillsOpen,
@@ -2848,6 +2907,11 @@ function onOpenSettingsFromMenu() {
   closeHeaderMoreMenu();
 }
 
+function onOpenProvidersFromMenu() {
+  openProvidersSettings();
+  closeHeaderMoreMenu();
+}
+
 function openSecretaryForForeman() {
   liveOpen.value = false;
   secretaryOpen.value = true;
@@ -4083,6 +4147,159 @@ function openAuthSettings() {
   refreshAuth();
 }
 
+function openProvidersSettings() {
+  providersError.value = "";
+  providersSettingsOpen.value = true;
+  void refreshProviders();
+}
+
+function startNewProvider() {
+  providerEditID.value = "";
+  providerEditName.value = "New Provider";
+  providerClaudeBaseURL.value = "";
+  providerClaudeApiKey.value = "";
+  providerClaudeAuthToken.value = "";
+  providerClaudeModel.value = "";
+  providerClaudeSmallFastModel.value = "";
+  providerClaudeSyncLive.value = false;
+
+  providerCodexBaseURL.value = "";
+  providerCodexApiKey.value = "";
+  providerCodexModel.value = "";
+  providerCodexReasoningEffort.value = "";
+  providerCodexSyncLive.value = false;
+
+  providerSecretaryBackend.value = "auto";
+}
+
+function loadProviderIntoEditor(p: ProviderProfile) {
+  providerEditID.value = String(p?.id ?? "").trim();
+  providerEditName.value = String(p?.name ?? "").trim() || providerEditID.value;
+
+  providerClaudeBaseURL.value = String(p?.targets?.claude?.base_url ?? "").trim();
+  providerClaudeModel.value = String(p?.targets?.claude?.model ?? "").trim();
+  providerClaudeSmallFastModel.value = String(
+    p?.targets?.claude?.small_fast_model ?? "",
+  ).trim();
+  providerClaudeSyncLive.value = !!p?.sync_live?.claude;
+  providerClaudeApiKey.value = "";
+  providerClaudeAuthToken.value = "";
+
+  providerCodexBaseURL.value = String(p?.targets?.codex?.base_url ?? "").trim();
+  providerCodexModel.value = String(p?.targets?.codex?.model ?? "").trim();
+  providerCodexReasoningEffort.value = String(
+    p?.targets?.codex?.reasoning_effort ?? "",
+  ).trim();
+  providerCodexSyncLive.value = !!p?.sync_live?.codex;
+  providerCodexApiKey.value = "";
+
+  const backend = String(p?.targets?.secretary?.backend ?? "").trim();
+  providerSecretaryBackend.value =
+    backend === "simple-http" || backend === "claude" || backend === "codex"
+      ? backend
+      : "auto";
+}
+
+async function refreshProviders(selectID?: string) {
+  providersError.value = "";
+  providersLoading.value = true;
+  try {
+    const res = await fetchProviders();
+    providersInfo.value = res;
+    const wantID = String(selectID ?? providerEditID.value).trim();
+    const list = res?.profiles ?? [];
+    const next =
+      list.find((p) => p.id === wantID) ??
+      list.find((p) => p.id === providerEditID.value.trim()) ??
+      list[0] ??
+      null;
+    if (next) loadProviderIntoEditor(next);
+    else startNewProvider();
+  } catch (e: any) {
+    providersError.value = e?.message ?? String(e);
+  } finally {
+    providersLoading.value = false;
+  }
+}
+
+async function saveProviderProfile() {
+  providersError.value = "";
+  if (!providerEditName.value.trim()) {
+    providersError.value = "name is required";
+    return;
+  }
+  providersSaving.value = true;
+  try {
+    const profile: ProviderProfile = {
+      id: providerEditID.value.trim(),
+      name: providerEditName.value.trim(),
+      targets: {
+        claude: {
+          base_url: providerClaudeBaseURL.value.trim(),
+          api_key: providerClaudeApiKey.value.trim(),
+          auth_token: providerClaudeAuthToken.value.trim(),
+          model: providerClaudeModel.value.trim(),
+          small_fast_model: providerClaudeSmallFastModel.value.trim(),
+        },
+        codex: {
+          base_url: providerCodexBaseURL.value.trim(),
+          api_key: providerCodexApiKey.value.trim(),
+          model: providerCodexModel.value.trim(),
+          reasoning_effort: providerCodexReasoningEffort.value.trim(),
+        },
+        secretary: {
+          backend: providerSecretaryBackend.value,
+        },
+      },
+      sync_live: {
+        claude: providerClaudeSyncLive.value,
+        codex: providerCodexSyncLive.value,
+        secretary: false,
+      },
+    };
+    const res = await upsertProvider(profile);
+    providerClaudeApiKey.value = "";
+    providerClaudeAuthToken.value = "";
+    providerCodexApiKey.value = "";
+    await refreshProviders(res.profile.id);
+  } catch (e: any) {
+    providersError.value = e?.message ?? String(e);
+  } finally {
+    providersSaving.value = false;
+  }
+}
+
+async function deleteProviderProfile() {
+  providersError.value = "";
+  const id = providerEditID.value.trim();
+  if (!id) return;
+  providersSaving.value = true;
+  try {
+    await deleteProvider(id);
+    await refreshProviders();
+  } catch (e: any) {
+    providersError.value = e?.message ?? String(e);
+  } finally {
+    providersSaving.value = false;
+  }
+}
+
+async function activateProviderTarget(target: "claude" | "codex" | "secretary") {
+  providersError.value = "";
+  const id = providerEditID.value.trim();
+  if (!id) return;
+  providersSaving.value = true;
+  try {
+    await activateProvider({ target, id });
+    await refreshProviders(id);
+    refreshAuth();
+  } catch (e: any) {
+    providersError.value = e?.message ?? String(e);
+  } finally {
+    providersSaving.value = false;
+  }
+}
+
 async function refreshTools() {
   toolsError.value = "";
   toolsLoading.value = true;
@@ -5085,6 +5302,9 @@ watch(
               </button>
               <button type="button" class="headerMoreItem" @click="onOpenSettingsFromMenu">
                 设置
+              </button>
+              <button type="button" class="headerMoreItem" @click="onOpenProvidersFromMenu">
+                Providers
               </button>
             </div>
           </details>
@@ -6711,6 +6931,7 @@ watch(
 	      v-model:codexReasoningEffort="authCodexReasoningEffort"
 	      @close="authSettingsOpen = false"
 	      @openTools="openToolsSettings"
+	      @openProviders="openProvidersSettings"
 	      @save="saveAuthSettings"
 	      @clearStored="clearStoredAuth"
 	    />
@@ -6730,9 +6951,44 @@ watch(
 	      @newTool="startNewTool"
 	      @refresh="refreshTools"
 	      @selectTool="loadToolIntoEditor"
-	      @delete="deleteToolOverride"
+		      @delete="deleteToolOverride"
 		      @save="saveTool"
 		    />
+
+        <ProvidersSettingsModal
+          :open="providersSettingsOpen"
+          :loading="providersLoading"
+          :saving="providersSaving"
+          :error="providersError"
+          :storagePath="providersStoragePath"
+          :profiles="providersProfiles"
+          :active="providersActive"
+          :editID="providerEditID"
+          v-model:editName="providerEditName"
+          v-model:claudeBaseURL="providerClaudeBaseURL"
+          v-model:claudeApiKey="providerClaudeApiKey"
+          v-model:claudeAuthToken="providerClaudeAuthToken"
+          v-model:claudeModel="providerClaudeModel"
+          v-model:claudeSmallFastModel="providerClaudeSmallFastModel"
+          v-model:claudeSyncLive="providerClaudeSyncLive"
+          :claudeApiKeyHint="providerClaudeApiKeyHint"
+          :claudeAuthTokenHint="providerClaudeAuthTokenHint"
+          v-model:codexBaseURL="providerCodexBaseURL"
+          v-model:codexApiKey="providerCodexApiKey"
+          v-model:codexModel="providerCodexModel"
+          v-model:codexReasoningEffort="providerCodexReasoningEffort"
+          v-model:codexSyncLive="providerCodexSyncLive"
+          :codexApiKeyHint="providerCodexApiKeyHint"
+          v-model:secretaryBackend="providerSecretaryBackend"
+          :secretarySyncLive="false"
+          @close="providersSettingsOpen = false"
+          @newProfile="startNewProvider"
+          @refresh="refreshProviders"
+          @selectProfile="loadProviderIntoEditor"
+          @delete="deleteProviderProfile"
+          @save="saveProviderProfile"
+          @activate="activateProviderTarget"
+        />
 
 	        <SkillsGovernanceModal
 	          :open="skillsGovernanceOpen"

@@ -4,6 +4,12 @@ import type {
   AuthPatch,
   AuthStatus,
   ChatMessage,
+  ProviderActivateResponse,
+  ProviderDeleteResponse,
+  ProviderProfile,
+  ProvidersListResponse,
+  ProviderSpeedTestResponse,
+  ProviderUpsertResponse,
   FSDeleteResponse,
   FSEntriesResponse,
   FSListResponse,
@@ -438,6 +444,36 @@ export async function fetchAuthInfo(): Promise<AuthInfo> {
 
 export async function updateAuth(patch: AuthPatch): Promise<AuthInfo> {
   return postJSON<AuthInfo>("/api/auth", patch);
+}
+
+export async function fetchProviders(): Promise<ProvidersListResponse> {
+  return getJSON<ProvidersListResponse>("/api/providers");
+}
+
+export async function upsertProvider(profile: ProviderProfile): Promise<ProviderUpsertResponse> {
+  return postJSON<ProviderUpsertResponse>("/api/providers/upsert", { profile });
+}
+
+export async function deleteProvider(id: string): Promise<ProviderDeleteResponse> {
+  return postJSON<ProviderDeleteResponse>("/api/providers/delete", { id });
+}
+
+export async function activateProvider(input: {
+  target: "claude" | "codex" | "secretary";
+  id: string;
+  force_live_overwrite?: boolean;
+  claude_home_dir?: string;
+  codex_home_dir?: string;
+}): Promise<ProviderActivateResponse> {
+  return postJSON<ProviderActivateResponse>("/api/providers/activate", input);
+}
+
+export async function speedtestProvider(input: {
+  target: "claude" | "codex";
+  id: string;
+  timeout_ms?: number;
+}): Promise<ProviderSpeedTestResponse> {
+  return postJSON<ProviderSpeedTestResponse>("/api/providers/speedtest", input);
 }
 
 export async function fetchTools(): Promise<ToolsListResponse> {
