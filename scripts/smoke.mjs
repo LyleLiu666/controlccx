@@ -78,6 +78,12 @@ const child = spawn(
   ],
   {
   stdio: "inherit",
+  env: {
+    ...process.env,
+    // Ensure env override warnings are exercised deterministically.
+    OPENAI_API_KEY: "smoke-env-openai-key",
+    ANTHROPIC_AUTH_TOKEN: "smoke-env-anthropic-token",
+  },
   }
 );
 
@@ -172,6 +178,19 @@ try {
   const initialProfiles = providers0?.profiles;
   if (!providers0 || !(initialProfiles == null || Array.isArray(initialProfiles))) {
     throw new Error("unexpected /api/providers payload");
+  }
+
+  const authStatus = await getJSON(`${base}/api/auth/status`);
+  const warnings = Array.isArray(authStatus?.warnings) ? authStatus.warnings : [];
+  const warningsText = warnings.join("\n");
+  if (!warningsText.includes("OPENAI_API_KEY") || !warningsText.includes("ANTHROPIC_AUTH_TOKEN")) {
+    throw new Error("expected env override warnings in /api/auth/status");
+  }
+  if (String(authStatus?.codex?.api_key?.effective ?? "") !== "env") {
+    throw new Error("expected codex api key effective source to be env");
+  }
+  if (String(authStatus?.claude?.auth_token?.effective ?? "") !== "env") {
+    throw new Error("expected claude auth token effective source to be env");
   }
 
   const liveRoot = path.join(dataDir, "live");
