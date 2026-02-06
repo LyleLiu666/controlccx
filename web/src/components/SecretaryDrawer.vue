@@ -55,6 +55,7 @@ const emit = defineEmits<{
   (e: "cancelSession", session: SessionGroup): void;
   (e: "dismissAttention", session: SessionGroup): void;
   (e: "sendChat"): void;
+  (e: "openAuthSettings"): void;
   (e: "markdownClick", ev: MouseEvent): void;
 }>();
 
@@ -288,6 +289,14 @@ function onMarkdownClick(e: MouseEvent) {
           </button>
         </div>
         <button
+          class="secHeaderAction"
+          type="button"
+          @click="emit('openAuthSettings')"
+          title="打开秘书 LLM 认证设置"
+        >
+          秘书设置
+        </button>
+        <button
           class="iconBtn"
           type="button"
           @click="fullModel = !fullModel"
@@ -319,9 +328,12 @@ function onMarkdownClick(e: MouseEvent) {
             </div>
           </div>
 
-          <div class="secSection">
+          <div class="secSection secSectionAttention">
             <div class="secSectionTitleRow">
-              <div class="secSectionTitle">需要关注</div>
+              <div class="secSectionHead">
+                <div class="secSectionTitle">需要关注</div>
+                <div class="secSectionSubtitle">阻塞 / 中断会话会显示在这里</div>
+              </div>
               <div class="secSectionControls">
                 <select v-model="scopeModel" class="secScopeSelect" title="范围">
                   <option value="current">当前</option>
@@ -336,65 +348,71 @@ function onMarkdownClick(e: MouseEvent) {
             <div v-if="autopilotNote" class="secAutopilotNote">
               {{ autopilotNote }}
             </div>
-            <div v-if="needsAttentionSessions.length === 0" class="empty">
-              暂无需要关注的 session
+            <div v-if="needsAttentionSessions.length === 0" class="secEmptyState">
+              <div class="secEmptyTitle">当前没有需要处理的会话</div>
+              <div class="secEmptyHint">出现 blocked / interrupted 后会自动显示在这里。</div>
             </div>
-            <div v-for="s in needsAttentionSessions" :key="s.key" class="secRow">
-              <button type="button" class="secRowMain" @click="onSelectAttentionSession(s)">
-                <div class="rowTop">
-                  <span class="mono">{{ shortSessionLabel(s) }}</span>
-                  <span class="pill" :class="s.status">{{ s.status }}</span>
+            <div v-else class="secRows">
+              <div v-for="s in needsAttentionSessions" :key="s.key" class="secRow">
+                <button type="button" class="secRowMain" @click="onSelectAttentionSession(s)">
+                  <div class="rowTop">
+                    <span class="mono">{{ shortSessionLabel(s) }}</span>
+                    <span class="pill" :class="s.status">{{ s.status }}</span>
+                  </div>
+                  <div class="rowMid">
+                    <span class="pill kind">{{ s.worker_type }}</span>
+                    <span class="score">score {{ s.score }}</span>
+                  </div>
+                  <div class="rowPath mono">{{ s.workdir }}</div>
+                </button>
+                <div class="secRowActions">
+                  <button
+                    type="button"
+                    class="secAction"
+                    @click="emit('resumeSession', s)"
+                    :disabled="
+                      !s.session_id ||
+                      !!s.deleted_at ||
+                      s.latest.status === 'running' ||
+                      s.latest.status === 'queued' ||
+                      s.latest.status === 'waiting'
+                    "
+                    title="继续会话"
+                  >
+                    继续
+                  </button>
+                  <button
+                    v-if="
+                      s.latest.status === 'running' ||
+                      s.latest.status === 'queued' ||
+                      s.latest.status === 'waiting'
+                    "
+                    type="button"
+                    class="secAction"
+                    @click="emit('cancelSession', s)"
+                    title="取消运行"
+                  >
+                    取消运行
+                  </button>
+                  <button
+                    v-else
+                    type="button"
+                    class="secAction"
+                    @click="emit('dismissAttention', s)"
+                    title="不再提示"
+                  >
+                    取消提醒
+                  </button>
                 </div>
-                <div class="rowMid">
-                  <span class="pill kind">{{ s.worker_type }}</span>
-                  <span class="score">score {{ s.score }}</span>
-                </div>
-                <div class="rowPath mono">{{ s.workdir }}</div>
-              </button>
-              <div class="secRowActions">
-                <button
-                  type="button"
-                  class="secAction"
-                  @click="emit('resumeSession', s)"
-                  :disabled="
-                    !s.session_id ||
-                    !!s.deleted_at ||
-                    s.latest.status === 'running' ||
-                    s.latest.status === 'queued' ||
-                    s.latest.status === 'waiting'
-                  "
-                  title="继续会话"
-                >
-                  继续
-                </button>
-                <button
-                  v-if="
-                    s.latest.status === 'running' ||
-                    s.latest.status === 'queued' ||
-                    s.latest.status === 'waiting'
-                  "
-                  type="button"
-                  class="secAction"
-                  @click="emit('cancelSession', s)"
-                  title="取消运行"
-                >
-                  取消运行
-                </button>
-                <button
-                  v-else
-                  type="button"
-                  class="secAction"
-                  @click="emit('dismissAttention', s)"
-                  title="不再提示"
-                >
-                  取消提醒
-                </button>
               </div>
             </div>
           </div>
 
-          <div class="secSection">
-            <div class="secSectionTitle">简报</div>
+          <div class="secSection secSectionBriefing">
+            <div class="secSectionHead">
+              <div class="secSectionTitle">简报</div>
+              <div class="secSectionSubtitle">当前范围的会话状态快照</div>
+            </div>
             <pre class="briefing">{{ briefing }}</pre>
           </div>
         </div>
@@ -439,6 +457,13 @@ function onMarkdownClick(e: MouseEvent) {
                       :disabled="chatSending"
                     />
                   </label>
+                </div>
+                <div class="chatSettingsHint">
+                  Agent 仅切换后端；模型和 token 在
+                  <button type="button" class="secInlineLink" @click="emit('openAuthSettings')">
+                    认证设置
+                  </button>
+                  中配置。
                 </div>
               </details>
               <div class="msgs" ref="chatMsgsEl">

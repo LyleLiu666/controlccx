@@ -6309,6 +6309,7 @@ watch(
 	      @cancelSession="secretaryCancelSessionRun"
 	      @dismissAttention="dismissAttentionSession"
 	      @sendChat="sendChatMessage"
+	      @openAuthSettings="openAuthSettings"
 	      @markdownClick="onResultMarkdownClick"
 	    />
 
