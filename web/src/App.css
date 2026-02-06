@@ -650,7 +650,7 @@ h2 {
   overflow-wrap: anywhere;
 }
 
-.setupHint {
+:deep(.setupHint) {
   grid-column: 1 / -1;
   display: grid;
   gap: 10px;
@@ -667,7 +667,7 @@ h2 {
   border-color: rgba(59, 130, 246, 0.22);
 }
 
-.setupDetails summary {
+:deep(.setupDetails summary) {
   cursor: pointer;
   font-weight: 800;
   color: var(--text-main);
@@ -687,18 +687,18 @@ h2 {
 
 :deep(.setupSteps a),
 :deep(.setupProvider a),
-.setupHint a {
+:deep(.setupHint a) {
   color: var(--color-primary);
   text-decoration: none;
 }
 
 :deep(.setupSteps a:hover),
 :deep(.setupProvider a:hover),
-.setupHint a:hover {
+:deep(.setupHint a:hover) {
   text-decoration: underline;
 }
 
-.setupActions {
+:deep(.setupActions) {
   display: flex;
   justify-content: flex-end;
   gap: 8px;

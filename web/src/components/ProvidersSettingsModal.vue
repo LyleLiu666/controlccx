@@ -246,6 +246,24 @@ function activateProfileForTarget(profile: ProviderProfile, target: ProviderTarg
             </div>
           </div>
         </div>
+
+        <div class="setupHint">
+          <div><strong>如何录入新的提供方？</strong></div>
+          <ol class="setupSteps">
+            <li>
+              点击 <span class="mono">New</span> 新建 profile，填写右侧信息（同一份 profile 可以分别配置 Claude Code / Codex / 秘书）。
+            </li>
+            <li>
+              点击底部 <span class="mono">Save</span> 保存；或直接点击右侧的
+              <span class="mono">启用到 Claude Code</span> / <span class="mono">启用到 Codex</span> /
+              <span class="mono">启用到 秘书</span>（会自动保存并启用）。
+            </li>
+            <li>
+              启用只影响后续新 run；已在运行的任务不会被打断或重启。
+            </li>
+          </ol>
+        </div>
+
         <div v-if="error" class="modalError">{{ error }}</div>
         <div v-else-if="loading" class="loading providersLoading">Loading...</div>
         <template v-else>
@@ -449,9 +467,9 @@ function activateProfileForTarget(profile: ProviderProfile, target: ProviderTarg
                         type="button"
                         class="primary"
                         @click="emit('activate', 'claude')"
-                        :disabled="saving || !editID.trim()"
+                        :disabled="saving || !editName.trim()"
                       >
-                        Activate Claude Code
+                        启用到 Claude Code
                       </button>
                     </div>
                   </div>
@@ -542,9 +560,9 @@ function activateProfileForTarget(profile: ProviderProfile, target: ProviderTarg
                         type="button"
                         class="primary"
                         @click="emit('activate', 'codex')"
-                        :disabled="saving || !editID.trim()"
+                        :disabled="saving || !editName.trim()"
                       >
-                        Activate Codex
+                        启用到 Codex
                       </button>
                     </div>
                   </div>
@@ -626,9 +644,9 @@ function activateProfileForTarget(profile: ProviderProfile, target: ProviderTarg
                         type="button"
                         class="primary"
                         @click="emit('activate', 'secretary')"
-                        :disabled="saving || !editID.trim()"
+                        :disabled="saving || !editName.trim()"
                       >
-                        Activate Secretary
+                        启用到 秘书
                       </button>
                     </div>
                   </div>
