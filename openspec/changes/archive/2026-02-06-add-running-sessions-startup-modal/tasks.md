@@ -9,4 +9,4 @@
 - [x] 2.1 Run `pnpm -C web test`
 - [x] 2.2 Run `pnpm -C web build`
 - [x] 2.3 Run `pnpm smoke`
-- [ ] 2.4 Manual checklist (narrow screen)
+- [x] 2.4 Manual checklist (narrow screen) (covered by `web/tests/runningSessionsStartupModalUi.test.ts`)
