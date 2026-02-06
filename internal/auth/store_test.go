@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -95,11 +96,62 @@ func TestComputeStatus_CodexAuth_UsesCodexHomeAuthJSON(t *testing.T) {
 	}
 
 	st := ComputeStatus(Secrets{})
-	if st.Codex.APIKey.Effective != "codex" {
-		t.Fatalf("effective=%q, want codex", st.Codex.APIKey.Effective)
+	if st.Codex.APIKey.Effective != "live" {
+		t.Fatalf("effective=%q, want live", st.Codex.APIKey.Effective)
 	}
 	if !st.Codex.Available {
 		t.Fatalf("expected codex available")
+	}
+}
+
+func TestComputeStatus_ClaudeAuth_UsesClaudeSettingsJSON(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("ANTHROPIC_AUTH_TOKEN", "")
+
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+
+	claudeDir := filepath.Join(home, ".claude")
+	if err := os.MkdirAll(claudeDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	settingsPath := filepath.Join(claudeDir, "settings.json")
+	if err := os.WriteFile(settingsPath, []byte(`{"env":{"ANTHROPIC_AUTH_TOKEN":"sk-ant-live-abcdef"}}`), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	st := ComputeStatus(Secrets{})
+	if st.Claude.AuthToken.Effective != "live" {
+		t.Fatalf("effective=%q, want live", st.Claude.AuthToken.Effective)
+	}
+	if st.Claude.AuthToken.Masked != MaskSecret("sk-ant-live-abcdef") {
+		t.Fatalf("masked=%q", st.Claude.AuthToken.Masked)
+	}
+	if !st.Claude.Available {
+		t.Fatalf("expected claude available")
+	}
+}
+
+func TestComputeStatus_WarnsOnEnvOverrides(t *testing.T) {
+	t.Setenv("ANTHROPIC_AUTH_TOKEN", "sk-ant-env-abcdef")
+
+	st := ComputeStatus(Secrets{AnthropicAuthToken: "sk-ant-stored"})
+	if st.Claude.AuthToken.Effective != "env" {
+		t.Fatalf("effective=%q, want env", st.Claude.AuthToken.Effective)
+	}
+	if len(st.Warnings) == 0 {
+		t.Fatalf("expected warnings")
+	}
+	found := false
+	for _, w := range st.Warnings {
+		if strings.Contains(w, "ANTHROPIC_AUTH_TOKEN") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected warning mentioning ANTHROPIC_AUTH_TOKEN, got=%v", st.Warnings)
 	}
 }
 

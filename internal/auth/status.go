@@ -1,13 +1,14 @@
 package auth
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 )
 
 type FieldStatus struct {
-	Effective string `json:"effective"` // "env" | "stored" | "codex" | "default" | "none"
+	Effective string `json:"effective"` // "env" | "stored" | "live" | "default" | "none"
 	Masked    string `json:"masked,omitempty"`
 }
 
@@ -28,19 +29,35 @@ type CodexStatus struct {
 }
 
 type Status struct {
-	Claude ClaudeStatus `json:"claude"`
-	Codex  CodexStatus  `json:"codex"`
+	Claude   ClaudeStatus `json:"claude"`
+	Codex    CodexStatus  `json:"codex"`
+	Warnings []string     `json:"warnings,omitempty"`
 }
 
 func ComputeStatus(secrets Secrets) Status {
-	baseURL := computeFieldStatusDisplay("ANTHROPIC_BASE_URL", secrets.AnthropicBaseURL)
-	apiKey := computeFieldStatus("ANTHROPIC_API_KEY", secrets.AnthropicAPIKey)
-	authToken := computeFieldStatus("ANTHROPIC_AUTH_TOKEN", secrets.AnthropicAuthToken)
-	model := computeFieldStatusDisplay("ANTHROPIC_MODEL", secrets.AnthropicModel)
-	smallFast := computeFieldStatusDisplay("ANTHROPIC_SMALL_FAST_MODEL", secrets.AnthropicSmallFastModel)
+	claudeLive := readClaudeLiveEnv()
+	baseURL := computeFieldStatusDisplay("ANTHROPIC_BASE_URL", secrets.AnthropicBaseURL, claudeLive["ANTHROPIC_BASE_URL"])
+	apiKey := computeFieldStatus("ANTHROPIC_API_KEY", secrets.AnthropicAPIKey, claudeLive["ANTHROPIC_API_KEY"])
+	authToken := computeFieldStatus("ANTHROPIC_AUTH_TOKEN", secrets.AnthropicAuthToken, claudeLive["ANTHROPIC_AUTH_TOKEN"])
+	model := computeFieldStatusDisplay("ANTHROPIC_MODEL", secrets.AnthropicModel, claudeLive["ANTHROPIC_MODEL"])
+	smallFast := computeFieldStatusDisplay("ANTHROPIC_SMALL_FAST_MODEL", secrets.AnthropicSmallFastModel, claudeLive["ANTHROPIC_SMALL_FAST_MODEL"])
 	openaiKey := computeCodexAuthStatus(secrets.OpenAIAPIKey)
 	codexModel := computeCodexSettingStatus(secrets.CodexModel, "gpt-5.2")
 	codexEffort := computeCodexSettingStatus(secrets.CodexReasoningEffort, "xhigh")
+
+	var warnings []string
+	for _, name := range []string{
+		"ANTHROPIC_BASE_URL",
+		"ANTHROPIC_API_KEY",
+		"ANTHROPIC_AUTH_TOKEN",
+		"ANTHROPIC_MODEL",
+		"ANTHROPIC_SMALL_FAST_MODEL",
+		"OPENAI_API_KEY",
+	} {
+		if v, ok := os.LookupEnv(name); ok && strings.TrimSpace(v) != "" {
+			warnings = append(warnings, "env override: "+name+" is set; stored/provider changes will not affect this field")
+		}
+	}
 
 	return Status{
 		Claude: ClaudeStatus{
@@ -57,25 +74,32 @@ func ComputeStatus(secrets Secrets) Status {
 			ReasoningEffort: codexEffort,
 			Available:       openaiKey.Effective != "none",
 		},
+		Warnings: warnings,
 	}
 }
 
-func computeFieldStatus(envName string, stored string) FieldStatus {
+func computeFieldStatus(envName string, stored string, live string) FieldStatus {
 	if v, ok := os.LookupEnv(envName); ok && strings.TrimSpace(v) != "" {
 		return FieldStatus{Effective: "env", Masked: MaskSecret(v)}
 	}
 	if strings.TrimSpace(stored) != "" {
 		return FieldStatus{Effective: "stored", Masked: MaskSecret(stored)}
 	}
+	if strings.TrimSpace(live) != "" {
+		return FieldStatus{Effective: "live", Masked: MaskSecret(live)}
+	}
 	return FieldStatus{Effective: "none"}
 }
 
-func computeFieldStatusDisplay(envName string, stored string) FieldStatus {
+func computeFieldStatusDisplay(envName string, stored string, live string) FieldStatus {
 	if v, ok := os.LookupEnv(envName); ok && strings.TrimSpace(v) != "" {
 		return FieldStatus{Effective: "env", Masked: TruncateDisplay(v, 96)}
 	}
 	if strings.TrimSpace(stored) != "" {
 		return FieldStatus{Effective: "stored", Masked: TruncateDisplay(stored, 96)}
+	}
+	if strings.TrimSpace(live) != "" {
+		return FieldStatus{Effective: "live", Masked: TruncateDisplay(live, 96)}
 	}
 	return FieldStatus{Effective: "none"}
 }
@@ -112,7 +136,7 @@ func computeCodexAuthStatus(stored string) FieldStatus {
 		return FieldStatus{Effective: "stored", Masked: MaskSecret(stored)}
 	}
 	if path, ok := codexAuthFilePath(); ok {
-		return FieldStatus{Effective: "codex", Masked: tildePath(path)}
+		return FieldStatus{Effective: "live", Masked: tildePath(path)}
 	}
 	return FieldStatus{Effective: "none"}
 }
@@ -156,6 +180,66 @@ func tildePath(p string) string {
 		return "~"
 	}
 	return p
+}
+
+func readClaudeLiveEnv() map[string]string {
+	path, ok := claudeSettingsFilePath()
+	if !ok {
+		return map[string]string{}
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return map[string]string{}
+	}
+	env, err := parseClaudeEnvFromSettingsJSON(b)
+	if err != nil {
+		return map[string]string{}
+	}
+	return env
+}
+
+func claudeSettingsFilePath() (string, bool) {
+	home, err := os.UserHomeDir()
+	if err != nil || strings.TrimSpace(home) == "" {
+		return "", false
+	}
+	dir := filepath.Join(filepath.Clean(home), ".claude")
+	for _, name := range []string{"settings.json", "claude.json"} {
+		p := filepath.Join(dir, name)
+		info, err := os.Stat(p)
+		if err != nil || info == nil || info.IsDir() {
+			continue
+		}
+		if info.Size() <= 0 {
+			continue
+		}
+		return p, true
+	}
+	return "", false
+}
+
+func parseClaudeEnvFromSettingsJSON(b []byte) (map[string]string, error) {
+	var v map[string]any
+	if err := json.Unmarshal(b, &v); err != nil {
+		return nil, err
+	}
+	raw, ok := v["env"].(map[string]any)
+	if !ok {
+		return map[string]string{}, nil
+	}
+	out := make(map[string]string, len(raw))
+	for k, vv := range raw {
+		ks := strings.TrimSpace(k)
+		if ks == "" {
+			continue
+		}
+		s, ok := vv.(string)
+		if !ok {
+			continue
+		}
+		out[ks] = s
+	}
+	return out, nil
 }
 
 func MaskSecret(s string) string {

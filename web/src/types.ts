@@ -406,7 +406,7 @@ export type ServerEvent = {
 };
 
 export type AuthFieldStatus = {
-  effective: "env" | "stored" | "codex" | "default" | "none";
+  effective: "env" | "stored" | "live" | "default" | "none";
   masked?: string;
 };
 
