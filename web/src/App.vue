@@ -23,6 +23,7 @@ import type {
   ProviderActiveSelection,
   ProviderProfile,
   ProvidersListResponse,
+  ProviderSpeedTestResult,
   WorkerType,
 } from "./types";
 import {
@@ -44,6 +45,7 @@ import {
   upsertProvider,
   deleteProvider,
   activateProvider,
+  speedtestProvider,
   importProvidersLive,
   exportProviders,
   fsDelete,
@@ -759,6 +761,11 @@ const providerClaudeAuthTokenHint = computed<string>(
 const providerCodexApiKeyHint = computed<string>(
   () => selectedProvider.value?.targets?.codex?.api_key ?? "",
 );
+
+const providerSpeedTesting = ref(false);
+const providerSpeedTestTarget = ref<"claude" | "codex" | "">("");
+const providerClaudeSpeedTest = ref<ProviderSpeedTestResult | null>(null);
+const providerCodexSpeedTest = ref<ProviderSpeedTestResult | null>(null);
 
 const {
   skillsOpen,
@@ -4153,6 +4160,7 @@ function openProvidersSettings() {
   providersError.value = "";
   providersSettingsOpen.value = true;
   void refreshProviders();
+  void refreshAuth();
 }
 
 function startNewProvider() {
@@ -4172,6 +4180,10 @@ function startNewProvider() {
   providerCodexSyncLive.value = false;
 
   providerSecretaryBackend.value = "auto";
+
+  providerClaudeSpeedTest.value = null;
+  providerCodexSpeedTest.value = null;
+  providerSpeedTestTarget.value = "";
 }
 
 function loadProviderIntoEditor(p: ProviderProfile) {
@@ -4200,6 +4212,10 @@ function loadProviderIntoEditor(p: ProviderProfile) {
     backend === "simple-http" || backend === "claude" || backend === "codex"
       ? backend
       : "auto";
+
+  providerClaudeSpeedTest.value = null;
+  providerCodexSpeedTest.value = null;
+  providerSpeedTestTarget.value = "";
 }
 
 async function refreshProviders(selectID?: string) {
@@ -4299,6 +4315,25 @@ async function activateProviderTarget(target: "claude" | "codex" | "secretary") 
     providersError.value = e?.message ?? String(e);
   } finally {
     providersSaving.value = false;
+  }
+}
+
+async function runProviderSpeedTest(target: "claude" | "codex") {
+  providersError.value = "";
+  const id = providerEditID.value.trim();
+  if (!id) return;
+
+  providerSpeedTesting.value = true;
+  providerSpeedTestTarget.value = target;
+  try {
+    const res = await speedtestProvider({ target, id });
+    if (target === "claude") providerClaudeSpeedTest.value = res.result;
+    else providerCodexSpeedTest.value = res.result;
+  } catch (e: any) {
+    providersError.value = e?.message ?? String(e);
+  } finally {
+    providerSpeedTesting.value = false;
+    providerSpeedTestTarget.value = "";
   }
 }
 
@@ -7013,6 +7048,7 @@ watch(
           :saving="providersSaving"
           :error="providersError"
           :storagePath="providersStoragePath"
+          :authStatus="authStatus"
           :profiles="providersProfiles"
           :active="providersActive"
           :editID="providerEditID"
@@ -7033,11 +7069,16 @@ watch(
           :codexApiKeyHint="providerCodexApiKeyHint"
           v-model:secretaryBackend="providerSecretaryBackend"
           :secretarySyncLive="false"
+          :speedTesting="providerSpeedTesting"
+          :speedTestTarget="providerSpeedTestTarget"
+          :claudeSpeedTest="providerClaudeSpeedTest"
+          :codexSpeedTest="providerCodexSpeedTest"
           @close="providersSettingsOpen = false"
           @newProfile="startNewProvider"
           @refresh="refreshProviders"
           @importLive="importProvidersFromLive"
           @export="exportProvidersToFile"
+          @speedtest="runProviderSpeedTest"
           @selectProfile="loadProviderIntoEditor"
           @delete="deleteProviderProfile"
           @save="saveProviderProfile"

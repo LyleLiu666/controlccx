@@ -1,8 +1,14 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import type { ProviderActiveSelection, ProviderProfile } from "../types";
+import type {
+  AuthStatus,
+  ProviderActiveSelection,
+  ProviderProfile,
+  ProviderSpeedTestResult,
+} from "../types";
 
 type SecretaryBackend = "auto" | "simple-http" | "claude" | "codex";
+type SpeedTestTarget = "claude" | "codex" | "";
 
 const props = defineProps<{
   open: boolean;
@@ -10,6 +16,7 @@ const props = defineProps<{
   saving: boolean;
   error: string;
   storagePath: string;
+  authStatus: AuthStatus | null;
   profiles: ProviderProfile[];
   active: ProviderActiveSelection;
 
@@ -34,6 +41,11 @@ const props = defineProps<{
 
   secretaryBackend: SecretaryBackend;
   secretarySyncLive: boolean;
+
+  speedTesting: boolean;
+  speedTestTarget: SpeedTestTarget;
+  claudeSpeedTest: ProviderSpeedTestResult | null;
+  codexSpeedTest: ProviderSpeedTestResult | null;
 }>();
 
 const emit = defineEmits<{
@@ -42,6 +54,7 @@ const emit = defineEmits<{
   (e: "refresh"): void;
   (e: "importLive"): void;
   (e: "export", includeSecrets: boolean): void;
+  (e: "speedtest", target: "claude" | "codex"): void;
   (e: "selectProfile", profile: ProviderProfile): void;
   (e: "delete"): void;
   (e: "save"): void;
@@ -178,6 +191,16 @@ const secretarySyncLiveModel = computed({
         <div v-if="storagePath" class="settingsMeta">
           Storage: <span class="mono">{{ storagePath }}</span>
         </div>
+        <div v-if="authStatus?.warnings?.length" class="providersWarning">
+          <div class="providersWarningTitle">Env overrides detected</div>
+          <div class="tinyHint">
+            Unset these environment variables and restart ControlCCX to make provider
+            switches take effect.
+          </div>
+          <div class="providersWarningList mono">
+            <div v-for="w in authStatus.warnings" :key="w">{{ w }}</div>
+          </div>
+        </div>
         <div v-if="error" class="modalError">{{ error }}</div>
         <div v-else-if="loading" class="loading">Loading...</div>
         <template v-else>
@@ -283,6 +306,41 @@ const secretarySyncLiveModel = computed({
                       <input type="checkbox" v-model="claudeSyncLiveModel" />
                       <span>Sync live config on activate</span>
                     </label>
+                    <div class="providerTestRow">
+                      <button
+                        type="button"
+                        @click="emit('speedtest', 'claude')"
+                        :disabled="
+                          saving ||
+                          !editID.trim() ||
+                          speedTesting
+                        "
+                      >
+                        <span
+                          v-if="speedTesting && speedTestTarget === 'claude'"
+                          >Testing...</span
+                        >
+                        <span v-else>Speed test</span>
+                      </button>
+                      <div
+                        v-if="claudeSpeedTest"
+                        class="speedTestResult mono"
+                        :class="{ ok: claudeSpeedTest.ok, bad: !claudeSpeedTest.ok }"
+                      >
+                        <span>{{ claudeSpeedTest.ok ? "ok" : "fail" }}</span>
+                        <span v-if="claudeSpeedTest.latency_ms != null">
+                          {{ claudeSpeedTest.latency_ms }}ms</span
+                        >
+                        <span
+                          v-if="
+                            !claudeSpeedTest.ok &&
+                            (claudeSpeedTest.hint || claudeSpeedTest.error)
+                          "
+                        >
+                          {{ claudeSpeedTest.hint || claudeSpeedTest.error }}</span
+                        >
+                      </div>
+                    </div>
                     <div class="providerActions">
                       <button
                         type="button"
@@ -342,6 +400,41 @@ const secretarySyncLiveModel = computed({
                       <input type="checkbox" v-model="codexSyncLiveModel" />
                       <span>Sync live config on activate</span>
                     </label>
+                    <div class="providerTestRow">
+                      <button
+                        type="button"
+                        @click="emit('speedtest', 'codex')"
+                        :disabled="
+                          saving ||
+                          !editID.trim() ||
+                          speedTesting
+                        "
+                      >
+                        <span
+                          v-if="speedTesting && speedTestTarget === 'codex'"
+                          >Testing...</span
+                        >
+                        <span v-else>Speed test</span>
+                      </button>
+                      <div
+                        v-if="codexSpeedTest"
+                        class="speedTestResult mono"
+                        :class="{ ok: codexSpeedTest.ok, bad: !codexSpeedTest.ok }"
+                      >
+                        <span>{{ codexSpeedTest.ok ? "ok" : "fail" }}</span>
+                        <span v-if="codexSpeedTest.latency_ms != null">
+                          {{ codexSpeedTest.latency_ms }}ms</span
+                        >
+                        <span
+                          v-if="
+                            !codexSpeedTest.ok &&
+                            (codexSpeedTest.hint || codexSpeedTest.error)
+                          "
+                        >
+                          {{ codexSpeedTest.hint || codexSpeedTest.error }}</span
+                        >
+                      </div>
+                    </div>
                     <div class="providerActions">
                       <button
                         type="button"
@@ -408,6 +501,25 @@ const secretarySyncLiveModel = computed({
 </template>
 
 <style scoped>
+.providersWarning {
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  background: rgba(245, 158, 11, 0.08);
+  border-radius: 14px;
+  padding: 12px;
+  margin-bottom: 10px;
+}
+
+.providersWarningTitle {
+  font-weight: 900;
+  color: var(--text-main);
+  margin-bottom: 6px;
+}
+
+.providersWarningList {
+  margin-top: 8px;
+  opacity: 0.95;
+}
+
 .providersBadges {
   display: flex;
   gap: 6px;
@@ -458,5 +570,34 @@ const secretarySyncLiveModel = computed({
 .providerActions {
   display: flex;
   justify-content: flex-end;
+}
+
+.providerTestRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.speedTestResult {
+  padding: 4px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border-color);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.2;
+}
+
+.speedTestResult.ok {
+  border-color: rgba(20, 184, 166, 0.45);
+  background: rgba(20, 184, 166, 0.12);
+  color: var(--text-main);
+}
+
+.speedTestResult.bad {
+  border-color: rgba(248, 113, 113, 0.4);
+  background: rgba(248, 113, 113, 0.08);
+  color: var(--text-main);
 }
 </style>

@@ -425,6 +425,7 @@ export type AuthStatus = {
     reasoning_effort: AuthFieldStatus;
     available: boolean;
   };
+  warnings?: string[];
 };
 
 export type AuthInfo = {
