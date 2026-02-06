@@ -71,6 +71,15 @@ func NewService(opts Options) (*Service, error) {
 	return s, nil
 }
 
+func (s *Service) Reload() error {
+	if s == nil {
+		return errors.New("tooling: service is nil")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.reloadLocked()
+}
+
 func (s *Service) List() []Tool {
 	if s == nil {
 		return nil
@@ -288,4 +297,3 @@ func isSafeID(s string) bool {
 	}
 	return true
 }
-

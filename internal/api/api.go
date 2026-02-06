@@ -23,7 +23,6 @@ import (
 	"controlccx/internal/systeminfo"
 	"controlccx/internal/tasks"
 	"controlccx/internal/tooling"
-	"controlccx/internal/worker"
 	"controlccx/internal/worktree"
 
 	"github.com/google/uuid"
@@ -31,7 +30,7 @@ import (
 
 type API struct {
 	Tasks                *tasks.Store
-	Workers              *worker.Manager
+	Workers              observer.TaskRunner
 	Observer             *observer.Service
 	Chat                 *chat.Store
 	Hub                  *events.Hub
@@ -562,7 +561,28 @@ func (a *API) handleTasks(w http.ResponseWriter, r *http.Request) {
 			a.Hub.Publish(events.Event{Type: "task.created", Time: time.Now().UTC(), Payload: task})
 		}
 		if a.Workers != nil {
-			_ = a.Workers.Start(r.Context(), task.ID)
+			if err := a.Workers.Start(r.Context(), task.ID); err != nil {
+				_, _ = a.Tasks.AppendLog(r.Context(), task.ID, tasks.LogSystem, fmt.Sprintf("runner start failed: %v", err))
+				_ = a.Tasks.FinishTask(r.Context(), task.ID, tasks.FinishTaskInput{
+					Status:     tasks.StatusFailed,
+					ExitCode:   nil,
+					Error:      err.Error(),
+					SessionID:  strings.TrimSpace(task.SessionID),
+					FinishedAt: time.Now().UTC(),
+				})
+				if a.Hub != nil {
+					if updated, err2 := a.Tasks.GetTask(r.Context(), task.ID); err2 == nil {
+						a.Hub.Publish(events.Event{Type: "task.updated", Time: time.Now().UTC(), Payload: updated})
+					}
+				}
+				writeJSONStatus(w, http.StatusServiceUnavailable, map[string]any{
+					"error":   "runner_unavailable",
+					"message": err.Error(),
+					"hint":    "restart the runner daemon (controlccx-runnerd)",
+					"task_id": task.ID,
+				})
+				return
+			}
 		}
 		writeJSON(w, task)
 	default:
@@ -764,7 +784,28 @@ func (a *API) handleSessionByKey(w http.ResponseWriter, r *http.Request) {
 				a.Hub.Publish(events.Event{Type: "task.created", Time: time.Now().UTC(), Payload: newTask})
 			}
 			if a.Workers != nil {
-				_ = a.Workers.Start(r.Context(), newTask.ID)
+				if err := a.Workers.Start(r.Context(), newTask.ID); err != nil {
+					_, _ = a.Tasks.AppendLog(r.Context(), newTask.ID, tasks.LogSystem, fmt.Sprintf("runner start failed: %v", err))
+					_ = a.Tasks.FinishTask(r.Context(), newTask.ID, tasks.FinishTaskInput{
+						Status:     tasks.StatusFailed,
+						ExitCode:   nil,
+						Error:      err.Error(),
+						SessionID:  strings.TrimSpace(newTask.SessionID),
+						FinishedAt: time.Now().UTC(),
+					})
+					if a.Hub != nil {
+						if updated, err2 := a.Tasks.GetTask(r.Context(), newTask.ID); err2 == nil {
+							a.Hub.Publish(events.Event{Type: "task.updated", Time: time.Now().UTC(), Payload: updated})
+						}
+					}
+					writeJSONStatus(w, http.StatusServiceUnavailable, map[string]any{
+						"error":   "runner_unavailable",
+						"message": err.Error(),
+						"hint":    "restart the runner daemon (controlccx-runnerd)",
+						"task_id": newTask.ID,
+					})
+					return
+				}
 			}
 			writeJSON(w, newTask)
 			return
@@ -877,7 +918,28 @@ func (a *API) handleSessionByKey(w http.ResponseWriter, r *http.Request) {
 			a.Hub.Publish(events.Event{Type: "task.created", Time: time.Now().UTC(), Payload: newTask})
 		}
 		if a.Workers != nil {
-			_ = a.Workers.Start(r.Context(), newTask.ID)
+			if err := a.Workers.Start(r.Context(), newTask.ID); err != nil {
+				_, _ = a.Tasks.AppendLog(r.Context(), newTask.ID, tasks.LogSystem, fmt.Sprintf("runner start failed: %v", err))
+				_ = a.Tasks.FinishTask(r.Context(), newTask.ID, tasks.FinishTaskInput{
+					Status:     tasks.StatusFailed,
+					ExitCode:   nil,
+					Error:      err.Error(),
+					SessionID:  strings.TrimSpace(newTask.SessionID),
+					FinishedAt: time.Now().UTC(),
+				})
+				if a.Hub != nil {
+					if updated, err2 := a.Tasks.GetTask(r.Context(), newTask.ID); err2 == nil {
+						a.Hub.Publish(events.Event{Type: "task.updated", Time: time.Now().UTC(), Payload: updated})
+					}
+				}
+				writeJSONStatus(w, http.StatusServiceUnavailable, map[string]any{
+					"error":   "runner_unavailable",
+					"message": err.Error(),
+					"hint":    "restart the runner daemon (controlccx-runnerd)",
+					"task_id": newTask.ID,
+				})
+				return
+			}
 		}
 		writeJSON(w, newTask)
 	case "workspace":
@@ -1080,7 +1142,17 @@ func (a *API) handleTaskByID(w http.ResponseWriter, r *http.Request) {
 		}
 		ok := false
 		if a.Workers != nil {
-			ok = a.Workers.Cancel(id)
+			var err error
+			ok, err = a.Workers.Cancel(r.Context(), id)
+			if err != nil {
+				writeJSONStatus(w, http.StatusServiceUnavailable, map[string]any{
+					"error":   "runner_unavailable",
+					"message": err.Error(),
+					"hint":    "restart the runner daemon (controlccx-runnerd)",
+					"task_id": id,
+				})
+				return
+			}
 		}
 		writeJSON(w, map[string]any{"ok": ok})
 	case "logs":
@@ -1300,7 +1372,28 @@ func (a *API) handleTaskByID(w http.ResponseWriter, r *http.Request) {
 			a.Hub.Publish(events.Event{Type: "task.created", Time: time.Now().UTC(), Payload: newTask})
 		}
 		if a.Workers != nil {
-			_ = a.Workers.Start(r.Context(), newTask.ID)
+			if err := a.Workers.Start(r.Context(), newTask.ID); err != nil {
+				_, _ = a.Tasks.AppendLog(r.Context(), newTask.ID, tasks.LogSystem, fmt.Sprintf("runner start failed: %v", err))
+				_ = a.Tasks.FinishTask(r.Context(), newTask.ID, tasks.FinishTaskInput{
+					Status:     tasks.StatusFailed,
+					ExitCode:   nil,
+					Error:      err.Error(),
+					SessionID:  strings.TrimSpace(newTask.SessionID),
+					FinishedAt: time.Now().UTC(),
+				})
+				if a.Hub != nil {
+					if updated, err2 := a.Tasks.GetTask(r.Context(), newTask.ID); err2 == nil {
+						a.Hub.Publish(events.Event{Type: "task.updated", Time: time.Now().UTC(), Payload: updated})
+					}
+				}
+				writeJSONStatus(w, http.StatusServiceUnavailable, map[string]any{
+					"error":   "runner_unavailable",
+					"message": err.Error(),
+					"hint":    "restart the runner daemon (controlccx-runnerd)",
+					"task_id": newTask.ID,
+				})
+				return
+			}
 		}
 		writeJSON(w, newTask)
 	case "rehydrate":
@@ -1455,7 +1548,28 @@ func (a *API) handleTaskByID(w http.ResponseWriter, r *http.Request) {
 			a.Hub.Publish(events.Event{Type: "task.created", Time: time.Now().UTC(), Payload: newTask})
 		}
 		if a.Workers != nil {
-			_ = a.Workers.Start(r.Context(), newTask.ID)
+			if err := a.Workers.Start(r.Context(), newTask.ID); err != nil {
+				_, _ = a.Tasks.AppendLog(r.Context(), newTask.ID, tasks.LogSystem, fmt.Sprintf("runner start failed: %v", err))
+				_ = a.Tasks.FinishTask(r.Context(), newTask.ID, tasks.FinishTaskInput{
+					Status:     tasks.StatusFailed,
+					ExitCode:   nil,
+					Error:      err.Error(),
+					SessionID:  strings.TrimSpace(newTask.SessionID),
+					FinishedAt: time.Now().UTC(),
+				})
+				if a.Hub != nil {
+					if updated, err2 := a.Tasks.GetTask(r.Context(), newTask.ID); err2 == nil {
+						a.Hub.Publish(events.Event{Type: "task.updated", Time: time.Now().UTC(), Payload: updated})
+					}
+				}
+				writeJSONStatus(w, http.StatusServiceUnavailable, map[string]any{
+					"error":   "runner_unavailable",
+					"message": err.Error(),
+					"hint":    "restart the runner daemon (controlccx-runnerd)",
+					"task_id": newTask.ID,
+				})
+				return
+			}
 		}
 		writeJSON(w, newTask)
 	default:
@@ -1574,49 +1688,7 @@ func (a *API) handleChat(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) handleEvents(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	if a.Hub == nil {
-		http.Error(w, "events not available", http.StatusServiceUnavailable)
-		return
-	}
-
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		http.Error(w, "streaming not supported", http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-
-	eventsCh, unsubscribe := a.Hub.Subscribe(256)
-	defer unsubscribe()
-
-	heartbeat := time.NewTicker(15 * time.Second)
-	defer heartbeat.Stop()
-
-	send := func(evt events.Event) {
-		data, _ := json.Marshal(evt)
-		_, _ = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", evt.Type, data)
-		flusher.Flush()
-	}
-
-	send(events.Event{Type: "hello", Time: time.Now().UTC(), Payload: map[string]any{"ok": true}})
-
-	for {
-		select {
-		case <-r.Context().Done():
-			return
-		case evt := <-eventsCh:
-			send(evt)
-		case <-heartbeat.C:
-			send(events.Event{Type: "heartbeat", Time: time.Now().UTC()})
-		}
-	}
+	events.ServeSSE(a.Hub)(w, r)
 }
 
 func writeJSON(w http.ResponseWriter, v any) {

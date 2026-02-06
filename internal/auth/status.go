@@ -12,19 +12,19 @@ type FieldStatus struct {
 }
 
 type ClaudeStatus struct {
-	BaseURL   FieldStatus `json:"base_url"`
-	APIKey    FieldStatus `json:"api_key"`
-	AuthToken FieldStatus `json:"auth_token"`
-	Model     FieldStatus `json:"model"`
+	BaseURL        FieldStatus `json:"base_url"`
+	APIKey         FieldStatus `json:"api_key"`
+	AuthToken      FieldStatus `json:"auth_token"`
+	Model          FieldStatus `json:"model"`
 	SmallFastModel FieldStatus `json:"small_fast_model"`
-	Available bool        `json:"available"`
+	Available      bool        `json:"available"`
 }
 
 type CodexStatus struct {
-	APIKey           FieldStatus `json:"api_key"`
-	Model            FieldStatus `json:"model"`
-	ReasoningEffort  FieldStatus `json:"reasoning_effort"`
-	Available        bool        `json:"available"`
+	APIKey          FieldStatus `json:"api_key"`
+	Model           FieldStatus `json:"model"`
+	ReasoningEffort FieldStatus `json:"reasoning_effort"`
+	Available       bool        `json:"available"`
 }
 
 type Status struct {
@@ -44,12 +44,12 @@ func ComputeStatus(secrets Secrets) Status {
 
 	return Status{
 		Claude: ClaudeStatus{
-			BaseURL:   baseURL,
-			APIKey:    apiKey,
-			AuthToken: authToken,
-			Model:     model,
+			BaseURL:        baseURL,
+			APIKey:         apiKey,
+			AuthToken:      authToken,
+			Model:          model,
 			SmallFastModel: smallFast,
-			Available: apiKey.Effective != "none" || authToken.Effective != "none",
+			Available:      apiKey.Effective != "none" || authToken.Effective != "none",
 		},
 		Codex: CodexStatus{
 			APIKey:          openaiKey,

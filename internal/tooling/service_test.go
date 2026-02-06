@@ -110,4 +110,3 @@ func TestService_Validate(t *testing.T) {
 		t.Fatalf("expected missing command error")
 	}
 }
-

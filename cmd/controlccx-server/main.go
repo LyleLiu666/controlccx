@@ -21,6 +21,7 @@ import (
 	"controlccx/internal/auth"
 	"controlccx/internal/chat"
 	"controlccx/internal/config"
+	"controlccx/internal/daemon"
 	"controlccx/internal/db"
 	"controlccx/internal/events"
 	"controlccx/internal/observer"
@@ -28,12 +29,14 @@ import (
 	"controlccx/internal/skills"
 	"controlccx/internal/tasks"
 	"controlccx/internal/tooling"
-	"controlccx/internal/worker"
 )
 
 func main() {
+	modeFlag := flag.String("mode", "server", "run mode: server | runnerd | secretaryd")
 	dataDirFlag := flag.String("data-dir", "", "data directory (default: ~/.controlccx)")
 	addrFlag := flag.String("addr", "", "listen address (default from config.yaml)")
+	runnerAddrFlag := flag.String("runnerd-addr", "127.0.0.1:5175", "runner daemon listen address (server attaches/spawns; runnerd listens here)")
+	secretaryAddrFlag := flag.String("secretaryd-addr", "127.0.0.1:5176", "secretary daemon listen address (server attaches/spawns; secretaryd listens here)")
 	staticDirFlag := flag.String("static-dir", "", "directory for built web assets (override embedded assets)")
 	claudePathFlag := flag.String("claude-path", "", "path to claude executable (optional)")
 	codexPathFlag := flag.String("codex-path", "", "path to codex executable (optional)")
@@ -61,6 +64,28 @@ func main() {
 
 	ctx := context.Background()
 
+	mode := strings.ToLower(strings.TrimSpace(*modeFlag))
+	switch mode {
+	case "", "server":
+		// continue below
+	case "runnerd":
+		if err := runRunnerd(cfg, *runnerAddrFlag); err != nil {
+			log.Fatal(err)
+		}
+		return
+	case "secretaryd":
+		runnerBaseURL, err := openURLForListenAddr(*runnerAddrFlag)
+		if err != nil {
+			log.Fatal(err)
+		}
+		if err := runSecretaryd(cfg, *secretaryAddrFlag, runnerBaseURL); err != nil {
+			log.Fatal(err)
+		}
+		return
+	default:
+		log.Fatalf("unknown mode: %q", mode)
+	}
+
 	autoOpen := shouldAutoOpenBrowser(*noOpenFlag)
 	initialOpenURL, openURLErr := openURLForListenAddr(cfg.Server.Addr)
 	if openURLErr == nil {
@@ -75,6 +100,62 @@ func main() {
 		}
 	}
 
+	instanceToken, err := daemon.LoadOrCreateInstanceToken(cfg.Paths.DataDir)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	runnerBaseURL, err := openURLForListenAddr(*runnerAddrFlag)
+	if err != nil {
+		log.Fatal(err)
+	}
+	spawnArgs := []string{
+		"--mode", "runnerd",
+		"--data-dir", cfg.Paths.DataDir,
+		"--runnerd-addr", strings.TrimSpace(*runnerAddrFlag),
+	}
+	if strings.TrimSpace(*claudePathFlag) != "" {
+		spawnArgs = append(spawnArgs, "--claude-path", strings.TrimSpace(*claudePathFlag))
+	}
+	if strings.TrimSpace(*codexPathFlag) != "" {
+		spawnArgs = append(spawnArgs, "--codex-path", strings.TrimSpace(*codexPathFlag))
+	}
+	if strings.TrimSpace(*gitBashPathFlag) != "" {
+		spawnArgs = append(spawnArgs, "--gitbash-path", strings.TrimSpace(*gitBashPathFlag))
+	}
+	if err := ensureRunnerd(ctx, runnerBaseURL, instanceToken, spawnArgs); err != nil {
+		log.Fatal(err)
+	}
+	runnerClient, err := daemon.NewRunnerClient(runnerBaseURL, daemon.RunnerClientOptions{Token: instanceToken})
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	secretaryBaseURL, err := openURLForListenAddr(*secretaryAddrFlag)
+	if err != nil {
+		log.Fatal(err)
+	}
+	secretarySpawnArgs := []string{
+		"--mode", "secretaryd",
+		"--data-dir", cfg.Paths.DataDir,
+		"--runnerd-addr", strings.TrimSpace(*runnerAddrFlag),
+		"--secretaryd-addr", strings.TrimSpace(*secretaryAddrFlag),
+	}
+	if strings.TrimSpace(*claudePathFlag) != "" {
+		secretarySpawnArgs = append(secretarySpawnArgs, "--claude-path", strings.TrimSpace(*claudePathFlag))
+	}
+	if strings.TrimSpace(*codexPathFlag) != "" {
+		secretarySpawnArgs = append(secretarySpawnArgs, "--codex-path", strings.TrimSpace(*codexPathFlag))
+	}
+	if strings.TrimSpace(*gitBashPathFlag) != "" {
+		secretarySpawnArgs = append(secretarySpawnArgs, "--gitbash-path", strings.TrimSpace(*gitBashPathFlag))
+	}
+	secretaryAvailable := true
+	if err := ensureSecretaryd(ctx, secretaryBaseURL, instanceToken, secretarySpawnArgs); err != nil {
+		secretaryAvailable = false
+		log.Printf("warning: secretaryd unavailable: %v\n", err)
+	}
+
 	conn, err := db.Open(ctx, db.Options{Path: cfg.Paths.DBPath})
 	if err != nil {
 		log.Fatal(err)
@@ -82,9 +163,6 @@ func main() {
 	defer func() { _ = conn.Close() }()
 
 	taskStore := tasks.NewStore(conn)
-	if _, err := taskStore.MarkInterrupted(ctx); err != nil {
-		log.Fatal(err)
-	}
 	if err := taskStore.EnsureConversationIDs(ctx); err != nil {
 		log.Fatal(err)
 	}
@@ -103,7 +181,6 @@ func main() {
 	}
 
 	hub := events.NewHub()
-	workerMgr := worker.NewManager(cfg, taskStore, hub, authStore, toolsSvc)
 	chatStore := chat.NewStore(conn)
 	simpleHTTPBackend := observer.NewSimpleHTTPBackend(cfg, authStore)
 	claudeBackend := observer.NewClaudeCLIBackend(cfg, authStore)
@@ -111,7 +188,7 @@ func main() {
 	observerSvc := &observer.Service{
 		Store:      taskStore,
 		Chat:       chatStore,
-		Runner:     workerMgr,
+		Runner:     runnerClient,
 		LLM:        observer.MultiBackend{Backends: []observer.Backend{simpleHTTPBackend, claudeBackend, codexBackend}},
 		SimpleHTTP: simpleHTTPBackend,
 		Claude:     claudeBackend,
@@ -136,7 +213,7 @@ func main() {
 
 	apiSvc := &api.API{
 		Tasks:                taskStore,
-		Workers:              workerMgr,
+		Workers:              runnerClient,
 		Observer:             observerSvc,
 		Chat:                 chatStore,
 		Hub:                  hub,
@@ -150,6 +227,18 @@ func main() {
 	}
 
 	mux := http.NewServeMux()
+	if secretaryAvailable {
+		mux.HandleFunc("/api/chat", proxySingleEndpoint(secretaryBaseURL, instanceToken))
+	} else {
+		mux.HandleFunc("/api/chat", func(w http.ResponseWriter, r *http.Request) {
+			writeJSONStatus(w, http.StatusServiceUnavailable, map[string]any{
+				"error":   "secretary_unavailable",
+				"message": "secretaryd unavailable",
+				"hint":    "restart the secretary daemon (controlccx-secretaryd)",
+			})
+		})
+	}
+	mux.HandleFunc("/api/control-plane", controlPlaneHandler(runnerBaseURL, secretaryBaseURL, instanceToken))
 	mux.Handle("/api/", apiSvc.Handler())
 	mux.Handle("/api", apiSvc.Handler())
 	mux.Handle("/", spaOrFallback(resolveUIFS(*staticDirFlag)))
@@ -160,6 +249,27 @@ func main() {
 		ReadTimeout:  30 * time.Second,
 		WriteTimeout: 0,
 		IdleTimeout:  60 * time.Second,
+	}
+
+	bridgeCtx, cancelBridge := context.WithCancel(context.Background())
+	srv.RegisterOnShutdown(cancelBridge)
+	go func() {
+		if err := daemon.BridgeSSEToHub(bridgeCtx, runnerBaseURL+"/api/events", hub, daemon.SSEBridgeOptions{
+			Logf:  log.Printf,
+			Token: instanceToken,
+		}); err != nil {
+			log.Printf("runner SSE bridge stopped: %v", err)
+		}
+	}()
+	if secretaryAvailable {
+		go func() {
+			if err := daemon.BridgeSSEToHub(bridgeCtx, secretaryBaseURL+"/api/events", hub, daemon.SSEBridgeOptions{
+				Logf:  log.Printf,
+				Token: instanceToken,
+			}); err != nil {
+				log.Printf("secretary SSE bridge stopped: %v", err)
+			}
+		}()
 	}
 
 	if autoScan != nil {

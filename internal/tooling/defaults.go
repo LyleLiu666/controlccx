@@ -20,4 +20,3 @@ func DefaultsFromConfig(cfg config.Config) []Tool {
 		{ID: "codex", Driver: DriverCodex, Command: codex},
 	}
 }
-

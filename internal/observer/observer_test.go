@@ -20,8 +20,8 @@ func (r *stubRunner) Start(ctx context.Context, taskID string) error {
 	return nil
 }
 
-func (r *stubRunner) Cancel(taskID string) bool {
-	return false
+func (r *stubRunner) Cancel(ctx context.Context, taskID string) (bool, error) {
+	return false, nil
 }
 
 func TestObserver_RespondWithoutLLM_FailFast_NoHeuristicAnswer(t *testing.T) {

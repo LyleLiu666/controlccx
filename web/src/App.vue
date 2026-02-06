@@ -101,6 +101,7 @@ import WorkdirCombobox from "./components/WorkdirCombobox.vue";
 import ContextPanel from "./components/ContextPanel.vue";
 import { useSkills } from "./composables/useSkills";
 import { useSecretaryChat } from "./composables/useSecretaryChat";
+import { useControlPlaneHealth } from "./composables/useControlPlaneHealth";
 import { useTasks } from "./composables/useTasks";
 import { useLiveFeed } from "./composables/useLiveFeed";
 import { useSessionWorkspace } from "./composables/useSessionWorkspace";
@@ -162,6 +163,39 @@ const resumePromptTextEl = ref<HTMLTextAreaElement | null>(null);
 const resumeSafetyOverride = ref(false);
 const resumeHighRiskOptIn = ref(false);
 const errorBanner = ref<string>("");
+
+const {
+  status: controlPlaneStatus,
+  loading: controlPlaneLoading,
+  error: controlPlaneError,
+} = useControlPlaneHealth({ intervalMs: 2000 });
+
+const runnerdState = computed<"ok" | "bad" | "unknown">(() => {
+  const s = controlPlaneStatus.value;
+  if (!s) return "unknown";
+  return s.runnerd?.ok ? "ok" : "bad";
+});
+const secretarydState = computed<"ok" | "bad" | "unknown">(() => {
+  const s = controlPlaneStatus.value;
+  if (!s) return "unknown";
+  return s.secretaryd?.ok ? "ok" : "bad";
+});
+
+const taskPlaneDegraded = computed<boolean>(() => runnerdState.value === "bad");
+const secretaryDegraded = computed<boolean>(() => secretarydState.value === "bad");
+
+const controlPlaneBanner = computed<string>(() => {
+  const s = controlPlaneStatus.value;
+  if (!s) return "";
+  const msgs: string[] = [];
+  if (s.runnerd?.ok === false) {
+    msgs.push("任务执行面不可用：Runner daemon 未连接，任务相关操作已禁用。");
+  }
+  if (s.secretaryd?.ok === false) {
+    msgs.push("秘书不可用：Secretary daemon 未连接，对话已禁用。");
+  }
+  return msgs.join(" ");
+});
 
 const workdirBusyOpen = ref(false);
 const workdirBusyBusy = ref(false);
@@ -619,6 +653,14 @@ const {
     errorBanner.value = message;
   },
 });
+
+async function sendChatMessageGuarded() {
+  if (secretaryDegraded.value) {
+    errorBanner.value = "秘书不可用：请确认 `controlccx-secretaryd` 正在运行，或重启 ControlCCX。";
+    return;
+  }
+  await sendChatMessage();
+}
 
 const theme = ref<"light" | "dark">("light");
 const headerMoreEl = ref<HTMLDetailsElement | null>(null);
@@ -2170,8 +2212,15 @@ async function maybeConfirmSkillMountForNewRun(driver: ToolDriver, prompt: strin
   return requestSkillMountConfirm({ driver, target: plan.target, items: plan.items, namesToMount: plan.namesToMount });
 }
 
+function ensureTaskPlaneAvailable(): boolean {
+  if (!taskPlaneDegraded.value) return true;
+  errorBanner.value = "任务执行面不可用：请确认 `controlccx-runnerd` 正在运行，或重启 ControlCCX。";
+  return false;
+}
+
 async function onCreateTask(opts?: { idempotencyKey?: string }): Promise<boolean> {
   errorBanner.value = "";
+  if (!ensureTaskPlaneAvailable()) return false;
   let createdInput: CreateTaskPayload | null = null;
   try {
     const driver = newRunDriver.value;
@@ -2899,6 +2948,7 @@ async function confirmBlockedPromptUnsafe() {
     blockedPromptError.value = "当前仅支持对 Claude Code 的 blocked 运行进行一键重试。";
     return;
   }
+  if (!ensureTaskPlaneAvailable()) return;
 
   const ok = await requestHighRiskConfirm({
     title: "高权限确认",
@@ -2936,6 +2986,7 @@ async function confirmRehydratePrompt() {
     return;
   }
   if (rehydratePromptBusy.value) return;
+  if (!ensureTaskPlaneAvailable()) return;
 
   if (selectedTaskId.value !== runID) {
     selectedTaskId.value = runID;
@@ -3231,6 +3282,10 @@ function enqueueAttentionAutopilot(sessionKey: string) {
 async function runAttentionAutopilotLoop() {
   if (attentionAutopilotRunning.value) return;
   if (!attentionAutopilotEnabled.value) return;
+  if (taskPlaneDegraded.value) {
+    attentionAutopilotNote.value = "Autopilot：Runner daemon 不可用，已暂停。";
+    return;
+  }
   attentionAutopilotRunning.value = true;
   try {
     while (attentionAutopilotQueue.value.length) {
@@ -3307,6 +3362,7 @@ function maybeTriggerAttentionAutopilot(prev: Task | undefined, next: Task) {
 
 async function onCancelTask() {
   if (!selectedTaskId.value) return;
+  if (!ensureTaskPlaneAvailable()) return;
   errorBanner.value = "";
   try {
     await cancelTask(selectedTaskId.value);
@@ -3326,6 +3382,7 @@ async function onCancelTask() {
 
 async function secretaryCancelSessionRun(s: SessionGroup) {
   if (!s?.latest?.id) return;
+  if (!ensureTaskPlaneAvailable()) return;
   errorBanner.value = "";
   try {
     await cancelTask(s.latest.id);
@@ -3358,6 +3415,7 @@ async function secretaryResumeSessionRun(s: SessionGroup) {
     errorBanner.value = "该会话仍在运行中，暂不需要继续。";
     return;
   }
+  if (!ensureTaskPlaneAvailable()) return;
   errorBanner.value = "";
   try {
     const driver = toolDriverForWorkerType(s.worker_type);
@@ -3406,6 +3464,7 @@ async function onResumeTask() {
     return;
   }
   if (!resumePrompt.value.trim()) return;
+  if (!ensureTaskPlaneAvailable()) return;
   errorBanner.value = "";
   try {
     const driver = resumeDriver.value;
@@ -4960,6 +5019,37 @@ watch(
           {{ systemInfo.os }}/{{ systemInfo.arch }} ·
           {{ systemInfo.hostname }} · Go {{ systemInfo.go_version }}
         </div>
+        <div
+          class="controlPlanePills"
+          :title="controlPlaneError ? `control plane status error: ${controlPlaneError}` : (controlPlaneLoading ? 'checking control plane…' : 'control plane')"
+        >
+          <span
+            :class="['controlPlanePill', runnerdState]"
+            :title="
+              !controlPlaneStatus
+                ? 'runnerd: unknown'
+                : controlPlaneStatus?.runnerd?.ok
+                  ? 'runnerd: ok'
+                  : `runnerd: ${controlPlaneStatus?.runnerd?.error || 'unavailable'}`
+            "
+          >
+            <span class="controlPlaneDot" aria-hidden="true"></span>
+            任务
+          </span>
+          <span
+            :class="['controlPlanePill', secretarydState]"
+            :title="
+              !controlPlaneStatus
+                ? 'secretaryd: unknown'
+                : controlPlaneStatus?.secretaryd?.ok
+                  ? 'secretaryd: ok'
+                  : `secretaryd: ${controlPlaneStatus?.secretaryd?.error || 'unavailable'}`
+            "
+          >
+            <span class="controlPlaneDot" aria-hidden="true"></span>
+            秘书
+          </span>
+        </div>
         <button
           type="button"
           class="headerSkillsBtn"
@@ -4969,7 +5059,7 @@ watch(
         >
           技能
         </button>
-	        <button type="button" class="primary" @click="openNewRun">
+	        <button type="button" class="primary" @click="openNewRun" :disabled="taskPlaneDegraded" :title="taskPlaneDegraded ? 'runnerd unavailable' : ''">
 	          新建运行
 	        </button>
           <details ref="headerMoreEl" class="headerMore">
@@ -5001,6 +5091,7 @@ watch(
 	      </div>
 	    </header>
 
+    <div v-if="controlPlaneBanner" class="banner warn">{{ controlPlaneBanner }}</div>
     <div v-if="errorBanner" class="banner">{{ errorBanner }}</div>
 
     <div v-if="isPhone && sessionsDrawerOpen" class="sessionsOverlay" @click.self="sessionsDrawerOpen = false"></div>
@@ -5483,7 +5574,8 @@ watch(
                 type="button"
                 class="primary"
                 @click="runFromHome"
-                :disabled="!newPrompt.trim() || highRiskConfirmOpen || homeRunBusy"
+                :disabled="!newPrompt.trim() || highRiskConfirmOpen || homeRunBusy || taskPlaneDegraded"
+                :title="taskPlaneDegraded ? 'runnerd unavailable' : ''"
               >
                 运行
               </button>
@@ -6296,6 +6388,7 @@ watch(
 	      :autopilotNote="attentionAutopilotNote"
 	      :briefing="secretaryBriefing"
 	      :chat="chat"
+	      :secretaryAvailable="!secretaryDegraded"
 	      :chatStreamStatus="chatStreamStatus"
 	      :chatStreamAnswer="chatStreamAnswer"
 	      :chatStreamToolError="chatStreamToolError"
@@ -6308,7 +6401,7 @@ watch(
 	      @resumeSession="secretaryResumeSessionRun"
 	      @cancelSession="secretaryCancelSessionRun"
 	      @dismissAttention="dismissAttentionSession"
-	      @sendChat="sendChatMessage"
+	      @sendChat="sendChatMessageGuarded"
 	      @openAuthSettings="openAuthSettings"
 	      @markdownClick="onResultMarkdownClick"
 	    />

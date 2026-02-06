@@ -23,9 +23,9 @@ func (r *fakeRunner) Start(ctx context.Context, taskID string) error {
 	return r.startErr
 }
 
-func (r *fakeRunner) Cancel(taskID string) bool {
+func (r *fakeRunner) Cancel(ctx context.Context, taskID string) (bool, error) {
 	r.canceled = append(r.canceled, taskID)
-	return r.cancelOK
+	return r.cancelOK, nil
 }
 
 func TestTools_taskResume_CreatesAndStartsResumeRun(t *testing.T) {

@@ -328,6 +328,23 @@ export type SystemInfo = {
   now: string;
 };
 
+export type ControlPlaneComponent = {
+  ok: boolean;
+  name: string;
+  protocol_version?: number;
+  pid?: number;
+  addr?: string;
+  error?: string;
+  ts_ms?: number;
+};
+
+export type ControlPlaneStatus = {
+  server: ControlPlaneComponent;
+  runnerd: ControlPlaneComponent;
+  secretaryd: ControlPlaneComponent;
+  ts_ms: number;
+};
+
 export type FSRoot = {
   name: string;
   path: string;

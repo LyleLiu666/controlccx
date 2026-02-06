@@ -10,9 +10,9 @@ import (
 
 func TestSpaOrFallback_ServesIndexForDeepLinkRoutes(t *testing.T) {
 	fsys := fstest.MapFS{
-		"index.html":     {Data: []byte("<html>INDEX</html>")},
-		"assets/app.js":  {Data: []byte("console.log('ok')")},
-		"favicon.svg":    {Data: []byte("<svg />")},
+		"index.html":      {Data: []byte("<html>INDEX</html>")},
+		"assets/app.js":   {Data: []byte("console.log('ok')")},
+		"favicon.svg":     {Data: []byte("<svg />")},
 		"placeholder.txt": {Data: []byte("placeholder")},
 	}
 	h := spaOrFallback(fsys)
@@ -56,4 +56,3 @@ func TestSpaOrFallback_ServesStaticAssetsWhenPresent(t *testing.T) {
 		t.Fatalf("expected no redirect Location header, got %q", loc)
 	}
 }
-

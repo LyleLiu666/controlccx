@@ -12,25 +12,25 @@ import (
 )
 
 type Secrets struct {
-	AnthropicBaseURL   string `json:"anthropic_base_url,omitempty"`
-	AnthropicAPIKey    string `json:"anthropic_api_key,omitempty"`
-	AnthropicAuthToken string `json:"anthropic_auth_token,omitempty"`
-	AnthropicModel     string `json:"anthropic_model,omitempty"`
+	AnthropicBaseURL        string `json:"anthropic_base_url,omitempty"`
+	AnthropicAPIKey         string `json:"anthropic_api_key,omitempty"`
+	AnthropicAuthToken      string `json:"anthropic_auth_token,omitempty"`
+	AnthropicModel          string `json:"anthropic_model,omitempty"`
 	AnthropicSmallFastModel string `json:"anthropic_small_fast_model,omitempty"`
-	OpenAIAPIKey       string `json:"openai_api_key,omitempty"`
-	CodexModel         string `json:"codex_model,omitempty"`
-	CodexReasoningEffort string `json:"codex_reasoning_effort,omitempty"`
+	OpenAIAPIKey            string `json:"openai_api_key,omitempty"`
+	CodexModel              string `json:"codex_model,omitempty"`
+	CodexReasoningEffort    string `json:"codex_reasoning_effort,omitempty"`
 }
 
 type Patch struct {
-	AnthropicBaseURL   *string `json:"anthropic_base_url,omitempty"`
-	AnthropicAPIKey    *string `json:"anthropic_api_key,omitempty"`
-	AnthropicAuthToken *string `json:"anthropic_auth_token,omitempty"`
-	AnthropicModel     *string `json:"anthropic_model,omitempty"`
+	AnthropicBaseURL        *string `json:"anthropic_base_url,omitempty"`
+	AnthropicAPIKey         *string `json:"anthropic_api_key,omitempty"`
+	AnthropicAuthToken      *string `json:"anthropic_auth_token,omitempty"`
+	AnthropicModel          *string `json:"anthropic_model,omitempty"`
 	AnthropicSmallFastModel *string `json:"anthropic_small_fast_model,omitempty"`
-	OpenAIAPIKey       *string `json:"openai_api_key,omitempty"`
-	CodexModel         *string `json:"codex_model,omitempty"`
-	CodexReasoningEffort *string `json:"codex_reasoning_effort,omitempty"`
+	OpenAIAPIKey            *string `json:"openai_api_key,omitempty"`
+	CodexModel              *string `json:"codex_model,omitempty"`
+	CodexReasoningEffort    *string `json:"codex_reasoning_effort,omitempty"`
 }
 
 type Store struct {
@@ -41,7 +41,7 @@ type Store struct {
 
 func Load(path string) (*Store, error) {
 	s := &Store{path: filepath.Clean(path)}
-	if err := s.reload(); err != nil {
+	if err := s.reloadLocked(); err != nil {
 		return nil, err
 	}
 	return s, nil
@@ -91,7 +91,16 @@ func (s *Store) ApplyPatch(p Patch) (Secrets, error) {
 	return s.secrets, nil
 }
 
-func (s *Store) reload() error {
+func (s *Store) Reload() error {
+	if s == nil {
+		return errors.New("auth: store is nil")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.reloadLocked()
+}
+
+func (s *Store) reloadLocked() error {
 	if s.path == "" {
 		return errors.New("auth: path is required")
 	}

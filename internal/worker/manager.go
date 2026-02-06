@@ -95,15 +95,15 @@ func (m *Manager) Start(ctx context.Context, taskID string) error {
 	return nil
 }
 
-func (m *Manager) Cancel(taskID string) bool {
+func (m *Manager) Cancel(ctx context.Context, taskID string) (bool, error) {
 	m.mu.Lock()
 	cancel, ok := m.cancels[taskID]
 	m.mu.Unlock()
 	if !ok {
-		return false
+		return false, nil
 	}
 	cancel()
-	return true
+	return true, nil
 }
 
 func (m *Manager) run(ctx context.Context, task tasks.Task) error {

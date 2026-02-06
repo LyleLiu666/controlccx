@@ -1,6 +1,7 @@
 import net from "node:net";
 import { spawn } from "node:child_process";
-import { existsSync, renameSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, renameSync, rmSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 
 async function pickPort() {
@@ -50,11 +51,35 @@ renameSync(diskAssets, bakAssets);
 moved = true;
 
 const port = await pickPort();
+const runnerPort = await pickPort();
+const secretaryPort = await pickPort();
 const base = `http://127.0.0.1:${port}`;
-
-const child = spawn(path.resolve(binPath), ["--addr", `127.0.0.1:${port}`], {
-  stdio: "inherit",
+const dataDir = mkdtempSync(path.join(os.tmpdir(), "controlccx-smoke-"));
+process.on("exit", () => {
+  try {
+    rmSync(dataDir, { recursive: true, force: true });
+  } catch {
+    // best-effort
+  }
 });
+
+const child = spawn(
+  path.resolve(binPath),
+  [
+    "--no-open",
+    "--data-dir",
+    dataDir,
+    "--addr",
+    `127.0.0.1:${port}`,
+    "--runnerd-addr",
+    `127.0.0.1:${runnerPort}`,
+    "--secretaryd-addr",
+    `127.0.0.1:${secretaryPort}`,
+  ],
+  {
+  stdio: "inherit",
+  }
+);
 
 const deadline = Date.now() + 10_000;
 let ok = false;
@@ -75,6 +100,13 @@ if (!ok) {
   child.kill();
   console.error("Smoke failed: server did not respond in time");
   process.exit(1);
+}
+
+let instanceToken = "";
+try {
+  instanceToken = readFileSync(path.join(dataDir, "instance.token"), "utf8").trim();
+} catch {
+  // ignore (cleanup will be best-effort)
 }
 
 const sys = await (await fetch(`${base}/api/system`)).json();
@@ -120,4 +152,20 @@ for (const needle of ["Trace", "Download", "Filter logs...", "logs/export"]) {
 
 child.kill();
 restoreDiskAssets();
+// Best-effort cleanup: daemons are detached and may outlive the server process.
+async function killDaemon(port) {
+  try {
+    const headers = instanceToken ? { "X-ControlCCX-Token": instanceToken } : {};
+    const res = await fetch(`http://127.0.0.1:${port}/health`, { headers });
+    if (!res.ok) return;
+    const body = await res.json();
+    const pid = body?.pid;
+    if (!pid || typeof pid !== "number") return;
+    process.kill(pid);
+  } catch {
+    // ignore
+  }
+}
+await killDaemon(runnerPort);
+await killDaemon(secretaryPort);
 console.log("Smoke OK");

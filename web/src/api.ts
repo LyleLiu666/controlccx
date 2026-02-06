@@ -28,6 +28,7 @@ import type {
   RestoreSkillVersionResult,
   SkillVersion,
   SkillVersionsListResponse,
+  ControlPlaneStatus,
   SystemInfo,
   SessionWorkspaceGetResponse,
   SessionWorkspaceMergeResponse,
@@ -72,12 +73,14 @@ async function parseErrorPayload(res: Response): Promise<{ data: any; rawText: s
 
 async function buildAPIError(res: Response): Promise<APIError> {
   const { data, rawText } = await parseErrorPayload(res);
-  const msg =
+  let msg =
     typeof data?.message === "string" && data.message.trim()
       ? String(data.message)
       : rawText.trim()
         ? `${res.status} ${rawText.trim()}`
         : `${res.status} ${res.statusText}`;
+  const hint = typeof data?.hint === "string" ? data.hint.trim() : "";
+  if (hint && !msg.includes(hint)) msg = `${msg} (hint: ${hint})`;
   return new APIError({
     status: res.status,
     statusText: res.statusText,
@@ -111,6 +114,10 @@ async function postJSON<T>(
 
 export async function fetchSystemInfo(): Promise<SystemInfo> {
   return getJSON<SystemInfo>("/api/system");
+}
+
+export async function fetchControlPlaneStatus(): Promise<ControlPlaneStatus> {
+  return getJSON<ControlPlaneStatus>("/api/control-plane");
 }
 
 export async function fetchToolsStatus(): Promise<ToolsStatusResponse> {

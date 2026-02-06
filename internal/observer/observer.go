@@ -44,7 +44,7 @@ type RespondOptions struct {
 
 type TaskRunner interface {
 	Start(ctx context.Context, taskID string) error
-	Cancel(taskID string) bool
+	Cancel(ctx context.Context, taskID string) (bool, error)
 }
 
 type Reply struct {

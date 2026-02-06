@@ -27,6 +27,7 @@ const props = defineProps<{
   autopilotNote: string;
   briefing: string;
   chat: ChatMessage[];
+  secretaryAvailable?: boolean;
   chatBackend: "auto" | "simple-http" | "claude" | "codex";
   chatStreamEnabled: boolean;
   chatMaxSteps: number;
@@ -91,6 +92,8 @@ const chatInputModel = computed({
   get: () => props.chatInput,
   set: (value: string) => emit("update:chatInput", value),
 });
+
+const secretaryAvailable = computed<boolean>(() => props.secretaryAvailable !== false);
 
 const chatInputEl = ref<HTMLTextAreaElement | null>(null);
 const chatMsgsEl = ref<HTMLDivElement | null>(null);
@@ -523,12 +526,19 @@ function onMarkdownClick(e: MouseEvent) {
               <div class="tinyHint">
                 Project Context（如已设置）会自动注入到对话（压缩/限长）。
               </div>
+              <div v-if="!secretaryAvailable" class="secDegradedHint" role="note">
+                <div class="text">秘书守护进程不可用：对话已禁用。</div>
+                <button type="button" class="secInlineLink" @click="emit('openAuthSettings')">
+                  认证设置
+                </button>
+              </div>
               <div class="input">
                 <textarea
                   ref="chatInputEl"
                   v-model="chatInputModel"
                   rows="3"
-                  placeholder="Ask the secretary..."
+                  :disabled="!secretaryAvailable"
+                  :placeholder="secretaryAvailable ? 'Ask the secretary...' : 'Secretary daemon unavailable'"
                   @keydown="onChatKeyDown"
                   @compositionstart="onChatCompositionStart"
                   @compositionend="onChatCompositionEnd"
@@ -536,7 +546,7 @@ function onMarkdownClick(e: MouseEvent) {
                 <button
                   class="primary"
                   @click="emit('sendChat')"
-                  :disabled="chatSending || !chatInputModel.trim()"
+                  :disabled="!secretaryAvailable || chatSending || !chatInputModel.trim()"
                 >
                   Send
                 </button>

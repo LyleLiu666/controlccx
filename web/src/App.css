@@ -109,6 +109,49 @@
   gap: 12px;
 }
 
+.controlPlanePills {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.controlPlanePill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 900;
+  background: var(--bg-app);
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  color: var(--text-sub);
+  letter-spacing: 0.01em;
+}
+
+.controlPlanePill.ok {
+  background: rgba(16, 185, 129, 0.12);
+  border-color: rgba(16, 185, 129, 0.25);
+  color: #34d399;
+}
+
+.controlPlanePill.bad {
+  background: rgba(239, 68, 68, 0.12);
+  border-color: rgba(239, 68, 68, 0.25);
+  color: #fca5a5;
+}
+
+.controlPlanePill.unknown {
+  opacity: 0.9;
+}
+
+.controlPlaneDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: currentColor;
+}
+
 .headerSkillsBtn {
   border-radius: 999px;
   padding: 8px 12px;
@@ -382,6 +425,18 @@
   font-size: 13px;
   font-weight: 500;
   box-shadow: var(--shadow-sm);
+}
+
+.banner.warn {
+  background: #fffbeb;
+  border-color: #fde68a;
+  color: #b45309;
+}
+
+:global(:root[data-theme="dark"]) .banner.warn {
+  background: rgba(251, 191, 36, 0.12);
+  border-color: rgba(251, 191, 36, 0.22);
+  color: #fbbf24;
 }
 
 .grid {
@@ -1491,6 +1546,22 @@ h2 {
   padding: 10px 12px;
   border-radius: var(--radius-md);
   font-size: 13px;
+}
+
+:deep(.secDegradedHint) {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: rgba(251, 191, 36, 0.12);
+  border: 1px solid rgba(251, 191, 36, 0.18);
+  color: #fbbf24;
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  font-size: 13px;
+}
+
+:deep(.secDegradedHint .text) {
+  flex: 1;
 }
 
 :deep(.secAttentionHint .text) {
