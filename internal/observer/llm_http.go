@@ -14,6 +14,7 @@ import (
 
 	"controlccx/internal/auth"
 	"controlccx/internal/config"
+	"controlccx/internal/providers"
 
 	"github.com/goccy/go-json"
 )
@@ -26,16 +27,22 @@ const (
 )
 
 type SimpleHTTPBackend struct {
-	cfg    config.Config
-	auth   *auth.Store
-	client *http.Client
+	cfg       config.Config
+	auth      *auth.Store
+	providers *providers.Store
+	client    *http.Client
 }
 
 func NewSimpleHTTPBackend(cfg config.Config, authStore *auth.Store) Backend {
+	return NewSimpleHTTPBackendWithProviders(cfg, authStore, nil)
+}
+
+func NewSimpleHTTPBackendWithProviders(cfg config.Config, authStore *auth.Store, providersStore *providers.Store) Backend {
 	return &SimpleHTTPBackend{
-		cfg:    cfg,
-		auth:   authStore,
-		client: &http.Client{},
+		cfg:       cfg,
+		auth:      authStore,
+		providers: providersStore,
+		client:    &http.Client{},
 	}
 }
 
@@ -350,6 +357,9 @@ func (b *SimpleHTTPBackend) resolveAnthropicBaseURL() string {
 	if v := strings.TrimSpace(os.Getenv("ANTHROPIC_BASE_URL")); v != "" {
 		return v
 	}
+	if v := strings.TrimSpace(b.resolveSecretarySimpleHTTP().BaseURL); v != "" {
+		return v
+	}
 	if b.auth != nil {
 		return strings.TrimSpace(b.auth.Get().AnthropicBaseURL)
 	}
@@ -358,6 +368,9 @@ func (b *SimpleHTTPBackend) resolveAnthropicBaseURL() string {
 
 func (b *SimpleHTTPBackend) resolveAnthropicAPIKey() string {
 	if v := strings.TrimSpace(os.Getenv("ANTHROPIC_API_KEY")); v != "" {
+		return v
+	}
+	if v := strings.TrimSpace(b.resolveSecretarySimpleHTTP().APIKey); v != "" {
 		return v
 	}
 	if b.auth != nil {
@@ -370,6 +383,9 @@ func (b *SimpleHTTPBackend) resolveAnthropicAuthToken() string {
 	if v := strings.TrimSpace(os.Getenv("ANTHROPIC_AUTH_TOKEN")); v != "" {
 		return v
 	}
+	if v := strings.TrimSpace(b.resolveSecretarySimpleHTTP().AuthToken); v != "" {
+		return v
+	}
 	if b.auth != nil {
 		return strings.TrimSpace(b.auth.Get().AnthropicAuthToken)
 	}
@@ -380,8 +396,27 @@ func (b *SimpleHTTPBackend) resolveAnthropicModel() string {
 	if v := strings.TrimSpace(os.Getenv("ANTHROPIC_MODEL")); v != "" {
 		return v
 	}
+	if v := strings.TrimSpace(b.resolveSecretarySimpleHTTP().Model); v != "" {
+		return v
+	}
 	if b.auth != nil {
 		return strings.TrimSpace(b.auth.Get().AnthropicModel)
 	}
 	return ""
+}
+
+func (b *SimpleHTTPBackend) resolveSecretarySimpleHTTP() providers.SecretarySimpleHTTP {
+	if b == nil || b.providers == nil {
+		return providers.SecretarySimpleHTTP{}
+	}
+	active := b.providers.Active()
+	id := strings.TrimSpace(active.Secretary)
+	if id == "" {
+		return providers.SecretarySimpleHTTP{}
+	}
+	p, ok := b.providers.Get(id)
+	if !ok {
+		return providers.SecretarySimpleHTTP{}
+	}
+	return p.Targets.Secretary.SimpleHTTP
 }

@@ -45,6 +45,17 @@ type CodexTarget struct {
 
 type SecretaryTarget struct {
 	Backend string `json:"backend,omitempty"` // auto | simple-http | claude | codex
+
+	// SimpleHTTP config is used when the Secretary selects backend=simple-http (or when simple-http is chosen in auto
+	// mode). This is intentionally separate from the Claude Code target so Secretary can use an independent auth set.
+	SimpleHTTP SecretarySimpleHTTP `json:"simple_http,omitempty"`
+}
+
+type SecretarySimpleHTTP struct {
+	BaseURL   string `json:"base_url,omitempty"`
+	APIKey    string `json:"api_key,omitempty"`
+	AuthToken string `json:"auth_token,omitempty"`
+	Model     string `json:"model,omitempty"`
 }
 
 type SyncLive struct {
@@ -356,6 +367,8 @@ func MaskProfile(p Profile) Profile {
 	p.Targets.Claude.APIKey = auth.MaskSecret(p.Targets.Claude.APIKey)
 	p.Targets.Claude.AuthToken = auth.MaskSecret(p.Targets.Claude.AuthToken)
 	p.Targets.Codex.APIKey = auth.MaskSecret(p.Targets.Codex.APIKey)
+	p.Targets.Secretary.SimpleHTTP.APIKey = auth.MaskSecret(p.Targets.Secretary.SimpleHTTP.APIKey)
+	p.Targets.Secretary.SimpleHTTP.AuthToken = auth.MaskSecret(p.Targets.Secretary.SimpleHTTP.AuthToken)
 	return p
 }
 
@@ -375,6 +388,10 @@ func normalizeProfile(p Profile) Profile {
 	p.Targets.Codex.ReasoningEffort = strings.TrimSpace(p.Targets.Codex.ReasoningEffort)
 
 	p.Targets.Secretary.Backend = strings.TrimSpace(p.Targets.Secretary.Backend)
+	p.Targets.Secretary.SimpleHTTP.BaseURL = strings.TrimSpace(p.Targets.Secretary.SimpleHTTP.BaseURL)
+	p.Targets.Secretary.SimpleHTTP.APIKey = strings.TrimSpace(p.Targets.Secretary.SimpleHTTP.APIKey)
+	p.Targets.Secretary.SimpleHTTP.AuthToken = strings.TrimSpace(p.Targets.Secretary.SimpleHTTP.AuthToken)
+	p.Targets.Secretary.SimpleHTTP.Model = strings.TrimSpace(p.Targets.Secretary.SimpleHTTP.Model)
 	return p
 }
 

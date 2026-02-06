@@ -84,6 +84,12 @@ func mergeProviderProfileForUpsert(existing providers.Profile, incoming provider
 	if isMaskedSecretPlaceholder(incoming.Targets.Codex.APIKey) || strings.TrimSpace(incoming.Targets.Codex.APIKey) == "" {
 		incoming.Targets.Codex.APIKey = existing.Targets.Codex.APIKey
 	}
+	if isMaskedSecretPlaceholder(incoming.Targets.Secretary.SimpleHTTP.APIKey) || strings.TrimSpace(incoming.Targets.Secretary.SimpleHTTP.APIKey) == "" {
+		incoming.Targets.Secretary.SimpleHTTP.APIKey = existing.Targets.Secretary.SimpleHTTP.APIKey
+	}
+	if isMaskedSecretPlaceholder(incoming.Targets.Secretary.SimpleHTTP.AuthToken) || strings.TrimSpace(incoming.Targets.Secretary.SimpleHTTP.AuthToken) == "" {
+		incoming.Targets.Secretary.SimpleHTTP.AuthToken = existing.Targets.Secretary.SimpleHTTP.AuthToken
+	}
 	return incoming
 }
 
@@ -92,8 +98,11 @@ func isMaskedSecretPlaceholder(s string) bool {
 	if s == "" {
 		return false
 	}
-	// MaskSecret uses either ellipsis or asterisks for short strings.
-	return strings.Contains(s, "…") || strings.Contains(s, "*")
+	// auth.MaskSecret uses ellipsis for normal secrets and "**" for very short strings.
+	if strings.Contains(s, "…") {
+		return true
+	}
+	return s == "**"
 }
 
 func (a *API) handleProvidersDelete(w http.ResponseWriter, r *http.Request) {

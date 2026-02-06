@@ -76,7 +76,7 @@ func runSecretaryd(cfg config.Config, secretaryAddr string, runnerBaseURL string
 		return err
 	}
 
-	simpleHTTPBackend := observer.NewSimpleHTTPBackend(cfg, authStore)
+	simpleHTTPBackend := observer.NewSimpleHTTPBackendWithProviders(cfg, authStore, providersStore)
 	claudeBackend := observer.NewClaudeCLIBackend(cfg, authStore)
 	codexBackend := observer.NewCodexCLIBackend(cfg, authStore)
 

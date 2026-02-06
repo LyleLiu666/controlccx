@@ -188,7 +188,7 @@ func main() {
 
 	hub := events.NewHub()
 	chatStore := chat.NewStore(conn)
-	simpleHTTPBackend := observer.NewSimpleHTTPBackend(cfg, authStore)
+	simpleHTTPBackend := observer.NewSimpleHTTPBackendWithProviders(cfg, authStore, providersStore)
 	claudeBackend := observer.NewClaudeCLIBackend(cfg, authStore)
 	codexBackend := observer.NewCodexCLIBackend(cfg, authStore)
 	observerSvc := &observer.Service{

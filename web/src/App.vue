@@ -748,6 +748,10 @@ const providerCodexSyncLive = ref(false);
 const providerSecretaryBackend = ref<"auto" | "simple-http" | "claude" | "codex">(
   "auto",
 );
+const providerSecretarySimpleHTTPBaseURL = ref("");
+const providerSecretarySimpleHTTPApiKey = ref("");
+const providerSecretarySimpleHTTPAuthToken = ref("");
+const providerSecretarySimpleHTTPModel = ref("");
 
 const selectedProvider = computed<ProviderProfile | null>(() => {
   const id = providerEditID.value.trim();
@@ -762,6 +766,12 @@ const providerClaudeAuthTokenHint = computed<string>(
 );
 const providerCodexApiKeyHint = computed<string>(
   () => selectedProvider.value?.targets?.codex?.api_key ?? "",
+);
+const providerSecretarySimpleHTTPApiKeyHint = computed<string>(
+  () => selectedProvider.value?.targets?.secretary?.simple_http?.api_key ?? "",
+);
+const providerSecretarySimpleHTTPAuthTokenHint = computed<string>(
+  () => selectedProvider.value?.targets?.secretary?.simple_http?.auth_token ?? "",
 );
 
 const providerSpeedTesting = ref(false);
@@ -4223,6 +4233,10 @@ function startNewProvider() {
   providerCodexSyncLive.value = false;
 
   providerSecretaryBackend.value = "auto";
+  providerSecretarySimpleHTTPBaseURL.value = "";
+  providerSecretarySimpleHTTPApiKey.value = "";
+  providerSecretarySimpleHTTPAuthToken.value = "";
+  providerSecretarySimpleHTTPModel.value = "";
 
   providerClaudeSpeedTest.value = null;
   providerCodexSpeedTest.value = null;
@@ -4255,6 +4269,14 @@ function loadProviderIntoEditor(p: ProviderProfile) {
     backend === "simple-http" || backend === "claude" || backend === "codex"
       ? backend
       : "auto";
+  providerSecretarySimpleHTTPBaseURL.value = String(
+    p?.targets?.secretary?.simple_http?.base_url ?? "",
+  ).trim();
+  providerSecretarySimpleHTTPModel.value = String(
+    p?.targets?.secretary?.simple_http?.model ?? "",
+  ).trim();
+  providerSecretarySimpleHTTPApiKey.value = "";
+  providerSecretarySimpleHTTPAuthToken.value = "";
 
   providerClaudeSpeedTest.value = null;
   providerCodexSpeedTest.value = null;
@@ -4310,6 +4332,12 @@ async function saveProviderProfile() {
         },
         secretary: {
           backend: providerSecretaryBackend.value,
+          simple_http: {
+            base_url: providerSecretarySimpleHTTPBaseURL.value.trim(),
+            api_key: providerSecretarySimpleHTTPApiKey.value.trim(),
+            auth_token: providerSecretarySimpleHTTPAuthToken.value.trim(),
+            model: providerSecretarySimpleHTTPModel.value.trim(),
+          },
         },
       },
       sync_live: {
@@ -4322,6 +4350,8 @@ async function saveProviderProfile() {
     providerClaudeApiKey.value = "";
     providerClaudeAuthToken.value = "";
     providerCodexApiKey.value = "";
+    providerSecretarySimpleHTTPApiKey.value = "";
+    providerSecretarySimpleHTTPAuthToken.value = "";
     await refreshProviders(res.profile.id);
   } catch (e: any) {
     providersError.value = e?.message ?? String(e);
@@ -7125,6 +7155,12 @@ watch(
           v-model:codexSyncLive="providerCodexSyncLive"
           :codexApiKeyHint="providerCodexApiKeyHint"
           v-model:secretaryBackend="providerSecretaryBackend"
+          v-model:secretarySimpleHTTPBaseURL="providerSecretarySimpleHTTPBaseURL"
+          v-model:secretarySimpleHTTPApiKey="providerSecretarySimpleHTTPApiKey"
+          v-model:secretarySimpleHTTPAuthToken="providerSecretarySimpleHTTPAuthToken"
+          v-model:secretarySimpleHTTPModel="providerSecretarySimpleHTTPModel"
+          :secretarySimpleHTTPApiKeyHint="providerSecretarySimpleHTTPApiKeyHint"
+          :secretarySimpleHTTPAuthTokenHint="providerSecretarySimpleHTTPAuthTokenHint"
           :secretarySyncLive="false"
           :speedTesting="providerSpeedTesting"
           :speedTestTarget="providerSpeedTestTarget"

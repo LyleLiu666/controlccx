@@ -473,6 +473,12 @@ export type ProviderCodexTarget = {
 
 export type ProviderSecretaryTarget = {
   backend?: "auto" | "simple-http" | "claude" | "codex";
+  simple_http?: {
+    base_url?: string;
+    api_key?: string;
+    auth_token?: string;
+    model?: string;
+  };
 };
 
 export type ProviderTargets = {
