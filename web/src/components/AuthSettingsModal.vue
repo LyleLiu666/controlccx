@@ -16,6 +16,7 @@ const props = defineProps<{
   open: boolean;
   saving: boolean;
   error: string;
+  notice?: string;
   storagePath: string;
   authStatus: AuthStatus | null;
   toolsStatus: ToolStatus[] | null;
@@ -34,6 +35,7 @@ const emit = defineEmits<{
   (e: "close"): void;
   (e: "openTools"): void;
   (e: "openProviders"): void;
+  (e: "importEnv", target: "claude" | "codex" | "all"): void;
   (e: "save"): void;
   (e: "clearStored", key: StoredAuthKey): void;
   (e: "update:autoDeliveryForeman", value: boolean): void;
@@ -95,6 +97,24 @@ const showCliInstallGuide = computed<boolean>(() => {
   return !claudeToolStatus.value.available && !codexToolStatus.value.available;
 });
 
+const canImportClaudeEnv = computed<boolean>(() => {
+  const st = props.authStatus?.claude;
+  if (!st) return false;
+  return [
+    st.base_url,
+    st.api_key,
+    st.auth_token,
+    st.model,
+    st.small_fast_model,
+  ].some((f) => f?.effective === "env");
+});
+
+const canImportCodexEnv = computed<boolean>(() => {
+  const st = props.authStatus?.codex;
+  if (!st) return false;
+  return st.api_key?.effective === "env";
+});
+
 function formatAuthEffective(v: string | undefined | null): string {
   const s = String(v ?? "").trim().toLowerCase();
   switch (s) {
@@ -135,6 +155,7 @@ function formatAuthEffective(v: string | undefined | null): string {
         </div>
 
         <div v-if="error" class="modalError">{{ error }}</div>
+        <div v-if="notice" class="modalNotice">{{ notice }}</div>
 
         <div v-if="showCliInstallGuide" class="settingsSection">
           <div class="settingsSectionTitle">快速开始</div>
@@ -194,7 +215,18 @@ function formatAuthEffective(v: string | undefined | null): string {
         </div>
 
         <div class="settingsSection">
-          <div class="settingsSectionTitle">Claude Code</div>
+          <div class="settingsSectionTitleRow">
+            <div class="settingsSectionTitle">Claude Code</div>
+            <button
+              v-if="canImportClaudeEnv"
+              type="button"
+              class="settingsSectionActionBtn"
+              @click="emit('importEnv', 'claude')"
+              :disabled="saving"
+            >
+              保存环境变量到本地
+            </button>
+          </div>
           <div class="kv">
             <span class="k">ANTHROPIC_BASE_URL</span>
             <span class="mono"
@@ -326,7 +358,18 @@ function formatAuthEffective(v: string | undefined | null): string {
         </div>
 
         <div class="settingsSection">
-          <div class="settingsSectionTitle">Codex</div>
+          <div class="settingsSectionTitleRow">
+            <div class="settingsSectionTitle">Codex</div>
+            <button
+              v-if="canImportCodexEnv"
+              type="button"
+              class="settingsSectionActionBtn"
+              @click="emit('importEnv', 'codex')"
+              :disabled="saving"
+            >
+              保存环境变量到本地
+            </button>
+          </div>
           <div class="kv">
             <span class="k">OPENAI_API_KEY</span>
             <span class="mono"

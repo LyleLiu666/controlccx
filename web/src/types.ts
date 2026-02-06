@@ -433,6 +433,13 @@ export type AuthInfo = {
   storage_path: string;
 };
 
+export type AuthImportEnvResponse = {
+  status: AuthStatus;
+  storage_path: string;
+  imported: string[];
+  skipped: string[];
+};
+
 export type AuthPatch = {
   anthropic_base_url?: string;
   anthropic_api_key?: string;

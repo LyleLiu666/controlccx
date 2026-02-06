@@ -1,6 +1,7 @@
 import type {
   AcceptanceResponse,
   AuthInfo,
+  AuthImportEnvResponse,
   AuthPatch,
   AuthStatus,
   ChatMessage,
@@ -446,6 +447,10 @@ export async function fetchAuthInfo(): Promise<AuthInfo> {
 
 export async function updateAuth(patch: AuthPatch): Promise<AuthInfo> {
   return postJSON<AuthInfo>("/api/auth", patch);
+}
+
+export async function importAuthFromEnv(target: "claude" | "codex" | "all" = "all"): Promise<AuthImportEnvResponse> {
+  return postJSON<AuthImportEnvResponse>("/api/auth/import/env", { target });
 }
 
 export async function fetchProviders(): Promise<ProvidersListResponse> {

@@ -97,6 +97,7 @@ func (a *API) Handler() http.Handler {
 	mux.HandleFunc("/api/chat", a.handleChat)
 	mux.HandleFunc("/api/auth", a.handleAuth)
 	mux.HandleFunc("/api/auth/status", a.handleAuthStatus)
+	mux.HandleFunc("/api/auth/import/env", a.handleAuthImportEnv)
 	return mux
 }
 

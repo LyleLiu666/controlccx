@@ -458,5 +458,72 @@ func TestAPI_TasksAndChat(t *testing.T) {
 		if !setBody.Status.Codex.Available || setBody.Status.Codex.APIKey.Effective != "stored" {
 			t.Fatalf("unexpected set status: %+v", setBody.Status.Codex)
 		}
+
+		t.Run("import env", func(t *testing.T) {
+			t.Setenv("ANTHROPIC_BASE_URL", "https://anthropic.example.test")
+			t.Setenv("ANTHROPIC_API_KEY", "sk-ant-env-supersecret-123456")
+			t.Setenv("ANTHROPIC_AUTH_TOKEN", "")
+			t.Setenv("ANTHROPIC_MODEL", "claude-test-model")
+			t.Setenv("ANTHROPIC_SMALL_FAST_MODEL", "")
+			t.Setenv("OPENAI_API_KEY", "sk-openai-env-supersecret-654321")
+
+			store, err := auth.Load(filepath.Join(t.TempDir(), "secrets.json"))
+			if err != nil {
+				t.Fatalf("auth load: %v", err)
+			}
+			apiSvc.Auth = store
+
+			buf, _ := json.Marshal(map[string]string{"target": "all"})
+			importRes, err := http.Post(srv.URL+"/api/auth/import/env", "application/json", bytes.NewReader(buf))
+			if err != nil {
+				t.Fatalf("post import: %v", err)
+			}
+			defer importRes.Body.Close()
+			rawBody, _ := io.ReadAll(importRes.Body)
+			if importRes.StatusCode != http.StatusOK {
+				t.Fatalf("import status=%d, want 200; body=%s", importRes.StatusCode, string(rawBody))
+			}
+			if strings.Contains(string(rawBody), "sk-ant-env-supersecret-123456") {
+				t.Fatalf("expected response to not include raw anthropic secret")
+			}
+			if strings.Contains(string(rawBody), "sk-openai-env-supersecret-654321") {
+				t.Fatalf("expected response to not include raw openai secret")
+			}
+
+			var body struct {
+				Status      auth.Status `json:"status"`
+				StoragePath string      `json:"storage_path"`
+				Imported    []string    `json:"imported"`
+			}
+			if err := json.Unmarshal(rawBody, &body); err != nil {
+				t.Fatalf("decode import: %v", err)
+			}
+			if body.StoragePath != store.Path() {
+				t.Fatalf("storage_path=%q, want %q", body.StoragePath, store.Path())
+			}
+			if body.Status.Claude.BaseURL.Effective != "env" || body.Status.Claude.APIKey.Effective != "env" {
+				t.Fatalf("expected env effective status, got claude=%+v", body.Status.Claude)
+			}
+			if body.Status.Codex.APIKey.Effective != "env" {
+				t.Fatalf("expected env effective status, got codex=%+v", body.Status.Codex)
+			}
+
+			secrets := store.Get()
+			if secrets.AnthropicBaseURL != "https://anthropic.example.test" {
+				t.Fatalf("anthropic_base_url=%q, want env value", secrets.AnthropicBaseURL)
+			}
+			if secrets.AnthropicAPIKey != "sk-ant-env-supersecret-123456" {
+				t.Fatalf("anthropic_api_key=%q, want env value", secrets.AnthropicAPIKey)
+			}
+			if secrets.AnthropicModel != "claude-test-model" {
+				t.Fatalf("anthropic_model=%q, want env value", secrets.AnthropicModel)
+			}
+			if secrets.OpenAIAPIKey != "sk-openai-env-supersecret-654321" {
+				t.Fatalf("openai_api_key=%q, want env value", secrets.OpenAIAPIKey)
+			}
+			if len(body.Imported) < 3 {
+				t.Fatalf("expected imported fields, got %v", body.Imported)
+			}
+		})
 	})
 }

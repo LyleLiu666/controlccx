@@ -61,6 +61,7 @@ import {
   sendChat,
   upsertTool,
   updateAuth,
+  importAuthFromEnv,
   fetchAcceptance,
   isAPIError,
 } from "./api";
@@ -691,6 +692,7 @@ const authStatus = computed<AuthStatus | null>(
 const authSettingsOpen = ref(false);
 const authSaving = ref(false);
 const authSettingsError = ref("");
+const authSettingsNotice = ref("");
 const authAnthropicBaseURL = ref("");
 const authAnthropicApiKey = ref("");
 const authAnthropicAuthToken = ref("");
@@ -4205,6 +4207,7 @@ function unpinWorkspace(path: string) {
 
 function openAuthSettings() {
   authSettingsError.value = "";
+  authSettingsNotice.value = "";
   authSettingsOpen.value = true;
   refreshAuth();
 }
@@ -4664,8 +4667,33 @@ async function deleteToolOverride() {
   }
 }
 
+async function importAuthEnv(target: "claude" | "codex" | "all") {
+  authSettingsError.value = "";
+  authSettingsNotice.value = "";
+  authSaving.value = true;
+  try {
+    const res = await importAuthFromEnv(target);
+    authInfo.value = res;
+    const imported = Array.isArray(res.imported) ? res.imported : [];
+    const skipped = Array.isArray(res.skipped) ? res.skipped : [];
+    if (imported.length) {
+      authSettingsNotice.value =
+        `已将环境变量保存到本地（${imported.length} 项）：` + imported.join(", ");
+    } else if (skipped.length) {
+      authSettingsNotice.value = "未发现可保存项：相关字段已保存过（不会覆盖）。";
+    } else {
+      authSettingsNotice.value = "未检测到可保存的环境变量。";
+    }
+  } catch (e: any) {
+    authSettingsError.value = e?.message ?? String(e);
+  } finally {
+    authSaving.value = false;
+  }
+}
+
 async function saveAuthSettings() {
   authSettingsError.value = "";
+  authSettingsNotice.value = "";
   authSaving.value = true;
   try {
     const patch: AuthPatch = {};
@@ -4710,6 +4738,7 @@ async function saveAuthSettings() {
 
 async function clearStoredAuth(field: keyof AuthPatch) {
   authSettingsError.value = "";
+  authSettingsNotice.value = "";
   authSaving.value = true;
   try {
     authInfo.value = await updateAuth({ [field]: "" } as AuthPatch);
@@ -7091,6 +7120,7 @@ watch(
 	      :open="authSettingsOpen"
 	      :saving="authSaving"
 	      :error="authSettingsError"
+	      :notice="authSettingsNotice"
 	      :storagePath="authInfo?.storage_path ?? ''"
 	      :authStatus="authStatus"
 	      :toolsStatus="toolsStatus"
@@ -7106,6 +7136,7 @@ watch(
 	      @close="authSettingsOpen = false"
 	      @openTools="openToolsSettings"
 	      @openProviders="openProvidersSettings"
+	      @importEnv="importAuthEnv"
 	      @save="saveAuthSettings"
 	      @clearStored="clearStoredAuth"
 	    />
