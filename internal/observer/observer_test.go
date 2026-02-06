@@ -112,3 +112,77 @@ func TestObserver_Respond_ResumeViaLLMToolCall(t *testing.T) {
 		t.Fatalf("conversation_id=%q, want %q", started.ConversationID, task.ConversationID)
 	}
 }
+
+func TestObserver_Respond_ExplicitBackendDoesNotFallback(t *testing.T) {
+	ctx := context.Background()
+	conn, err := db.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "controlccx.db")})
+	if err != nil {
+		t.Fatalf("db open: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+
+	store := tasks.NewStore(conn)
+	fallback := &stubBackend{
+		name: "fallback",
+		outputs: []string{
+			`{"action":"final","message":"should not be used"}`,
+		},
+	}
+	obs := &Service{
+		Store: store,
+		LLM:   fallback,
+	}
+
+	reply, err := obs.RespondWithOptions(ctx, "hello", RespondOptions{Backend: "claude"})
+	if err != nil {
+		t.Fatalf("respond: %v", err)
+	}
+	if !strings.Contains(reply.Message, "backend=claude") {
+		t.Fatalf("unexpected reply=%q", reply.Message)
+	}
+	if len(fallback.prompts) != 0 {
+		t.Fatalf("explicit backend should not fallback, prompts=%d", len(fallback.prompts))
+	}
+}
+
+func TestObserver_Respond_AutoPrefersSimpleHTTP(t *testing.T) {
+	ctx := context.Background()
+	conn, err := db.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "controlccx.db")})
+	if err != nil {
+		t.Fatalf("db open: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+
+	store := tasks.NewStore(conn)
+	simple := &stubBackend{
+		name: "simple-http",
+		outputs: []string{
+			`{"action":"final","message":"from simple-http"}`,
+		},
+	}
+	claude := &stubBackend{
+		name: "claude",
+		outputs: []string{
+			`{"action":"final","message":"from claude"}`,
+		},
+	}
+	obs := &Service{
+		Store:      store,
+		SimpleHTTP: simple,
+		Claude:     claude,
+	}
+
+	reply, err := obs.RespondWithOptions(ctx, "hello", RespondOptions{Backend: "auto"})
+	if err != nil {
+		t.Fatalf("respond: %v", err)
+	}
+	if reply.Message != "from simple-http" {
+		t.Fatalf("reply=%q, want simple-http result", reply.Message)
+	}
+	if len(simple.prompts) == 0 {
+		t.Fatalf("simple-http backend should be used first")
+	}
+	if len(claude.prompts) != 0 {
+		t.Fatalf("claude backend should not be used when simple-http is available")
+	}
+}

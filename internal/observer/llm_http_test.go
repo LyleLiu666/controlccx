@@ -1,0 +1,127 @@
+package observer
+
+import (
+	"context"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"controlccx/internal/auth"
+	"controlccx/internal/config"
+)
+
+func TestNormalizeMessagesEndpoint(t *testing.T) {
+	cases := []struct {
+		base string
+		want string
+	}{
+		{base: "https://api.anthropic.com", want: "https://api.anthropic.com/v1/messages"},
+		{base: "https://api.anthropic.com/", want: "https://api.anthropic.com/v1/messages"},
+		{base: "https://example.com/proxy", want: "https://example.com/proxy/v1/messages"},
+		{base: "https://example.com/proxy/", want: "https://example.com/proxy/v1/messages"},
+		{base: "https://example.com/v1/messages", want: "https://example.com/v1/messages"},
+	}
+	for _, tc := range cases {
+		got, err := normalizeMessagesEndpoint(tc.base)
+		if err != nil {
+			t.Fatalf("base=%q: unexpected err: %v", tc.base, err)
+		}
+		if got != tc.want {
+			t.Fatalf("base=%q: got %q want %q", tc.base, got, tc.want)
+		}
+	}
+}
+
+func TestSimpleHTTPBackend_Complete_AnthropicStyle(t *testing.T) {
+	const authToken = "token-abc"
+	var gotAuthHeader string
+	var gotAPIKeyHeader string
+	var gotPath string
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuthHeader = strings.TrimSpace(r.Header.Get("Authorization"))
+		gotAPIKeyHeader = strings.TrimSpace(r.Header.Get("x-api-key"))
+		gotPath = r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"content":[{"type":"text","text":"ok from anthropic"}]}`))
+	}))
+	defer srv.Close()
+
+	store, err := auth.Load(t.TempDir() + "/secrets.json")
+	if err != nil {
+		t.Fatalf("auth load: %v", err)
+	}
+	_, err = store.ApplyPatch(auth.Patch{
+		AnthropicBaseURL:   ptr(srv.URL),
+		AnthropicAuthToken: ptr(authToken),
+		AnthropicModel:     ptr("claude-test"),
+	})
+	if err != nil {
+		t.Fatalf("apply patch: %v", err)
+	}
+
+	cfg := config.Default()
+	b := NewSimpleHTTPBackend(cfg, store)
+	out, err := b.Complete(context.Background(), "hello")
+	if err != nil {
+		t.Fatalf("complete: %v", err)
+	}
+	if out != "ok from anthropic" {
+		t.Fatalf("out=%q", out)
+	}
+	if gotPath != "/v1/messages" {
+		t.Fatalf("path=%q, want /v1/messages", gotPath)
+	}
+	if gotAuthHeader != "Bearer "+authToken {
+		t.Fatalf("Authorization=%q", gotAuthHeader)
+	}
+	if gotAPIKeyHeader != authToken {
+		t.Fatalf("x-api-key=%q", gotAPIKeyHeader)
+	}
+}
+
+func TestSimpleHTTPBackend_Complete_OpenAIStyle(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"ok from choices"}}]}`))
+	}))
+	defer srv.Close()
+
+	store, err := auth.Load(t.TempDir() + "/secrets.json")
+	if err != nil {
+		t.Fatalf("auth load: %v", err)
+	}
+	_, err = store.ApplyPatch(auth.Patch{
+		AnthropicBaseURL:   ptr(srv.URL + "/proxy"),
+		AnthropicAuthToken: ptr("token-xyz"),
+	})
+	if err != nil {
+		t.Fatalf("apply patch: %v", err)
+	}
+
+	cfg := config.Default()
+	b := NewSimpleHTTPBackend(cfg, store)
+	out, err := b.Complete(context.Background(), "hello")
+	if err != nil {
+		t.Fatalf("complete: %v", err)
+	}
+	if out != "ok from choices" {
+		t.Fatalf("out=%q", out)
+	}
+}
+
+func TestSimpleHTTPBackend_Complete_MissingCredential(t *testing.T) {
+	store, err := auth.Load(t.TempDir() + "/secrets.json")
+	if err != nil {
+		t.Fatalf("auth load: %v", err)
+	}
+	cfg := config.Default()
+	b := NewSimpleHTTPBackend(cfg, store)
+	_, err = b.Complete(context.Background(), "hello")
+	if err == nil || !strings.Contains(err.Error(), "missing credentials") {
+		t.Fatalf("expected missing credentials error, got %v", err)
+	}
+}
+
+func ptr(s string) *string { return &s }

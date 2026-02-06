@@ -3,6 +3,8 @@ package observer
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"strings"
 	"testing"
 )
 
@@ -78,10 +80,10 @@ func TestAgent_Run_ToolThenFinal(t *testing.T) {
 }
 
 func TestAgent_Run_InvalidJSON_ReturnsRaw(t *testing.T) {
- 	ctx := context.Background()
- 	llm := &stubBackend{name: "stub", outputs: []string{"not json"}}
- 	agent := Agent{LLM: llm, Tools: map[string]Tool{}}
- 	msg, err := agent.Run(ctx, "hi")
+	ctx := context.Background()
+	llm := &stubBackend{name: "stub", outputs: []string{"not json"}}
+	agent := Agent{LLM: llm, Tools: map[string]Tool{}}
+	msg, err := agent.Run(ctx, "hi")
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -171,5 +173,68 @@ func TestAgent_Run_MaxStepsExceeded(t *testing.T) {
 	if e.Code != ErrMaxStepsExceeded {
 		b, _ := json.Marshal(e)
 		t.Fatalf("err=%s, want code=%q", string(b), ErrMaxStepsExceeded)
+	}
+}
+
+func TestAgent_Run_ToolErrorContinuesLoop(t *testing.T) {
+	ctx := context.Background()
+	llm := &stubBackend{
+		name: "stub",
+		outputs: []string{
+			`{"action":"tool","tool":"flaky","args":{"x":1}}`,
+			`{"action":"final","message":"handled tool error and finished"}`,
+		},
+	}
+
+	var gotResult map[string]any
+	agent := Agent{
+		LLM: llm,
+		Tools: map[string]Tool{
+			"flaky": toolFunc{
+				name: "flaky",
+				desc: "always fails",
+				run: func(ctx context.Context, args map[string]any) (any, error) {
+					return nil, errors.New("boom")
+				},
+			},
+		},
+		OnToolResult: func(tool string, result any) {
+			if tool != "flaky" {
+				return
+			}
+			if m, ok := result.(toolResultEnvelope); ok {
+				gotResult = map[string]any{
+					"ok":    m.OK,
+					"error": m.Error,
+				}
+				return
+			}
+			if m, ok := result.(map[string]any); ok {
+				gotResult = m
+			}
+		},
+	}
+
+	msg, err := agent.Run(ctx, "run flaky then finish")
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if msg != "handled tool error and finished" {
+		t.Fatalf("msg=%q", msg)
+	}
+	if len(llm.prompts) < 2 {
+		t.Fatalf("expected loop to continue after tool error, prompts=%d", len(llm.prompts))
+	}
+	if gotResult == nil {
+		t.Fatalf("expected tool result callback to run")
+	}
+	if ok, _ := gotResult["ok"].(bool); ok {
+		t.Fatalf("expected ok=false in tool result, got %+v", gotResult)
+	}
+	if gotResult["error"] == nil {
+		t.Fatalf("expected error in tool result, got %+v", gotResult)
+	}
+	if !strings.Contains(llm.prompts[len(llm.prompts)-1], `"ok":false`) {
+		t.Fatalf("expected trace to include tool error envelope, got prompt=%q", llm.prompts[len(llm.prompts)-1])
 	}
 }

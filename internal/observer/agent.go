@@ -61,6 +61,12 @@ type agentStep struct {
 	Message string         `json:"message,omitempty"`
 }
 
+type toolResultEnvelope struct {
+	OK    bool   `json:"ok"`
+	Value any    `json:"value,omitempty"`
+	Error string `json:"error,omitempty"`
+}
+
 func (a Agent) Run(ctx context.Context, userMessage string) (string, error) {
 	if a.LLM == nil {
 		return "", AgentError{Code: ErrNoLLM, Message: "LLM backend is not configured"}
@@ -115,20 +121,31 @@ func (a Agent) Run(ctx context.Context, userMessage string) (string, error) {
 			}
 
 			res, err := tool.Run(ctx, args)
+			toolResult := toolResultEnvelope{OK: err == nil}
 			if err != nil {
-				return "", AgentError{Code: ErrToolFailed, Message: "tool call failed", Detail: err.Error()}
+				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+					return "", err
+				}
+				toolResult.Error = strings.TrimSpace(err.Error())
+			} else {
+				toolResult.Value = res
 			}
 
 			if a.OnToolResult != nil {
-				a.OnToolResult(toolName, res)
+				a.OnToolResult(toolName, toolResult)
 			}
 
 			stepJSON, _ := json.Marshal(parsed)
-			resJSON, _ := json.Marshal(res)
+			resJSON, _ := json.Marshal(toolResult)
 			traces = append(traces,
 				fmt.Sprintf("TOOL_CALL %s", string(stepJSON)),
 				fmt.Sprintf("TOOL_RESULT %s", string(resJSON)),
 			)
+			if err != nil {
+				// Tool failures are part of the agent loop now: the model can observe
+				// the error via TOOL_RESULT and decide whether to retry/fallback/finalize.
+				continue
+			}
 		default:
 			return "", AgentError{Code: ErrInvalidModelJSON, Message: "unknown action", Detail: parsed.Action}
 		}

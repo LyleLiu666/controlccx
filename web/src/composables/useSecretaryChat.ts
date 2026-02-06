@@ -8,11 +8,12 @@ export function useSecretaryChat(opts?: { onError?: (message: string) => void })
 
   const chat = ref<ChatMessage[]>([]);
   const chatInput = ref<string>("");
-  const chatBackend = ref<"auto" | "claude" | "codex">("auto");
+  const chatBackend = ref<"auto" | "simple-http" | "claude" | "codex">("auto");
   const chatStreamEnabled = ref<boolean>(true);
   const chatMaxSteps = ref<number>(8);
   const chatStreamStatus = ref<string>("");
   const chatStreamAnswer = ref<string>("");
+  const chatStreamToolError = ref<string>("");
   const chatSending = ref<boolean>(false);
 
   async function refreshChat() {
@@ -39,6 +40,7 @@ export function useSecretaryChat(opts?: { onError?: (message: string) => void })
 
       chatStreamStatus.value = "thinking";
       chatStreamAnswer.value = "";
+      chatStreamToolError.value = "";
       chatInput.value = "";
 
       await sendChatStream(
@@ -57,6 +59,15 @@ export function useSecretaryChat(opts?: { onError?: (message: string) => void })
           }
           if (evt.event === "tool_result") {
             const tool = String(evt.data?.tool ?? "");
+            const result = evt.data?.result;
+            if (result && typeof result === "object" && result.ok === false) {
+              const detail = String(result.error ?? "").trim() || "tool call failed";
+              chatStreamToolError.value = tool
+                ? `tool ${tool} error: ${detail}`
+                : `tool error: ${detail}`;
+              chatStreamStatus.value = tool ? `tool failed: ${tool}` : "tool failed";
+              return;
+            }
             if (tool) chatStreamStatus.value = `tool done: ${tool}`;
             return;
           }
@@ -71,6 +82,7 @@ export function useSecretaryChat(opts?: { onError?: (message: string) => void })
       chat.value = await fetchChat();
       chatStreamStatus.value = "";
       chatStreamAnswer.value = "";
+      chatStreamToolError.value = "";
     } catch (e: any) {
       onError(e?.message ?? String(e));
     } finally {
@@ -86,9 +98,9 @@ export function useSecretaryChat(opts?: { onError?: (message: string) => void })
     chatMaxSteps,
     chatStreamStatus,
     chatStreamAnswer,
+    chatStreamToolError,
     chatSending,
     refreshChat,
     sendChatMessage,
   };
 }
-

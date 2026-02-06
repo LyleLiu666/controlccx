@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/fs"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -37,6 +38,7 @@ func main() {
 	claudePathFlag := flag.String("claude-path", "", "path to claude executable (optional)")
 	codexPathFlag := flag.String("codex-path", "", "path to codex executable (optional)")
 	gitBashPathFlag := flag.String("gitbash-path", "", "path to Git Bash bash.exe on Windows (optional)")
+	noOpenFlag := flag.Bool("no-open", false, "do not auto-open the web UI in a browser on startup (or set CONTROLCCX_NO_OPEN=1)")
 	flag.Parse()
 
 	cfg, err := config.Load(*dataDirFlag)
@@ -58,6 +60,21 @@ func main() {
 	}
 
 	ctx := context.Background()
+
+	autoOpen := shouldAutoOpenBrowser(*noOpenFlag)
+	initialOpenURL, openURLErr := openURLForListenAddr(cfg.Server.Addr)
+	if openURLErr == nil {
+		checkCtx, cancel := context.WithTimeout(ctx, 900*time.Millisecond)
+		defer cancel()
+		if isControlCCXRunning(checkCtx, initialOpenURL) {
+			log.Printf("controlccx already running at %s\n", initialOpenURL)
+			if autoOpen {
+				_ = openBrowserBestEffort(initialOpenURL)
+			}
+			return
+		}
+	}
+
 	conn, err := db.Open(ctx, db.Options{Path: cfg.Paths.DBPath})
 	if err != nil {
 		log.Fatal(err)
@@ -88,13 +105,15 @@ func main() {
 	hub := events.NewHub()
 	workerMgr := worker.NewManager(cfg, taskStore, hub, authStore, toolsSvc)
 	chatStore := chat.NewStore(conn)
+	simpleHTTPBackend := observer.NewSimpleHTTPBackend(cfg, authStore)
 	claudeBackend := observer.NewClaudeCLIBackend(cfg, authStore)
 	codexBackend := observer.NewCodexCLIBackend(cfg, authStore)
 	observerSvc := &observer.Service{
 		Store:      taskStore,
 		Chat:       chatStore,
 		Runner:     workerMgr,
-		LLM:        observer.MultiBackend{Backends: []observer.Backend{claudeBackend, codexBackend}},
+		LLM:        observer.MultiBackend{Backends: []observer.Backend{simpleHTTPBackend, claudeBackend, codexBackend}},
+		SimpleHTTP: simpleHTTPBackend,
 		Claude:     claudeBackend,
 		Codex:      codexBackend,
 		ForceAgent: true,
@@ -167,9 +186,35 @@ func main() {
 		}()
 	}
 
+	ln, err := net.Listen("tcp", cfg.Server.Addr)
+	if err != nil {
+		// Port in use: check again for a running ControlCCX instance before failing.
+		if openURLErr == nil {
+			checkCtx, cancel := context.WithTimeout(ctx, 900*time.Millisecond)
+			defer cancel()
+			if isControlCCXRunning(checkCtx, initialOpenURL) {
+				log.Printf("controlccx already running at %s\n", initialOpenURL)
+				if autoOpen {
+					_ = openBrowserBestEffort(initialOpenURL)
+				}
+				return
+			}
+		}
+		log.Fatal(err)
+	}
+
+	finalListenAddr := ln.Addr().String()
+	openURL, err := openURLForListenAddr(finalListenAddr)
+	if err != nil {
+		openURL = "http://" + finalListenAddr
+	}
+
 	go func() {
-		log.Printf("controlccx server listening on http://%s\n", cfg.Server.Addr)
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		log.Printf("controlccx server listening on %s\n", openURL)
+		if autoOpen {
+			_ = openBrowserBestEffort(openURL)
+		}
+		if err := srv.Serve(ln); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("server error: %v", err)
 		}
 	}()

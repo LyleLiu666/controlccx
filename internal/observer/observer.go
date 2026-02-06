@@ -18,12 +18,13 @@ import (
 )
 
 type Service struct {
-	Store  *tasks.Store
-	Chat   *chat.Store
-	Runner TaskRunner
-	LLM    Backend
-	Claude Backend
-	Codex  Backend
+	Store      *tasks.Store
+	Chat       *chat.Store
+	Runner     TaskRunner
+	LLM        Backend
+	SimpleHTTP Backend
+	Claude     Backend
+	Codex      Backend
 
 	// AgentMaxSteps limits the tool-call loop iterations. If zero, a default is used.
 	AgentMaxSteps int
@@ -34,7 +35,7 @@ type Service struct {
 }
 
 type RespondOptions struct {
-	Backend  string // "auto" | "claude" | "codex"
+	Backend  string // "auto" | "simple-http" | "claude" | "codex"
 	MaxSteps int
 
 	OnToolCall   func(tool string, args map[string]any)
@@ -153,18 +154,36 @@ func (s *Service) RespondWithOptions(ctx context.Context, userMessage string, op
 
 func llmUnavailableMessage(requestedBackend string) string {
 	b := strings.ToLower(strings.TrimSpace(requestedBackend))
-	if b == "" || b == "auto" {
-		b = ""
-	}
-	if b != "" {
-		b = fmt.Sprintf("（backend=%s）", b)
-	}
-	return strings.TrimSpace(fmt.Sprintf(`秘书不可用%s：未配置可用的 LLM backend。
+	switch b {
+	case "simple-http":
+		return strings.TrimSpace(`秘书不可用（backend=simple-http）：未配置可用的 HTTP backend。
 
 最小修复步骤：
-1) 安装并配置 Claude Code 或 Codex CLI（可在 config.yaml 的 paths.claude / paths.codex 指定路径）
-2) 配置凭据：Claude Code 使用 ANTHROPIC_API_KEY 或 ANTHROPIC_AUTH_TOKEN；Codex 使用 OPENAI_API_KEY
-3) 然后重试`, b))
+1) 配置 ANTHROPIC_BASE_URL（可选，默认 https://api.anthropic.com）
+2) 配置 ANTHROPIC_AUTH_TOKEN（优先）或 ANTHROPIC_API_KEY
+3) 可选配置 ANTHROPIC_MODEL，然后重试`)
+	case "claude":
+		return strings.TrimSpace(`秘书不可用（backend=claude）：Claude backend 不可用。
+
+最小修复步骤：
+1) 安装并配置 Claude Code CLI（可在 config.yaml 的 paths.claude 指定路径）
+2) 配置凭据：ANTHROPIC_API_KEY 或 ANTHROPIC_AUTH_TOKEN
+3) 然后重试`)
+	case "codex":
+		return strings.TrimSpace(`秘书不可用（backend=codex）：Codex backend 不可用。
+
+最小修复步骤：
+1) 安装并配置 Codex CLI（可在 config.yaml 的 paths.codex 指定路径）
+2) 配置 OPENAI_API_KEY
+3) 然后重试`)
+	default:
+		return strings.TrimSpace(`秘书不可用：未配置可用的 LLM backend。
+
+最小修复步骤：
+1) 选择其一：simple-http / Claude Code / Codex
+2) simple-http：配置 ANTHROPIC_BASE_URL + ANTHROPIC_AUTH_TOKEN（优先）
+3) Claude/Codex：配置对应 CLI 路径与凭据后重试`)
+	}
 }
 
 func llmFailedMessage(requestedBackend string, backend Backend, err error) string {
@@ -183,8 +202,9 @@ func llmFailedMessage(requestedBackend string, backend Backend, err error) strin
 	return strings.TrimSpace(fmt.Sprintf(`秘书调用 LLM 失败（backend=%s, provider=%s）：%s
 
 提示：
-- 确认 Claude Code/Codex CLI 可执行（PATH 或 config.yaml 的 paths.*）
-- 确认凭据已配置：ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN / OPENAI_API_KEY
+- simple-http：确认 ANTHROPIC_BASE_URL / ANTHROPIC_AUTH_TOKEN（或 ANTHROPIC_API_KEY）可用
+- claude/codex：确认 CLI 可执行（PATH 或 config.yaml 的 paths.*）
+- 确认凭据已配置：ANTHROPIC_AUTH_TOKEN / ANTHROPIC_API_KEY / OPENAI_API_KEY
 - 重新打开面板或重试`, req, name, detail))
 }
 
@@ -433,19 +453,26 @@ func (s *Service) selectBackend(name string) Backend {
 	n := strings.ToLower(strings.TrimSpace(name))
 	switch n {
 	case "", "auto":
-		return s.LLM
-	case "claude":
+		// Preference order for lightweight secretary experience:
+		// simple-http -> claude -> codex -> fallback LLM.
+		if s.SimpleHTTP != nil {
+			return s.SimpleHTTP
+		}
 		if s.Claude != nil {
 			return s.Claude
 		}
-		return s.LLM
-	case "codex":
 		if s.Codex != nil {
 			return s.Codex
 		}
 		return s.LLM
+	case "simple-http":
+		return s.SimpleHTTP
+	case "claude":
+		return s.Claude
+	case "codex":
+		return s.Codex
 	default:
-		return s.LLM
+		return nil
 	}
 }
 

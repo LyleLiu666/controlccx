@@ -611,6 +611,7 @@ const {
   chatMaxSteps,
   chatStreamStatus,
   chatStreamAnswer,
+  chatStreamToolError,
   chatSending,
   sendChatMessage,
 } = useSecretaryChat({
@@ -1872,7 +1873,7 @@ const workspaceSelect = ref<string>(loadString(LS_KEY_WORKSPACE_FILTER));
 
 {
   const v = loadString(LS_KEY_CHAT_BACKEND).trim();
-  if (v === "auto" || v === "claude" || v === "codex")
+  if (v === "auto" || v === "simple-http" || v === "claude" || v === "codex")
     chatBackend.value = v as any;
   chatStreamEnabled.value = loadBool(LS_KEY_CHAT_STREAM, true);
   const n = loadInt(LS_KEY_CHAT_MAX_STEPS, 8);
@@ -6297,6 +6298,7 @@ watch(
 	      :chat="chat"
 	      :chatStreamStatus="chatStreamStatus"
 	      :chatStreamAnswer="chatStreamAnswer"
+	      :chatStreamToolError="chatStreamToolError"
 	      :chatSending="chatSending"
 	      :theme="theme"
 	      :renderMarkdownSafe="renderMarkdownSafe"

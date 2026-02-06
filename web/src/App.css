@@ -5304,6 +5304,16 @@ h2 {
   gap: 12px;
 }
 
+:deep(.secStreamToolError) {
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  background: rgba(239, 68, 68, 0.1);
+  color: #b91c1c;
+  border-radius: var(--radius-md);
+  padding: 9px 12px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 :deep(.msg) {
   padding: 10px 14px;
   border-radius: var(--radius-md);

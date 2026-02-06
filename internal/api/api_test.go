@@ -280,6 +280,45 @@ func TestAPI_TasksAndChat(t *testing.T) {
 		}
 	})
 
+	t.Run("chat stream explicit simple-http backend", func(t *testing.T) {
+		sb := &stubObserverBackend{
+			outputs: []string{
+				`{"action":"final","message":"from simple-http"}`,
+			},
+		}
+		apiSvc.Observer = &observer.Service{
+			Store:      taskStore,
+			Chat:       chatStore,
+			SimpleHTTP: sb,
+			ForceAgent: true,
+		}
+
+		req := map[string]any{"message": "hello", "stream": true, "backend": "simple-http"}
+		buf, _ := json.Marshal(req)
+		httpReq, err := http.NewRequest(http.MethodPost, srv.URL+"/api/chat?stream=1", bytes.NewReader(buf))
+		if err != nil {
+			t.Fatalf("new req: %v", err)
+		}
+		httpReq.Header.Set("Content-Type", "application/json")
+		httpReq.Header.Set("Accept", "text/event-stream")
+		res, err := http.DefaultClient.Do(httpReq)
+		if err != nil {
+			t.Fatalf("post: %v", err)
+		}
+		defer res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(res.Body)
+			t.Fatalf("status=%d, want 200; body=%s", res.StatusCode, string(body))
+		}
+		body, err := io.ReadAll(res.Body)
+		if err != nil {
+			t.Fatalf("read body: %v", err)
+		}
+		if !strings.Contains(string(body), `from simple-http`) {
+			t.Fatalf("expected streamed final message, got:\n%s", string(body))
+		}
+	})
+
 	t.Run("fs", func(t *testing.T) {
 		root := filepath.Join(t.TempDir(), "root")
 		if err := os.MkdirAll(filepath.Join(root, "a"), 0o755); err != nil {

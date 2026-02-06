@@ -289,7 +289,7 @@ export async function sendChat(message: string): Promise<{ message: string }> {
 }
 
 export type ChatSendOptions = {
-  backend?: "auto" | "claude" | "codex";
+  backend?: "auto" | "simple-http" | "claude" | "codex";
   max_steps?: number;
 };
 

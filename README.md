@@ -24,6 +24,7 @@ pnpm start
 
 - Server: `http://127.0.0.1:5174`
 - The web UI is embedded into the server binary after build (no runtime static directory required).
+- The server will try to open the web UI in your default browser automatically (disable with `--no-open` or `CONTROLCCX_NO_OPEN=1`).
 
 ### Startup scripts
 
@@ -78,11 +79,16 @@ Workers inherit environment variables from the ControlCCX server process. You ca
 
 ## Secretary (Observer) is LLM-only (禁止 deterministic/heuristic)
 
-The built-in Secretary (Observer) is an **agentic** role: it MUST use an LLM backend (Claude Code CLI / Codex CLI) and tools to reason, inspect real system state, and perform actions.
+The built-in Secretary (Observer) is an **agentic** role: it MUST use an LLM backend (simple-http / Claude Code CLI / Codex CLI) and tools to reason, inspect real system state, and perform actions.
 
 ControlCCX intentionally does **not** provide deterministic/heuristic “fallback answers” for the Secretary (e.g. “count tasks from DB without LLM”, or “auto resume when LLM is missing”). If the LLM backend is not configured/available, the Secretary will fail-fast and tell you the minimal fix steps.
 
-Claude Code compatible vendors (e.g. Kimi/Minimax/GLM gateways) are supported via standard env vars:
+Backend selection in Secretary chat:
+
+- `auto` (default): `simple-http` -> `claude` -> `codex`
+- explicit `simple-http` / `claude` / `codex`: no fallback to other providers
+
+`simple-http` is designed for `baseURL + ANTHROPIC_AUTH_TOKEN` style integration. Claude Code compatible vendors (e.g. Kimi/Minimax/GLM gateways) are supported via standard env vars:
 
 - `ANTHROPIC_BASE_URL`
 - `ANTHROPIC_AUTH_TOKEN` (required to support)

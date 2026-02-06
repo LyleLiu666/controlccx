@@ -27,11 +27,12 @@ const props = defineProps<{
   autopilotNote: string;
   briefing: string;
   chat: ChatMessage[];
-  chatBackend: "auto" | "claude" | "codex";
+  chatBackend: "auto" | "simple-http" | "claude" | "codex";
   chatStreamEnabled: boolean;
   chatMaxSteps: number;
   chatStreamStatus: string;
   chatStreamAnswer: string;
+  chatStreamToolError: string;
   chatSending: boolean;
   chatInput: string;
   theme: "light" | "dark";
@@ -45,7 +46,7 @@ const emit = defineEmits<{
   (e: "update:view", value: "chat" | "overview"): void;
   (e: "update:scope", value: "current" | "all"): void;
   (e: "update:autopilotEnabled", value: boolean): void;
-  (e: "update:chatBackend", value: "auto" | "claude" | "codex"): void;
+  (e: "update:chatBackend", value: "auto" | "simple-http" | "claude" | "codex"): void;
   (e: "update:chatStreamEnabled", value: boolean): void;
   (e: "update:chatMaxSteps", value: number): void;
   (e: "update:chatInput", value: string): void;
@@ -75,7 +76,7 @@ const autopilotModel = computed({
 });
 const chatBackendModel = computed({
   get: () => props.chatBackend,
-  set: (value: "auto" | "claude" | "codex") => emit("update:chatBackend", value),
+  set: (value: "auto" | "simple-http" | "claude" | "codex") => emit("update:chatBackend", value),
 });
 const chatStreamEnabledModel = computed({
   get: () => props.chatStreamEnabled,
@@ -415,6 +416,7 @@ function onMarkdownClick(e: MouseEvent) {
                     Agent
                     <select v-model="chatBackendModel" :disabled="chatSending">
                       <option value="auto">auto</option>
+                      <option value="simple-http">simple-http</option>
                       <option value="claude">claude</option>
                       <option value="codex">codex</option>
                     </select>
@@ -440,6 +442,9 @@ function onMarkdownClick(e: MouseEvent) {
                 </div>
               </details>
               <div class="msgs" ref="chatMsgsEl">
+                <div v-if="chatStreamToolError" class="secStreamToolError">
+                  {{ chatStreamToolError }}
+                </div>
                 <div v-for="m in chat" :key="m.id" class="msg" :class="m.role">
                   <div class="role">{{ m.role }}</div>
                   <div
