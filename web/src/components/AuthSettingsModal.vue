@@ -94,25 +94,44 @@ const showCliInstallGuide = computed<boolean>(() => {
   if (!claudeToolStatus.value || !codexToolStatus.value) return false;
   return !claudeToolStatus.value.available && !codexToolStatus.value.available;
 });
+
+function formatAuthEffective(v: string | undefined | null): string {
+  const s = String(v ?? "").trim().toLowerCase();
+  switch (s) {
+    case "env":
+      return "环境变量";
+    case "stored":
+      return "已保存";
+    case "live":
+      return "CLI";
+    case "default":
+      return "默认";
+    case "none":
+    case "":
+      return "无";
+    default:
+      return s;
+  }
+}
 </script>
 
 <template>
   <div v-if="open" class="modalOverlay" @click.self="emit('close')">
     <div class="modal settingsModal">
       <div class="modalHeader">
-        <div class="modalTitle">Auth Settings</div>
+        <div class="modalTitle">认证设置</div>
         <button type="button" class="headerMiniBtn" @click="emit('openTools')">
-          Tools
+          工具
         </button>
         <button type="button" class="headerMiniBtn" @click="emit('openProviders')">
-          Providers
+          提供方
         </button>
         <button class="iconBtn" type="button" @click="emit('close')">✕</button>
       </div>
 
       <div class="modalBody settingsBody">
         <div class="settingsMeta" v-if="storagePath">
-          Storage: <span class="mono">{{ storagePath }}</span>
+          存储位置: <span class="mono">{{ storagePath }}</span>
         </div>
 
         <div v-if="error" class="modalError">{{ error }}</div>
@@ -121,7 +140,7 @@ const showCliInstallGuide = computed<boolean>(() => {
           <div class="settingsSectionTitle">快速开始</div>
           <div class="tinyHint">
             未检测到可用的 Claude Code / Codex 命令。你需要先安装 Claude Code（推荐）或在
-            Tools 里配置可执行文件路径。
+            工具中配置可执行文件路径。
           </div>
           <ol class="setupSteps">
             <li>
@@ -164,14 +183,13 @@ const showCliInstallGuide = computed<boolean>(() => {
         </div>
 
         <div class="settingsSection">
-          <div class="settingsSectionTitle">Automation</div>
+          <div class="settingsSectionTitle">自动化</div>
           <label class="settingsToggleRow">
             <input type="checkbox" v-model="autoDeliveryForemanModel" />
-            <span>Auto Delivery Foreman</span>
+            <span>自动交付前哨</span>
           </label>
           <div class="tinyHint">
-            When a run finishes, send an automatic “delivery check” message to the
-            Secretary (no auto focus).
+            当 run 结束时，自动向秘书发送一条“交付检查”消息（不会自动抢焦点）。
           </div>
         </div>
 
@@ -180,41 +198,41 @@ const showCliInstallGuide = computed<boolean>(() => {
           <div class="kv">
             <span class="k">ANTHROPIC_BASE_URL</span>
             <span class="mono"
-              >{{ authStatus?.claude.base_url.effective }}
+              >{{ formatAuthEffective(authStatus?.claude.base_url.effective) }}
               {{ authStatus?.claude.base_url.masked }}</span
             >
           </div>
           <div class="kv">
             <span class="k">ANTHROPIC_API_KEY</span>
             <span class="mono"
-              >{{ authStatus?.claude.api_key.effective }}
+              >{{ formatAuthEffective(authStatus?.claude.api_key.effective) }}
               {{ authStatus?.claude.api_key.masked }}</span
             >
           </div>
           <div class="kv">
             <span class="k">ANTHROPIC_AUTH_TOKEN</span>
             <span class="mono"
-              >{{ authStatus?.claude.auth_token.effective }}
+              >{{ formatAuthEffective(authStatus?.claude.auth_token.effective) }}
               {{ authStatus?.claude.auth_token.masked }}</span
             >
           </div>
           <div class="kv">
             <span class="k">ANTHROPIC_MODEL</span>
             <span class="mono"
-              >{{ authStatus?.claude.model.effective }}
+              >{{ formatAuthEffective(authStatus?.claude.model.effective) }}
               {{ authStatus?.claude.model.masked }}</span
             >
           </div>
           <div class="kv">
             <span class="k">ANTHROPIC_SMALL_FAST_MODEL</span>
             <span class="mono"
-              >{{ authStatus?.claude.small_fast_model.effective }}
+              >{{ formatAuthEffective(authStatus?.claude.small_fast_model.effective) }}
               {{ authStatus?.claude.small_fast_model.masked }}</span
             >
           </div>
 
           <label class="full">
-            Store ANTHROPIC_BASE_URL
+            保存 ANTHROPIC_BASE_URL
             <div class="secretRow">
               <input
                 v-model="anthropicBaseURLModel"
@@ -226,17 +244,17 @@ const showCliInstallGuide = computed<boolean>(() => {
                 @click="emit('clearStored', 'anthropic_base_url')"
                 :disabled="saving"
               >
-                Clear stored
+                清除已保存
               </button>
             </div>
           </label>
           <label class="full">
-            Store ANTHROPIC_API_KEY
+            保存 ANTHROPIC_API_KEY
             <div class="secretRow">
               <input
                 v-model="anthropicApiKeyModel"
                 type="password"
-                placeholder="Paste key…"
+                placeholder="粘贴 key…"
                 autocomplete="off"
               />
               <button
@@ -244,17 +262,17 @@ const showCliInstallGuide = computed<boolean>(() => {
                 @click="emit('clearStored', 'anthropic_api_key')"
                 :disabled="saving"
               >
-                Clear stored
+                清除已保存
               </button>
             </div>
           </label>
           <label class="full">
-            Store ANTHROPIC_AUTH_TOKEN
+            保存 ANTHROPIC_AUTH_TOKEN
             <div class="secretRow">
               <input
                 v-model="anthropicAuthTokenModel"
                 type="password"
-                placeholder="Paste token…"
+                placeholder="粘贴 token…"
                 autocomplete="off"
               />
               <button
@@ -262,16 +280,16 @@ const showCliInstallGuide = computed<boolean>(() => {
                 @click="emit('clearStored', 'anthropic_auth_token')"
                 :disabled="saving"
               >
-                Clear stored
+                清除已保存
               </button>
             </div>
           </label>
           <label class="full">
-            Store ANTHROPIC_MODEL
+            保存 ANTHROPIC_MODEL
             <div class="secretRow">
               <input
                 v-model="anthropicModelModel"
-                placeholder="model name…"
+                placeholder="模型名…"
                 autocomplete="off"
               />
               <button
@@ -279,16 +297,16 @@ const showCliInstallGuide = computed<boolean>(() => {
                 @click="emit('clearStored', 'anthropic_model')"
                 :disabled="saving"
               >
-                Clear stored
+                清除已保存
               </button>
             </div>
           </label>
           <label class="full">
-            Store ANTHROPIC_SMALL_FAST_MODEL
+            保存 ANTHROPIC_SMALL_FAST_MODEL
             <div class="secretRow">
               <input
                 v-model="anthropicSmallFastModelModel"
-                placeholder="model name…"
+                placeholder="模型名…"
                 autocomplete="off"
               />
               <button
@@ -296,7 +314,7 @@ const showCliInstallGuide = computed<boolean>(() => {
                 @click="emit('clearStored', 'anthropic_small_fast_model')"
                 :disabled="saving"
               >
-                Clear stored
+                清除已保存
               </button>
             </div>
           </label>
@@ -312,31 +330,31 @@ const showCliInstallGuide = computed<boolean>(() => {
           <div class="kv">
             <span class="k">OPENAI_API_KEY</span>
             <span class="mono"
-              >{{ authStatus?.codex.api_key.effective }}
+              >{{ formatAuthEffective(authStatus?.codex.api_key.effective) }}
               {{ authStatus?.codex.api_key.masked }}</span
             >
           </div>
           <div class="kv">
             <span class="k">MODEL</span>
             <span class="mono"
-              >{{ authStatus?.codex.model.effective }}
+              >{{ formatAuthEffective(authStatus?.codex.model.effective) }}
               {{ authStatus?.codex.model.masked }}</span
             >
           </div>
           <div class="kv">
             <span class="k">REASONING</span>
             <span class="mono"
-              >{{ authStatus?.codex.reasoning_effort.effective }}
+              >{{ formatAuthEffective(authStatus?.codex.reasoning_effort.effective) }}
               {{ authStatus?.codex.reasoning_effort.masked }}</span
             >
           </div>
           <label class="full">
-            Store OPENAI_API_KEY
+            保存 OPENAI_API_KEY
             <div class="secretRow">
               <input
                 v-model="openAIApiKeyModel"
                 type="password"
-                placeholder="Paste key…"
+                placeholder="粘贴 key…"
                 autocomplete="off"
               />
               <button
@@ -344,12 +362,12 @@ const showCliInstallGuide = computed<boolean>(() => {
                 @click="emit('clearStored', 'openai_api_key')"
                 :disabled="saving"
               >
-                Clear stored
+                清除已保存
               </button>
             </div>
           </label>
           <label class="full">
-            Set model (default gpt-5.2)
+            模型（默认 gpt-5.2）
             <div class="secretRow">
               <input
                 v-model="codexModelModel"
@@ -361,15 +379,15 @@ const showCliInstallGuide = computed<boolean>(() => {
                 @click="emit('clearStored', 'codex_model')"
                 :disabled="saving"
               >
-                Clear stored
+                清除已保存
               </button>
             </div>
           </label>
           <label class="full">
-            Set reasoning effort (default xhigh)
+            推理强度（默认 xhigh）
             <div class="secretRow">
               <select v-model="codexReasoningEffortModel">
-                <option value="">(keep)</option>
+                <option value="">(保持)</option>
                 <option value="low">low</option>
                 <option value="medium">medium</option>
                 <option value="high">high</option>
@@ -380,7 +398,7 @@ const showCliInstallGuide = computed<boolean>(() => {
                 @click="emit('clearStored', 'codex_reasoning_effort')"
                 :disabled="saving"
               >
-                Clear stored
+                清除已保存
               </button>
             </div>
           </label>
@@ -388,14 +406,14 @@ const showCliInstallGuide = computed<boolean>(() => {
       </div>
 
       <div class="modalFooter">
-        <button type="button" @click="emit('close')">Close</button>
+        <button type="button" @click="emit('close')">关闭</button>
         <button
           type="button"
           class="primary"
           @click="emit('save')"
           :disabled="saving"
         >
-          {{ saving ? "Saving..." : "Save" }}
+          {{ saving ? "保存中..." : "保存" }}
         </button>
       </div>
     </div>

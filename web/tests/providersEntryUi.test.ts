@@ -17,8 +17,7 @@ test("Auth settings can open Providers", () => {
   const modal = readText("../src/components/AuthSettingsModal.vue");
   const appVue = readText("../src/App.vue");
 
-  assert.match(modal, />\s*Providers\s*</);
+  assert.match(modal, />\s*提供方\s*</);
   assert.match(modal, /emit\('openProviders'\)/);
   assert.match(appVue, /@openProviders=\"openProvidersSettings\"/);
 });
-
