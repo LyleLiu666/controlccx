@@ -27,6 +27,7 @@ type secretaryChatHandlerDeps struct {
 	Auth        *auth.Store
 	Providers   *providers.Store
 	Idempotency *chatIdempotencyCache
+	HistoryLog  *secretaryChatHistoryLogger
 }
 
 func newSecretaryChatHandler(deps secretaryChatHandlerDeps) http.HandlerFunc {
@@ -121,6 +122,22 @@ func newSecretaryChatHandler(deps secretaryChatHandlerDeps) http.HandlerFunc {
 				return
 			}
 			if cached != nil {
+				if deps.HistoryLog != nil {
+					msgs, _ := listAllChatMessages(r.Context(), deps.Chat)
+					_ = deps.HistoryLog.Append(secretaryChatHistoryLogEntry{
+						Time:           time.Now().UTC(),
+						Kind:           "idempotency_cache_hit",
+						IdempotencyKey: idKey,
+						Backend:        body.Backend,
+						MaxSteps:       body.MaxSteps,
+						Stream:         send != nil,
+						UserMessage:    user,
+						Cached:         true,
+						Reply:          cached.Reply,
+						Error:          cached.Error,
+						Messages:       msgs,
+					})
+				}
 				respondSecretaryChatCached(w, send, cached)
 				return
 			}
@@ -128,6 +145,20 @@ func newSecretaryChatHandler(deps secretaryChatHandlerDeps) http.HandlerFunc {
 			userMsg, _ := deps.Chat.Append(r.Context(), chat.RoleUser, user)
 			if deps.Hub != nil {
 				deps.Hub.Publish(events.Event{Type: "chat.message", Time: time.Now().UTC(), Payload: userMsg})
+			}
+
+			if deps.HistoryLog != nil {
+				msgs, _ := listAllChatMessages(r.Context(), deps.Chat)
+				_ = deps.HistoryLog.Append(secretaryChatHistoryLogEntry{
+					Time:           time.Now().UTC(),
+					Kind:           "llm_request",
+					IdempotencyKey: idKey,
+					Backend:        body.Backend,
+					MaxSteps:       body.MaxSteps,
+					Stream:         send != nil,
+					UserMessage:    user,
+					Messages:       msgs,
+				})
 			}
 
 			if send != nil {

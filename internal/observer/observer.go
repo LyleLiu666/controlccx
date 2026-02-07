@@ -374,9 +374,18 @@ func (s *Service) recentChatContext(ctx context.Context, currentUserMessage stri
 		return "", nil
 	}
 
-	msgs, err := s.Chat.Tail(ctx, 12)
-	if err != nil {
-		return "", err
+	var msgs []chat.Message
+	var after int64
+	for {
+		batch, err := s.Chat.List(ctx, after, 500)
+		if err != nil {
+			return "", err
+		}
+		if len(batch) == 0 {
+			break
+		}
+		msgs = append(msgs, batch...)
+		after = batch[len(batch)-1].ID
 	}
 	if len(msgs) == 0 {
 		return "", nil
@@ -391,9 +400,9 @@ func (s *Service) recentChatContext(ctx context.Context, currentUserMessage stri
 		return "", nil
 	}
 
-	const maxPerMessage = 800
+	const maxPerMessage = 4000
 	var sb strings.Builder
-	sb.WriteString("Recent chat context:\n")
+	sb.WriteString("Chat history:\n")
 	for _, m := range msgs {
 		role := strings.ToUpper(string(m.Role))
 		content := strings.TrimSpace(m.Content)
@@ -410,7 +419,7 @@ func (s *Service) recentChatContext(ctx context.Context, currentUserMessage stri
 		sb.WriteByte('\n')
 	}
 	out := strings.TrimSpace(sb.String())
-	if out == "Recent chat context:" {
+	if out == "Chat history:" {
 		return "", nil
 	}
 	return out, nil

@@ -25,7 +25,7 @@ func (b *promptProbeBackend) Complete(ctx context.Context, prompt string) (strin
 	return `{"action":"final","message":"NO_CONTEXT"}`, nil
 }
 
-func TestObserver_AgentIncludesRecentChatContext(t *testing.T) {
+func TestObserver_AgentIncludesChatHistory(t *testing.T) {
 	ctx := context.Background()
 	conn, err := db.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "controlccx.db")})
 	if err != nil {
@@ -36,7 +36,7 @@ func TestObserver_AgentIncludesRecentChatContext(t *testing.T) {
 	taskStore := tasks.NewStore(conn)
 	chatStore := chat.NewStore(conn)
 
-	question := "你刚才问的是哪个 session；我说的是这个。"
+	oldest := "早先内容：你刚才问的是哪个 session；我说的是这个。"
 	backend := &promptProbeBackend{wantSubstr: "哪个 session"}
 
 	obs := &Service{
@@ -46,9 +46,20 @@ func TestObserver_AgentIncludesRecentChatContext(t *testing.T) {
 		ForceAgent: true,
 	}
 
-	// Prior assistant question that the user is answering now.
-	if _, err := chatStore.Append(ctx, chat.RoleAssistant, question); err != nil {
+	// Older assistant message that would be dropped if we only send a small tail.
+	if _, err := chatStore.Append(ctx, chat.RoleAssistant, oldest); err != nil {
 		t.Fatalf("append assistant: %v", err)
+	}
+
+	// Fill with enough messages so the oldest one falls outside any small tail window.
+	for i := 0; i < 20; i++ {
+		role := chat.RoleUser
+		if i%2 == 1 {
+			role = chat.RoleAssistant
+		}
+		if _, err := chatStore.Append(ctx, role, "filler "+strconv.Itoa(i)); err != nil {
+			t.Fatalf("append filler %d: %v", i, err)
+		}
 	}
 
 	// API appends the current user message before calling observer.

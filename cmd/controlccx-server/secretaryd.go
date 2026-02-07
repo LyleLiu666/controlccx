@@ -80,6 +80,7 @@ func runSecretaryd(cfg config.Config, secretaryAddr string, runnerBaseURL string
 
 	hub := events.NewHub()
 	chatIdem := newChatIdempotencyCache(20*time.Second, 2048)
+	chatHistoryLog := newSecretaryChatHistoryLogger(filepath.Join(cfg.Paths.DataDir, "secretary", "chat_history.jsonl"))
 	observerSvc := &observer.Service{
 		Store:      taskStore,
 		Chat:       chatStore,
@@ -98,6 +99,7 @@ func runSecretaryd(cfg config.Config, secretaryAddr string, runnerBaseURL string
 		Auth:        authStore,
 		Providers:   providersStore,
 		Idempotency: chatIdem,
+		HistoryLog:  chatHistoryLog,
 	})
 
 	mux := http.NewServeMux()
