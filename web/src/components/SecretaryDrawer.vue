@@ -29,11 +29,11 @@ const props = defineProps<{
   chat: ChatMessage[];
   secretaryAvailable?: boolean;
   chatBackend: "auto" | "simple-http" | "claude" | "codex";
-  chatStreamEnabled: boolean;
   chatMaxSteps: number;
   chatStreamStatus: string;
   chatStreamAnswer: string;
   chatStreamToolError: string;
+  chatSendError: string;
   chatSending: boolean;
   chatInput: string;
   theme: "light" | "dark";
@@ -49,7 +49,6 @@ const emit = defineEmits<{
   (e: "update:scope", value: "current" | "all"): void;
   (e: "update:autopilotEnabled", value: boolean): void;
   (e: "update:chatBackend", value: "auto" | "simple-http" | "claude" | "codex"): void;
-  (e: "update:chatStreamEnabled", value: boolean): void;
   (e: "update:chatMaxSteps", value: number): void;
   (e: "update:chatInput", value: string): void;
   (e: "selectTask", taskID: string): void;
@@ -81,10 +80,6 @@ const autopilotModel = computed({
 const chatBackendModel = computed({
   get: () => props.chatBackend,
   set: (value: "auto" | "simple-http" | "claude" | "codex") => emit("update:chatBackend", value),
-});
-const chatStreamEnabledModel = computed({
-  get: () => props.chatStreamEnabled,
-  set: (value: boolean) => emit("update:chatStreamEnabled", value),
 });
 const chatMaxStepsModel = computed({
   get: () => props.chatMaxSteps,
@@ -493,12 +488,7 @@ function onMarkdownClick(e: MouseEvent) {
                     </select>
                   </label>
                   <label class="chatToggle">
-                    <input
-                      type="checkbox"
-                      v-model="chatStreamEnabledModel"
-                      :disabled="chatSending"
-                    />
-                    Stream
+                    Stream（固定开启）
                   </label>
                   <label>
                     Max steps
@@ -524,6 +514,9 @@ function onMarkdownClick(e: MouseEvent) {
                 </div>
               </details>
               <div class="msgs" ref="chatMsgsEl">
+                <div v-if="chatSendError" class="secChatError" role="alert">
+                  {{ chatSendError }}
+                </div>
                 <div v-if="chatStreamToolError" class="secStreamToolError">
                   {{ chatStreamToolError }}
                 </div>

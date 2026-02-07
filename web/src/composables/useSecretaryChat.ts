@@ -1,7 +1,22 @@
 import { ref } from "vue";
 import type { ChatMessage } from "../types";
-import { fetchChat, sendChat, sendChatStream } from "../api";
-import { sendChatAndReload } from "../chatOps";
+import { fetchChat, sendChatStream } from "../api";
+
+function lastChatID(list: ChatMessage[]): number {
+  if (!Array.isArray(list) || list.length === 0) return 0;
+  const last = list[list.length - 1];
+  return typeof last?.id === "number" && Number.isFinite(last.id) ? last.id : 0;
+}
+
+function mergeChatMessages(current: ChatMessage[], incoming: ChatMessage[]): ChatMessage[] {
+  if (!Array.isArray(incoming) || incoming.length === 0) return current;
+  const seen = new Set<number>();
+  for (const m of current) {
+    if (m && typeof m.id === "number") seen.add(m.id);
+  }
+  const added = incoming.filter((m) => m && typeof m.id === "number" && !seen.has(m.id));
+  return added.length ? [...current, ...added] : current;
+}
 
 export function useSecretaryChat(opts?: { onError?: (message: string) => void }) {
   const onError = opts?.onError ?? (() => {});
@@ -9,35 +24,44 @@ export function useSecretaryChat(opts?: { onError?: (message: string) => void })
   const chat = ref<ChatMessage[]>([]);
   const chatInput = ref<string>("");
   const chatBackend = ref<"auto" | "simple-http" | "claude" | "codex">("auto");
-  const chatStreamEnabled = ref<boolean>(true);
   const chatMaxSteps = ref<number>(8);
   const chatStreamStatus = ref<string>("");
   const chatStreamAnswer = ref<string>("");
   const chatStreamToolError = ref<string>("");
+  const chatSendError = ref<string>("");
   const chatSending = ref<boolean>(false);
 
   async function refreshChat() {
     try {
-      chat.value = await fetchChat();
+      const after = lastChatID(chat.value);
+      const incoming = await fetchChat(after, 200);
+      if (!after) {
+        chat.value = incoming;
+        return;
+      }
+      chat.value = mergeChatMessages(chat.value, incoming);
     } catch (e: any) {
       onError(e?.message ?? String(e));
     }
   }
 
+  async function syncChatFrom(after: number) {
+    const incoming = await fetchChat(Math.max(0, after || 0), 200);
+    chat.value = mergeChatMessages(chat.value, incoming);
+  }
+
   async function sendChatMessage() {
-    const msg = chatInput.value.trim();
+    const rawInput = chatInput.value;
+    const msg = rawInput.trim();
     if (!msg) return;
     if (chatSending.value) return;
 
+    const after = lastChatID(chat.value);
+
     onError("");
+    chatSendError.value = "";
     chatSending.value = true;
     try {
-      if (!chatStreamEnabled.value) {
-        chat.value = await sendChatAndReload(msg, { sendChat, fetchChat });
-        chatInput.value = "";
-        return;
-      }
-
       chatStreamStatus.value = "thinking";
       chatStreamAnswer.value = "";
       chatStreamToolError.value = "";
@@ -79,12 +103,16 @@ export function useSecretaryChat(opts?: { onError?: (message: string) => void })
         },
       );
 
-      chat.value = await fetchChat();
+      await syncChatFrom(after);
       chatStreamStatus.value = "";
       chatStreamAnswer.value = "";
       chatStreamToolError.value = "";
     } catch (e: any) {
-      onError(e?.message ?? String(e));
+      const message = e?.message ?? String(e);
+      chatSendError.value = message;
+      onError(message);
+      chatStreamStatus.value = "";
+      chatInput.value = rawInput;
     } finally {
       chatSending.value = false;
     }
@@ -94,13 +122,14 @@ export function useSecretaryChat(opts?: { onError?: (message: string) => void })
     chat,
     chatInput,
     chatBackend,
-    chatStreamEnabled,
     chatMaxSteps,
     chatStreamStatus,
     chatStreamAnswer,
     chatStreamToolError,
+    chatSendError,
     chatSending,
     refreshChat,
+    syncChatFrom,
     sendChatMessage,
   };
 }

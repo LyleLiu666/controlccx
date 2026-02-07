@@ -66,7 +66,7 @@ import {
   fetchAcceptance,
   isAPIError,
 } from "./api";
-import { appendChatMessageUnique, sendChatAndReload } from "./chatOps";
+import { appendChatMessageUnique } from "./chatOps";
 import {
   attentionAutopilotIsNoConversationFound,
   attentionAutopilotMarkSeen,
@@ -656,12 +656,13 @@ const {
   chat,
   chatInput,
   chatBackend,
-  chatStreamEnabled,
   chatMaxSteps,
   chatStreamStatus,
   chatStreamAnswer,
   chatStreamToolError,
+  chatSendError,
   chatSending,
+  syncChatFrom,
   sendChatMessage,
 } = useSecretaryChat({
   onError: (message: string) => {
@@ -1822,7 +1823,6 @@ const LS_KEY_PINNED_WORKSPACE_NAMES = "controlccx.pinned_workspace_names.v1";
 const LS_KEY_WORKSPACE_FILTER = "controlccx.workspace_filter.v1";
 const LS_KEY_WORKSPACE_FILTERS = "controlccx.workspace_filters.v1";
 const LS_KEY_CHAT_BACKEND = "controlccx.chat.backend.v1";
-const LS_KEY_CHAT_STREAM = "controlccx.chat.stream.v1";
 const LS_KEY_CHAT_MAX_STEPS = "controlccx.chat.max_steps.v1";
 const LS_KEY_SECRETARY_VIEW = "controlccx.secretary.view.v1";
 const LS_KEY_SECRETARY_SCOPE = "controlccx.secretary.scope.v1";
@@ -2029,7 +2029,6 @@ const workspaceSelect = ref<string>(loadString(LS_KEY_WORKSPACE_FILTER));
   const v = loadString(LS_KEY_CHAT_BACKEND).trim();
   if (v === "auto" || v === "simple-http" || v === "claude" || v === "codex")
     chatBackend.value = v as any;
-  chatStreamEnabled.value = loadBool(LS_KEY_CHAT_STREAM, true);
   const n = loadInt(LS_KEY_CHAT_MAX_STEPS, 8);
   chatMaxSteps.value = Math.max(1, Math.min(32, n));
 
@@ -2169,7 +2168,6 @@ watch(sessionsShowDeleted, (v) => {
   void refresh();
 });
 watch(chatBackend, (v) => saveString(LS_KEY_CHAT_BACKEND, v));
-watch(chatStreamEnabled, (v) => saveBool(LS_KEY_CHAT_STREAM, v));
 watch(chatMaxSteps, (v) => saveInt(LS_KEY_CHAT_MAX_STEPS, v));
 watch(secretaryView, (v) => saveString(LS_KEY_SECRETARY_VIEW, v));
 watch(secretaryScope, (v) => saveString(LS_KEY_SECRETARY_SCOPE, v));
@@ -3331,7 +3329,9 @@ async function runDeliveryForemanOnce(t: Task) {
   showDeliveryForemanToast("Delivery Foreman: analyzing completed run…");
   try {
     const prompt = await buildDeliveryForemanPrompt(t);
-    chat.value = await sendChatAndReload(prompt, { sendChat, fetchChat });
+    const after = chat.value.length ? chat.value[chat.value.length - 1]!.id : 0;
+    await sendChat(prompt, { backend: chatBackend.value, max_steps: chatMaxSteps.value });
+    await syncChatFrom(after);
     if (selectedSessionKey.value === sessionKeyForTask(t)) {
       await refreshAcceptance();
     }
@@ -7005,7 +7005,6 @@ watch(
 	      v-model:scope="secretaryScope"
 	      v-model:autopilotEnabled="attentionAutopilotEnabled"
 	      v-model:chatBackend="chatBackend"
-	      v-model:chatStreamEnabled="chatStreamEnabled"
 	      v-model:chatMaxSteps="chatMaxSteps"
 	      v-model:chatInput="chatInput"
 	      :width="secretaryWidth"
@@ -7019,6 +7018,7 @@ watch(
 	      :chatStreamStatus="chatStreamStatus"
 	      :chatStreamAnswer="chatStreamAnswer"
 	      :chatStreamToolError="chatStreamToolError"
+	      :chatSendError="chatSendError"
 	      :chatSending="chatSending"
 	      :theme="theme"
 	      :authStatus="authStatus"

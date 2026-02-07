@@ -523,7 +523,7 @@ watch(
               </div>
 
               <div class="toolsEditorGrid providersEditorGrid">
-                <div class="providersSubsection">
+                <div class="providersSubsection providersSubsectionSaved">
                   <div class="providersSubsectionTitle">已保存配置（点击切换编辑）</div>
                   <div class="providersProfilesList">
                     <button
@@ -546,7 +546,7 @@ watch(
                   <input v-model="editNameModel" placeholder="例如：Anthropic / OpenAI / My Provider" autocomplete="off" />
                 </label>
 
-                <div class="providersSubsection">
+                <div class="providersSubsection providersSubsectionAuth">
                   <div class="providersSubsectionHead">
                     <div class="providersSubsectionTitle">授权</div>
                     <button v-if="!editID.trim()" type="button" @click="emit('importEnv', page)" :disabled="saving">
@@ -693,7 +693,7 @@ watch(
                   </div>
                 </div>
 
-                <div class="providersSubsection">
+                <div class="providersSubsection providersSubsectionModel">
                   <div class="providersSubsectionTitle">模型</div>
 
                   <div v-if="page === 'claude'" class="toolsEditorGrid providersSubsectionGrid">
@@ -738,7 +738,7 @@ watch(
                   </div>
                 </div>
 
-                <div class="providersSubsection">
+                <div class="providersSubsection providersSubsectionEnable">
                   <div class="providersSubsectionTitle">
                     <template v-if="page === 'secretary' && showSecretaryHTTPNotice">启用（用于 simple-http）</template>
                     <template v-else>启用</template>
@@ -778,7 +778,7 @@ watch(
                     {{ saving ? "保存中..." : "保存并启用" }}
                   </button>
                 </div>
-                <div class="tinyHint">提示：保存并启用会立即生效；仅保存不会影响当前使用配置。</div>
+                <div class="providersSaveHint tinyHint">提示：保存并启用会立即生效；仅保存不会影响当前使用配置。</div>
               </div>
             </template>
           </div>
@@ -868,6 +868,36 @@ watch(
 
 .providersEditor {
   overflow: auto;
+}
+
+.providersEditorGrid {
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+}
+
+.providersEditorGrid > .full {
+  grid-column: 1 / -1;
+}
+
+.providersEditorGrid > .providersSubsectionSaved,
+.providersEditorGrid > .providersSubsectionEnable,
+.providersEditorGrid > .providersFooterActions,
+.providersEditorGrid > .providersSaveHint {
+  grid-column: 1 / -1;
+}
+
+@media (min-width: 1040px) {
+  .providersEditorGrid {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  .providersSubsectionAuth {
+    grid-column: 1;
+  }
+
+  .providersSubsectionModel {
+    grid-column: 2;
+  }
 }
 
 .providersEditorHead {

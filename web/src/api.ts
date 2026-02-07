@@ -301,14 +301,17 @@ export async function fetchChat(after = 0, limit = 200): Promise<ChatMessage[]> 
   return res.messages;
 }
 
-export async function sendChat(message: string): Promise<{ message: string }> {
-  return postJSON<{ message: string }>("/api/chat", { message });
-}
-
 export type ChatSendOptions = {
   backend?: "auto" | "simple-http" | "claude" | "codex";
   max_steps?: number;
 };
+
+export async function sendChat(message: string, opts?: ChatSendOptions): Promise<{ message: string }> {
+  const body: Record<string, any> = { message };
+  if (opts?.backend) body.backend = opts.backend;
+  if (typeof opts?.max_steps === "number") body.max_steps = opts.max_steps;
+  return postJSON<{ message: string }>("/api/chat", body);
+}
 
 export type ChatStreamEvent = {
   event: string;
