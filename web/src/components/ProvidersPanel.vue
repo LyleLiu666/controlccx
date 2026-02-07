@@ -3,6 +3,7 @@ import { computed, ref, watch } from "vue";
 import type {
   AuthStatus,
   ProviderActiveSelection,
+  ProviderPingTestResult,
   ProviderProfile,
   ProviderSpeedTestResult,
 } from "../types";
@@ -52,6 +53,8 @@ const props = defineProps<{
   speedTestTarget: SpeedTestTarget;
   claudeSpeedTest: ProviderSpeedTestResult | null;
   codexSpeedTest: ProviderSpeedTestResult | null;
+  pingTesting: boolean;
+  pingResult: ProviderPingTestResult | null;
 }>();
 
 const emit = defineEmits<{
@@ -62,6 +65,7 @@ const emit = defineEmits<{
   (e: "importEnv", target: "claude" | "codex" | "secretary"): void;
   (e: "export", includeSecrets: boolean): void;
   (e: "speedtest", target: "claude" | "codex"): void;
+  (e: "pingtest"): void;
   (e: "selectProfile", profile: ProviderProfile): void;
   (e: "delete"): void;
   (e: "save", target: "claude" | "codex" | "secretary"): void;
@@ -731,6 +735,37 @@ watch(
                         模型（model）
                         <input v-model="secretarySimpleHTTPModelModel" placeholder="claude-3-5-sonnet-latest" autocomplete="off" />
                       </label>
+
+                      <div class="providersPingSection">
+                        <div class="providersMinorTitle">连通性测试</div>
+                        <div class="tinyHint">发送 ping，要求返回 pong（任意纯文本返回都算通过）。</div>
+
+                        <div class="providersPingRow">
+                          <button type="button" @click="emit('pingtest')" :disabled="saving || pingTesting">
+                            <span v-if="pingTesting">测试中...</span>
+                            <span v-else>Ping 测试</span>
+                          </button>
+
+                          <div
+                            v-if="pingResult"
+                            class="speedTestResult mono"
+                            :class="{ ok: pingResult.ok, bad: !pingResult.ok }"
+                          >
+                            <span>{{ pingResult.ok ? "OK" : "失败" }}</span>
+                            <span v-if="pingResult.latency_ms != null">{{ pingResult.latency_ms }}ms</span>
+                            <span v-if="!pingResult.ok && (pingResult.hint || pingResult.error)">{{
+                              pingResult.hint || pingResult.error
+                            }}</span>
+                          </div>
+                        </div>
+
+                        <div v-if="pingResult && pingResult.endpoint" class="tinyHint">
+                          Endpoint: <span class="mono">{{ pingResult.endpoint }}</span>
+                        </div>
+                        <div v-if="pingResult && (pingResult.response || pingResult.error)" class="providersPingOutput mono">
+                          {{ pingResult.response || pingResult.error }}
+                        </div>
+                      </div>
                     </div>
                     <div v-else class="tinyHint">
                       当前选择为 <span class="mono">{{ chatBackendModel }}</span>；无需在此配置模型。
@@ -924,6 +959,32 @@ watch(
 .providersMinorTitle {
   font-weight: 900;
   margin: 6px 0;
+}
+
+.providersPingSection {
+  display: grid;
+  gap: 10px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-color);
+}
+
+.providersPingRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.providersPingOutput {
+  border: 1px solid var(--border-color);
+  background: var(--bg-subtle);
+  border-radius: 12px;
+  padding: 10px;
+  max-height: 220px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .providersProfilesList {

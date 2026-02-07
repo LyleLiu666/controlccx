@@ -346,6 +346,70 @@ func (a *API) handleProvidersSpeedTest(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{"result": res})
 }
 
+func (a *API) handleProvidersPing(w http.ResponseWriter, r *http.Request) {
+	if !isLoopbackRequest(r) {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if a.Providers == nil {
+		http.Error(w, "providers store not configured", http.StatusServiceUnavailable)
+		return
+	}
+	var body struct {
+		ID        string `json:"id,omitempty"`
+		BaseURL   string `json:"base_url,omitempty"`
+		APIKey    string `json:"api_key,omitempty"`
+		AuthToken string `json:"auth_token,omitempty"`
+		Model     string `json:"model,omitempty"`
+		TimeoutMS int    `json:"timeout_ms,omitempty"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+
+	cfg := providers.SecretarySimpleHTTP{
+		BaseURL:   strings.TrimSpace(body.BaseURL),
+		APIKey:    strings.TrimSpace(body.APIKey),
+		AuthToken: strings.TrimSpace(body.AuthToken),
+		Model:     strings.TrimSpace(body.Model),
+	}
+
+	id := strings.TrimSpace(body.ID)
+	if id != "" {
+		p, ok := a.Providers.Get(id)
+		if !ok {
+			http.Error(w, "profile not found", http.StatusNotFound)
+			return
+		}
+		stored := p.Targets.Secretary.SimpleHTTP
+		if cfg.BaseURL == "" {
+			cfg.BaseURL = strings.TrimSpace(stored.BaseURL)
+		}
+		if cfg.Model == "" {
+			cfg.Model = strings.TrimSpace(stored.Model)
+		}
+		if cfg.AuthToken == "" || isMaskedSecretPlaceholder(cfg.AuthToken) {
+			cfg.AuthToken = strings.TrimSpace(stored.AuthToken)
+		}
+		if cfg.APIKey == "" || isMaskedSecretPlaceholder(cfg.APIKey) {
+			cfg.APIKey = strings.TrimSpace(stored.APIKey)
+		}
+	}
+
+	timeout := 8 * time.Second
+	if body.TimeoutMS > 0 && body.TimeoutMS <= 60_000 {
+		timeout = time.Duration(body.TimeoutMS) * time.Millisecond
+	}
+
+	res := providers.PingTest(r.Context(), cfg, providers.PingTestOptions{Timeout: timeout})
+	writeJSON(w, map[string]any{"result": res})
+}
+
 func (a *API) handleProvidersImportLive(w http.ResponseWriter, r *http.Request) {
 	if !isLoopbackRequest(r) {
 		http.Error(w, "forbidden", http.StatusForbidden)

@@ -23,6 +23,7 @@ import type {
   ProviderActiveSelection,
   ProviderProfile,
   ProvidersListResponse,
+  ProviderPingTestResult,
   ProviderSpeedTestResult,
   WorkerType,
 } from "./types";
@@ -47,6 +48,7 @@ import {
   deleteProvider,
   activateProvider,
   speedtestProvider,
+  pingtestProvider,
   importProvidersLive,
   importProviderEnv,
   exportProviders,
@@ -782,6 +784,8 @@ const providerSpeedTesting = ref(false);
 const providerSpeedTestTarget = ref<"claude" | "codex" | "">("");
 const providerClaudeSpeedTest = ref<ProviderSpeedTestResult | null>(null);
 const providerCodexSpeedTest = ref<ProviderSpeedTestResult | null>(null);
+const providerPingTesting = ref(false);
+const providerPingResult = ref<ProviderPingTestResult | null>(null);
 
 const {
   skillsOpen,
@@ -4289,6 +4293,7 @@ function startNewProvider() {
   providerClaudeSpeedTest.value = null;
   providerCodexSpeedTest.value = null;
   providerSpeedTestTarget.value = "";
+  providerPingResult.value = null;
 }
 
 function loadProviderIntoEditor(p: ProviderProfile) {
@@ -4329,6 +4334,7 @@ function loadProviderIntoEditor(p: ProviderProfile) {
   providerClaudeSpeedTest.value = null;
   providerCodexSpeedTest.value = null;
   providerSpeedTestTarget.value = "";
+  providerPingResult.value = null;
 }
 
 async function refreshProviders(selectID?: string) {
@@ -4518,6 +4524,25 @@ async function runProviderSpeedTest(target: "claude" | "codex") {
   } finally {
     providerSpeedTesting.value = false;
     providerSpeedTestTarget.value = "";
+  }
+}
+
+async function runProviderPingTest() {
+  providersError.value = "";
+  providerPingTesting.value = true;
+  try {
+    const res = await pingtestProvider({
+      id: providerEditID.value.trim(),
+      base_url: providerSecretarySimpleHTTPBaseURL.value.trim(),
+      api_key: providerSecretarySimpleHTTPApiKey.value.trim(),
+      auth_token: providerSecretarySimpleHTTPAuthToken.value.trim(),
+      model: providerSecretarySimpleHTTPModel.value.trim(),
+    });
+    providerPingResult.value = res.result;
+  } catch (e: any) {
+    providersError.value = providerErrorMessage(e);
+  } finally {
+    providerPingTesting.value = false;
   }
 }
 
@@ -5743,6 +5768,8 @@ watch(
         :speedTestTarget="providerSpeedTestTarget"
         :claudeSpeedTest="providerClaudeSpeedTest"
         :codexSpeedTest="providerCodexSpeedTest"
+        :pingTesting="providerPingTesting"
+        :pingResult="providerPingResult"
         @close="closeProvidersPage"
         @newProfile="startNewProvider"
         @refresh="refreshProviders"
@@ -5750,6 +5777,7 @@ watch(
         @importEnv="importProvidersFromEnv"
         @export="exportProvidersToFile"
         @speedtest="runProviderSpeedTest"
+        @pingtest="runProviderPingTest"
         @selectProfile="loadProviderIntoEditor"
         @delete="deleteProviderProfile"
         @save="saveProviderProfile"

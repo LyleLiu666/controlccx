@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -415,5 +416,119 @@ func TestAPI_Providers_ImportEnv_CodexFromHomeFiles(t *testing.T) {
 	}
 	if len(body.Imported) == 0 {
 		t.Fatalf("imported should include codex file-derived fields")
+	}
+}
+
+func TestAPI_Providers_Ping_SecretarySimpleHTTP(t *testing.T) {
+	dataDir := t.TempDir()
+	providersStore, err := providers.NewStore(dataDir)
+	if err != nil {
+		t.Fatalf("providers.NewStore: %v", err)
+	}
+	authStore, err := auth.Load(filepath.Join(dataDir, "secrets.json"))
+	if err != nil {
+		t.Fatalf("auth.Load: %v", err)
+	}
+
+	wantToken := "sec-token-abc123"
+	authzCh := make(chan string, 1)
+
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/messages" {
+			http.NotFound(w, r)
+			return
+		}
+		select {
+		case authzCh <- r.Header.Get("Authorization"):
+		default:
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"content":[{"type":"text","text":"pong"}]}`))
+	}))
+	t.Cleanup(backend.Close)
+
+	apiSvc := &API{Providers: providersStore, Auth: authStore}
+	srv := httptest.NewServer(apiSvc.Handler())
+	t.Cleanup(srv.Close)
+
+	// Create provider with stored secretary simple-http secrets.
+	var created providers.Profile
+	{
+		reqBody, _ := json.Marshal(map[string]any{
+			"profile": providers.Profile{
+				Name: "Sec1",
+				Targets: providers.Targets{
+					Secretary: providers.SecretaryTarget{
+						Backend: "simple-http",
+						SimpleHTTP: providers.SecretarySimpleHTTP{
+							BaseURL:   backend.URL,
+							AuthToken: wantToken,
+							Model:     "claude-test",
+						},
+					},
+				},
+			},
+		})
+		res, err := http.Post(srv.URL+"/api/providers/upsert", "application/json", bytes.NewReader(reqBody))
+		if err != nil {
+			t.Fatalf("post upsert: %v", err)
+		}
+		defer res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("upsert status=%d, want 200", res.StatusCode)
+		}
+		var body struct {
+			Profile providers.Profile `json:"profile"`
+		}
+		if err := json.NewDecoder(res.Body).Decode(&body); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		created = body.Profile
+		if created.ID == "" {
+			t.Fatalf("expected id")
+		}
+	}
+
+	// Ping test: omit secrets (editor keeps them blank); API MUST use stored secrets.
+	{
+		reqBody, _ := json.Marshal(map[string]any{
+			"id":         created.ID,
+			"base_url":   backend.URL,
+			"model":      "claude-test",
+			"timeout_ms": 1000,
+		})
+		res, err := http.Post(srv.URL+"/api/providers/ping", "application/json", bytes.NewReader(reqBody))
+		if err != nil {
+			t.Fatalf("post ping: %v", err)
+		}
+		defer res.Body.Close()
+		rawBody, _ := io.ReadAll(res.Body)
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("ping status=%d, want 200; body=%s", res.StatusCode, string(rawBody))
+		}
+		var body struct {
+			Result providers.PingTestResult `json:"result"`
+		}
+		if err := json.Unmarshal(rawBody, &body); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if !body.Result.OK {
+			t.Fatalf("expected ok, got=%+v", body.Result)
+		}
+		if strings.TrimSpace(body.Result.Response) == "" {
+			t.Fatalf("expected response")
+		}
+		if strings.ToLower(strings.TrimSpace(body.Result.Response)) != "pong" {
+			t.Fatalf("response=%q", body.Result.Response)
+		}
+	}
+
+	select {
+	case got := <-authzCh:
+		if got != "Bearer "+wantToken {
+			t.Fatalf("Authorization=%q", got)
+		}
+	case <-time.After(200 * time.Millisecond):
+		t.Fatalf("expected backend request")
 	}
 }

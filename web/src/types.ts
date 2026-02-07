@@ -537,6 +537,20 @@ export type ProviderSpeedTestResponse = {
   result: ProviderSpeedTestResult;
 };
 
+export type ProviderPingTestResult = {
+  endpoint: string;
+  ok: boolean;
+  status_code?: number;
+  latency_ms?: number;
+  response?: string;
+  error?: string;
+  hint?: string;
+};
+
+export type ProviderPingTestResponse = {
+  result: ProviderPingTestResult;
+};
+
 export type ProviderImportLiveResponse = {
   profile: ProviderProfile;
   live?: any;

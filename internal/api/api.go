@@ -68,6 +68,7 @@ func (a *API) Handler() http.Handler {
 	mux.HandleFunc("/api/providers/reorder", a.handleProvidersReorder)
 	mux.HandleFunc("/api/providers/activate", a.handleProvidersActivate)
 	mux.HandleFunc("/api/providers/speedtest", a.handleProvidersSpeedTest)
+	mux.HandleFunc("/api/providers/ping", a.handleProvidersPing)
 	mux.HandleFunc("/api/providers/import/live", a.handleProvidersImportLive)
 	mux.HandleFunc("/api/providers/import/env", a.handleProvidersImportEnv)
 	mux.HandleFunc("/api/providers/export", a.handleProvidersExport)

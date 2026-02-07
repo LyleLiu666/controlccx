@@ -12,6 +12,7 @@ import type {
   ProviderImportLiveResponse,
   ProviderProfile,
   ProvidersListResponse,
+  ProviderPingTestResponse,
   ProviderSpeedTestResponse,
   ProviderUpsertResponse,
   FSDeleteResponse,
@@ -485,6 +486,17 @@ export async function speedtestProvider(input: {
   timeout_ms?: number;
 }): Promise<ProviderSpeedTestResponse> {
   return postJSON<ProviderSpeedTestResponse>("/api/providers/speedtest", input);
+}
+
+export async function pingtestProvider(input: {
+  id?: string;
+  base_url?: string;
+  api_key?: string;
+  auth_token?: string;
+  model?: string;
+  timeout_ms?: number;
+}): Promise<ProviderPingTestResponse> {
+  return postJSON<ProviderPingTestResponse>("/api/providers/ping", input);
 }
 
 export async function importProvidersLive(input: {
