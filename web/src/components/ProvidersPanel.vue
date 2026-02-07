@@ -296,6 +296,9 @@ watch(
       </div>
 
       <div class="providersHeaderActions">
+        <button type="button" class="headerMiniBtn" @click="openOverview()" :disabled="loading || saving || page === 'overview'">
+          总览
+        </button>
         <button type="button" class="headerMiniBtn" @click="emit('refresh')" :disabled="loading || saving">
           刷新
         </button>
@@ -335,18 +338,6 @@ watch(
       <template v-else>
         <div class="providersSplit toolsSplit">
           <div class="providersNav toolsList">
-            <div class="providersNavGroup">
-              <div class="providersNavTitle">快速开始</div>
-              <button
-                type="button"
-                class="providersNavItem toolsItem"
-                :class="{ active: page === 'overview' }"
-                @click="openOverview()"
-              >
-                总览
-              </button>
-            </div>
-
             <div class="providersNavGroup">
               <div class="providersNavTitle">配置</div>
               <button
@@ -451,7 +442,6 @@ watch(
                 </div>
 
                 <div class="providersEditorHeadActions">
-                  <button type="button" @click="openOverview()">总览</button>
                   <button type="button" @click="startNewForTarget(page)" :disabled="saving">新建配置</button>
                   <button type="button" @click="startNewAndImportEnv(page)" :disabled="saving">新建并导入环境变量</button>
                   <button type="button" @click="emit('delete')" :disabled="saving || !editID.trim()">删除配置</button>
