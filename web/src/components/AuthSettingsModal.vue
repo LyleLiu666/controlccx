@@ -161,16 +161,15 @@ function formatAuthEffective(v: string | undefined | null): string {
           <div><strong>不知道怎么录入新的提供方？</strong></div>
           <div class="tinyHint">
             工具 = 本地命令（Claude Code / Codex），提供方 = 远端 API。你不需要把工具“绑定”到提供方：
-            只要在提供方里为 Claude Code / Codex / 秘书分别启用一个 profile，新建 run 时会自动使用。
+            只要在提供方页里把令牌/模型保存并启用，新建 run 时会自动使用。
           </div>
           <ol class="setupSteps">
             <li>
-              录入新的提供方：点击右上角 <span class="mono">提供方</span> →
-              <span class="mono">New</span>（新建） → 填写信息 → <span class="mono">Save</span>（保存）。
+              录入新的提供方：点击右上角 <span class="mono">提供方</span>，在左侧选择
+              <span class="mono">令牌管理</span> / <span class="mono">模型管理</span>，再选择 Claude Code / Codex / 秘书。
             </li>
             <li>
-              把提供方用于工具：在 profile 里点击 <span class="mono">启用到 Claude Code</span> /
-              <span class="mono">启用到 Codex</span> / <span class="mono">启用到 秘书</span>。
+              填写信息后点击 <span class="mono">保存并启用</span>（立即生效，只影响后续新 run）。
             </li>
             <li>
               回到这里确认状态变成 <span class="mono">已保存</span>（或 <span class="mono">环境变量</span>）。

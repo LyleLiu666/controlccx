@@ -99,7 +99,7 @@ import LiveDrawer from "./components/LiveDrawer.vue";
 import FilesModal from "./components/FilesModal.vue";
 import AuthSettingsModal from "./components/AuthSettingsModal.vue";
 import ToolsSettingsModal from "./components/ToolsSettingsModal.vue";
-import ProvidersSettingsModal from "./components/ProvidersSettingsModal.vue";
+import ProvidersPanel from "./components/ProvidersPanel.vue";
 import NewRunModal from "./components/NewRunModal.vue";
 import SkillsInsertModal from "./components/SkillsInsertModal.vue";
 import RunLaunchOverlay from "./components/RunLaunchOverlay.vue";
@@ -2598,6 +2598,10 @@ function goHome() {
     closeFilesPage();
     return;
   }
+  if (providersSettingsOpen.value) {
+    closeProvidersPage();
+    return;
+  }
   navigateTo("/");
 }
 
@@ -2762,6 +2766,7 @@ async function openSkillsPage() {
   navigateTo("/skills");
   sessionsDrawerOpen.value = false;
   contextOpen.value = false;
+  providersSettingsOpen.value = false;
   await openSkills();
 }
 
@@ -2770,6 +2775,7 @@ function openContextPage() {
   sessionsDrawerOpen.value = false;
   skillsGovernanceOpen.value = false;
   skillsOpen.value = false;
+  providersSettingsOpen.value = false;
 
   if (filesOpen.value) {
     closeFiles();
@@ -2799,6 +2805,7 @@ async function openFilesForBase(base: string) {
   const b = (base ?? "").trim() || ".";
   if (filesDirty.value && !window.confirm("放弃未保存的更改？")) return;
 
+  providersSettingsOpen.value = false;
   filesOpen.value = true;
   filesLoading.value = true;
   filesError.value = "";
@@ -2883,6 +2890,7 @@ function applyRouteFromLocation() {
     sessionsDrawerOpen.value = false;
     skillsGovernanceOpen.value = false;
     skillsOpen.value = false;
+    providersSettingsOpen.value = false;
     contextOpen.value = true;
     return;
   }
@@ -2892,12 +2900,32 @@ function applyRouteFromLocation() {
     void openFilesPageFromLocation();
     return;
   }
+  if (path === "/providers") {
+    if (filesOpen.value) {
+      closeFiles();
+      if (filesOpen.value) {
+        restoreFilesRoute();
+        return;
+      }
+    }
+    sessionsDrawerOpen.value = false;
+    skillsGovernanceOpen.value = false;
+    skillsOpen.value = false;
+    contextOpen.value = false;
+    authSettingsOpen.value = false;
+    toolsSettingsOpen.value = false;
+    providersSettingsOpen.value = true;
+    void refreshProviders();
+    void refreshAuth();
+    return;
+  }
   if (skillsOpen.value) skillsOpen.value = false;
   if (contextOpen.value) contextOpen.value = false;
   if (filesOpen.value) {
     closeFiles();
     if (filesOpen.value) restoreFilesRoute();
   }
+  if (providersSettingsOpen.value) providersSettingsOpen.value = false;
 }
 
 function onRoutePopState() {
@@ -4214,9 +4242,25 @@ function openAuthSettings() {
 
 function openProvidersSettings() {
   providersError.value = "";
+  authSettingsOpen.value = false;
+  toolsSettingsOpen.value = false;
+  if (filesOpen.value) {
+    closeFiles();
+    if (filesOpen.value) return;
+  }
+  skillsGovernanceOpen.value = false;
+  skillsOpen.value = false;
+  contextOpen.value = false;
+  sessionsDrawerOpen.value = false;
   providersSettingsOpen.value = true;
+  navigateTo("/providers");
   void refreshProviders();
   void refreshAuth();
+}
+
+function closeProvidersPage() {
+  providersSettingsOpen.value = false;
+  navigateTo("/");
 }
 
 function startNewProvider() {
@@ -4294,9 +4338,11 @@ async function refreshProviders(selectID?: string) {
     providersInfo.value = res;
     const wantID = String(selectID ?? providerEditID.value).trim();
     const list = res?.profiles ?? [];
+    const activeClaude = String(res?.active?.claude ?? "").trim();
     const next =
       list.find((p) => p.id === wantID) ??
       list.find((p) => p.id === providerEditID.value.trim()) ??
+      list.find((p) => p.id === activeClaude) ??
       list[0] ??
       null;
     if (next) loadProviderIntoEditor(next);
@@ -5592,6 +5638,54 @@ watch(
 	          <ContextPanel @back="closeContextPage" />
 	        </div>
 	      </section>
+
+      <ProvidersPanel
+        v-else-if="providersSettingsOpen"
+        :loading="providersLoading"
+        :saving="providersSaving"
+        :error="providersError"
+        :storagePath="providersStoragePath"
+        :authStatus="authStatus"
+        :profiles="providersProfiles"
+        :active="providersActive"
+        :editID="providerEditID"
+        v-model:editName="providerEditName"
+        v-model:claudeBaseURL="providerClaudeBaseURL"
+        v-model:claudeApiKey="providerClaudeApiKey"
+        v-model:claudeAuthToken="providerClaudeAuthToken"
+        v-model:claudeModel="providerClaudeModel"
+        v-model:claudeSmallFastModel="providerClaudeSmallFastModel"
+        v-model:claudeSyncLive="providerClaudeSyncLive"
+        :claudeApiKeyHint="providerClaudeApiKeyHint"
+        :claudeAuthTokenHint="providerClaudeAuthTokenHint"
+        v-model:codexBaseURL="providerCodexBaseURL"
+        v-model:codexApiKey="providerCodexApiKey"
+        v-model:codexModel="providerCodexModel"
+        v-model:codexReasoningEffort="providerCodexReasoningEffort"
+        v-model:codexSyncLive="providerCodexSyncLive"
+        :codexApiKeyHint="providerCodexApiKeyHint"
+        v-model:secretarySimpleHTTPBaseURL="providerSecretarySimpleHTTPBaseURL"
+        v-model:secretarySimpleHTTPApiKey="providerSecretarySimpleHTTPApiKey"
+        v-model:secretarySimpleHTTPAuthToken="providerSecretarySimpleHTTPAuthToken"
+        v-model:secretarySimpleHTTPModel="providerSecretarySimpleHTTPModel"
+        :secretarySimpleHTTPApiKeyHint="providerSecretarySimpleHTTPApiKeyHint"
+        :secretarySimpleHTTPAuthTokenHint="providerSecretarySimpleHTTPAuthTokenHint"
+        v-model:chatBackend="chatBackend"
+        :speedTesting="providerSpeedTesting"
+        :speedTestTarget="providerSpeedTestTarget"
+        :claudeSpeedTest="providerClaudeSpeedTest"
+        :codexSpeedTest="providerCodexSpeedTest"
+        @close="closeProvidersPage"
+        @newProfile="startNewProvider"
+        @refresh="refreshProviders"
+        @importLive="importProvidersFromLive"
+        @export="exportProvidersToFile"
+        @speedtest="runProviderSpeedTest"
+        @selectProfile="loadProviderIntoEditor"
+        @delete="deleteProviderProfile"
+        @save="saveProviderProfile"
+        @activate="activateProviderTarget"
+      />
 
       <FilesModal
         v-else-if="filesOpen"
@@ -7202,56 +7296,6 @@ watch(
 		      @delete="deleteToolOverride"
 		      @save="saveTool"
 		    />
-
-        <ProvidersSettingsModal
-          :open="providersSettingsOpen"
-          :loading="providersLoading"
-          :saving="providersSaving"
-          :error="providersError"
-          :storagePath="providersStoragePath"
-          :authStatus="authStatus"
-          :profiles="providersProfiles"
-          :active="providersActive"
-          :editID="providerEditID"
-          v-model:editName="providerEditName"
-          v-model:claudeBaseURL="providerClaudeBaseURL"
-          v-model:claudeApiKey="providerClaudeApiKey"
-          v-model:claudeAuthToken="providerClaudeAuthToken"
-          v-model:claudeModel="providerClaudeModel"
-          v-model:claudeSmallFastModel="providerClaudeSmallFastModel"
-          v-model:claudeSyncLive="providerClaudeSyncLive"
-          :claudeApiKeyHint="providerClaudeApiKeyHint"
-          :claudeAuthTokenHint="providerClaudeAuthTokenHint"
-          v-model:codexBaseURL="providerCodexBaseURL"
-          v-model:codexApiKey="providerCodexApiKey"
-          v-model:codexModel="providerCodexModel"
-          v-model:codexReasoningEffort="providerCodexReasoningEffort"
-          v-model:codexSyncLive="providerCodexSyncLive"
-          :codexApiKeyHint="providerCodexApiKeyHint"
-          v-model:secretaryBackend="providerSecretaryBackend"
-          v-model:secretarySimpleHTTPBaseURL="providerSecretarySimpleHTTPBaseURL"
-          v-model:secretarySimpleHTTPApiKey="providerSecretarySimpleHTTPApiKey"
-          v-model:secretarySimpleHTTPAuthToken="providerSecretarySimpleHTTPAuthToken"
-          v-model:secretarySimpleHTTPModel="providerSecretarySimpleHTTPModel"
-          :secretarySimpleHTTPApiKeyHint="providerSecretarySimpleHTTPApiKeyHint"
-          :secretarySimpleHTTPAuthTokenHint="providerSecretarySimpleHTTPAuthTokenHint"
-          :secretarySyncLive="false"
-          v-model:chatBackend="chatBackend"
-          :speedTesting="providerSpeedTesting"
-          :speedTestTarget="providerSpeedTestTarget"
-          :claudeSpeedTest="providerClaudeSpeedTest"
-          :codexSpeedTest="providerCodexSpeedTest"
-          @close="providersSettingsOpen = false"
-          @newProfile="startNewProvider"
-          @refresh="refreshProviders"
-          @importLive="importProvidersFromLive"
-          @export="exportProvidersToFile"
-          @speedtest="runProviderSpeedTest"
-          @selectProfile="loadProviderIntoEditor"
-          @delete="deleteProviderProfile"
-          @save="saveProviderProfile"
-          @activate="activateProviderTarget"
-        />
 
 	        <SkillsGovernanceModal
 	          :open="skillsGovernanceOpen"

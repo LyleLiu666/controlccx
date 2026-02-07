@@ -9,10 +9,11 @@ function readText(relativePath: string) {
 test("Auth settings explains how to add providers and map them to tools", () => {
   const modal = readText("../src/components/AuthSettingsModal.vue");
   assert.ok(modal.includes("录入新的提供方"));
-  assert.ok(modal.includes("启用到 Claude Code"));
+  assert.ok(modal.includes("令牌管理"));
+  assert.ok(modal.includes("模型管理"));
+  assert.ok(modal.includes("保存并启用"));
   assert.ok(modal.includes("打开提供方"));
   assert.ok(modal.includes("打开工具"));
   assert.ok(modal.includes("emit('openProviders')"));
   assert.ok(modal.includes("emit('openTools')"));
 });
-

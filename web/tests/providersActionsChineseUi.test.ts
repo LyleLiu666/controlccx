@@ -7,15 +7,9 @@ function readText(relativePath: string) {
 }
 
 test("Providers modal uses Chinese action labels with clear save/activate semantics", () => {
-  const modal = readText("../src/components/ProvidersSettingsModal.vue");
-  // Binding ("挂钩") and profile library ("提供方库") are separated for clarity.
-  for (const s of [
-    "挂钩",
-    "提供方库",
-    "去挂钩",
-    "仅保存",
-    "仅保存（不切换当前工具）",
-  ]) {
-    assert.ok(modal.includes(s), `expected Providers modal to include ${JSON.stringify(s)}`);
+  const panel = readText("../src/components/ProvidersPanel.vue");
+  for (const s of ["令牌管理", "模型管理", "保存并启用", "立即生效"]) {
+    assert.ok(panel.includes(s), `expected Providers page to include ${JSON.stringify(s)}`);
   }
+  assert.ok(!panel.includes("挂钩"), "expected Providers page to avoid confusing 挂钩 wording");
 });

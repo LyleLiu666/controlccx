@@ -7,12 +7,12 @@ function readText(relativePath: string) {
 }
 
 test("Providers modal supports Secretary simple-http auth fields", () => {
-  const modal = readText("../src/components/ProvidersSettingsModal.vue");
-  assert.match(modal, /Simple HTTP（Anthropic 兼容）/);
-  assert.match(modal, /v-model=\"secretarySimpleHTTPBaseURLModel\"/);
-  assert.match(modal, /v-model=\"secretarySimpleHTTPAuthTokenModel\"/);
-  assert.match(modal, /v-model=\"secretarySimpleHTTPApiKeyModel\"/);
-  assert.match(modal, /v-model=\"secretarySimpleHTTPModelModel\"/);
+  const panel = readText("../src/components/ProvidersPanel.vue");
+  assert.match(panel, /Simple HTTP（Anthropic 兼容）/);
+  assert.match(panel, /v-model=\"secretarySimpleHTTPBaseURLModel\"/);
+  assert.match(panel, /v-model=\"secretarySimpleHTTPAuthTokenModel\"/);
+  assert.match(panel, /v-model=\"secretarySimpleHTTPApiKeyModel\"/);
+  assert.match(panel, /v-model=\"secretarySimpleHTTPModelModel\"/);
 });
 
 test("App wires Secretary simple-http provider fields", () => {
