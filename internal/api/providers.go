@@ -510,20 +510,20 @@ func (a *API) handleProvidersImportEnv(w http.ResponseWriter, r *http.Request) {
 		appendImported("ANTHROPIC_MODEL", model)
 		appendImported("ANTHROPIC_SMALL_FAST_MODEL", smallFast)
 	case "codex":
-		baseURL := env("OPENAI_BASE_URL")
-		apiKey := env("OPENAI_API_KEY")
-		model := env("CODEX_MODEL")
-		effort := env("CODEX_REASONING_EFFORT")
-		profile.Targets.Codex = providers.CodexTarget{
-			BaseURL:         baseURL,
-			APIKey:          apiKey,
-			Model:           model,
-			ReasoningEffort: effort,
+		codexHome, err := defaultCodexHomeDir()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
 		}
-		appendImported("OPENAI_BASE_URL", baseURL)
-		appendImported("OPENAI_API_KEY", apiKey)
-		appendImported("CODEX_MODEL", model)
-		appendImported("CODEX_REASONING_EFFORT", effort)
+		codexImp, err := providers.ImportCodexLive(codexHome)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		profile.Targets.Codex = codexImp.Target
+		appendImported("OPENAI_API_KEY", codexImp.Target.APIKey)
+		appendImported("CODEX_MODEL", codexImp.Target.Model)
+		appendImported("CODEX_REASONING_EFFORT", codexImp.Target.ReasoningEffort)
 	case "secretary":
 		baseURL := env("ANTHROPIC_BASE_URL")
 		apiKey := env("ANTHROPIC_API_KEY")

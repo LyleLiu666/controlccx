@@ -350,8 +350,8 @@ try {
     claude_home_dir: claudeHome,
     codex_home_dir: codexHome,
   });
-  const importedID = String(imp?.profile?.id ?? "").trim();
-  if (!importedID) throw new Error("import did not return a profile id");
+  const importedClaudeID = String(imp?.profile?.id ?? "").trim();
+  if (!importedClaudeID) throw new Error("import did not return a profile id");
 
   const exportedMasked = await getJSON(`${base}/api/providers/export`);
   const maskedText = JSON.stringify(exportedMasked);
@@ -360,12 +360,17 @@ try {
   }
 
   const exported = await getJSON(`${base}/api/providers/export?include_secrets=1`);
-  const raw = (exported?.profiles ?? []).find((p) => p?.id === importedID);
-  if (!raw) throw new Error("export missing imported profile");
-  if (String(raw?.targets?.claude?.auth_token ?? "") !== anthropicToken) {
+  const profiles = Array.isArray(exported?.profiles) ? exported.profiles : [];
+  const rawClaude = profiles.find((p) => p?.id === importedClaudeID);
+  if (!rawClaude) throw new Error("export missing imported claude profile");
+  if (String(rawClaude?.targets?.claude?.auth_token ?? "") !== anthropicToken) {
     throw new Error("imported claude auth_token mismatch");
   }
-  if (String(raw?.targets?.codex?.api_key ?? "") !== openaiKey) {
+  const rawCodex = profiles.find(
+    (p) => String(p?.tool ?? "").trim() === "codex" && String(p?.name ?? "").trim() === "Imported Codex",
+  );
+  if (!rawCodex) throw new Error("export missing imported codex profile");
+  if (String(rawCodex?.targets?.codex?.api_key ?? "") !== openaiKey) {
     throw new Error("imported codex api_key mismatch");
   }
 

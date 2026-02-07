@@ -550,7 +550,7 @@ watch(
                   <div class="providersSubsectionHead">
                     <div class="providersSubsectionTitle">授权</div>
                     <button v-if="!editID.trim()" type="button" @click="emit('importEnv', page)" :disabled="saving">
-                      从环境变量填充
+                      从环境导入
                     </button>
                   </div>
 

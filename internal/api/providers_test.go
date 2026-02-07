@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -344,5 +345,75 @@ func TestAPI_Providers_ImportEnv(t *testing.T) {
 	}
 	if got := body.Profile.Targets.Claude.Model; got != "claude-env-model" {
 		t.Fatalf("claude.model=%q, want env value", got)
+	}
+}
+
+func TestAPI_Providers_ImportEnv_CodexFromHomeFiles(t *testing.T) {
+	dataDir := t.TempDir()
+	providersStore, err := providers.NewStore(dataDir)
+	if err != nil {
+		t.Fatalf("providers.NewStore: %v", err)
+	}
+	authStore, err := auth.Load(filepath.Join(dataDir, "secrets.json"))
+	if err != nil {
+		t.Fatalf("auth.Load: %v", err)
+	}
+
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+	t.Setenv("OPENAI_API_KEY", "sk-openai-env-should-not-be-used")
+	t.Setenv("CODEX_MODEL", "env-codex-model-should-not-be-used")
+	t.Setenv("CODEX_REASONING_EFFORT", "high")
+
+	codexHome := filepath.Join(homeDir, ".codex")
+	if err := os.MkdirAll(codexHome, 0o755); err != nil {
+		t.Fatalf("mkdir codex home: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(codexHome, "auth.json"), []byte(`{"OPENAI_API_KEY":"sk-openai-file-123456"}`), 0o644); err != nil {
+		t.Fatalf("write auth.json: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(codexHome, "config.toml"), []byte("model = \"gpt-5.2\"\nmodel_reasoning_effort = \"medium\"\n"), 0o644); err != nil {
+		t.Fatalf("write config.toml: %v", err)
+	}
+
+	apiSvc := &API{Providers: providersStore, Auth: authStore}
+	srv := httptest.NewServer(apiSvc.Handler())
+	t.Cleanup(srv.Close)
+
+	reqBody, _ := json.Marshal(map[string]any{"target": "codex"})
+	res, err := http.Post(srv.URL+"/api/providers/import/env", "application/json", bytes.NewReader(reqBody))
+	if err != nil {
+		t.Fatalf("post import env codex: %v", err)
+	}
+	defer res.Body.Close()
+	rawBody, _ := io.ReadAll(res.Body)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("import env codex status=%d, want 200; body=%s", res.StatusCode, string(rawBody))
+	}
+
+	var body struct {
+		Profile  providers.Profile `json:"profile"`
+		Imported []string          `json:"imported"`
+	}
+	if err := json.Unmarshal(rawBody, &body); err != nil {
+		t.Fatalf("decode import env codex: %v", err)
+	}
+	if got := body.Profile.Tool; got != "codex" {
+		t.Fatalf("profile.tool=%q, want codex", got)
+	}
+	if got := body.Profile.Targets.Codex.APIKey; got != "sk-openai-file-123456" {
+		t.Fatalf("codex.api_key=%q, want file value", got)
+	}
+	if got := body.Profile.Targets.Codex.Model; got != "gpt-5.2" {
+		t.Fatalf("codex.model=%q, want file value", got)
+	}
+	if got := body.Profile.Targets.Codex.ReasoningEffort; got != "medium" {
+		t.Fatalf("codex.reasoning_effort=%q, want file value", got)
+	}
+	if got := body.Profile.Targets.Codex.APIKey; got == "sk-openai-env-should-not-be-used" {
+		t.Fatalf("codex.api_key unexpectedly imported from env")
+	}
+	if len(body.Imported) == 0 {
+		t.Fatalf("imported should include codex file-derived fields")
 	}
 }
