@@ -871,6 +871,8 @@ watch(
 }
 
 .providersEditorGrid {
+  display: grid;
+  gap: 12px;
   grid-template-columns: minmax(0, 1fr);
   align-items: start;
 }
@@ -886,7 +888,7 @@ watch(
   grid-column: 1 / -1;
 }
 
-@media (min-width: 1040px) {
+@media (min-width: 900px) {
   .providersEditorGrid {
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   }
