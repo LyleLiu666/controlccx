@@ -434,6 +434,106 @@ func (a *API) handleProvidersImportLive(w http.ResponseWriter, r *http.Request) 
 	})
 }
 
+func (a *API) handleProvidersImportEnv(w http.ResponseWriter, r *http.Request) {
+	if !isLoopbackRequest(r) {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if a.Providers == nil {
+		http.Error(w, "providers store not configured", http.StatusServiceUnavailable)
+		return
+	}
+	var body struct {
+		Target string `json:"target"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+	target := strings.ToLower(strings.TrimSpace(body.Target))
+	if target != "claude" && target != "codex" && target != "secretary" {
+		http.Error(w, "invalid target", http.StatusBadRequest)
+		return
+	}
+
+	env := func(name string) string { return strings.TrimSpace(os.Getenv(name)) }
+	imported := []string{}
+	appendImported := func(name, value string) {
+		if strings.TrimSpace(value) != "" {
+			imported = append(imported, name)
+		}
+	}
+
+	profile := providers.Profile{
+		Name: map[string]string{
+			"claude":    "Claude Env",
+			"codex":     "Codex Env",
+			"secretary": "Secretary Env",
+		}[target],
+	}
+	switch target {
+	case "claude":
+		baseURL := env("ANTHROPIC_BASE_URL")
+		apiKey := env("ANTHROPIC_API_KEY")
+		authToken := env("ANTHROPIC_AUTH_TOKEN")
+		model := env("ANTHROPIC_MODEL")
+		smallFast := env("ANTHROPIC_SMALL_FAST_MODEL")
+		profile.Targets.Claude = providers.ClaudeTarget{
+			BaseURL:        baseURL,
+			APIKey:         apiKey,
+			AuthToken:      authToken,
+			Model:          model,
+			SmallFastModel: smallFast,
+		}
+		appendImported("ANTHROPIC_BASE_URL", baseURL)
+		appendImported("ANTHROPIC_API_KEY", apiKey)
+		appendImported("ANTHROPIC_AUTH_TOKEN", authToken)
+		appendImported("ANTHROPIC_MODEL", model)
+		appendImported("ANTHROPIC_SMALL_FAST_MODEL", smallFast)
+	case "codex":
+		baseURL := env("OPENAI_BASE_URL")
+		apiKey := env("OPENAI_API_KEY")
+		model := env("CODEX_MODEL")
+		effort := env("CODEX_REASONING_EFFORT")
+		profile.Targets.Codex = providers.CodexTarget{
+			BaseURL:         baseURL,
+			APIKey:          apiKey,
+			Model:           model,
+			ReasoningEffort: effort,
+		}
+		appendImported("OPENAI_BASE_URL", baseURL)
+		appendImported("OPENAI_API_KEY", apiKey)
+		appendImported("CODEX_MODEL", model)
+		appendImported("CODEX_REASONING_EFFORT", effort)
+	case "secretary":
+		baseURL := env("ANTHROPIC_BASE_URL")
+		apiKey := env("ANTHROPIC_API_KEY")
+		authToken := env("ANTHROPIC_AUTH_TOKEN")
+		model := env("ANTHROPIC_MODEL")
+		profile.Targets.Secretary = providers.SecretaryTarget{
+			Backend: "simple-http",
+			SimpleHTTP: providers.SecretarySimpleHTTP{
+				BaseURL:   baseURL,
+				APIKey:    apiKey,
+				AuthToken: authToken,
+				Model:     model,
+			},
+		}
+		appendImported("ANTHROPIC_BASE_URL", baseURL)
+		appendImported("ANTHROPIC_API_KEY", apiKey)
+		appendImported("ANTHROPIC_AUTH_TOKEN", authToken)
+		appendImported("ANTHROPIC_MODEL", model)
+	}
+	writeJSON(w, map[string]any{
+		"profile":  profile,
+		"imported": imported,
+	})
+}
+
 func (a *API) handleProvidersExport(w http.ResponseWriter, r *http.Request) {
 	if !isLoopbackRequest(r) {
 		http.Error(w, "forbidden", http.StatusForbidden)

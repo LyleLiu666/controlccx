@@ -501,12 +501,12 @@ func TestAPI_TasksAndChat(t *testing.T) {
 			if body.StoragePath != store.Path() {
 				t.Fatalf("storage_path=%q, want %q", body.StoragePath, store.Path())
 			}
-			if body.Status.Claude.BaseURL.Effective != "env" || body.Status.Claude.APIKey.Effective != "env" {
-				t.Fatalf("expected env effective status, got claude=%+v", body.Status.Claude)
-			}
-			if body.Status.Codex.APIKey.Effective != "env" {
-				t.Fatalf("expected env effective status, got codex=%+v", body.Status.Codex)
-			}
+				if body.Status.Claude.BaseURL.Effective != "stored" || body.Status.Claude.APIKey.Effective != "stored" {
+					t.Fatalf("expected stored effective status, got claude=%+v", body.Status.Claude)
+				}
+				if body.Status.Codex.APIKey.Effective != "stored" {
+					t.Fatalf("expected stored effective status, got codex=%+v", body.Status.Codex)
+				}
 
 			secrets := store.Get()
 			if secrets.AnthropicBaseURL != "https://anthropic.example.test" {

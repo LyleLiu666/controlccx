@@ -55,7 +55,7 @@ func ComputeStatus(secrets Secrets) Status {
 		"OPENAI_API_KEY",
 	} {
 		if v, ok := os.LookupEnv(name); ok && strings.TrimSpace(v) != "" {
-			warnings = append(warnings, "env override: "+name+" is set; stored/provider changes will not affect this field")
+			warnings = append(warnings, "env import: "+name+" is set; 可导入到新配置")
 		}
 	}
 
@@ -79,11 +79,11 @@ func ComputeStatus(secrets Secrets) Status {
 }
 
 func computeFieldStatus(envName string, stored string, live string) FieldStatus {
-	if v, ok := os.LookupEnv(envName); ok && strings.TrimSpace(v) != "" {
-		return FieldStatus{Effective: "env", Masked: MaskSecret(v)}
-	}
 	if strings.TrimSpace(stored) != "" {
 		return FieldStatus{Effective: "stored", Masked: MaskSecret(stored)}
+	}
+	if v, ok := os.LookupEnv(envName); ok && strings.TrimSpace(v) != "" {
+		return FieldStatus{Effective: "env", Masked: MaskSecret(v)}
 	}
 	if strings.TrimSpace(live) != "" {
 		return FieldStatus{Effective: "live", Masked: MaskSecret(live)}
@@ -92,11 +92,11 @@ func computeFieldStatus(envName string, stored string, live string) FieldStatus 
 }
 
 func computeFieldStatusDisplay(envName string, stored string, live string) FieldStatus {
-	if v, ok := os.LookupEnv(envName); ok && strings.TrimSpace(v) != "" {
-		return FieldStatus{Effective: "env", Masked: TruncateDisplay(v, 96)}
-	}
 	if strings.TrimSpace(stored) != "" {
 		return FieldStatus{Effective: "stored", Masked: TruncateDisplay(stored, 96)}
+	}
+	if v, ok := os.LookupEnv(envName); ok && strings.TrimSpace(v) != "" {
+		return FieldStatus{Effective: "env", Masked: TruncateDisplay(v, 96)}
 	}
 	if strings.TrimSpace(live) != "" {
 		return FieldStatus{Effective: "live", Masked: TruncateDisplay(live, 96)}
@@ -129,11 +129,11 @@ func computeCodexSettingStatus(stored string, defaultValue string) FieldStatus {
 }
 
 func computeCodexAuthStatus(stored string) FieldStatus {
-	if v, ok := os.LookupEnv("OPENAI_API_KEY"); ok && strings.TrimSpace(v) != "" {
-		return FieldStatus{Effective: "env", Masked: MaskSecret(v)}
-	}
 	if strings.TrimSpace(stored) != "" {
 		return FieldStatus{Effective: "stored", Masked: MaskSecret(stored)}
+	}
+	if v, ok := os.LookupEnv("OPENAI_API_KEY"); ok && strings.TrimSpace(v) != "" {
+		return FieldStatus{Effective: "env", Masked: MaskSecret(v)}
 	}
 	if path, ok := codexAuthFilePath(); ok {
 		return FieldStatus{Effective: "live", Masked: tildePath(path)}

@@ -1,6 +1,7 @@
 package observer
 
 import (
+	"strings"
 	"testing"
 
 	"controlccx/internal/config"
@@ -37,3 +38,16 @@ func indexOf(ss []string, want string) int {
 	return -1
 }
 
+func TestMergeEnv_StoredOverridesProcessEnv(t *testing.T) {
+	base := []string{"OPENAI_API_KEY=from-env"}
+	out := mergeEnv(base, map[string]string{"OPENAI_API_KEY": "from-store"})
+	got := ""
+	for _, kv := range out {
+		if strings.HasPrefix(kv, "OPENAI_API_KEY=") {
+			got = strings.TrimPrefix(kv, "OPENAI_API_KEY=")
+		}
+	}
+	if got != "from-store" {
+		t.Fatalf("OPENAI_API_KEY=%q, want from-store", got)
+	}
+}

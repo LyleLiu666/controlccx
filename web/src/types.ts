@@ -541,6 +541,11 @@ export type ProviderImportLiveResponse = {
   live?: any;
 };
 
+export type ProviderImportEnvResponse = {
+  profile: ProviderProfile;
+  imported: string[];
+};
+
 export type ProviderExportResponse = {
   profiles: ProviderProfile[];
   active: ProviderActiveSelection;

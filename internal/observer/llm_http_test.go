@@ -272,4 +272,71 @@ func TestSimpleHTTPBackend_Complete_UsesSecretaryProviderOverride(t *testing.T) 
 	}
 }
 
+func TestSimpleHTTPBackend_Complete_ProviderOverrideBeatsProcessEnv(t *testing.T) {
+	var hitProvider int
+	var hitEnv int
+
+	srvEnv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hitEnv++
+		http.Error(w, "should not hit env endpoint", http.StatusInternalServerError)
+	}))
+	defer srvEnv.Close()
+
+	srvProvider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hitProvider++
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"content":[{"type":"text","text":"ok from provider"}]}`))
+	}))
+	defer srvProvider.Close()
+
+	t.Setenv("ANTHROPIC_BASE_URL", srvEnv.URL)
+	t.Setenv("ANTHROPIC_AUTH_TOKEN", "token-from-env")
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("ANTHROPIC_MODEL", "claude-env-model")
+
+	authStore, err := auth.Load(filepath.Join(t.TempDir(), "secrets.json"))
+	if err != nil {
+		t.Fatalf("auth load: %v", err)
+	}
+	providersStore, err := providers.NewStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("providers new store: %v", err)
+	}
+	p, err := providersStore.Upsert(providers.Profile{
+		Name: "Secretary",
+		Targets: providers.Targets{
+			Secretary: providers.SecretaryTarget{
+				Backend: "simple-http",
+				SimpleHTTP: providers.SecretarySimpleHTTP{
+					BaseURL:   srvProvider.URL,
+					AuthToken: "token-from-provider",
+					Model:     "claude-provider-model",
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("providers upsert: %v", err)
+	}
+	if err := providersStore.SetActive("secretary", p.ID); err != nil {
+		t.Fatalf("providers set active: %v", err)
+	}
+
+	cfg := config.Default()
+	b := NewSimpleHTTPBackendWithProviders(cfg, authStore, providersStore)
+	out, err := b.Complete(context.Background(), "hello")
+	if err != nil {
+		t.Fatalf("complete: %v", err)
+	}
+	if out != "ok from provider" {
+		t.Fatalf("out=%q", out)
+	}
+	if hitEnv != 0 {
+		t.Fatalf("env endpoint should not be used (hitEnv=%d)", hitEnv)
+	}
+	if hitProvider == 0 {
+		t.Fatalf("provider endpoint should be used")
+	}
+}
+
 func ptr(s string) *string { return &s }

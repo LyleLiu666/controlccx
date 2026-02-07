@@ -48,6 +48,7 @@ import {
   activateProvider,
   speedtestProvider,
   importProvidersLive,
+  importProviderEnv,
   exportProviders,
   fsDelete,
   fsMkdir,
@@ -4354,6 +4355,18 @@ async function refreshProviders(selectID?: string) {
   }
 }
 
+function providerErrorMessage(e: unknown): string {
+  const fallback = "操作失败，请稍后重试";
+  const raw = isAPIError(e)
+    ? String(e?.data?.message ?? e.message ?? "").trim()
+    : String((e as any)?.message ?? e ?? "").trim();
+  if (!raw) return fallback;
+  if (raw.toLowerCase().includes("name already exists")) {
+    return "保存失败：配置名称不能重名";
+  }
+  return raw;
+}
+
 async function saveProviderProfile() {
   providersError.value = "";
   if (!providerEditName.value.trim()) {
@@ -4403,7 +4416,7 @@ async function saveProviderProfile() {
     providerSecretarySimpleHTTPAuthToken.value = "";
     await refreshProviders(res.profile.id);
   } catch (e: any) {
-    providersError.value = e?.message ?? String(e);
+    providersError.value = providerErrorMessage(e);
   } finally {
     providersSaving.value = false;
   }
@@ -4413,6 +4426,10 @@ async function deleteProviderProfile() {
   providersError.value = "";
   const id = providerEditID.value.trim();
   if (!id) return;
+  if (typeof window !== "undefined") {
+    const ok = window.confirm("删除配置后不可恢复。确定删除当前配置吗？");
+    if (!ok) return;
+  }
   providersSaving.value = true;
   try {
     await deleteProvider(id);
@@ -4477,7 +4494,7 @@ async function activateProviderTarget(target: "claude" | "codex" | "secretary") 
     await refreshProviders(id);
     refreshAuth();
   } catch (e: any) {
-    providersError.value = e?.message ?? String(e);
+    providersError.value = providerErrorMessage(e);
   } finally {
     providersSaving.value = false;
   }
@@ -4510,6 +4527,51 @@ async function importProvidersFromLive() {
     await refreshProviders(res.profile.id);
   } catch (e: any) {
     providersError.value = e?.message ?? String(e);
+  } finally {
+    providersSaving.value = false;
+  }
+}
+
+async function importProvidersFromEnv(target: "claude" | "codex" | "secretary") {
+  providersError.value = "";
+  providersSaving.value = true;
+  try {
+    const res = await importProviderEnv({ target });
+    const profile = res.profile;
+    const imported = Array.isArray(res.imported) ? res.imported.length : 0;
+    if (target === "claude") {
+      providerClaudeBaseURL.value = String(profile?.targets?.claude?.base_url ?? providerClaudeBaseURL.value).trim();
+      providerClaudeApiKey.value = String(profile?.targets?.claude?.api_key ?? "").trim();
+      providerClaudeAuthToken.value = String(profile?.targets?.claude?.auth_token ?? "").trim();
+      providerClaudeModel.value = String(profile?.targets?.claude?.model ?? providerClaudeModel.value).trim();
+      providerClaudeSmallFastModel.value = String(
+        profile?.targets?.claude?.small_fast_model ?? providerClaudeSmallFastModel.value,
+      ).trim();
+    } else if (target === "codex") {
+      providerCodexBaseURL.value = String(profile?.targets?.codex?.base_url ?? providerCodexBaseURL.value).trim();
+      providerCodexApiKey.value = String(profile?.targets?.codex?.api_key ?? "").trim();
+      providerCodexModel.value = String(profile?.targets?.codex?.model ?? providerCodexModel.value).trim();
+      providerCodexReasoningEffort.value = String(
+        profile?.targets?.codex?.reasoning_effort ?? providerCodexReasoningEffort.value,
+      ).trim();
+    } else {
+      providerSecretaryBackend.value = "simple-http";
+      providerSecretarySimpleHTTPBaseURL.value = String(
+        profile?.targets?.secretary?.simple_http?.base_url ?? providerSecretarySimpleHTTPBaseURL.value,
+      ).trim();
+      providerSecretarySimpleHTTPApiKey.value = String(profile?.targets?.secretary?.simple_http?.api_key ?? "").trim();
+      providerSecretarySimpleHTTPAuthToken.value = String(
+        profile?.targets?.secretary?.simple_http?.auth_token ?? "",
+      ).trim();
+      providerSecretarySimpleHTTPModel.value = String(
+        profile?.targets?.secretary?.simple_http?.model ?? providerSecretarySimpleHTTPModel.value,
+      ).trim();
+    }
+    if (imported === 0) {
+      providersError.value = "未检测到可导入的环境变量";
+    }
+  } catch (e: any) {
+    providersError.value = providerErrorMessage(e);
   } finally {
     providersSaving.value = false;
   }
@@ -5679,6 +5741,7 @@ watch(
         @newProfile="startNewProvider"
         @refresh="refreshProviders"
         @importLive="importProvidersFromLive"
+        @importEnv="importProvidersFromEnv"
         @export="exportProvidersToFile"
         @speedtest="runProviderSpeedTest"
         @selectProfile="loadProviderIntoEditor"

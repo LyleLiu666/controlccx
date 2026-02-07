@@ -180,6 +180,9 @@ func (s *Store) Upsert(p Profile) (Profile, error) {
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if hasProfileNameLocked(s.m.Profiles, p.Name, p.ID) {
+		return Profile{}, errors.New("providers: name already exists")
+	}
 
 	if strings.TrimSpace(p.ID) == "" {
 		id, err := newID()
@@ -280,6 +283,9 @@ func (s *Store) Duplicate(id string, newName string) (Profile, error) {
 	}
 	if !ok {
 		return Profile{}, errors.New("providers: profile not found")
+	}
+	if hasProfileNameLocked(s.m.Profiles, newName, "") {
+		return Profile{}, errors.New("providers: name already exists")
 	}
 
 	newID, err := newID()
@@ -415,6 +421,27 @@ func hasProfileID(ps []Profile, id string) bool {
 		}
 	}
 	return false
+}
+
+func hasProfileNameLocked(ps []Profile, name string, exceptID string) bool {
+	nameKey := normalizedProfileName(name)
+	if nameKey == "" {
+		return false
+	}
+	exceptID = strings.TrimSpace(exceptID)
+	for _, p := range ps {
+		if exceptID != "" && p.ID == exceptID {
+			continue
+		}
+		if normalizedProfileName(p.Name) == nameKey {
+			return true
+		}
+	}
+	return false
+}
+
+func normalizedProfileName(name string) string {
+	return strings.ToLower(strings.TrimSpace(name))
 }
 
 func (s *Store) reloadLocked() error {

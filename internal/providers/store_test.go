@@ -154,3 +154,32 @@ func TestStoreReorder_ValidatesInput(t *testing.T) {
 		t.Fatalf("expected ok reorder, got %v", err)
 	}
 }
+
+func TestStoreUpsert_RejectsDuplicateName(t *testing.T) {
+	s, err := NewStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	first, err := s.Upsert(Profile{Name: "Current"})
+	if err != nil {
+		t.Fatalf("Upsert(first): %v", err)
+	}
+	if _, err := s.Upsert(Profile{Name: "current"}); err == nil {
+		t.Fatalf("expected duplicate-name error")
+	}
+
+	other, err := s.Upsert(Profile{Name: "Other"})
+	if err != nil {
+		t.Fatalf("Upsert(other): %v", err)
+	}
+	other.Name = "CURRENT"
+	if _, err := s.Upsert(other); err == nil {
+		t.Fatalf("expected duplicate-name error on update")
+	}
+
+	// Same profile may keep its own name.
+	first.Name = "  Current  "
+	if _, err := s.Upsert(first); err != nil {
+		t.Fatalf("upsert same profile name: %v", err)
+	}
+}

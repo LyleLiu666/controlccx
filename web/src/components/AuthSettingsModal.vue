@@ -165,11 +165,11 @@ function formatAuthEffective(v: string | undefined | null): string {
           </div>
           <ol class="setupSteps">
             <li>
-              录入新的提供方：点击右上角 <span class="mono">提供方</span>，在左侧选择
-              <span class="mono">令牌管理</span> / <span class="mono">模型管理</span>，再选择 Claude Code / Codex / 秘书。
+              录入新的提供方：点击右上角 <span class="mono">提供方</span>，在左侧进入 <span class="mono">总览</span>，
+              再选择 Claude Code / Codex / 秘书。
             </li>
             <li>
-              填写信息后点击 <span class="mono">保存并启用</span>（立即生效，只影响后续新 run）。
+              在对应页面填写 <span class="mono">授权</span> 与 <span class="mono">模型</span>，然后点击 <span class="mono">保存并启用</span>（立即生效，只影响后续新 run）。
             </li>
             <li>
               回到这里确认状态变成 <span class="mono">已保存</span>（或 <span class="mono">环境变量</span>）。

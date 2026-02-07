@@ -411,10 +411,8 @@ func mergeEnv(base []string, additions map[string]string) []string {
 			check = strings.ToUpper(check)
 		}
 		if i, ok := index[check]; ok {
-			if valueEmpty[check] {
-				out[i] = k + "=" + v
-				valueEmpty[check] = false
-			}
+			out[i] = k + "=" + v
+			valueEmpty[check] = false
 			continue
 		}
 		index[check] = len(out)

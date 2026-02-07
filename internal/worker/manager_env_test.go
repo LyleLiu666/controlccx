@@ -10,7 +10,7 @@ import (
 	"controlccx/internal/tasks"
 )
 
-func TestMergeEnv_DoesNotOverrideExisting(t *testing.T) {
+func TestMergeEnv_StoredOverridesExistingEnv(t *testing.T) {
 	base := []string{"ANTHROPIC_API_KEY=envkey"}
 	out := mergeEnv(base, map[string]string{"ANTHROPIC_API_KEY": "storedkey"})
 
@@ -20,8 +20,8 @@ func TestMergeEnv_DoesNotOverrideExisting(t *testing.T) {
 			got = strings.TrimPrefix(kv, "ANTHROPIC_API_KEY=")
 		}
 	}
-	if got != "envkey" {
-		t.Fatalf("ANTHROPIC_API_KEY=%q, want envkey", got)
+	if got != "storedkey" {
+		t.Fatalf("ANTHROPIC_API_KEY=%q, want storedkey", got)
 	}
 }
 

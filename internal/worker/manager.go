@@ -624,11 +624,9 @@ func mergeEnvWithReport(base []string, additions map[string]string) ([]string, [
 			check = strings.ToUpper(check)
 		}
 		if i, ok := index[check]; ok {
-			if valueEmpty[check] {
-				out[i] = k + "=" + v
-				valueEmpty[check] = false
-				applied = append(applied, k)
-			}
+			out[i] = k + "=" + v
+			valueEmpty[check] = false
+			applied = append(applied, k)
 			continue
 		}
 		index[check] = len(out)

@@ -7,6 +7,7 @@ import type {
   ChatMessage,
   ProviderActivateResponse,
   ProviderDeleteResponse,
+  ProviderImportEnvResponse,
   ProviderExportResponse,
   ProviderImportLiveResponse,
   ProviderProfile,
@@ -489,6 +490,12 @@ export async function importProvidersLive(input: {
   codex_home_dir?: string;
 }): Promise<ProviderImportLiveResponse> {
   return postJSON<ProviderImportLiveResponse>("/api/providers/import/live", input);
+}
+
+export async function importProviderEnv(input: {
+  target: "claude" | "codex" | "secretary";
+}): Promise<ProviderImportEnvResponse> {
+  return postJSON<ProviderImportEnvResponse>("/api/providers/import/env", input);
 }
 
 export async function exportProviders(includeSecrets: boolean): Promise<ProviderExportResponse> {

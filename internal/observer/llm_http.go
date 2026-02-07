@@ -354,53 +354,61 @@ func textFromAny(v any) string {
 }
 
 func (b *SimpleHTTPBackend) resolveAnthropicBaseURL() string {
-	if v := strings.TrimSpace(os.Getenv("ANTHROPIC_BASE_URL")); v != "" {
-		return v
-	}
 	if v := strings.TrimSpace(b.resolveSecretarySimpleHTTP().BaseURL); v != "" {
 		return v
 	}
 	if b.auth != nil {
-		return strings.TrimSpace(b.auth.Get().AnthropicBaseURL)
+		if v := strings.TrimSpace(b.auth.Get().AnthropicBaseURL); v != "" {
+			return v
+		}
+	}
+	if v := strings.TrimSpace(os.Getenv("ANTHROPIC_BASE_URL")); v != "" {
+		return v
 	}
 	return ""
 }
 
 func (b *SimpleHTTPBackend) resolveAnthropicAPIKey() string {
-	if v := strings.TrimSpace(os.Getenv("ANTHROPIC_API_KEY")); v != "" {
-		return v
-	}
 	if v := strings.TrimSpace(b.resolveSecretarySimpleHTTP().APIKey); v != "" {
 		return v
 	}
 	if b.auth != nil {
-		return strings.TrimSpace(b.auth.Get().AnthropicAPIKey)
+		if v := strings.TrimSpace(b.auth.Get().AnthropicAPIKey); v != "" {
+			return v
+		}
+	}
+	if v := strings.TrimSpace(os.Getenv("ANTHROPIC_API_KEY")); v != "" {
+		return v
 	}
 	return ""
 }
 
 func (b *SimpleHTTPBackend) resolveAnthropicAuthToken() string {
-	if v := strings.TrimSpace(os.Getenv("ANTHROPIC_AUTH_TOKEN")); v != "" {
-		return v
-	}
 	if v := strings.TrimSpace(b.resolveSecretarySimpleHTTP().AuthToken); v != "" {
 		return v
 	}
 	if b.auth != nil {
-		return strings.TrimSpace(b.auth.Get().AnthropicAuthToken)
+		if v := strings.TrimSpace(b.auth.Get().AnthropicAuthToken); v != "" {
+			return v
+		}
+	}
+	if v := strings.TrimSpace(os.Getenv("ANTHROPIC_AUTH_TOKEN")); v != "" {
+		return v
 	}
 	return ""
 }
 
 func (b *SimpleHTTPBackend) resolveAnthropicModel() string {
-	if v := strings.TrimSpace(os.Getenv("ANTHROPIC_MODEL")); v != "" {
-		return v
-	}
 	if v := strings.TrimSpace(b.resolveSecretarySimpleHTTP().Model); v != "" {
 		return v
 	}
 	if b.auth != nil {
-		return strings.TrimSpace(b.auth.Get().AnthropicModel)
+		if v := strings.TrimSpace(b.auth.Get().AnthropicModel); v != "" {
+			return v
+		}
+	}
+	if v := strings.TrimSpace(os.Getenv("ANTHROPIC_MODEL")); v != "" {
+		return v
 	}
 	return ""
 }

@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -260,5 +261,88 @@ func TestAPI_Providers_Upsert_PreservesSecretarySimpleHTTPSecrets(t *testing.T) 
 		if got != rawToken {
 			t.Fatalf("expected stored auth token preserved, got=%q", got)
 		}
+	}
+}
+
+func TestAPI_Providers_Upsert_RejectsDuplicateName(t *testing.T) {
+	dataDir := t.TempDir()
+	providersStore, err := providers.NewStore(dataDir)
+	if err != nil {
+		t.Fatalf("providers.NewStore: %v", err)
+	}
+	authStore, err := auth.Load(filepath.Join(dataDir, "secrets.json"))
+	if err != nil {
+		t.Fatalf("auth.Load: %v", err)
+	}
+
+	apiSvc := &API{Providers: providersStore, Auth: authStore}
+	srv := httptest.NewServer(apiSvc.Handler())
+	t.Cleanup(srv.Close)
+
+	create := func(name string) int {
+		reqBody, _ := json.Marshal(map[string]any{
+			"profile": providers.Profile{Name: name},
+		})
+		res, err := http.Post(srv.URL+"/api/providers/upsert", "application/json", bytes.NewReader(reqBody))
+		if err != nil {
+			t.Fatalf("post upsert(%s): %v", name, err)
+		}
+		defer res.Body.Close()
+		return res.StatusCode
+	}
+
+	if status := create("Current"); status != http.StatusOK {
+		t.Fatalf("first upsert status=%d, want 200", status)
+	}
+	if status := create("current"); status != http.StatusBadRequest {
+		t.Fatalf("duplicate upsert status=%d, want 400", status)
+	}
+}
+
+func TestAPI_Providers_ImportEnv(t *testing.T) {
+	dataDir := t.TempDir()
+	providersStore, err := providers.NewStore(dataDir)
+	if err != nil {
+		t.Fatalf("providers.NewStore: %v", err)
+	}
+	authStore, err := auth.Load(filepath.Join(dataDir, "secrets.json"))
+	if err != nil {
+		t.Fatalf("auth.Load: %v", err)
+	}
+
+	t.Setenv("ANTHROPIC_BASE_URL", "https://env.anthropic.example")
+	t.Setenv("ANTHROPIC_AUTH_TOKEN", "sk-ant-env-import-123456")
+	t.Setenv("ANTHROPIC_MODEL", "claude-env-model")
+	t.Setenv("OPENAI_API_KEY", "sk-openai-env-import-123456")
+
+	apiSvc := &API{Providers: providersStore, Auth: authStore}
+	srv := httptest.NewServer(apiSvc.Handler())
+	t.Cleanup(srv.Close)
+
+	reqBody, _ := json.Marshal(map[string]any{"target": "claude"})
+	res, err := http.Post(srv.URL+"/api/providers/import/env", "application/json", bytes.NewReader(reqBody))
+	if err != nil {
+		t.Fatalf("post import env: %v", err)
+	}
+	defer res.Body.Close()
+	rawBody, _ := io.ReadAll(res.Body)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("import env status=%d, want 200; body=%s", res.StatusCode, string(rawBody))
+	}
+
+	var body struct {
+		Profile providers.Profile `json:"profile"`
+	}
+	if err := json.Unmarshal(rawBody, &body); err != nil {
+		t.Fatalf("decode import env: %v", err)
+	}
+	if got := body.Profile.Targets.Claude.BaseURL; got != "https://env.anthropic.example" {
+		t.Fatalf("claude.base_url=%q, want env value", got)
+	}
+	if got := body.Profile.Targets.Claude.AuthToken; got != "sk-ant-env-import-123456" {
+		t.Fatalf("claude.auth_token=%q, want env value", got)
+	}
+	if got := body.Profile.Targets.Claude.Model; got != "claude-env-model" {
+		t.Fatalf("claude.model=%q, want env value", got)
 	}
 }

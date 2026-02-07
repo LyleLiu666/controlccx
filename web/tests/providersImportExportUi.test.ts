@@ -8,10 +8,10 @@ function readText(relativePath: string) {
 
 test("Providers page exposes import/export actions", () => {
   const panel = readText("../src/components/ProvidersPanel.vue");
-  assert.match(panel, />\s*从 CLI 导入\s*</);
+  assert.match(panel, />\s*从 AUTH 文件导入\s*</);
   assert.match(panel, />\s*导出\s*</);
   assert.match(panel, />\s*导出密钥\s*</);
-  assert.match(panel, /emit\('importLive'\)/);
+  assert.match(panel, /emit\('importLive'/);
   assert.match(panel, /emit\('export',\s*false\)/);
   assert.match(panel, /emit\('export',\s*true\)/);
 });

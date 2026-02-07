@@ -44,11 +44,11 @@ func TestStore_ApplyPatch_Persists(t *testing.T) {
 	}
 }
 
-func TestComputeStatus_PrefersEnvOverStored(t *testing.T) {
+func TestComputeStatus_PrefersStoredOverEnv(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "env-key-123456")
 	st := ComputeStatus(Secrets{AnthropicAPIKey: "stored-key-abcdef"})
-	if st.Claude.APIKey.Effective != "env" {
-		t.Fatalf("effective=%q, want env", st.Claude.APIKey.Effective)
+	if st.Claude.APIKey.Effective != "stored" {
+		t.Fatalf("effective=%q, want stored", st.Claude.APIKey.Effective)
 	}
 }
 
@@ -137,21 +137,21 @@ func TestComputeStatus_WarnsOnEnvOverrides(t *testing.T) {
 	t.Setenv("ANTHROPIC_AUTH_TOKEN", "sk-ant-env-abcdef")
 
 	st := ComputeStatus(Secrets{AnthropicAuthToken: "sk-ant-stored"})
-	if st.Claude.AuthToken.Effective != "env" {
-		t.Fatalf("effective=%q, want env", st.Claude.AuthToken.Effective)
+	if st.Claude.AuthToken.Effective != "stored" {
+		t.Fatalf("effective=%q, want stored", st.Claude.AuthToken.Effective)
 	}
 	if len(st.Warnings) == 0 {
 		t.Fatalf("expected warnings")
 	}
 	found := false
 	for _, w := range st.Warnings {
-		if strings.Contains(w, "ANTHROPIC_AUTH_TOKEN") {
+		if strings.Contains(w, "ANTHROPIC_AUTH_TOKEN") && strings.Contains(w, "可导入") {
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Fatalf("expected warning mentioning ANTHROPIC_AUTH_TOKEN, got=%v", st.Warnings)
+		t.Fatalf("expected import hint mentioning ANTHROPIC_AUTH_TOKEN, got=%v", st.Warnings)
 	}
 }
 
