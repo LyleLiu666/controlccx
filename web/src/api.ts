@@ -305,13 +305,17 @@ export async function fetchChat(after = 0, limit = 200): Promise<ChatMessage[]> 
 export type ChatSendOptions = {
   backend?: "auto" | "simple-http" | "claude" | "codex";
   max_steps?: number;
+  idempotency_key?: string;
 };
 
 export async function sendChat(message: string, opts?: ChatSendOptions): Promise<{ message: string }> {
   const body: Record<string, any> = { message };
   if (opts?.backend) body.backend = opts.backend;
   if (typeof opts?.max_steps === "number") body.max_steps = opts.max_steps;
-  return postJSON<{ message: string }>("/api/chat", body);
+  if (opts?.idempotency_key) body.idempotency_key = opts.idempotency_key;
+  const headers: Record<string, string> = {};
+  if (opts?.idempotency_key) headers["Idempotency-Key"] = opts.idempotency_key;
+  return postJSON<{ message: string }>("/api/chat", body, { headers });
 }
 
 export type ChatStreamEvent = {
@@ -324,12 +328,15 @@ export async function sendChatStream(
   opts: ChatSendOptions,
   onEvent: (evt: ChatStreamEvent) => void,
 ): Promise<string> {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    Accept: "text/event-stream",
+  };
+  if (opts?.idempotency_key) headers["Idempotency-Key"] = String(opts.idempotency_key);
+
   const res = await fetch("/api/chat?stream=1", {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Accept: "text/event-stream",
-    },
+    headers,
     body: JSON.stringify({ message, stream: true, ...opts }),
     credentials: "same-origin",
   });

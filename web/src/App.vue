@@ -3334,7 +3334,12 @@ async function runDeliveryForemanOnce(t: Task) {
   try {
     const prompt = await buildDeliveryForemanPrompt(t);
     const after = chat.value.length ? chat.value[chat.value.length - 1]!.id : 0;
-    await sendChat(prompt, { backend: chatBackend.value, max_steps: chatMaxSteps.value });
+    const idempotencyKey = `delivery-foreman:${String(t.id ?? "").trim()}`;
+    await sendChat(prompt, {
+      backend: chatBackend.value,
+      max_steps: chatMaxSteps.value,
+      idempotency_key: idempotencyKey,
+    });
     await syncChatFrom(after);
     if (selectedSessionKey.value === sessionKeyForTask(t)) {
       await refreshAcceptance();

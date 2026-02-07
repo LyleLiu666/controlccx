@@ -2,9 +2,7 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"fmt"
 	"log"
 	"net"
 	"net/http"
@@ -81,6 +79,7 @@ func runSecretaryd(cfg config.Config, secretaryAddr string, runnerBaseURL string
 	codexBackend := observer.NewCodexCLIBackend(cfg, authStore)
 
 	hub := events.NewHub()
+	chatIdem := newChatIdempotencyCache(20*time.Second, 2048)
 	observerSvc := &observer.Service{
 		Store:      taskStore,
 		Chat:       chatStore,
@@ -91,6 +90,15 @@ func runSecretaryd(cfg config.Config, secretaryAddr string, runnerBaseURL string
 		Codex:      codexBackend,
 		ForceAgent: true,
 	}
+
+	chatHandler := newSecretaryChatHandler(secretaryChatHandlerDeps{
+		Chat:        chatStore,
+		Hub:         hub,
+		Responder:   observerSvc,
+		Auth:        authStore,
+		Providers:   providersStore,
+		Idempotency: chatIdem,
+	})
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
@@ -123,125 +131,7 @@ func runSecretaryd(cfg config.Config, secretaryAddr string, runnerBaseURL string
 			http.Error(w, "forbidden", http.StatusForbidden)
 			return
 		}
-		if chatStore == nil {
-			http.Error(w, "chat store not configured", http.StatusServiceUnavailable)
-			return
-		}
-
-		switch r.Method {
-		case http.MethodGet:
-			after := parseInt64(r.URL.Query().Get("after"), 0)
-			limit := parseInt(r.URL.Query().Get("limit"), 200)
-			msgs, err := chatStore.List(r.Context(), after, limit)
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-			writeJSON(w, map[string]any{"messages": msgs})
-		case http.MethodPost:
-			var body struct {
-				Message  string `json:"message"`
-				Stream   bool   `json:"stream,omitempty"`
-				Backend  string `json:"backend,omitempty"`
-				MaxSteps int    `json:"max_steps,omitempty"`
-			}
-			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-				http.Error(w, "invalid json", http.StatusBadRequest)
-				return
-			}
-			user := strings.TrimSpace(body.Message)
-			if user == "" {
-				http.Error(w, "message is required", http.StatusBadRequest)
-				return
-			}
-
-			// Pick up any auth token updates made via the server settings UI.
-			if authStore != nil {
-				_ = authStore.Reload()
-			}
-			if providersStore != nil {
-				_ = providersStore.Reload()
-			}
-
-			body.Backend = resolveSecretaryBackend(body.Backend, providersStore)
-
-			wantStream := body.Stream ||
-				strings.TrimSpace(r.URL.Query().Get("stream")) == "1" ||
-				strings.Contains(strings.ToLower(r.Header.Get("Accept")), "text/event-stream")
-
-			var (
-				flusher http.Flusher
-				send    func(event string, payload any)
-			)
-			if wantStream {
-				f, ok := w.(http.Flusher)
-				if !ok {
-					http.Error(w, "streaming not supported", http.StatusInternalServerError)
-					return
-				}
-				flusher = f
-				w.Header().Set("Content-Type", "text/event-stream")
-				w.Header().Set("Cache-Control", "no-cache")
-				w.Header().Set("Connection", "keep-alive")
-				w.Header().Set("X-Accel-Buffering", "no")
-
-				send = func(event string, payload any) {
-					data, _ := json.Marshal(payload)
-					_, _ = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, data)
-					flusher.Flush()
-				}
-
-				send("meta", map[string]any{"ok": true})
-			}
-
-			userMsg, _ := chatStore.Append(r.Context(), chat.RoleUser, user)
-			hub.Publish(events.Event{Type: "chat.message", Time: time.Now().UTC(), Payload: userMsg})
-
-			if send != nil {
-				send("status", map[string]any{"phase": "thinking"})
-			}
-
-			var (
-				reply observer.Reply
-				err   error
-			)
-			if observerSvc == nil {
-				err = errors.New("observer not configured")
-			} else {
-				reply, err = observerSvc.RespondWithOptions(r.Context(), user, observer.RespondOptions{
-					Backend:  body.Backend,
-					MaxSteps: body.MaxSteps,
-					OnToolCall: func(tool string, args map[string]any) {
-						if send != nil {
-							send("tool_call", map[string]any{"tool": tool, "args": args})
-						}
-					},
-					OnToolResult: func(tool string, result any) {
-						if send != nil {
-							send("tool_result", map[string]any{"tool": tool, "result": result})
-						}
-					},
-				})
-			}
-			if err != nil {
-				if send != nil {
-					send("error", map[string]any{"error": err.Error()})
-					return
-				}
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-
-			assistantMsg, _ := chatStore.Append(r.Context(), chat.RoleAssistant, reply.Message)
-			hub.Publish(events.Event{Type: "chat.message", Time: time.Now().UTC(), Payload: assistantMsg})
-			if send != nil {
-				send("final", map[string]any{"message": reply.Message})
-				return
-			}
-			writeJSON(w, reply)
-		default:
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		}
+		chatHandler(w, r)
 	})
 
 	srv := &http.Server{

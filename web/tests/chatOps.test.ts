@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { appendChatMessageUnique, sendChatAndReload } from "../src/chatOps.ts";
+import { appendChatMessageUnique, buildChatIdempotencyKey, sendChatAndReload } from "../src/chatOps.ts";
 
 test("appendChatMessageUnique appends and dedups by id", () => {
   const list = [
@@ -40,4 +40,18 @@ test("sendChatAndReload calls sendChat then fetchChat", async () => {
     ["fetchChat", 0, 200],
   ]);
   assert.equal(res.length, 1);
+});
+
+test("buildChatIdempotencyKey changes across chat history (after)", () => {
+  const a = buildChatIdempotencyKey({ after: 10, message: "ping", backend: "auto", maxSteps: 8 });
+  const b = buildChatIdempotencyKey({ after: 11, message: "ping", backend: "auto", maxSteps: 8 });
+  assert.notEqual(a, b);
+  assert.match(a, /^chat:10:/);
+  assert.match(b, /^chat:11:/);
+});
+
+test("buildChatIdempotencyKey is stable for same inputs", () => {
+  const a = buildChatIdempotencyKey({ after: 0, message: "ping", backend: "auto", maxSteps: 8 });
+  const b = buildChatIdempotencyKey({ after: 0, message: " ping ", backend: "auto", maxSteps: 8 });
+  assert.equal(a, b);
 });

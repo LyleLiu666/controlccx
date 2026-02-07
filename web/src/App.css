@@ -5592,6 +5592,8 @@ h2 {
   background: var(--bg-subtle);
   border: 1px solid transparent;
   max-width: min(92%, 820px);
+  min-width: 0;
+  box-sizing: border-box;
   align-self: flex-start;
 }
 
@@ -5623,6 +5625,9 @@ h2 {
   font-size: 13px;
   line-height: 1.65;
   color: var(--text-main);
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 :deep(.msg .content.chatMarkdown) {

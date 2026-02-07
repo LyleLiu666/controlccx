@@ -1,6 +1,7 @@
 import { ref } from "vue";
 import type { ChatMessage } from "../types";
 import { fetchChat, sendChatStream } from "../api";
+import { buildChatIdempotencyKey } from "../chatOps";
 
 function lastChatID(list: ChatMessage[]): number {
   if (!Array.isArray(list) || list.length === 0) return 0;
@@ -57,6 +58,12 @@ export function useSecretaryChat(opts?: { onError?: (message: string) => void })
     if (chatSending.value) return;
 
     const after = lastChatID(chat.value);
+    const idempotencyKey = buildChatIdempotencyKey({
+      after,
+      message: msg,
+      backend: chatBackend.value,
+      maxSteps: chatMaxSteps.value,
+    });
 
     onError("");
     chatSendError.value = "";
@@ -69,7 +76,7 @@ export function useSecretaryChat(opts?: { onError?: (message: string) => void })
 
       await sendChatStream(
         msg,
-        { backend: chatBackend.value, max_steps: chatMaxSteps.value },
+        { backend: chatBackend.value, max_steps: chatMaxSteps.value, idempotency_key: idempotencyKey },
         (evt) => {
           if (evt.event === "status") {
             const phase = String(evt.data?.phase ?? "");
