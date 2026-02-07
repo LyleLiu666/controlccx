@@ -4367,7 +4367,7 @@ function providerErrorMessage(e: unknown): string {
   return raw;
 }
 
-async function saveProviderProfile() {
+async function saveProviderProfile(target: "claude" | "codex" | "secretary") {
   providersError.value = "";
   if (!providerEditName.value.trim()) {
     providersError.value = "name is required";
@@ -4378,6 +4378,7 @@ async function saveProviderProfile() {
     const profile: ProviderProfile = {
       id: providerEditID.value.trim(),
       name: providerEditName.value.trim(),
+      tool: target,
       targets: {
         claude: {
           base_url: providerClaudeBaseURL.value.trim(),
@@ -4453,6 +4454,7 @@ async function activateProviderTarget(target: "claude" | "codex" | "secretary") 
     const profile: ProviderProfile = {
       id,
       name: providerEditName.value.trim(),
+      tool: target,
       targets: {
         claude: {
           base_url: providerClaudeBaseURL.value.trim(),

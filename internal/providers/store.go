@@ -67,6 +67,7 @@ type SyncLive struct {
 type Profile struct {
 	ID        string    `json:"id"`
 	Name      string    `json:"name"`
+	Tool      string    `json:"tool,omitempty"`
 	Targets   Targets   `json:"targets,omitempty"`
 	SyncLive  SyncLive  `json:"sync_live,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
@@ -381,6 +382,7 @@ func MaskProfile(p Profile) Profile {
 func normalizeProfile(p Profile) Profile {
 	p.ID = strings.TrimSpace(p.ID)
 	p.Name = strings.TrimSpace(p.Name)
+	p.Tool = normalizeProfileTool(p.Tool)
 
 	p.Targets.Claude.BaseURL = strings.TrimSpace(p.Targets.Claude.BaseURL)
 	p.Targets.Claude.APIKey = strings.TrimSpace(p.Targets.Claude.APIKey)
@@ -398,7 +400,66 @@ func normalizeProfile(p Profile) Profile {
 	p.Targets.Secretary.SimpleHTTP.APIKey = strings.TrimSpace(p.Targets.Secretary.SimpleHTTP.APIKey)
 	p.Targets.Secretary.SimpleHTTP.AuthToken = strings.TrimSpace(p.Targets.Secretary.SimpleHTTP.AuthToken)
 	p.Targets.Secretary.SimpleHTTP.Model = strings.TrimSpace(p.Targets.Secretary.SimpleHTTP.Model)
+
+	if p.Tool == "" {
+		p.Tool = inferProfileTool(p.Targets)
+	}
+	if p.Tool == "" {
+		p.Tool = "claude"
+	}
 	return p
+}
+
+func normalizeProfileTool(v string) string {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "claude":
+		return "claude"
+	case "codex":
+		return "codex"
+	case "secretary":
+		return "secretary"
+	default:
+		return ""
+	}
+}
+
+func inferProfileTool(targets Targets) string {
+	if hasClaudeTargetData(targets.Claude) {
+		return "claude"
+	}
+	if hasCodexTargetData(targets.Codex) {
+		return "codex"
+	}
+	if hasSecretaryTargetData(targets.Secretary) {
+		return "secretary"
+	}
+	return ""
+}
+
+func hasClaudeTargetData(t ClaudeTarget) bool {
+	return strings.TrimSpace(t.BaseURL) != "" ||
+		strings.TrimSpace(t.APIKey) != "" ||
+		strings.TrimSpace(t.AuthToken) != "" ||
+		strings.TrimSpace(t.Model) != "" ||
+		strings.TrimSpace(t.SmallFastModel) != ""
+}
+
+func hasCodexTargetData(t CodexTarget) bool {
+	return strings.TrimSpace(t.BaseURL) != "" ||
+		strings.TrimSpace(t.APIKey) != "" ||
+		strings.TrimSpace(t.Model) != "" ||
+		strings.TrimSpace(t.ReasoningEffort) != ""
+}
+
+func hasSecretaryTargetData(t SecretaryTarget) bool {
+	backend := strings.TrimSpace(t.Backend)
+	if backend == "simple-http" || backend == "claude" || backend == "codex" {
+		return true
+	}
+	return strings.TrimSpace(t.SimpleHTTP.BaseURL) != "" ||
+		strings.TrimSpace(t.SimpleHTTP.APIKey) != "" ||
+		strings.TrimSpace(t.SimpleHTTP.AuthToken) != "" ||
+		strings.TrimSpace(t.SimpleHTTP.Model) != ""
 }
 
 func cloneProfiles(in []Profile) []Profile {

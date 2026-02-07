@@ -74,6 +74,10 @@ func mergeProviderProfileForUpsert(existing providers.Profile, incoming provider
 	if incoming.Name == "" {
 		incoming.Name = existing.Name
 	}
+	incoming.Tool = strings.ToLower(strings.TrimSpace(incoming.Tool))
+	if incoming.Tool == "" {
+		incoming.Tool = strings.ToLower(strings.TrimSpace(existing.Tool))
+	}
 
 	if isMaskedSecretPlaceholder(incoming.Targets.Claude.APIKey) || strings.TrimSpace(incoming.Targets.Claude.APIKey) == "" {
 		incoming.Targets.Claude.APIKey = existing.Targets.Claude.APIKey
@@ -400,13 +404,23 @@ func (a *API) handleProvidersImportLive(w http.ResponseWriter, r *http.Request) 
 	}
 
 	profile, err := a.Providers.Upsert(providers.Profile{
-		Name: name,
+		Name: name + " Claude",
+		Tool: "claude",
 		Targets: providers.Targets{
 			Claude: claudeImp.Target,
-			Codex:  codexImp.Target,
 		},
 	})
 	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if _, err := a.Providers.Upsert(providers.Profile{
+		Name: name + " Codex",
+		Tool: "codex",
+		Targets: providers.Targets{
+			Codex: codexImp.Target,
+		},
+	}); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -469,6 +483,7 @@ func (a *API) handleProvidersImportEnv(w http.ResponseWriter, r *http.Request) {
 	}
 
 	profile := providers.Profile{
+		Tool: target,
 		Name: map[string]string{
 			"claude":    "Claude Env",
 			"codex":     "Codex Env",

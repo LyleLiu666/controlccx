@@ -64,7 +64,7 @@ const emit = defineEmits<{
   (e: "speedtest", target: "claude" | "codex"): void;
   (e: "selectProfile", profile: ProviderProfile): void;
   (e: "delete"): void;
-  (e: "save"): void;
+  (e: "save", target: "claude" | "codex" | "secretary"): void;
   (e: "activate", target: "claude" | "codex" | "secretary"): void;
 
   (e: "update:editName", value: string): void;
@@ -190,6 +190,65 @@ function profileForID(id: string): ProviderProfile | null {
   return props.profiles.find((p) => p.id === key) ?? null;
 }
 
+function hasText(value: unknown): boolean {
+  return String(value ?? "").trim() !== "";
+}
+
+function normalizeTool(value: unknown): ProviderTarget | null {
+  const v = String(value ?? "").trim();
+  if (v === "claude" || v === "codex" || v === "secretary") return v;
+  return null;
+}
+
+function hasClaudeTargetData(p: ProviderProfile | null | undefined): boolean {
+  if (!p) return false;
+  const claude = p.targets?.claude;
+  return (
+    hasText(claude?.base_url) ||
+    hasText(claude?.api_key) ||
+    hasText(claude?.auth_token) ||
+    hasText(claude?.model) ||
+    hasText(claude?.small_fast_model)
+  );
+}
+
+function hasCodexTargetData(p: ProviderProfile | null | undefined): boolean {
+  if (!p) return false;
+  const codex = p.targets?.codex;
+  return (
+    hasText(codex?.base_url) ||
+    hasText(codex?.api_key) ||
+    hasText(codex?.model) ||
+    hasText(codex?.reasoning_effort)
+  );
+}
+
+function hasSecretaryTargetData(p: ProviderProfile | null | undefined): boolean {
+  if (!p) return false;
+  const secretary = p.targets?.secretary;
+  const backend = String(secretary?.backend ?? "").trim();
+  if (backend === "simple-http" || backend === "claude" || backend === "codex") return true;
+  return (
+    hasText(secretary?.simple_http?.base_url) ||
+    hasText(secretary?.simple_http?.api_key) ||
+    hasText(secretary?.simple_http?.auth_token) ||
+    hasText(secretary?.simple_http?.model)
+  );
+}
+
+function inferProfileTool(p: ProviderProfile | null | undefined): ProviderTarget | null {
+  if (!p) return null;
+  if (hasClaudeTargetData(p)) return "claude";
+  if (hasCodexTargetData(p)) return "codex";
+  if (hasSecretaryTargetData(p)) return "secretary";
+  return null;
+}
+
+function profileTool(p: ProviderProfile | null | undefined): ProviderTarget | null {
+  if (!p) return null;
+  return normalizeTool(p.tool) ?? inferProfileTool(p);
+}
+
 function activeIDFor(t: ProviderTarget): string {
   if (t === "claude") return String(props.active?.claude ?? "").trim();
   if (t === "codex") return String(props.active?.codex ?? "").trim();
@@ -197,8 +256,23 @@ function activeIDFor(t: ProviderTarget): string {
 }
 
 function activeProfileFor(t: ProviderTarget): ProviderProfile | null {
-  return profileForID(activeIDFor(t));
+  const p = profileForID(activeIDFor(t));
+  if (!profileMatchesTarget(p, t)) return null;
+  return p;
 }
+
+function profileMatchesTarget(p: ProviderProfile | null | undefined, t: ProviderTarget): boolean {
+  return profileTool(p) === t;
+}
+
+function profilesForTarget(t: ProviderTarget): ProviderProfile[] {
+  return props.profiles.filter((p) => profileMatchesTarget(p, t));
+}
+
+const pageProfiles = computed<ProviderProfile[]>(() => {
+  if (page.value === "overview") return props.profiles;
+  return profilesForTarget(page.value);
+});
 
 function ensureEditorFor(t: ProviderTarget) {
   const p = activeProfileFor(t);
@@ -206,7 +280,13 @@ function ensureEditorFor(t: ProviderTarget) {
     emit("selectProfile", p);
     return;
   }
-  const fallback = props.profiles[0];
+  const currentEditing = profileForID(props.editID);
+  if (currentEditing && profileMatchesTarget(currentEditing, t)) {
+    emit("selectProfile", currentEditing);
+    return;
+  }
+  const targetProfiles = profilesForTarget(t);
+  const fallback = targetProfiles[0];
   if (fallback) {
     emit("selectProfile", fallback);
     return;
@@ -240,17 +320,23 @@ function startNewForTarget(t: ProviderTarget) {
 }
 
 function onSelectEditProfile(id: string) {
+  if (page.value === "overview") return;
   const p = profileForID(id);
-  if (!p) return;
+  if (!p || !profileMatchesTarget(p, page.value)) return;
   emit("selectProfile", p);
 }
 
 function onSelectActiveProfile(id: string) {
   if (page.value === "overview") return;
   const p = profileForID(id);
-  if (!p) return;
+  if (!p || !profileMatchesTarget(p, page.value)) return;
   emit("selectProfile", p);
   emit("activate", page.value);
+}
+
+function onSaveProfile() {
+  if (page.value === "overview") return;
+  emit("save", page.value);
 }
 
 function onSaveAndActivate() {
@@ -322,35 +408,38 @@ watch(
       <div v-if="error" class="modalError">{{ error }}</div>
       <div v-else-if="loading" class="loading providersLoading">加载中...</div>
       <template v-else>
-        <div class="providersSplit toolsSplit">
-          <div class="providersNav toolsList">
-            <div class="providersNavGroup">
-              <div class="providersNavTitle">配置</div>
-              <button
-                type="button"
-                class="providersNavItem toolsItem"
-                :class="{ active: page === 'claude' }"
-                @click="openTargetPage('claude')"
-              >
-                Claude Code
-              </button>
-              <button
-                type="button"
-                class="providersNavItem toolsItem"
-                :class="{ active: page === 'codex' }"
-                @click="openTargetPage('codex')"
-              >
-                Codex
-              </button>
-              <button
-                type="button"
-                class="providersNavItem toolsItem"
-                :class="{ active: page === 'secretary' }"
-                @click="openTargetPage('secretary')"
-              >
-                秘书
-              </button>
-            </div>
+        <div class="providersSplit">
+          <div v-if="page !== 'overview'" class="providersNav" role="tablist" aria-label="工具配置切换">
+            <button
+              type="button"
+              role="tab"
+              class="providersNavItem"
+              :class="{ active: page === 'claude' }"
+              :aria-selected="page === 'claude'"
+              @click="openTargetPage('claude')"
+            >
+              Claude Code
+            </button>
+            <button
+              type="button"
+              role="tab"
+              class="providersNavItem"
+              :class="{ active: page === 'codex' }"
+              :aria-selected="page === 'codex'"
+              @click="openTargetPage('codex')"
+            >
+              Codex
+            </button>
+            <button
+              type="button"
+              role="tab"
+              class="providersNavItem"
+              :class="{ active: page === 'secretary' }"
+              :aria-selected="page === 'secretary'"
+              @click="openTargetPage('secretary')"
+            >
+              秘书
+            </button>
           </div>
 
           <div class="providersEditor toolsEditor">
@@ -438,7 +527,7 @@ watch(
                   <div class="providersSubsectionTitle">已保存配置（点击切换编辑）</div>
                   <div class="providersProfilesList">
                     <button
-                      v-for="p in profiles"
+                      v-for="p in pageProfiles"
                       :key="p.id"
                       type="button"
                       class="providersProfileBtn"
@@ -448,7 +537,7 @@ watch(
                     >
                       {{ profileLabel(p) }}
                     </button>
-                    <div v-if="!profiles.length" class="tinyHint">暂无已保存配置，请先填写并保存。</div>
+                    <div v-if="!pageProfiles.length" class="tinyHint">暂无已保存配置，请先填写并保存。</div>
                   </div>
                 </div>
 
@@ -457,16 +546,13 @@ watch(
                   <input v-model="editNameModel" placeholder="例如：Anthropic / OpenAI / My Provider" autocomplete="off" />
                 </label>
 
-                <div v-if="!editID.trim()" class="providersSubsection providersEnvImportCard">
-                  <div class="providersSubsectionTitle">新建配置可选操作</div>
-                  <div class="tinyHint">你可以先手动填写，或从环境变量一次性填充。</div>
-                  <div class="providersEnvImportActions">
-                    <button type="button" @click="emit('importEnv', page)" :disabled="saving">从环境变量填充</button>
-                  </div>
-                </div>
-
                 <div class="providersSubsection">
-                  <div class="providersSubsectionTitle">授权</div>
+                  <div class="providersSubsectionHead">
+                    <div class="providersSubsectionTitle">授权</div>
+                    <button v-if="!editID.trim()" type="button" @click="emit('importEnv', page)" :disabled="saving">
+                      从环境变量填充
+                    </button>
+                  </div>
 
                   <div v-if="page === 'claude'" class="toolsEditorGrid providersSubsectionGrid">
                     <label class="full">
@@ -666,11 +752,11 @@ watch(
                       切换当前启用配置（{{ targetLabel(page) }}，会立即生效）
                       <select
                         :value="activeIDFor(page)"
-                        :disabled="saving || !profiles.length"
+                        :disabled="saving || !pageProfiles.length"
                         @change="onSelectActiveProfile(($event.target as HTMLSelectElement).value)"
                       >
                         <option value="" disabled>未启用（请选择…）</option>
-                        <option v-for="p in profiles" :key="p.id" :value="p.id">
+                        <option v-for="p in pageProfiles" :key="p.id" :value="p.id">
                           {{ profileLabel(p) }}
                         </option>
                       </select>
@@ -679,7 +765,7 @@ watch(
                 </div>
 
                 <div class="providersFooterActions">
-                  <button type="button" @click="emit('save')" :disabled="saving || !editName.trim()">
+                  <button type="button" @click="onSaveProfile" :disabled="saving || !editName.trim()">
                     仅保存
                   </button>
                   <button
@@ -742,23 +828,42 @@ watch(
 }
 
 .providersSplit {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
   flex: 1;
   min-height: 0;
 }
 
 .providersNav {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
   overflow: auto;
 }
 
-.providersNavTitle {
-  padding: 2px 2px 6px;
-  font-size: 12px;
-  font-weight: 800;
-  color: var(--text-sub);
+.providersNavItem {
+  width: auto;
+  text-align: center;
+  padding: 8px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--border-color);
+  background: transparent;
 }
 
-.providersNavGroup + .providersNavGroup {
-  margin-top: 10px;
+.providersNavItem:hover {
+  background: var(--bg-subtle);
+}
+
+.providersNavItem.active {
+  border-color: rgba(20, 184, 166, 0.35);
+  background: rgba(20, 184, 166, 0.08);
+}
+
+.providersNavItem:focus-visible {
+  outline: 2px solid rgba(20, 184, 166, 0.55);
+  outline-offset: 2px;
 }
 
 .providersEditor {
@@ -895,19 +1000,20 @@ watch(
   margin-bottom: 6px;
 }
 
+.providersSubsectionHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.providersSubsectionHead .providersSubsectionTitle {
+  margin-bottom: 0;
+}
+
 .providersSubsectionGrid {
   margin-top: 10px;
-}
-
-.providersEnvImportCard {
-  grid-column: 1 / -1;
-  display: grid;
-  gap: 8px;
-}
-
-.providersEnvImportActions {
-  display: flex;
-  justify-content: flex-start;
 }
 
 .providersFooterActions {

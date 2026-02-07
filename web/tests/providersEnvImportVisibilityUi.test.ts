@@ -8,6 +8,7 @@ function readText(relativePath: string) {
 
 test("Env import action is visible only for unsaved new profile", () => {
   const panel = readText("../src/components/ProvidersPanel.vue");
+  assert.ok(!panel.includes("providersEnvImportCard"));
   assert.match(panel, /v-if="!editID\.trim\(\)"/);
-  assert.match(panel, /v-if="!editID\.trim\(\)"[\s\S]*从环境变量填充/s);
+  assert.match(panel, /providersSubsectionTitle">授权<\/div>[\s\S]*v-if="!editID\.trim\(\)"[\s\S]*从环境变量填充/s);
 });

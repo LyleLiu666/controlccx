@@ -183,3 +183,50 @@ func TestStoreUpsert_RejectsDuplicateName(t *testing.T) {
 		t.Fatalf("upsert same profile name: %v", err)
 	}
 }
+
+func TestStoreUpsert_AssignsToolByTargetContent(t *testing.T) {
+	s, err := NewStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	p, err := s.Upsert(Profile{
+		Name: "CodexOnly",
+		Targets: Targets{
+			Codex: CodexTarget{
+				BaseURL: "https://api.openai.com",
+				Model:   "gpt-5.2",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Upsert: %v", err)
+	}
+	if got := p.Tool; got != "codex" {
+		t.Fatalf("tool got=%q want=%q", got, "codex")
+	}
+}
+
+func TestStoreUpsert_PreservesExplicitTool(t *testing.T) {
+	s, err := NewStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	p, err := s.Upsert(Profile{
+		Name: "SecHTTP",
+		Tool: "secretary",
+		Targets: Targets{
+			Secretary: SecretaryTarget{
+				Backend: "simple-http",
+				SimpleHTTP: SecretarySimpleHTTP{
+					BaseURL: "https://api.anthropic.com",
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Upsert: %v", err)
+	}
+	if got := p.Tool; got != "secretary" {
+		t.Fatalf("tool got=%q want=%q", got, "secretary")
+	}
+}

@@ -497,6 +497,7 @@ export type ProviderTargets = {
 export type ProviderProfile = {
   id: string;
   name: string;
+  tool?: "claude" | "codex" | "secretary";
   targets: ProviderTargets;
   sync_live?: ProviderSyncLive;
   created_at?: string;
