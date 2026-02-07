@@ -239,11 +239,6 @@ function startNewForTarget(t: ProviderTarget) {
   secretarySimpleHTTPBaseURLModel.value = "https://api.anthropic.com";
 }
 
-function startNewAndImportEnv(t: ProviderTarget) {
-  startNewForTarget(t);
-  emit("importEnv", t);
-}
-
 function onSelectEditProfile(id: string) {
   const p = profileForID(id);
   if (!p) return;
@@ -318,18 +313,9 @@ watch(
     </div>
 
     <div class="providersBody">
-      <div v-if="storagePath || authStatus?.warnings?.length" class="providersMeta">
+      <div v-if="storagePath" class="providersMeta">
         <div v-if="storagePath" class="settingsMeta providersStorage">
           存储位置: <span class="mono">{{ storagePath }}</span>
-        </div>
-        <div v-if="authStatus?.warnings?.length" class="providersWarning">
-          <div class="providersWarningTitle">检测到可导入的环境变量</div>
-          <div class="tinyHint">
-            环境变量仅用于辅助填充，不会覆盖已保存配置。新建配置后可点击“新建并导入环境变量”。
-          </div>
-          <div class="providersWarningList mono">
-            <div v-for="w in authStatus.warnings" :key="w">{{ w }}</div>
-          </div>
         </div>
       </div>
 
@@ -443,7 +429,6 @@ watch(
 
                 <div class="providersEditorHeadActions">
                   <button type="button" @click="startNewForTarget(page)" :disabled="saving">新建配置</button>
-                  <button type="button" @click="startNewAndImportEnv(page)" :disabled="saving">新建并导入环境变量</button>
                   <button type="button" @click="emit('delete')" :disabled="saving || !editID.trim()">删除配置</button>
                 </div>
               </div>
@@ -471,6 +456,14 @@ watch(
                   配置名称
                   <input v-model="editNameModel" placeholder="例如：Anthropic / OpenAI / My Provider" autocomplete="off" />
                 </label>
+
+                <div v-if="!editID.trim()" class="providersSubsection providersEnvImportCard">
+                  <div class="providersSubsectionTitle">新建配置可选操作</div>
+                  <div class="tinyHint">你可以先手动填写，或从环境变量一次性填充。</div>
+                  <div class="providersEnvImportActions">
+                    <button type="button" @click="emit('importEnv', page)" :disabled="saving">从环境变量填充</button>
+                  </div>
+                </div>
 
                 <div class="providersSubsection">
                   <div class="providersSubsectionTitle">授权</div>
@@ -906,6 +899,17 @@ watch(
   margin-top: 10px;
 }
 
+.providersEnvImportCard {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 8px;
+}
+
+.providersEnvImportActions {
+  display: flex;
+  justify-content: flex-start;
+}
+
 .providersFooterActions {
   display: flex;
   gap: 10px;
@@ -927,16 +931,4 @@ watch(
   margin: 0;
 }
 
-.providersWarning {
-  border: 1px solid color-mix(in srgb, var(--border-color) 80%, rgba(245, 158, 11, 0.25) 20%);
-  background: color-mix(in srgb, var(--bg-subtle) 78%, rgba(245, 158, 11, 0.06) 22%);
-  border-radius: 14px;
-  padding: 10px 12px;
-  display: grid;
-  gap: 6px;
-}
-
-.providersWarningTitle {
-  font-weight: 900;
-}
 </style>

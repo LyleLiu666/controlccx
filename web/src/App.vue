@@ -4534,6 +4534,10 @@ async function importProvidersFromLive() {
 
 async function importProvidersFromEnv(target: "claude" | "codex" | "secretary") {
   providersError.value = "";
+  if (providerEditID.value.trim()) {
+    providersError.value = "仅新建配置可导入环境变量";
+    return;
+  }
   providersSaving.value = true;
   try {
     const res = await importProviderEnv({ target });

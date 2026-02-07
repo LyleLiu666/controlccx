@@ -8,14 +8,18 @@ function readText(relativePath: string) {
 
 test("Providers page exposes importing env vars into a new profile", () => {
   const panel = readText("../src/components/ProvidersPanel.vue");
-  assert.ok(panel.includes("新建并导入环境变量"));
+  assert.ok(!panel.includes("新建并导入环境变量"));
+  assert.ok(!panel.includes("检测到可导入的环境变量"));
+  assert.ok(panel.includes("新建配置可选操作"));
+  assert.ok(panel.includes("从环境变量填充"));
+  assert.ok(panel.includes("你可以先手动填写，或从环境变量一次性填充。"));
   assert.match(panel, /emit\(["']importEnv["']/);
-  assert.ok(panel.includes("环境变量仅用于辅助填充，不会覆盖已保存配置"));
 });
 
 test("App wires provider env import handler", () => {
   const appVue = readText("../src/App.vue");
   assert.match(appVue, /@importEnv="importProvidersFromEnv"/);
   assert.match(appVue, /async function importProvidersFromEnv\(/);
+  assert.match(appVue, /if \(providerEditID\.value\.trim\(\)\) \{[\s\S]*仅新建配置可导入环境变量/s);
   assert.match(appVue, /await importProviderEnv\(\{ target \}\)/);
 });
