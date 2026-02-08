@@ -15,7 +15,9 @@ const {
   sources,
   retention,
   entries,
-  nextCursor,
+  pageNumber,
+  hasPrevPage,
+  hasNextPage,
   selectedID,
   detail,
   querySources,
@@ -27,7 +29,8 @@ const {
   queryStreams,
   init,
   search,
-  loadMore,
+  loadPrevPage,
+  loadNextPage,
   selectEntry,
   resetFilters,
 } = useAudit();
@@ -51,6 +54,14 @@ function onReset() {
 
 function onSelect(id: string) {
   void selectEntry(id);
+}
+
+function onPrevPage() {
+  void loadPrevPage();
+}
+
+function onNextPage() {
+  void loadNextPage();
 }
 
 onMounted(() => {
@@ -119,7 +130,12 @@ onMounted(() => {
       <div class="auditActions full">
         <button type="button" class="primary" @click="onSearch" :disabled="loading">查询</button>
         <button type="button" @click="onReset" :disabled="loading">重置</button>
-        <button type="button" @click="loadMore" :disabled="loadingMore || !nextCursor">更多</button>
+      </div>
+      <div class="auditPager full">
+        <button type="button" @click="onPrevPage" :disabled="loadingMore || !hasPrevPage">上一页</button>
+        <span class="tinyHint">第 {{ pageNumber }} 页</span>
+        <button type="button" @click="onNextPage" :disabled="loadingMore || !hasNextPage">下一页</button>
+        <span v-if="loadingMore" class="tinyHint">翻页中…</span>
       </div>
     </div>
 
@@ -169,6 +185,8 @@ onMounted(() => {
   min-height: 0;
   flex-direction: column;
   gap: 12px;
+  padding: 16px;
+  box-sizing: border-box;
 }
 
 .auditHeader {
@@ -237,6 +255,13 @@ onMounted(() => {
 .auditActions {
   display: flex;
   flex-wrap: wrap;
+  gap: 8px;
+}
+
+.auditPager {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   gap: 8px;
 }
 
@@ -317,6 +342,10 @@ onMounted(() => {
 }
 
 @media (max-width: 1100px) {
+  .auditPanel {
+    padding: 12px;
+  }
+
   .auditFilters {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -326,4 +355,3 @@ onMounted(() => {
   }
 }
 </style>
-
