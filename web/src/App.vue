@@ -1053,6 +1053,12 @@ const runsOpen = ref(false);
 const isPhone = ref(false);
 const sessionsDrawerOpen = ref(false);
 const sessionsFiltersOpen = ref(false);
+const sessionsHostAllowsPanel = computed(
+  () => !skillsOpen.value && !contextOpen.value && !filesOpen.value,
+);
+const showSessionsPanel = computed(
+  () => sessionsHostAllowsPanel.value && sessionsDrawerOpen.value,
+);
 
 const sessionActionsMenuOpen = ref(false);
 const sessionActionsMenuSession = ref<SessionGroup | null>(null);
@@ -2423,7 +2429,7 @@ async function onCreateTask(opts?: { idempotencyKey?: string }): Promise<boolean
 
 async function onSelectTask(id: string) {
   closeSessionActionsMenu();
-  sessionsDrawerOpen.value = false;
+  if (isPhone.value) sessionsDrawerOpen.value = false;
   await selectTask(id, {
     closeMobileDrawer: isPhone.value ? () => { sessionsDrawerOpen.value = false; } : undefined,
     closeRunsModal: () => { runsOpen.value = false; },
@@ -2587,7 +2593,7 @@ function closeNewRun() {
 function goHome() {
   closeSessionActionsMenu();
   runsOpen.value = false;
-  sessionsDrawerOpen.value = false;
+  if (isPhone.value) sessionsDrawerOpen.value = false;
   selectedTaskId.value = "";
   if (contextOpen.value) {
     closeContextPage();
@@ -2613,7 +2619,7 @@ async function runFromHome() {
   homeRunBusy.value = true;
   try {
     const ok = await onCreateTask();
-    if (ok) sessionsDrawerOpen.value = false;
+    if (ok && isPhone.value) sessionsDrawerOpen.value = false;
   } finally {
     homeRunBusy.value = false;
   }
@@ -2911,7 +2917,6 @@ function applyRouteFromLocation() {
         return;
       }
     }
-    sessionsDrawerOpen.value = false;
     skillsGovernanceOpen.value = false;
     skillsOpen.value = false;
     contextOpen.value = false;
@@ -4261,7 +4266,6 @@ function openProvidersSettings() {
   skillsGovernanceOpen.value = false;
   skillsOpen.value = false;
   contextOpen.value = false;
-  sessionsDrawerOpen.value = false;
   providersSettingsOpen.value = true;
   navigateTo("/providers");
   void refreshProviders();
@@ -4986,7 +4990,7 @@ onMounted(async () => {
       sessionsDrawerOpen.value = false;
       sessionsFiltersOpen.value = false;
     } else {
-      sessionsDrawerOpen.value = false;
+      sessionsDrawerOpen.value = true;
     }
   };
   phoneMqHandler();
@@ -5593,6 +5597,7 @@ watch(
     <header class="header">
       <div class="headerLeft">
         <button
+          v-if="sessionsHostAllowsPanel"
           type="button"
           class="menuBtn"
           @click="sessionsDrawerOpen = !sessionsDrawerOpen"
@@ -5702,9 +5707,9 @@ watch(
     <div v-if="controlPlaneBanner" class="banner warn">{{ controlPlaneBanner }}</div>
     <div v-if="errorBanner" class="banner">{{ errorBanner }}</div>
 
-    <div v-if="isPhone && sessionsDrawerOpen" class="sessionsOverlay" @click.self="sessionsDrawerOpen = false"></div>
+    <div v-if="isPhone && showSessionsPanel" class="sessionsOverlay" @click.self="sessionsDrawerOpen = false"></div>
 
-    <div class="grid" :class="{ gridSingle: !sessionsDrawerOpen }">
+    <div class="grid" :class="{ gridSingle: !showSessionsPanel }">
 	      <section v-if="skillsOpen" class="panel skillsPagePanel">
 	          <div class="skillsPageWrap">
             <SkillsPanel
@@ -5736,58 +5741,6 @@ watch(
 	          <ContextPanel @back="closeContextPage" />
 	        </div>
 	      </section>
-
-      <ProvidersPanel
-        v-else-if="providersSettingsOpen"
-        :loading="providersLoading"
-        :saving="providersSaving"
-        :error="providersError"
-        :storagePath="providersStoragePath"
-        :authStatus="authStatus"
-        :profiles="providersProfiles"
-        :active="providersActive"
-        :editID="providerEditID"
-        v-model:editName="providerEditName"
-        v-model:claudeBaseURL="providerClaudeBaseURL"
-        v-model:claudeApiKey="providerClaudeApiKey"
-        v-model:claudeAuthToken="providerClaudeAuthToken"
-        v-model:claudeModel="providerClaudeModel"
-        v-model:claudeSmallFastModel="providerClaudeSmallFastModel"
-        v-model:claudeSyncLive="providerClaudeSyncLive"
-        :claudeApiKeyHint="providerClaudeApiKeyHint"
-        :claudeAuthTokenHint="providerClaudeAuthTokenHint"
-        v-model:codexBaseURL="providerCodexBaseURL"
-        v-model:codexApiKey="providerCodexApiKey"
-        v-model:codexModel="providerCodexModel"
-        v-model:codexReasoningEffort="providerCodexReasoningEffort"
-        v-model:codexSyncLive="providerCodexSyncLive"
-        :codexApiKeyHint="providerCodexApiKeyHint"
-        v-model:secretarySimpleHTTPBaseURL="providerSecretarySimpleHTTPBaseURL"
-        v-model:secretarySimpleHTTPApiKey="providerSecretarySimpleHTTPApiKey"
-        v-model:secretarySimpleHTTPAuthToken="providerSecretarySimpleHTTPAuthToken"
-        v-model:secretarySimpleHTTPModel="providerSecretarySimpleHTTPModel"
-        :secretarySimpleHTTPApiKeyHint="providerSecretarySimpleHTTPApiKeyHint"
-        :secretarySimpleHTTPAuthTokenHint="providerSecretarySimpleHTTPAuthTokenHint"
-        v-model:chatBackend="chatBackend"
-        :speedTesting="providerSpeedTesting"
-        :speedTestTarget="providerSpeedTestTarget"
-        :claudeSpeedTest="providerClaudeSpeedTest"
-        :codexSpeedTest="providerCodexSpeedTest"
-        :pingTesting="providerPingTesting"
-        :pingResult="providerPingResult"
-        @close="closeProvidersPage"
-        @newProfile="startNewProvider"
-        @refresh="refreshProviders"
-        @importLive="importProvidersFromLive"
-        @importEnv="importProvidersFromEnv"
-        @export="exportProvidersToFile"
-        @speedtest="runProviderSpeedTest"
-        @pingtest="runProviderPingTest"
-        @selectProfile="loadProviderIntoEditor"
-        @delete="deleteProviderProfile"
-        @save="saveProviderProfile"
-        @activate="activateProviderTarget"
-      />
 
       <FilesModal
         v-else-if="filesOpen"
@@ -5827,7 +5780,7 @@ watch(
 
       <template v-else>
       <section
-        v-if="sessionsDrawerOpen"
+        v-if="showSessionsPanel"
         class="panel sessionsPanel"
         :class="{ sessionsDrawerPanel: isPhone }"
       >
@@ -6095,20 +6048,72 @@ watch(
             type="button"
             class="loadMore"
             @click="loadMoreSessions"
-          >
-            Load more
-          </button>
-        </div>
-      </section>
+	          >
+	            Load more
+	          </button>
+	        </div>
+	      </section>
 
-      <section class="panel">
-        <div v-if="!selectedSession" class="detail homeStart">
-          <div class="homeHero">
-            <div class="homeTitle">开始新任务</div>
-            <div class="homeSub">
-              默认不展示历史记录；需要时点击左上角「≡」打开会话列表。
-            </div>
-          </div>
+      <ProvidersPanel
+        v-if="providersSettingsOpen"
+        :loading="providersLoading"
+        :saving="providersSaving"
+        :error="providersError"
+        :storagePath="providersStoragePath"
+        :authStatus="authStatus"
+        :profiles="providersProfiles"
+        :active="providersActive"
+        :editID="providerEditID"
+        v-model:editName="providerEditName"
+        v-model:claudeBaseURL="providerClaudeBaseURL"
+        v-model:claudeApiKey="providerClaudeApiKey"
+        v-model:claudeAuthToken="providerClaudeAuthToken"
+        v-model:claudeModel="providerClaudeModel"
+        v-model:claudeSmallFastModel="providerClaudeSmallFastModel"
+        v-model:claudeSyncLive="providerClaudeSyncLive"
+        :claudeApiKeyHint="providerClaudeApiKeyHint"
+        :claudeAuthTokenHint="providerClaudeAuthTokenHint"
+        v-model:codexBaseURL="providerCodexBaseURL"
+        v-model:codexApiKey="providerCodexApiKey"
+        v-model:codexModel="providerCodexModel"
+        v-model:codexReasoningEffort="providerCodexReasoningEffort"
+        v-model:codexSyncLive="providerCodexSyncLive"
+        :codexApiKeyHint="providerCodexApiKeyHint"
+        v-model:secretarySimpleHTTPBaseURL="providerSecretarySimpleHTTPBaseURL"
+        v-model:secretarySimpleHTTPApiKey="providerSecretarySimpleHTTPApiKey"
+        v-model:secretarySimpleHTTPAuthToken="providerSecretarySimpleHTTPAuthToken"
+        v-model:secretarySimpleHTTPModel="providerSecretarySimpleHTTPModel"
+        :secretarySimpleHTTPApiKeyHint="providerSecretarySimpleHTTPApiKeyHint"
+        :secretarySimpleHTTPAuthTokenHint="providerSecretarySimpleHTTPAuthTokenHint"
+        v-model:chatBackend="chatBackend"
+        :speedTesting="providerSpeedTesting"
+        :speedTestTarget="providerSpeedTestTarget"
+        :claudeSpeedTest="providerClaudeSpeedTest"
+        :codexSpeedTest="providerCodexSpeedTest"
+        :pingTesting="providerPingTesting"
+        :pingResult="providerPingResult"
+        @close="closeProvidersPage"
+        @newProfile="startNewProvider"
+        @refresh="refreshProviders"
+        @importLive="importProvidersFromLive"
+        @importEnv="importProvidersFromEnv"
+        @export="exportProvidersToFile"
+        @speedtest="runProviderSpeedTest"
+        @pingtest="runProviderPingTest"
+        @selectProfile="loadProviderIntoEditor"
+        @delete="deleteProviderProfile"
+        @save="saveProviderProfile"
+        @activate="activateProviderTarget"
+      />
+
+	      <section v-else class="panel">
+	        <div v-if="!selectedSession" class="detail homeStart">
+	          <div class="homeHero">
+	            <div class="homeTitle">开始新任务</div>
+	            <div class="homeSub">
+	              桌面端默认展示会话列表；移动端可点击左上角「≡」打开。
+	            </div>
+	          </div>
 
           <div v-if="anyRunning" class="homeStatus">
             <div class="homeStatusText">
