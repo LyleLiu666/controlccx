@@ -218,6 +218,68 @@ func TestAPI_SessionContinue_ConflictsWhenHasQueuedOrRunning(t *testing.T) {
 	}
 }
 
+func TestAPI_SessionContinue_ConflictsWhenAwaitingApproval(t *testing.T) {
+	ctx := context.Background()
+	conn, err := db.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "controlccx.db")})
+	if err != nil {
+		t.Fatalf("db open: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+
+	taskStore := tasks.NewStore(conn)
+	hub := events.NewHub()
+	apiSvc := &API{Tasks: taskStore, Hub: hub}
+
+	task, err := taskStore.CreateTask(ctx, tasks.CreateTaskInput{
+		WorkerType: tasks.WorkerClaudeCode,
+		Mode:       tasks.ModeNew,
+		Prompt:     "do A",
+		WorkDir:    ".",
+		SessionID:  "sess-1",
+	})
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	if err := taskStore.SetRunning(ctx, task.ID); err != nil {
+		t.Fatalf("set running: %v", err)
+	}
+	if err := taskStore.SetAwaitingApproval(ctx, task.ID); err != nil {
+		t.Fatalf("set awaiting approval: %v", err)
+	}
+
+	srv := httptest.NewServer(apiSvc.Handler())
+	t.Cleanup(srv.Close)
+
+	key := tasks.SessionKeyForTask(task)
+	payload := map[string]any{"prompt": "continue"}
+	buf, _ := json.Marshal(payload)
+	res, err := http.Post(srv.URL+"/api/sessions/"+url.PathEscape(key)+"/continue", "application/json", bytes.NewReader(buf))
+	if err != nil {
+		t.Fatalf("post continue: %v", err)
+	}
+	t.Cleanup(func() { _ = res.Body.Close() })
+	if res.StatusCode != http.StatusConflict {
+		t.Fatalf("status=%d, want 409", res.StatusCode)
+	}
+	var conflict struct {
+		Error          string `json:"error"`
+		ExistingTaskID string `json:"existing_task_id"`
+		ExistingStatus string `json:"existing_status"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&conflict); err != nil {
+		t.Fatalf("decode conflict: %v", err)
+	}
+	if conflict.Error != "session_task_in_flight" {
+		t.Fatalf("error=%q, want %q", conflict.Error, "session_task_in_flight")
+	}
+	if conflict.ExistingTaskID != task.ID {
+		t.Fatalf("existing_task_id=%q, want %q", conflict.ExistingTaskID, task.ID)
+	}
+	if conflict.ExistingStatus != string(tasks.StatusAwaitingApproval) {
+		t.Fatalf("existing_status=%q, want %q", conflict.ExistingStatus, tasks.StatusAwaitingApproval)
+	}
+}
+
 func TestAPI_SessionContinue_SupportsLegacySessionKey(t *testing.T) {
 	ctx := context.Background()
 	conn, err := db.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "controlccx.db")})

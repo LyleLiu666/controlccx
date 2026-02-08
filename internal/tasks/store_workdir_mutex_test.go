@@ -47,6 +47,47 @@ func TestStore_CreateTask_RejectsWhenWorkdirBusy(t *testing.T) {
 	}
 }
 
+func TestStore_CreateTask_RejectsWhenWorkdirBusyAwaitingApproval(t *testing.T) {
+	ctx := context.Background()
+	conn, err := db.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "controlccx.db")})
+	if err != nil {
+		t.Fatalf("db open: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+
+	store := NewStore(conn)
+
+	first, err := store.CreateTask(ctx, CreateTaskInput{
+		WorkerType: WorkerExec,
+		Mode:       ModeNew,
+		Prompt:     "echo 1",
+		WorkDir:    ".",
+	})
+	if err != nil {
+		t.Fatalf("create first: %v", err)
+	}
+	if err := store.SetAwaitingApproval(ctx, first.ID); err != nil {
+		t.Fatalf("SetAwaitingApproval: %v", err)
+	}
+
+	_, err = store.CreateTask(ctx, CreateTaskInput{
+		WorkerType: WorkerExec,
+		Mode:       ModeNew,
+		Prompt:     "echo 2",
+		WorkDir:    ".",
+	})
+	var busy *WorkDirBusyError
+	if !errors.As(err, &busy) {
+		t.Fatalf("err=%v, want WorkDirBusyError", err)
+	}
+	if busy.ExistingTaskID != first.ID {
+		t.Fatalf("existing_task_id=%q want %q", busy.ExistingTaskID, first.ID)
+	}
+	if busy.ExistingStatus != StatusAwaitingApproval {
+		t.Fatalf("existing_status=%q want %q", busy.ExistingStatus, StatusAwaitingApproval)
+	}
+}
+
 func TestStore_CreateTask_IdempotencyBypassesWorkdirBusy(t *testing.T) {
 	ctx := context.Background()
 	conn, err := db.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "controlccx.db")})

@@ -107,3 +107,99 @@ func TestAPI_ResumeTask_SingleFlightPerSession(t *testing.T) {
 		t.Fatalf("tasks=%d, want 2", len(list))
 	}
 }
+
+func TestAPI_ResumeTask_SingleFlightPerSession_AwaitingApproval(t *testing.T) {
+	ctx := context.Background()
+	conn, err := db.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "controlccx.db")})
+	if err != nil {
+		t.Fatalf("db open: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+
+	taskStore := tasks.NewStore(conn)
+	hub := events.NewHub()
+
+	apiSvc := &API{
+		Tasks:   taskStore,
+		Workers: nil,
+		Hub:     hub,
+	}
+
+	prev, err := taskStore.CreateTask(ctx, tasks.CreateTaskInput{
+		WorkerType: tasks.WorkerClaudeCode,
+		Mode:       tasks.ModeNew,
+		Prompt:     "x",
+		WorkDir:    ".",
+		SessionID:  "sess-1",
+	})
+	if err != nil {
+		t.Fatalf("create prev: %v", err)
+	}
+	now := time.Now().UTC()
+	exitCode := 0
+	if err := taskStore.FinishTask(ctx, prev.ID, tasks.FinishTaskInput{
+		Status:     tasks.StatusSucceeded,
+		ExitCode:   &exitCode,
+		Error:      "",
+		SessionID:  prev.SessionID,
+		FinishedAt: now,
+	}); err != nil {
+		t.Fatalf("finish prev: %v", err)
+	}
+
+	inFlight, err := taskStore.CreateTask(ctx, tasks.CreateTaskInput{
+		WorkerType: tasks.WorkerClaudeCode,
+		Mode:       tasks.ModeResume,
+		Prompt:     "continue",
+		WorkDir:    ".",
+		SessionID:  "sess-1",
+	})
+	if err != nil {
+		t.Fatalf("create inflight: %v", err)
+	}
+	if err := taskStore.SetRunning(ctx, inFlight.ID); err != nil {
+		t.Fatalf("set running: %v", err)
+	}
+	if err := taskStore.SetAwaitingApproval(ctx, inFlight.ID); err != nil {
+		t.Fatalf("set awaiting approval: %v", err)
+	}
+
+	srv := httptest.NewServer(apiSvc.Handler())
+	t.Cleanup(srv.Close)
+
+	payload := map[string]any{"prompt": "continue"}
+	buf, _ := json.Marshal(payload)
+	res, err := http.Post(srv.URL+"/api/tasks/"+prev.ID+"/resume", "application/json", bytes.NewReader(buf))
+	if err != nil {
+		t.Fatalf("post resume: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusConflict {
+		t.Fatalf("status=%d, want %d", res.StatusCode, http.StatusConflict)
+	}
+	var conflict struct {
+		Error          string `json:"error"`
+		ExistingTaskID string `json:"existing_task_id"`
+		ExistingStatus string `json:"existing_status"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&conflict); err != nil {
+		t.Fatalf("decode conflict: %v", err)
+	}
+	if conflict.Error != "session_task_in_flight" {
+		t.Fatalf("error=%q, want %q", conflict.Error, "session_task_in_flight")
+	}
+	if conflict.ExistingTaskID != inFlight.ID {
+		t.Fatalf("existing_task_id=%q, want %q", conflict.ExistingTaskID, inFlight.ID)
+	}
+	if conflict.ExistingStatus != string(tasks.StatusAwaitingApproval) {
+		t.Fatalf("existing_status=%q, want %q", conflict.ExistingStatus, tasks.StatusAwaitingApproval)
+	}
+
+	list, err := taskStore.ListTasksWithOptions(ctx, 50, tasks.ListTasksOptions{IncludeDeleted: true})
+	if err != nil {
+		t.Fatalf("list tasks: %v", err)
+	}
+	if len(list) != 2 {
+		t.Fatalf("tasks=%d, want 2", len(list))
+	}
+}
