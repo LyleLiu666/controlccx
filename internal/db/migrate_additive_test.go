@@ -97,4 +97,11 @@ func TestMigrate_AdditiveTables_AllowedAtSchemaVersion(t *testing.T) {
 	`).Scan(&name); err != nil {
 		t.Fatalf("expected idx_tasks_latest_execution_sort index: %v", err)
 	}
+
+	if err := conn.QueryRowContext(ctx, `
+		SELECT name FROM sqlite_master
+		WHERE type='table' AND name='secretary_events';
+	`).Scan(&name); err != nil {
+		t.Fatalf("expected secretary_events table: %v", err)
+	}
 }

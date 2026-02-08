@@ -136,6 +136,16 @@ func Migrate(ctx context.Context, conn *sql.DB) error {
 		);`,
 		`CREATE INDEX IF NOT EXISTS idx_tasks_latest_execution_sort
 			ON tasks(COALESCE(finished_at, started_at, created_at) DESC, created_at DESC, id DESC);`,
+		`CREATE TABLE IF NOT EXISTS secretary_events (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			ts INTEGER NOT NULL,
+			run_id TEXT NOT NULL,
+			kind TEXT NOT NULL,
+			protocol TEXT NOT NULL,
+			step INTEGER NOT NULL,
+			event_json TEXT NOT NULL
+		);`,
+		`CREATE INDEX IF NOT EXISTS idx_secretary_events_run_id_id ON secretary_events(run_id, id);`,
 	)
 
 	for _, stmt := range stmts {

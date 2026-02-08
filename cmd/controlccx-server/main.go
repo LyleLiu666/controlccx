@@ -134,6 +134,7 @@ func main() {
 	}
 
 	chatStore := chat.NewStore(conn)
+	secretaryEvents := secretary.NewEventStore(conn)
 
 	authStore, err := auth.Load(filepath.Join(cfg.Paths.DataDir, "secrets.json"))
 	if err != nil {
@@ -153,7 +154,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	secretarySvc := secretary.NewService(cfg, taskStore, chatStore, authStore, providersStore)
+	secretarySvc := secretary.NewService(cfg, taskStore, chatStore, authStore, providersStore, secretary.WithEventStore(secretaryEvents))
 
 	hub := events.NewHub()
 

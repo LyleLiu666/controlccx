@@ -167,6 +167,67 @@ func TestService_Send_ToolLoopAndPersistsVisibleMessages(t *testing.T) {
 	}
 }
 
+func TestService_Send_PersistsEventSinkEvents(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "controlccx.db")
+
+	conn, err := db.Open(ctx, db.Options{Path: dbPath})
+	if err != nil {
+		t.Fatalf("db open: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+
+	taskStore := tasks.NewStore(conn)
+	chatStore := chat.NewStore(conn)
+	eventStore := NewEventStore(conn)
+
+	c := &scriptedClient{
+		responses: []string{"hello"},
+	}
+
+	svc := NewService(config.Default(), taskStore, chatStore, nil, nil, WithClient(c), WithEventStore(eventStore))
+
+	reply, err := svc.Send(ctx, "hi")
+	if err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	if strings.TrimSpace(reply) != "hello" {
+		t.Fatalf("reply=%q", reply)
+	}
+
+	events, err := eventStore.Tail(ctx, 500)
+	if err != nil {
+		t.Fatalf("tail events: %v", err)
+	}
+	if len(events) < 2 {
+		t.Fatalf("events len=%d want >=2", len(events))
+	}
+
+	runID := strings.TrimSpace(events[0].RunID)
+	if runID == "" {
+		t.Fatalf("expected non-empty run_id")
+	}
+	hasRequest := false
+	for _, ev := range events {
+		if strings.TrimSpace(ev.RunID) != runID {
+			t.Fatalf("mixed run_id: %q vs %q", ev.RunID, runID)
+		}
+		if ev.Kind == agentsdk.EventKindLLMRequest {
+			hasRequest = true
+		}
+		if strings.TrimSpace(ev.EventJSON) == "" {
+			t.Fatalf("empty event_json for kind=%q", ev.Kind)
+		}
+		var anyPayload any
+		if err := json.Unmarshal([]byte(ev.EventJSON), &anyPayload); err != nil {
+			t.Fatalf("unmarshal event_json: %v", err)
+		}
+	}
+	if !hasRequest {
+		t.Fatalf("expected at least one llm_request event")
+	}
+}
+
 func extractFirstTagValue(s string, tag string) string {
 	open := "<" + tag + ">"
 	close := "</" + tag + ">"

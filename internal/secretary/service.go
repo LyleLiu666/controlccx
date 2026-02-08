@@ -2,9 +2,12 @@ package secretary
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 	"unicode/utf8"
 
 	"controlccx/internal/agentsdk"
@@ -21,6 +24,7 @@ type Service struct {
 	cfg       config.Config
 	tasks     *tasks.Store
 	chat      *chat.Store
+	events    *EventStore
 	auth      *auth.Store
 	providers *providers.Store
 
@@ -34,6 +38,12 @@ type Option func(*Service)
 func WithClient(client agentsdk.Client) Option {
 	return func(s *Service) {
 		s.client = client
+	}
+}
+
+func WithEventStore(store *EventStore) Option {
+	return func(s *Service) {
+		s.events = store
 	}
 }
 
@@ -98,11 +108,23 @@ func (s *Service) Send(ctx context.Context, userText string) (string, error) {
 	}
 	messages = append(messages, agentsdk.Message{Role: "user", Content: msg})
 
+	var sink agentsdk.EventSink
+	var runID string
+	if s.events != nil {
+		runID = newRunID()
+		sink = agentsdk.EventSinkFunc(func(ctx context.Context, ev agentsdk.Event) {
+			_ = s.events.Append(ctx, runID, ev)
+		})
+	}
+
 	out, runErr := xmlprotocol.RunLoop(ctx, xmlprotocol.RunLoopInput{
 		Client:   client,
 		Messages: messages,
 		Executor: reg,
 		MaxSteps: 60,
+		Callbacks: xmlprotocol.Callbacks{
+			EventSink: sink,
+		},
 	})
 
 	reply := strings.TrimSpace(out)
@@ -120,6 +142,9 @@ func (s *Service) Send(ctx context.Context, userText string) (string, error) {
 		return "", err
 	}
 	_ = s.chat.PruneKeepLast(ctx, 2000)
+	if s.events != nil {
+		_ = s.events.PruneKeepLastRuns(ctx, 200)
+	}
 	return reply, nil
 }
 
@@ -232,4 +257,12 @@ func truncateRunes(s string, max int) string {
 	}
 	b.WriteRune('…')
 	return b.String()
+}
+
+func newRunID() string {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err == nil {
+		return hex.EncodeToString(b[:])
+	}
+	return fmt.Sprintf("%d", time.Now().UnixNano())
 }
