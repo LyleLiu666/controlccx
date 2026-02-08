@@ -10,8 +10,7 @@ test("Tools modal layout keeps body scrollable on small screens", () => {
   const css = readText("../src/App.css");
   assert.match(
     css,
-    /\.toolsBody\s*\{[^}]*display:\s*flex;[^}]*flex-direction:\s*column;[^}]*min-height:\s*0;[^}]*overflow:\s*auto;/s,
+    /:deep\(\.toolsBody\)\s*\{[^}]*display:\s*flex;[^}]*flex-direction:\s*column;[^}]*min-height:\s*0;[^}]*overflow:\s*auto;/s,
   );
-  assert.match(css, /\.toolsSplit\s*\{[^}]*flex:\s*1;[^}]*min-height:\s*0;/s);
+  assert.match(css, /:deep\(\.toolsSplit\)\s*\{[^}]*flex:\s*1;[^}]*min-height:\s*0;/s);
 });
-

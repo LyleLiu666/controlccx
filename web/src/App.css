@@ -1731,12 +1731,12 @@ h2 {
   height: min(660px, 90vh);
 }
 
-.toolsModal {
+:deep(.toolsModal) {
   width: min(980px, 95vw);
   height: min(660px, 90vh);
 }
 
-.toolsBody {
+:deep(.toolsBody) {
   padding-top: 12px;
   display: flex;
   flex-direction: column;
@@ -1745,7 +1745,7 @@ h2 {
   overflow: auto;
 }
 
-.toolsSplit {
+:deep(.toolsSplit) {
   display: grid;
   grid-template-columns: 240px 1fr;
   gap: 14px;
@@ -1753,7 +1753,7 @@ h2 {
   min-height: 0;
 }
 
-.toolsList {
+:deep(.toolsList) {
   border: 1px solid var(--border-color);
   border-radius: 14px;
   overflow: auto;
@@ -1764,11 +1764,11 @@ h2 {
   gap: 8px;
 }
 
-.toolsListTitleRow {
+:deep(.toolsListTitleRow) {
   padding: 2px 2px 6px;
 }
 
-.toolsItem {
+:deep(.toolsItem) {
   width: 100%;
   text-align: left;
   padding: 10px 10px;
@@ -1777,16 +1777,16 @@ h2 {
   background: transparent;
 }
 
-.toolsItem:hover {
+:deep(.toolsItem:hover) {
   background: var(--bg-subtle);
 }
 
-.toolsItem.active {
+:deep(.toolsItem.active) {
   border-color: rgba(20, 184, 166, 0.35);
   background: rgba(20, 184, 166, 0.08);
 }
 
-.toolsEditor {
+:deep(.toolsEditor) {
   border: 1px solid var(--border-color);
   border-radius: 14px;
   overflow: auto;
@@ -1794,14 +1794,14 @@ h2 {
   min-height: 0;
 }
 
-.toolsEditorGrid {
+:deep(.toolsEditorGrid) {
   display: grid;
   gap: 12px;
 }
 
-.toolsEditorGrid input,
-.toolsEditorGrid textarea,
-.toolsEditorGrid select {
+:deep(.toolsEditorGrid input),
+:deep(.toolsEditorGrid textarea),
+:deep(.toolsEditorGrid select) {
   width: 100%;
 }
 
