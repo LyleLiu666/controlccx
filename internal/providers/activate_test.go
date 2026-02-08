@@ -120,7 +120,7 @@ func TestStoreActivate_SecretaryOnlyUpdatesActive(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
-	p, err := providersStore.Upsert(Profile{Name: "P3", Targets: Targets{Secretary: SecretaryTarget{Backend: "auto"}}})
+	p, err := providersStore.Upsert(Profile{Name: "P3", Targets: Targets{Secretary: SecretaryTarget{Backend: "simple-http"}}})
 	if err != nil {
 		t.Fatalf("Upsert: %v", err)
 	}

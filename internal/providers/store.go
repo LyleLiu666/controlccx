@@ -44,10 +44,11 @@ type CodexTarget struct {
 }
 
 type SecretaryTarget struct {
-	Backend string `json:"backend,omitempty"` // auto | simple-http | claude | codex
+	// Backend is kept for backwards compatibility; the secretary currently uses simple-http only.
+	Backend string `json:"backend,omitempty"` // simple-http
 
-	// SimpleHTTP config is used when the Secretary selects backend=simple-http (or when simple-http is chosen in auto
-	// mode). This is intentionally separate from the Claude Code target so Secretary can use an independent auth set.
+	// SimpleHTTP config is used by the Secretary backend. This is intentionally separate from the Claude Code target
+	// so Secretary can use an independent auth set.
 	SimpleHTTP SecretarySimpleHTTP `json:"simple_http,omitempty"`
 }
 
@@ -401,6 +402,21 @@ func normalizeProfile(p Profile) Profile {
 	p.Targets.Secretary.SimpleHTTP.AuthToken = strings.TrimSpace(p.Targets.Secretary.SimpleHTTP.AuthToken)
 	p.Targets.Secretary.SimpleHTTP.Model = strings.TrimSpace(p.Targets.Secretary.SimpleHTTP.Model)
 
+	backend := strings.ToLower(strings.TrimSpace(p.Targets.Secretary.Backend))
+	if backend != "" && backend != "simple-http" {
+		backend = "simple-http"
+	}
+	if backend == "" {
+		if p.Tool == "secretary" ||
+			strings.TrimSpace(p.Targets.Secretary.SimpleHTTP.BaseURL) != "" ||
+			strings.TrimSpace(p.Targets.Secretary.SimpleHTTP.APIKey) != "" ||
+			strings.TrimSpace(p.Targets.Secretary.SimpleHTTP.AuthToken) != "" ||
+			strings.TrimSpace(p.Targets.Secretary.SimpleHTTP.Model) != "" {
+			backend = "simple-http"
+		}
+	}
+	p.Targets.Secretary.Backend = backend
+
 	if p.Tool == "" {
 		p.Tool = inferProfileTool(p.Targets)
 	}
@@ -452,8 +468,7 @@ func hasCodexTargetData(t CodexTarget) bool {
 }
 
 func hasSecretaryTargetData(t SecretaryTarget) bool {
-	backend := strings.TrimSpace(t.Backend)
-	if backend == "simple-http" || backend == "claude" || backend == "codex" {
+	if strings.TrimSpace(t.Backend) != "" {
 		return true
 	}
 	return strings.TrimSpace(t.SimpleHTTP.BaseURL) != "" ||
