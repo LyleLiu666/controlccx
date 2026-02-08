@@ -403,12 +403,6 @@ watch(
     </div>
 
     <div class="providersBody">
-      <div v-if="storagePath" class="providersMeta">
-        <div v-if="storagePath" class="settingsMeta providersStorage">
-          存储位置: <span class="mono">{{ storagePath }}</span>
-        </div>
-      </div>
-
       <div v-if="error" class="modalError">{{ error }}</div>
       <div v-else-if="loading" class="loading providersLoading">加载中...</div>
       <template v-else>
@@ -1119,15 +1113,6 @@ watch(
 
 .providersLoading {
   padding: 20px 0;
-}
-
-.providersMeta {
-  display: grid;
-  gap: 10px;
-}
-
-.providersStorage {
-  margin: 0;
 }
 
 </style>
