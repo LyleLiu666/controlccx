@@ -14,4 +14,3 @@ func withDefaultTimeout(ctx context.Context, d time.Duration) (context.Context, 
 	}
 	return context.WithTimeout(ctx, d)
 }
-
