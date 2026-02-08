@@ -714,9 +714,6 @@ const providerCodexModel = ref("");
 const providerCodexReasoningEffort = ref("");
 const providerCodexSyncLive = ref(false);
 
-const providerSecretaryBackend = ref<"auto" | "simple-http" | "claude" | "codex">(
-  "auto",
-);
 const providerSecretarySimpleHTTPBaseURL = ref("");
 const providerSecretarySimpleHTTPApiKey = ref("");
 const providerSecretarySimpleHTTPAuthToken = ref("");
@@ -3897,7 +3894,6 @@ function startNewProvider() {
   providerCodexReasoningEffort.value = "";
   providerCodexSyncLive.value = false;
 
-  providerSecretaryBackend.value = "auto";
   providerSecretarySimpleHTTPBaseURL.value = "";
   providerSecretarySimpleHTTPApiKey.value = "";
   providerSecretarySimpleHTTPAuthToken.value = "";
@@ -3930,11 +3926,6 @@ function loadProviderIntoEditor(p: ProviderProfile) {
   providerCodexSyncLive.value = !!p?.sync_live?.codex;
   providerCodexApiKey.value = "";
 
-  const backend = String(p?.targets?.secretary?.backend ?? "").trim();
-  providerSecretaryBackend.value =
-    backend === "simple-http" || backend === "claude" || backend === "codex"
-      ? backend
-      : "auto";
   providerSecretarySimpleHTTPBaseURL.value = String(
     p?.targets?.secretary?.simple_http?.base_url ?? "",
   ).trim();
@@ -4013,7 +4004,7 @@ async function saveProviderProfile(target: "claude" | "codex" | "secretary") {
           reasoning_effort: providerCodexReasoningEffort.value.trim(),
         },
         secretary: {
-          backend: providerSecretaryBackend.value,
+          backend: "simple-http",
           simple_http: {
             base_url: providerSecretarySimpleHTTPBaseURL.value.trim(),
             api_key: providerSecretarySimpleHTTPApiKey.value.trim(),
@@ -4089,7 +4080,7 @@ async function activateProviderTarget(target: "claude" | "codex" | "secretary") 
           reasoning_effort: providerCodexReasoningEffort.value.trim(),
         },
         secretary: {
-          backend: providerSecretaryBackend.value,
+          backend: "simple-http",
           simple_http: {
             base_url: providerSecretarySimpleHTTPBaseURL.value.trim(),
             api_key: providerSecretarySimpleHTTPApiKey.value.trim(),
@@ -4249,7 +4240,6 @@ async function importProvidersFromEnv(target: "claude" | "codex" | "secretary") 
         profile?.targets?.codex?.reasoning_effort ?? providerCodexReasoningEffort.value,
       ).trim();
     } else {
-      providerSecretaryBackend.value = "simple-http";
       providerSecretarySimpleHTTPBaseURL.value = String(
         profile?.targets?.secretary?.simple_http?.base_url ?? providerSecretarySimpleHTTPBaseURL.value,
       ).trim();
@@ -5611,7 +5601,6 @@ watch(
         v-model:secretarySimpleHTTPModel="providerSecretarySimpleHTTPModel"
         :secretarySimpleHTTPApiKeyHint="providerSecretarySimpleHTTPApiKeyHint"
         :secretarySimpleHTTPAuthTokenHint="providerSecretarySimpleHTTPAuthTokenHint"
-        v-model:secretaryBackend="providerSecretaryBackend"
         :speedTesting="providerSpeedTesting"
         :speedTestTarget="providerSpeedTestTarget"
         :claudeSpeedTest="providerClaudeSpeedTest"

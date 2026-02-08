@@ -8,7 +8,6 @@ import type {
   ProviderSpeedTestResult,
 } from "../types";
 
-type SecretaryBackend = "auto" | "simple-http" | "claude" | "codex";
 type ProviderTarget = "claude" | "codex" | "secretary";
 type ProvidersPage = "overview" | ProviderTarget;
 type SpeedTestTarget = "claude" | "codex" | "";
@@ -21,7 +20,6 @@ const props = defineProps<{
   authStatus: AuthStatus | null;
   profiles: ProviderProfile[];
   active: ProviderActiveSelection;
-  secretaryBackend: SecretaryBackend;
 
   editID: string;
   editName: string;
@@ -89,8 +87,6 @@ const emit = defineEmits<{
   (e: "update:secretarySimpleHTTPApiKey", value: string): void;
   (e: "update:secretarySimpleHTTPAuthToken", value: string): void;
   (e: "update:secretarySimpleHTTPModel", value: string): void;
-
-  (e: "update:secretaryBackend", value: SecretaryBackend): void;
 }>();
 
 const editNameModel = computed({
@@ -161,11 +157,6 @@ const secretarySimpleHTTPModelModel = computed({
   set: (value: string) => emit("update:secretarySimpleHTTPModel", value),
 });
 
-const secretaryBackendModel = computed({
-  get: () => props.secretaryBackend,
-  set: (value: SecretaryBackend) => emit("update:secretaryBackend", value),
-});
-
 const page = ref<ProvidersPage>("overview");
 
 function targetLabel(t: ProviderTarget): string {
@@ -231,7 +222,7 @@ function hasSecretaryTargetData(p: ProviderProfile | null | undefined): boolean 
   if (!p) return false;
   const secretary = p.targets?.secretary;
   const backend = String(secretary?.backend ?? "").trim();
-  if (backend === "simple-http" || backend === "claude" || backend === "codex") return true;
+  if (backend) return true;
   return (
     hasText(secretary?.simple_http?.base_url) ||
     hasText(secretary?.simple_http?.api_key) ||
@@ -347,10 +338,6 @@ function onSaveAndActivate() {
   if (page.value === "overview") return;
   emit("activate", page.value);
 }
-
-const showSecretaryHTTPNotice = computed<boolean>(() => {
-  return props.secretaryBackend === "auto" || props.secretaryBackend === "simple-http";
-});
 
 watch(
   () => props.loading,
@@ -483,11 +470,11 @@ watch(
                         当前启用：<span class="mono">{{ profileLabel(activeProfileFor('secretary')) }}</span>
                       </div>
                       <div>
-                        后端：<span class="mono">{{ secretaryBackendModel }}</span>
+                        后端：<span class="mono">simple-http</span>
                       </div>
                     </div>
                     <div class="providersOverviewCardActions">
-                      <span class="primaryPill">选择后端 / 配置</span>
+                      <span class="primaryPill">配置授权 / 模型</span>
                     </div>
                   </button>
                 </div>
@@ -644,47 +631,33 @@ watch(
 
                   <div v-else class="toolsEditorGrid providersSubsectionGrid">
                     <label class="full">
-                      秘书后端（对话/评审使用）
-                      <select v-model="secretaryBackendModel">
-                        <option value="auto">auto（优先 HTTP → Claude → Codex）</option>
-                        <option value="simple-http">simple-http（独立 HTTP）</option>
-                        <option value="claude">claude（复用 Claude Code）</option>
-                        <option value="codex">codex（复用 Codex）</option>
-                      </select>
+                      秘书后端（固定）
+                      <input value="simple-http" disabled />
                     </label>
 
-                    <div v-if="showSecretaryHTTPNotice">
-                      <div class="tinyHint">
-                        仅当秘书后端为 <span class="mono">simple-http</span> 或 <span class="mono">auto</span>（优先 HTTP）时，才会使用下方 HTTP 凭据。
-                      </div>
-                      <div class="providersMinorTitle">Simple HTTP（Anthropic 兼容）</div>
-                      <label class="full">
-                        Base URL
-                        <input v-model="secretarySimpleHTTPBaseURLModel" placeholder="https://api.anthropic.com" autocomplete="off" />
-                      </label>
-                      <label class="full">
-                        Auth Token（优先）
-                        <input
-                          v-model="secretarySimpleHTTPAuthTokenModel"
-                          type="password"
-                          :placeholder="secretarySimpleHTTPAuthTokenHint ? `留空保留（${secretarySimpleHTTPAuthTokenHint}）` : '留空保留'"
-                          autocomplete="off"
-                        />
-                      </label>
-                      <label class="full">
-                        API Key
-                        <input
-                          v-model="secretarySimpleHTTPApiKeyModel"
-                          type="password"
-                          :placeholder="secretarySimpleHTTPApiKeyHint ? `留空保留（${secretarySimpleHTTPApiKeyHint}）` : '留空保留'"
-                          autocomplete="off"
-                        />
-                      </label>
-                    </div>
-
-                    <div v-else class="tinyHint">
-                      当前选择为 <span class="mono">{{ secretaryBackendModel }}</span>；秘书会复用对应工具的启用配置（AUTH + 模型）。
-                    </div>
+                    <div class="providersMinorTitle">Simple HTTP（Anthropic 兼容）</div>
+                    <label class="full">
+                      Base URL
+                      <input v-model="secretarySimpleHTTPBaseURLModel" placeholder="https://api.anthropic.com" autocomplete="off" />
+                    </label>
+                    <label class="full">
+                      Auth Token（优先）
+                      <input
+                        v-model="secretarySimpleHTTPAuthTokenModel"
+                        type="password"
+                        :placeholder="secretarySimpleHTTPAuthTokenHint ? `留空保留（${secretarySimpleHTTPAuthTokenHint}）` : '留空保留'"
+                        autocomplete="off"
+                      />
+                    </label>
+                    <label class="full">
+                      API Key
+                      <input
+                        v-model="secretarySimpleHTTPApiKeyModel"
+                        type="password"
+                        :placeholder="secretarySimpleHTTPApiKeyHint ? `留空保留（${secretarySimpleHTTPApiKeyHint}）` : '留空保留'"
+                        autocomplete="off"
+                      />
+                    </label>
                   </div>
                 </div>
 
@@ -720,60 +693,48 @@ watch(
                   </div>
 
                   <div v-else class="toolsEditorGrid providersSubsectionGrid">
-                    <div v-if="showSecretaryHTTPNotice">
-                      <div class="providersMinorTitle">Simple HTTP（Anthropic 兼容）</div>
-                      <label class="full">
-                        模型（model）
-                        <input v-model="secretarySimpleHTTPModelModel" placeholder="claude-3-5-sonnet-latest" autocomplete="off" />
-                      </label>
+                    <div class="providersMinorTitle">Simple HTTP（Anthropic 兼容）</div>
+                    <label class="full">
+                      模型（model）
+                      <input v-model="secretarySimpleHTTPModelModel" placeholder="claude-3-5-sonnet-latest" autocomplete="off" />
+                    </label>
 
-                      <div class="providersPingSection">
-                        <div class="providersMinorTitle">连通性测试</div>
-                        <div class="tinyHint">发送 ping，要求返回 pong（任意纯文本返回都算通过）。</div>
+                    <div class="providersPingSection">
+                      <div class="providersMinorTitle">连通性测试</div>
+                      <div class="tinyHint">发送 ping，要求返回 pong（任意纯文本返回都算通过）。</div>
 
-                        <div class="providersPingRow">
-                          <button type="button" @click="emit('pingtest')" :disabled="saving || pingTesting">
-                            <span v-if="pingTesting">测试中...</span>
-                            <span v-else>Ping 测试</span>
-                          </button>
+                      <div class="providersPingRow">
+                        <button type="button" @click="emit('pingtest')" :disabled="saving || pingTesting">
+                          <span v-if="pingTesting">测试中...</span>
+                          <span v-else>Ping 测试</span>
+                        </button>
 
-                          <div
-                            v-if="pingResult"
-                            class="speedTestResult mono"
-                            :class="{ ok: pingResult.ok, bad: !pingResult.ok }"
-                          >
-                            <span>{{ pingResult.ok ? "OK" : "失败" }}</span>
-                            <span v-if="pingResult.latency_ms != null">{{ pingResult.latency_ms }}ms</span>
-                            <span v-if="!pingResult.ok && (pingResult.hint || pingResult.error)">{{
-                              pingResult.hint || pingResult.error
-                            }}</span>
-                          </div>
-                        </div>
-
-                        <div v-if="pingResult && pingResult.endpoint" class="tinyHint">
-                          Endpoint: <span class="mono">{{ pingResult.endpoint }}</span>
-                        </div>
-                        <div v-if="pingResult && (pingResult.response || pingResult.error)" class="providersPingOutput mono">
-                          {{ pingResult.response || pingResult.error }}
+                        <div
+                          v-if="pingResult"
+                          class="speedTestResult mono"
+                          :class="{ ok: pingResult.ok, bad: !pingResult.ok }"
+                        >
+                          <span>{{ pingResult.ok ? "OK" : "失败" }}</span>
+                          <span v-if="pingResult.latency_ms != null">{{ pingResult.latency_ms }}ms</span>
+                          <span v-if="!pingResult.ok && (pingResult.hint || pingResult.error)">{{
+                            pingResult.hint || pingResult.error
+                          }}</span>
                         </div>
                       </div>
-                    </div>
-                    <div v-else class="tinyHint">
-                      当前选择为 <span class="mono">{{ secretaryBackendModel }}</span>；无需在此配置模型。
+
+                      <div v-if="pingResult && pingResult.endpoint" class="tinyHint">
+                        Endpoint: <span class="mono">{{ pingResult.endpoint }}</span>
+                      </div>
+                      <div v-if="pingResult && (pingResult.response || pingResult.error)" class="providersPingOutput mono">
+                        {{ pingResult.response || pingResult.error }}
+                      </div>
                     </div>
                   </div>
                 </div>
 
                 <div class="providersSubsection providersSubsectionEnable">
-                  <div class="providersSubsectionTitle">
-                    <template v-if="page === 'secretary' && showSecretaryHTTPNotice">启用（用于 simple-http）</template>
-                    <template v-else>启用</template>
-                  </div>
-                  <div v-if="page === 'secretary' && !showSecretaryHTTPNotice" class="tinyHint">
-                    当前后端为 <span class="mono">{{ secretaryBackendModel }}</span>；秘书会复用对应工具的启用配置，无需启用秘书配置。
-                    如需使用 <span class="mono">simple-http</span>，请先切换秘书后端。
-                  </div>
-                  <div v-else class="toolsEditorGrid providersSubsectionGrid">
+                  <div class="providersSubsectionTitle">启用</div>
+                  <div class="toolsEditorGrid providersSubsectionGrid">
                     <label class="full">
                       切换当前启用配置（{{ targetLabel(page) }}，会立即生效）
                       <select

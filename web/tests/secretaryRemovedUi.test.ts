@@ -18,6 +18,6 @@ test("App exposes secretary drawer while keeping providers integration", () => {
   assert.match(appVue, /onOpenSecretaryFromMenu/);
 
   assert.match(appVue, /<ProvidersPanel/);
-  assert.match(appVue, /v-model:secretaryBackend="providerSecretaryBackend"/);
+  assert.ok(!appVue.includes("v-model:secretaryBackend"));
   assert.match(appVue, /v-model:secretarySimpleHTTPBaseURL="providerSecretarySimpleHTTPBaseURL"/);
 });
