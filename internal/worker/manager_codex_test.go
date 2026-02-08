@@ -26,15 +26,15 @@ func TestManager_buildToolCommand_CodexDefaults(t *testing.T) {
 	wantModel := "gpt-5.2"
 	wantCfg := `model_reasoning_effort="xhigh"`
 
-	execIdx := indexOfAny(tool.Args, "e", "exec")
-	if execIdx < 0 {
-		t.Fatalf("args=%v, expected exec subcommand", tool.Args)
+	appIdx := indexOfAny(tool.Args, "app-server")
+	if appIdx < 0 {
+		t.Fatalf("args=%v, expected app-server subcommand", tool.Args)
 	}
-	if len(tool.Args) < execIdx+5 {
-		t.Fatalf("args=%v, want >= %d", tool.Args, execIdx+5)
+	if appIdx < 4 {
+		t.Fatalf("args=%v, want defaults before app-server", tool.Args)
 	}
-	if tool.Args[execIdx+1] != "-m" || tool.Args[execIdx+2] != wantModel || tool.Args[execIdx+3] != "-c" || tool.Args[execIdx+4] != wantCfg {
-		t.Fatalf("args near exec=%v, want [exec -m %s -c %s]", tool.Args[execIdx:min(execIdx+5, len(tool.Args))], wantModel, wantCfg)
+	if tool.Args[appIdx-4] != "-m" || tool.Args[appIdx-3] != wantModel || tool.Args[appIdx-2] != "-c" || tool.Args[appIdx-1] != wantCfg {
+		t.Fatalf("args=%v, want [-m %s -c %s app-server]", tool.Args, wantModel, wantCfg)
 	}
 }
 
@@ -63,23 +63,16 @@ func TestManager_buildToolCommand_CodexUsesStoredModelAndEffort(t *testing.T) {
 	}
 	wantCfg := `model_reasoning_effort="high"`
 
-	execIdx := indexOfAny(tool.Args, "e", "exec")
-	if execIdx < 0 {
-		t.Fatalf("args=%v, expected exec subcommand", tool.Args)
+	appIdx := indexOfAny(tool.Args, "app-server")
+	if appIdx < 0 {
+		t.Fatalf("args=%v, expected app-server subcommand", tool.Args)
 	}
-	if len(tool.Args) < execIdx+5 {
-		t.Fatalf("args=%v, want >= %d", tool.Args, execIdx+5)
+	if appIdx < 4 {
+		t.Fatalf("args=%v, want defaults before app-server", tool.Args)
 	}
-	if tool.Args[execIdx+1] != "-m" || tool.Args[execIdx+2] != "o3" || tool.Args[execIdx+3] != "-c" || tool.Args[execIdx+4] != wantCfg {
-		t.Fatalf("args near exec=%v, want [exec -m o3 -c %s]", tool.Args[execIdx:min(execIdx+5, len(tool.Args))], wantCfg)
+	if tool.Args[appIdx-4] != "-m" || tool.Args[appIdx-3] != "o3" || tool.Args[appIdx-2] != "-c" || tool.Args[appIdx-1] != wantCfg {
+		t.Fatalf("args=%v, want [-m o3 -c %s app-server]", tool.Args, wantCfg)
 	}
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }
 
 func indexOfAny(items []string, values ...string) int {

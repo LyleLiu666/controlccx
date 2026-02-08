@@ -45,7 +45,7 @@ func TestManager_consumeStdout_ClaudeCode_StoresRawStdout(t *testing.T) {
 		`{"type":"assistant","session_id":"sess-1","result":"final answer"}`,
 	}, "\n")
 
-	m.consumeStdout(ctx, task, tasks.WorkerClaudeCode, strings.NewReader(out), nil, &sidMu, &sid, func() {}, &resumeFailureState{}, &blockedState{})
+	m.consumeStdout(ctx, task, tasks.WorkerClaudeCode, strings.NewReader(out), nil, nil, &sidMu, &sid, func() {}, &resumeFailureState{}, &blockedState{})
 
 	logs, err := store.ListLogs(ctx, task.ID, 0, 2000)
 	if err != nil {
@@ -108,7 +108,7 @@ func TestManager_consumeStdout_ClaudeCode_StoresRawWhenParseFails(t *testing.T) 
 		sidMu sync.Mutex
 		sid   string
 	)
-	m.consumeStdout(ctx, task, tasks.WorkerClaudeCode, strings.NewReader("not-json\n"), nil, &sidMu, &sid, func() {}, &resumeFailureState{}, &blockedState{})
+	m.consumeStdout(ctx, task, tasks.WorkerClaudeCode, strings.NewReader("not-json\n"), nil, nil, &sidMu, &sid, func() {}, &resumeFailureState{}, &blockedState{})
 
 	logs, err := store.ListLogs(ctx, task.ID, 0, 2000)
 	if err != nil {
@@ -154,11 +154,11 @@ func TestManager_consumeStdout_Codex_StoresRawStdout(t *testing.T) {
 		sid   string
 	)
 	out := strings.Join([]string{
-		`{"type":"noop","thread_id":"thr-1"}`,
-		`{"type":"item.completed","thread_id":"thr-1","item":{"type":"agent_message","text":"hello"}}`,
+		`{"method":"thread/started","params":{"thread":{"id":"thr-1"}}}`,
+		`{"method":"item/completed","params":{"threadId":"thr-1","turnId":"turn-1","item":{"id":"it-1","type":"agentMessage","text":"hello"}}}`,
 	}, "\n")
 
-	m.consumeStdout(ctx, task, tasks.WorkerCodex, strings.NewReader(out), nil, &sidMu, &sid, func() {}, &resumeFailureState{}, &blockedState{})
+	m.consumeStdout(ctx, task, tasks.WorkerCodex, strings.NewReader(out), nil, nil, &sidMu, &sid, func() {}, &resumeFailureState{}, &blockedState{})
 
 	logs, err := store.ListLogs(ctx, task.ID, 0, 2000)
 	if err != nil {
@@ -223,11 +223,11 @@ func TestManager_consumeStdout_Codex_KeepsWorkspaceGreeting(t *testing.T) {
 	)
 	greeting := "I notice you're currently in (/tmp/.ccx/workspaces/abc/copy) directory."
 	out := strings.Join([]string{
-		fmt.Sprintf(`{"type":"item.completed","thread_id":"thr-1","item":{"type":"agent_message","text":%q}}`, greeting),
-		`{"type":"item.completed","thread_id":"thr-1","item":{"type":"agent_message","text":"real answer"}}`,
+		fmt.Sprintf(`{"method":"item/completed","params":{"threadId":"thr-1","turnId":"turn-1","item":{"id":"it-1","type":"agentMessage","text":%q}}}`, greeting),
+		`{"method":"item/completed","params":{"threadId":"thr-1","turnId":"turn-1","item":{"id":"it-2","type":"agentMessage","text":"real answer"}}}`,
 	}, "\n")
 
-	m.consumeStdout(ctx, task, tasks.WorkerCodex, strings.NewReader(out), nil, &sidMu, &sid, func() {}, &resumeFailureState{}, &blockedState{})
+	m.consumeStdout(ctx, task, tasks.WorkerCodex, strings.NewReader(out), nil, nil, &sidMu, &sid, func() {}, &resumeFailureState{}, &blockedState{})
 
 	logs, err := store.ListLogs(ctx, task.ID, 0, 2000)
 	if err != nil {

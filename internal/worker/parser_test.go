@@ -49,5 +49,29 @@ func TestParseCodexJSONLine(t *testing.T) {
 			t.Fatalf("assistant=%q, want ab", parsed.AssistantText)
 		}
 	})
-}
 
+	t.Run("rpc thread started", func(t *testing.T) {
+		line := []byte(`{"method":"thread/started","params":{"thread":{"id":"thr-1"}}}`)
+		parsed, err := parseCodexJSONLine(line)
+		if err != nil {
+			t.Fatalf("parse: %v", err)
+		}
+		if parsed.SessionID != "thr-1" {
+			t.Fatalf("session_id=%q, want thr-1", parsed.SessionID)
+		}
+	})
+
+	t.Run("rpc item completed agentMessage", func(t *testing.T) {
+		line := []byte(`{"method":"item/completed","params":{"threadId":"thr-1","turnId":"turn-1","item":{"id":"it-1","type":"agentMessage","text":"hello"}}}`)
+		parsed, err := parseCodexJSONLine(line)
+		if err != nil {
+			t.Fatalf("parse: %v", err)
+		}
+		if parsed.SessionID != "thr-1" {
+			t.Fatalf("session_id=%q, want thr-1", parsed.SessionID)
+		}
+		if parsed.AssistantText != "hello" {
+			t.Fatalf("assistant=%q, want hello", parsed.AssistantText)
+		}
+	})
+}

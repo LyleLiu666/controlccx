@@ -252,6 +252,8 @@ func (m *Manager) run(ctx context.Context, task tasks.Task) error {
 	var (
 		claudePeer  *claudeProtocolPeer
 		claudeStdin io.WriteCloser
+		codexPeer   *codexAppServerPeer
+		codexStdin  io.WriteCloser
 	)
 	if driver == tasks.WorkerClaudeCode {
 		claudeStdin, err = cmd.StdinPipe()
@@ -259,6 +261,12 @@ func (m *Manager) run(ctx context.Context, task tasks.Task) error {
 			return m.failTask(task.ID, fmt.Errorf("stdin pipe: %w", err))
 		}
 		claudePeer = newClaudeProtocolPeer(claudeStdin)
+	} else if driver == tasks.WorkerCodex {
+		codexStdin, err = cmd.StdinPipe()
+		if err != nil {
+			return m.failTask(task.ID, fmt.Errorf("stdin pipe: %w", err))
+		}
+		codexPeer = newCodexAppServerPeer(codexStdin)
 	} else if tool.Stdin != "" {
 		cmd.Stdin = stringsReader(tool.Stdin)
 	}
@@ -271,6 +279,9 @@ func (m *Manager) run(ctx context.Context, task tasks.Task) error {
 	}
 	if claudeStdin != nil {
 		defer func() { _ = claudeStdin.Close() }()
+	}
+	if codexPeer != nil {
+		defer func() { _ = codexPeer.CloseStdin() }()
 	}
 
 	var (
@@ -285,7 +296,7 @@ func (m *Manager) run(ctx context.Context, task tasks.Task) error {
 
 	go func() {
 		defer wg.Done()
-		m.consumeStdout(ctx, task, driver, stdout, claudePeer, &lastSessionIDMu, &lastSessionID, cancel, resumeFailure, blockedState)
+		m.consumeStdout(ctx, task, driver, stdout, claudePeer, codexPeer, &lastSessionIDMu, &lastSessionID, cancel, resumeFailure, blockedState)
 	}()
 
 	go func() {
@@ -309,6 +320,10 @@ func (m *Manager) run(ctx context.Context, task tasks.Task) error {
 				m.appendLog(task.ID, tasks.LogSystem, fmt.Sprintf("claude protocol send user message error: %v", err))
 			}
 		}()
+	}
+	if driver == tasks.WorkerCodex && codexPeer != nil {
+		prompt := tool.Stdin
+		go m.runCodexAppServer(ctx, task, codexPeer, prompt, resumeFailure, cancel)
 	}
 
 	wg.Wait()
@@ -504,14 +519,14 @@ func (m *Manager) withCodexDefaults(args []string) []string {
 	if len(args) == 0 {
 		return args
 	}
-	execIdx := -1
+	cmdIdx := -1
 	for i, a := range args {
-		if a == "e" || a == "exec" {
-			execIdx = i
+		if a == "e" || a == "exec" || a == "app-server" {
+			cmdIdx = i
 			break
 		}
 	}
-	if execIdx < 0 {
+	if cmdIdx < 0 {
 		return args
 	}
 
@@ -538,9 +553,9 @@ func (m *Manager) withCodexDefaults(args []string) []string {
 		return args
 	}
 	out := make([]string, 0, len(args)+len(insert))
-	out = append(out, args[:execIdx+1]...)
+	out = append(out, args[:cmdIdx]...)
 	out = append(out, insert...)
-	out = append(out, args[execIdx+1:]...)
+	out = append(out, args[cmdIdx:]...)
 	return out
 }
 
@@ -721,7 +736,7 @@ func mergeEnvWithReport(base []string, additions map[string]string) ([]string, [
 	return out, applied
 }
 
-func (m *Manager) consumeStdout(ctx context.Context, task tasks.Task, driver tasks.WorkerType, stdout io.Reader, claudePeer *claudeProtocolPeer, sidMu *sync.Mutex, sid *string, cancel context.CancelFunc, resumeFailure *resumeFailureState, blocked *blockedState) {
+func (m *Manager) consumeStdout(ctx context.Context, task tasks.Task, driver tasks.WorkerType, stdout io.Reader, claudePeer *claudeProtocolPeer, codexPeer *codexAppServerPeer, sidMu *sync.Mutex, sid *string, cancel context.CancelFunc, resumeFailure *resumeFailureState, blocked *blockedState) {
 	reader := newLineReader(stdout)
 	for {
 		line, tooLong, err := readLineWithLimit(reader, defaultJSONLineMaxBytes)
@@ -749,6 +764,11 @@ func (m *Manager) consumeStdout(ctx context.Context, task tasks.Task, driver tas
 			m.handleApprovalRequired(task, driver, string(line), line, blocked)
 		} else if driver == tasks.WorkerClaudeCode {
 			m.handleClaudeControlRequest(ctx, task, line, claudePeer)
+		}
+		if driver == tasks.WorkerCodex && codexPeer != nil {
+			codexPeer.HandleLine(line, func(id json.RawMessage, method string, params json.RawMessage) {
+				go m.handleCodexServerRequest(ctx, task, codexPeer, id, method, params)
+			}, nil)
 		}
 
 		var parsed parsedLine

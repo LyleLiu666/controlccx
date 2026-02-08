@@ -170,33 +170,18 @@ func buildCodex(cfg config.Config, task tasks.Task) (ToolCommand, error) {
 	unsafe := cfg.Workers.UnsafeAutomation || task.UnsafeAutomation
 
 	args := []string{}
+	if task.CodexSearch {
+		// Codex feature flags are opt-in; search is disabled by default.
+		args = append(args, "--enable", "web_search_request")
+	}
 	if unsafe {
 		args = append(args, "--dangerously-bypass-approvals-and-sandbox")
-	} else {
-		policy := strings.TrimSpace(task.CodexApprovalPolicy)
-		if policy == "" {
-			policy = "never"
-		}
-		args = append(args, "--ask-for-approval", policy)
-
-		sandbox := strings.TrimSpace(task.CodexSandbox)
-		if sandbox == "" {
-			// Safe default: allow workspace writes while keeping Codex sandboxing/approvals.
-			sandbox = "workspace-write"
-		}
-		args = append(args, "--sandbox", sandbox)
-
-		if task.CodexSearch {
-			args = append(args, "--search")
-		}
 	}
-
-	args = append(args, "exec", "--skip-git-repo-check")
-
-	if task.Mode == tasks.ModeResume && strings.TrimSpace(task.SessionID) != "" {
-		args = append(args, "--json", "resume", strings.TrimSpace(task.SessionID), "-")
-	} else {
-		args = append(args, "-C", workdir, "--json", "-")
+	args = append(args, "app-server")
+	if strings.TrimSpace(os.Getenv("CONTROLCCX_TEST_CODEX_HELPER_PROCESS")) != "" {
+		// Test-only escape hatch: allow worker tests to use the Go test binary as a fake Codex app-server.
+		// The helper process can access the original CLI args via flag.Args() after "--".
+		args = append([]string{"-test.run=TestCCXCodexHelperProcess", "--", "ccx-helper-codex"}, args...)
 	}
 
 	tool := ToolCommand{

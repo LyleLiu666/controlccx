@@ -27,11 +27,11 @@ func TestBuildToolCommand_Default_DoesNotUseDangerousFlags(t *testing.T) {
 	if hasArg(codexTool.Args, "--dangerously-bypass-approvals-and-sandbox") {
 		t.Fatalf("unexpected codex dangerous flag in args=%v", codexTool.Args)
 	}
-	if !hasArg(codexTool.Args, "--ask-for-approval") || !hasArg(codexTool.Args, "never") {
-		t.Fatalf("expected codex ask-for-approval never in args=%v", codexTool.Args)
+	if !hasArg(codexTool.Args, "app-server") {
+		t.Fatalf("expected codex app-server in args=%v", codexTool.Args)
 	}
-	if !hasArg(codexTool.Args, "--sandbox") || !hasArg(codexTool.Args, "workspace-write") {
-		t.Fatalf("expected codex sandbox workspace-write in args=%v", codexTool.Args)
+	if hasArg(codexTool.Args, "--ask-for-approval") || hasArg(codexTool.Args, "--sandbox") || hasArg(codexTool.Args, "--search") {
+		t.Fatalf("unexpected codex exec-only flags in args=%v", codexTool.Args)
 	}
 }
 
@@ -56,11 +56,11 @@ func TestBuildToolCommand_UnsafeAutomation_UsesDangerousFlags(t *testing.T) {
 	if !hasArg(codexTool.Args, "--dangerously-bypass-approvals-and-sandbox") {
 		t.Fatalf("expected codex dangerous flag in args=%v", codexTool.Args)
 	}
-	if hasArg(codexTool.Args, "--ask-for-approval") {
-		t.Fatalf("unexpected codex ask-for-approval flag in args=%v", codexTool.Args)
+	if !hasArg(codexTool.Args, "app-server") {
+		t.Fatalf("expected codex app-server in args=%v", codexTool.Args)
 	}
-	if hasArg(codexTool.Args, "--sandbox") {
-		t.Fatalf("unexpected codex sandbox flag in args=%v", codexTool.Args)
+	if hasArg(codexTool.Args, "--ask-for-approval") || hasArg(codexTool.Args, "--sandbox") || hasArg(codexTool.Args, "--search") {
+		t.Fatalf("unexpected codex exec-only flags in args=%v", codexTool.Args)
 	}
 }
 
@@ -84,11 +84,11 @@ func TestBuildToolCommand_PerRunUnsafeAutomation_UsesDangerousFlags(t *testing.T
 	if !hasArg(codexTool.Args, "--dangerously-bypass-approvals-and-sandbox") {
 		t.Fatalf("expected codex dangerous flag in args=%v", codexTool.Args)
 	}
-	if hasArg(codexTool.Args, "--ask-for-approval") {
-		t.Fatalf("unexpected codex ask-for-approval flag in args=%v", codexTool.Args)
+	if !hasArg(codexTool.Args, "app-server") {
+		t.Fatalf("expected codex app-server in args=%v", codexTool.Args)
 	}
-	if hasArg(codexTool.Args, "--sandbox") {
-		t.Fatalf("unexpected codex sandbox flag in args=%v", codexTool.Args)
+	if hasArg(codexTool.Args, "--ask-for-approval") || hasArg(codexTool.Args, "--sandbox") || hasArg(codexTool.Args, "--search") {
+		t.Fatalf("unexpected codex exec-only flags in args=%v", codexTool.Args)
 	}
 }
 
