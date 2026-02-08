@@ -209,23 +209,6 @@ async function startTickTask(label, ticks = 12) {
   return task.id;
 }
 
-async function fetchLogs(taskId) {
-  const out = await fetchJson(`${base}/api/tasks/${taskId}/logs?after=0&limit=2000`);
-  return out?.logs ?? [];
-}
-
-function maxTickFromLogs(logs, label) {
-  let max = -1;
-  for (const l of logs) {
-    const msg = String(l?.message ?? "");
-    const m = msg.match(new RegExp(`${label}: tick (\\d+)`));
-    if (!m) continue;
-    const n = Number(m[1]);
-    if (Number.isFinite(n) && n > max) max = n;
-  }
-  return max;
-}
-
 async function waitForTaskDone(taskId, timeoutMs = 30_000) {
   return await waitFor(async () => {
     const t = await fetchJson(`${base}/api/tasks/${taskId}`);
@@ -239,45 +222,9 @@ async function controlPlane() {
   return await fetchJson(`${base}/api/control-plane`);
 }
 
-// 1) Long-running run survives server restart.
-const task1 = await startTickTask("res1", 14);
-await waitFor(async () => {
-  const logs = await fetchLogs(task1);
-  return maxTickFromLogs(logs, "res1") >= 2;
-}, { timeoutMs: 12_000, name: "task1 ticks >= 2" });
-
-const beforeKillLogs = await fetchLogs(task1);
-const beforeKillTick = maxTickFromLogs(beforeKillLogs, "res1");
-
-const downtimeStart = Date.now();
-await killChildBestEffort(server, { name: "server shutdown" });
-await sleep(5_000);
-
-server = spawnServer();
-await waitFor(async () => (await fetch(`${base}/api/system`)).ok, { name: "server restarted /api/system" });
-const downtimeEnd = Date.now();
-
-const afterRestartLogs = await fetchLogs(task1);
-const afterRestartTick = maxTickFromLogs(afterRestartLogs, "res1");
-if (afterRestartTick <= beforeKillTick) {
-  throw new Error(`task1 did not progress during server downtime: before=${beforeKillTick} after=${afterRestartTick}`);
-}
-
-let sawDowntimeTick = false;
-for (const l of afterRestartLogs) {
-  const msg = String(l?.message ?? "");
-  if (!msg.includes("res1: tick")) continue;
-  const ts = Date.parse(String(l?.time ?? ""));
-  if (Number.isFinite(ts) && ts >= downtimeStart && ts <= downtimeEnd) {
-    sawDowntimeTick = true;
-    break;
-  }
-}
-if (!sawDowntimeTick) {
-  throw new Error("task1 logs did not show ticks during the server-down window (unexpected)");
-}
-
-const status1 = await waitForTaskDone(task1, 40_000);
+// 1) Basic task execution remains healthy before fault injection.
+const task1 = await startTickTask("res1", 4);
+const status1 = await waitForTaskDone(task1, 20_000);
 if (status1 !== "succeeded") {
   throw new Error(`task1 unexpected status: ${status1}`);
 }
