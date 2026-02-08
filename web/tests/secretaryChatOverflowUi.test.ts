@@ -9,5 +9,7 @@ function readText(relativePath: string) {
 test("Secretary chat messages prevent horizontal overflow for long user text", () => {
   const css = readText("../src/App.css");
   assert.match(css, /:deep\(\.msg\)[\s\S]*min-width:\s*0/);
+  assert.match(css, /:deep\(\.msgs\)[\s\S]*min-width:\s*0/);
   assert.match(css, /:deep\(\.msg\s+\.content\)[\s\S]*overflow-wrap:\s*anywhere/);
+  assert.match(css, /:deep\(\.msg\s+\.content\.chatMarkdown\s+pre\)[\s\S]*max-width:\s*100%/);
 });
