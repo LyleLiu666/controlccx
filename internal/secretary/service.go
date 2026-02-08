@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"unicode/utf8"
 
 	"controlccx/internal/agentsdk"
@@ -24,6 +25,8 @@ type Service struct {
 	providers *providers.Store
 
 	client agentsdk.Client
+
+	sendMu sync.Mutex
 }
 
 type Option func(*Service)
@@ -61,6 +64,11 @@ func (s *Service) Send(ctx context.Context, userText string) (string, error) {
 	if msg == "" {
 		return "请先输入你的问题。", nil
 	}
+
+	// Serialize requests: the secretary chat is currently a single global thread.
+	// Without this, concurrent Send() calls can interleave history and confuse the agent.
+	s.sendMu.Lock()
+	defer s.sendMu.Unlock()
 
 	history, err := s.History(ctx, 40)
 	if err != nil {

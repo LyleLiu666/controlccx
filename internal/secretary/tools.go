@@ -3,6 +3,7 @@ package secretary
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -35,7 +36,10 @@ func newToolRegistry(store *tasks.Store) *agentsdk.ToolRegistry {
 		if store == nil {
 			return nil, errors.New("tasks store not configured")
 		}
-		statusFilter := strings.TrimSpace(call.Fields["status"])
+		statusFilter := strings.ToLower(strings.TrimSpace(call.Fields["status"]))
+		if statusFilter != "" && !isKnownTaskStatus(statusFilter) {
+			return nil, fmt.Errorf("unknown status %q (allowed: %s)", statusFilter, strings.Join(knownTaskStatusesList, ", "))
+		}
 		includeDeleted := parseBool(call.Fields["include_deleted"])
 
 		counts, total, err := store.CountByStatus(ctx, tasks.ListTasksOptions{IncludeDeleted: includeDeleted})
@@ -107,6 +111,34 @@ func newToolRegistry(store *tasks.Store) *agentsdk.ToolRegistry {
 	return reg
 }
 
+var knownTaskStatusesList = []string{
+	string(tasks.StatusQueued),
+	string(tasks.StatusWaiting),
+	string(tasks.StatusRunning),
+	string(tasks.StatusSucceeded),
+	string(tasks.StatusFailed),
+	string(tasks.StatusCanceled),
+	string(tasks.StatusInterrupted),
+	string(tasks.StatusBlocked),
+}
+
+var knownTaskStatuses = func() map[string]struct{} {
+	out := make(map[string]struct{}, len(knownTaskStatusesList))
+	for _, st := range knownTaskStatusesList {
+		s := strings.ToLower(strings.TrimSpace(st))
+		if s == "" {
+			continue
+		}
+		out[s] = struct{}{}
+	}
+	return out
+}()
+
+func isKnownTaskStatus(s string) bool {
+	_, ok := knownTaskStatuses[strings.ToLower(strings.TrimSpace(s))]
+	return ok
+}
+
 func parseBool(s string) bool {
 	v := strings.TrimSpace(strings.ToLower(s))
 	return v == "1" || v == "true" || v == "yes" || v == "y"
@@ -125,9 +157,5 @@ func parseInt(s string, def int) int {
 }
 
 func truncateDisplay(s string, max int) string {
-	s = strings.TrimSpace(s)
-	if max <= 0 || len(s) <= max {
-		return s
-	}
-	return s[:max-1] + "…"
+	return truncateRunes(s, max)
 }

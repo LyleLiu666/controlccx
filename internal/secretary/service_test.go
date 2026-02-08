@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -178,4 +179,114 @@ func extractFirstTagValue(s string, tag string) string {
 		return ""
 	}
 	return s[i+len(open) : i+len(open)+j]
+}
+
+type blockingClient struct {
+	mu sync.Mutex
+
+	calls int
+
+	firstStarted  chan struct{}
+	unblockFirst  chan struct{}
+	secondStarted chan struct{}
+}
+
+func (c *blockingClient) ChatCompletionStream(ctx context.Context, messages []agentsdk.Message, opts *agentsdk.ChatCompletionOptions, callback agentsdk.StreamCallback) error {
+	_ = ctx
+	_ = messages
+	_ = opts
+
+	c.mu.Lock()
+	callNum := c.calls
+	c.calls++
+	c.mu.Unlock()
+
+	switch callNum {
+	case 0:
+		close(c.firstStarted)
+		<-c.unblockFirst
+		return callback("reply-1")
+	case 1:
+		close(c.secondStarted)
+		return callback("reply-2")
+	default:
+		return callback("no more scripted responses")
+	}
+}
+
+func TestService_Send_SerializesConcurrentRequests(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "controlccx.db")
+
+	conn, err := db.Open(ctx, db.Options{Path: dbPath})
+	if err != nil {
+		t.Fatalf("db open: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+
+	taskStore := tasks.NewStore(conn)
+	chatStore := chat.NewStore(conn)
+
+	c := &blockingClient{
+		firstStarted:  make(chan struct{}),
+		unblockFirst:  make(chan struct{}),
+		secondStarted: make(chan struct{}),
+	}
+
+	svc := NewService(config.Default(), taskStore, chatStore, nil, nil, WithClient(c))
+
+	var (
+		r1, r2 string
+		e1, e2 error
+	)
+	firstDone := make(chan struct{})
+	go func() {
+		r1, e1 = svc.Send(ctx, "one")
+		close(firstDone)
+	}()
+	<-c.firstStarted
+
+	secondDone := make(chan struct{})
+	go func() {
+		r2, e2 = svc.Send(ctx, "two")
+		close(secondDone)
+	}()
+
+	select {
+	case <-c.secondStarted:
+		t.Fatalf("expected second request to be blocked until first completes")
+	case <-time.After(250 * time.Millisecond):
+		// ok
+	}
+
+	close(c.unblockFirst)
+	<-firstDone
+	<-secondDone
+
+	if e1 != nil || e2 != nil {
+		t.Fatalf("send errors: e1=%v e2=%v", e1, e2)
+	}
+	if strings.TrimSpace(r1) != "reply-1" || strings.TrimSpace(r2) != "reply-2" {
+		t.Fatalf("unexpected replies: r1=%q r2=%q", r1, r2)
+	}
+
+	hist, err := svc.History(ctx, 10)
+	if err != nil {
+		t.Fatalf("history: %v", err)
+	}
+	if len(hist) != 4 {
+		t.Fatalf("history len=%d want 4", len(hist))
+	}
+	if hist[0].Role != chat.RoleUser || strings.TrimSpace(hist[0].Content) != "one" {
+		t.Fatalf("unexpected msg0: %+v", hist[0])
+	}
+	if hist[1].Role != chat.RoleAssistant || strings.TrimSpace(hist[1].Content) != "reply-1" {
+		t.Fatalf("unexpected msg1: %+v", hist[1])
+	}
+	if hist[2].Role != chat.RoleUser || strings.TrimSpace(hist[2].Content) != "two" {
+		t.Fatalf("unexpected msg2: %+v", hist[2])
+	}
+	if hist[3].Role != chat.RoleAssistant || strings.TrimSpace(hist[3].Content) != "reply-2" {
+		t.Fatalf("unexpected msg3: %+v", hist[3])
+	}
 }
