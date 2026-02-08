@@ -3,6 +3,7 @@ package secretary
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -438,5 +439,15 @@ func TestService_Send_AutoCompressesHistory(t *testing.T) {
 	}
 	if !hasSummary {
 		t.Fatalf("expected summary to be injected into main prompt")
+	}
+}
+
+func TestSecretaryFailedMessage_DoesNotMentionCLIBackends(t *testing.T) {
+	msg := secretaryFailedMessage("simple-http", errors.New("boom"))
+	if strings.Contains(strings.ToLower(msg), "paths.claude") || strings.Contains(strings.ToLower(msg), "paths.codex") {
+		t.Fatalf("expected failure message to not mention CLI paths, got: %q", msg)
+	}
+	if strings.Contains(strings.ToLower(msg), "claude/codex") {
+		t.Fatalf("expected failure message to not mention cli backends, got: %q", msg)
 	}
 }

@@ -101,7 +101,7 @@ func (s *Service) Send(ctx context.Context, userText string) (string, error) {
 
 	client := s.client
 	if client == nil {
-		backend := s.selectBackend()
+		backend := llm.NewSimpleHTTPBackendWithProviders(s.cfg, s.auth, s.providers)
 		client = &llm.Client{Backend: backend}
 	}
 
@@ -137,7 +137,7 @@ func (s *Service) Send(ctx context.Context, userText string) (string, error) {
 
 	reply := strings.TrimSpace(out)
 	if runErr != nil {
-		reply = strings.TrimSpace(secretaryFailedMessage(s.requestedBackend(), backendNameBestEffort(client), runErr))
+		reply = strings.TrimSpace(secretaryFailedMessage(backendNameBestEffort(client), runErr))
 	}
 	if reply == "" {
 		reply = "秘书没有返回内容，请重试。"
@@ -173,45 +173,6 @@ func (s *Service) Clear(ctx context.Context) error {
 	return s.chat.Clear(ctx)
 }
 
-func (s *Service) requestedBackend() string {
-	if s == nil || s.providers == nil {
-		return "auto"
-	}
-	active := s.providers.Active()
-	id := strings.TrimSpace(active.Secretary)
-	if id == "" {
-		return "auto"
-	}
-	p, ok := s.providers.Get(id)
-	if !ok {
-		return "auto"
-	}
-	v := strings.ToLower(strings.TrimSpace(p.Targets.Secretary.Backend))
-	if v == "" {
-		return "auto"
-	}
-	return v
-}
-
-func (s *Service) selectBackend() llm.Backend {
-	mode := s.requestedBackend()
-
-	simple := llm.NewSimpleHTTPBackendWithProviders(s.cfg, s.auth, s.providers)
-	claude := llm.NewClaudeCLIBackend(s.cfg, s.auth)
-	codex := llm.NewCodexCLIBackend(s.cfg, s.auth)
-
-	switch mode {
-	case "simple-http":
-		return simple
-	case "claude":
-		return claude
-	case "codex":
-		return codex
-	default:
-		return &llm.AutoBackend{Backends: []llm.Backend{simple, claude, codex}}
-	}
-}
-
 func backendNameBestEffort(client agentsdk.Client) string {
 	if client == nil {
 		return ""
@@ -224,12 +185,8 @@ func backendNameBestEffort(client agentsdk.Client) string {
 	return ""
 }
 
-func secretaryFailedMessage(requestedBackend string, provider string, err error) string {
-	req := strings.TrimSpace(requestedBackend)
-	if req == "" {
-		req = "auto"
-	}
-	name := strings.TrimSpace(provider)
+func secretaryFailedMessage(backend string, err error) string {
+	name := strings.TrimSpace(backend)
 	if name == "" {
 		name = "<unknown>"
 	}
@@ -237,12 +194,11 @@ func secretaryFailedMessage(requestedBackend string, provider string, err error)
 	if err != nil {
 		detail = truncateRunes(strings.TrimSpace(err.Error()), 800)
 	}
-	return strings.TrimSpace(fmt.Sprintf(`秘书调用 LLM 失败（backend=%s, provider=%s）：%s
+	return strings.TrimSpace(fmt.Sprintf(`秘书调用 LLM 失败（backend=%s）：%s
 
 最小排查：
-- simple-http：配置 ANTHROPIC_BASE_URL + ANTHROPIC_AUTH_TOKEN（或 ANTHROPIC_API_KEY）
-- claude/codex：确认 CLI 可执行（PATH 或 config.yaml 的 paths.*）
-- 也可在 Providers 面板为 secretary 选择 backend`, req, name, detail))
+- 在 Providers 面板为“秘书”配置 simple-http（ANTHROPIC_BASE_URL 可选；优先配置 ANTHROPIC_AUTH_TOKEN，其次 ANTHROPIC_API_KEY）
+- 或直接设置环境变量：ANTHROPIC_BASE_URL / ANTHROPIC_AUTH_TOKEN / ANTHROPIC_API_KEY`, name, detail))
 }
 
 func truncateRunes(s string, max int) string {
