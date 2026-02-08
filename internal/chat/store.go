@@ -110,6 +110,48 @@ func (s *Store) Tail(ctx context.Context, limit int) ([]Message, error) {
 	return out, nil
 }
 
+// TailAfter returns the most recent messages with id > afterID in chronological order (oldest first).
+func (s *Store) TailAfter(ctx context.Context, afterID int64, limit int) ([]Message, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 200
+	}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, ts, role, content
+		FROM chat_messages
+		WHERE id > ?
+		ORDER BY id DESC
+		LIMIT ?;
+	`, afterID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("chat: tail_after: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var out []Message
+	for rows.Next() {
+		var (
+			m        Message
+			tsMillis int64
+			roleStr  string
+		)
+		if err := rows.Scan(&m.ID, &tsMillis, &roleStr, &m.Content); err != nil {
+			return nil, fmt.Errorf("chat: tail_after scan: %w", err)
+		}
+		m.Time = fromMillis(tsMillis)
+		m.Role = Role(roleStr)
+		out = append(out, m)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("chat: tail_after rows: %w", err)
+	}
+
+	// Reverse so callers see chronological order.
+	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
+		out[i], out[j] = out[j], out[i]
+	}
+	return out, nil
+}
+
 func (s *Store) Clear(ctx context.Context) error {
 	if s == nil || s.db == nil {
 		return errors.New("chat: store not initialized")

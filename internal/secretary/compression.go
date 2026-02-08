@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"controlccx/internal/agentsdk"
 	"controlccx/internal/agentsdk/sessioncompress"
@@ -18,7 +17,7 @@ type CompressionOptions struct {
 	KeepTextMessages       int
 	MaxSummaryRunes        int
 	MaxMsgRunesForHistory  int
-	MaxMessagesAfterCursor int
+	MaxMessagesToSummarize int
 	MaxCompressionSteps    int
 	SummaryMaxTokens       int
 }
@@ -26,10 +25,10 @@ type CompressionOptions struct {
 func DefaultCompressionOptions() CompressionOptions {
 	return CompressionOptions{
 		MaxContextRunes:        sessioncompress.DefaultMaxContextRunes,
-		KeepTextMessages:       sessioncompress.DefaultKeepTextMessages,
+		KeepTextMessages:       40,
 		MaxSummaryRunes:        8000,
 		MaxMsgRunesForHistory:  2000,
-		MaxMessagesAfterCursor: 5000,
+		MaxMessagesToSummarize: 500,
 		MaxCompressionSteps:    2,
 		SummaryMaxTokens:       512,
 	}
@@ -43,14 +42,20 @@ func normalizeCompressionOptions(opts CompressionOptions) CompressionOptions {
 	if opts.KeepTextMessages <= 0 {
 		opts.KeepTextMessages = def.KeepTextMessages
 	}
+	if opts.KeepTextMessages > 500 {
+		opts.KeepTextMessages = 500
+	}
 	if opts.MaxSummaryRunes <= 0 {
 		opts.MaxSummaryRunes = def.MaxSummaryRunes
 	}
 	if opts.MaxMsgRunesForHistory <= 0 {
 		opts.MaxMsgRunesForHistory = def.MaxMsgRunesForHistory
 	}
-	if opts.MaxMessagesAfterCursor <= 0 {
-		opts.MaxMessagesAfterCursor = def.MaxMessagesAfterCursor
+	if opts.MaxMessagesToSummarize <= 0 {
+		opts.MaxMessagesToSummarize = def.MaxMessagesToSummarize
+	}
+	if opts.MaxMessagesToSummarize > 500 {
+		opts.MaxMessagesToSummarize = 500
 	}
 	if opts.MaxCompressionSteps <= 0 {
 		opts.MaxCompressionSteps = def.MaxCompressionSteps
@@ -97,7 +102,7 @@ func (s *Service) promptHistory(ctx context.Context, client agentsdk.Client, run
 		out = append(out, agentsdk.Message{Role: "system", Content: formatSummaryForPrompt(summary)})
 	}
 
-	list, err := s.chat.List(ctx, cursor, s.compressOpts.MaxMessagesAfterCursor)
+	list, err := s.chat.TailAfter(ctx, cursor, s.compressOpts.KeepTextMessages)
 	if err != nil {
 		return nil, err
 	}
@@ -144,12 +149,33 @@ func (s *Service) maybeCompress(ctx context.Context, client agentsdk.Client, run
 	sum := truncateRunes(summary, s.compressOpts.MaxSummaryRunes)
 
 	for i := 0; i < s.compressOpts.MaxCompressionSteps; i++ {
-		list, err := s.chat.List(ctx, cur, s.compressOpts.MaxMessagesAfterCursor)
+		tail, err := s.chat.TailAfter(ctx, cur, s.compressOpts.KeepTextMessages)
 		if err != nil {
 			return sum, cur, err
 		}
-		mapped := make([]sessioncompress.Message, 0, len(list))
-		for _, m := range list {
+		if len(tail) == 0 {
+			break
+		}
+		keepFrom := tail[0].ID
+
+		// Summarize only messages strictly before the kept tail window.
+		head, err := s.chat.List(ctx, cur, s.compressOpts.MaxMessagesToSummarize)
+		if err != nil {
+			return sum, cur, err
+		}
+		toSummarize := make([]chat.Message, 0, len(head))
+		for _, m := range head {
+			if m.ID >= keepFrom {
+				break
+			}
+			toSummarize = append(toSummarize, m)
+		}
+		if len(toSummarize) == 0 {
+			break
+		}
+
+		mapped := make([]sessioncompress.Message, 0, len(toSummarize))
+		for _, m := range toSummarize {
 			id := uint(m.ID)
 			mapped = append(mapped, sessioncompress.Message{
 				ID:      id,
@@ -159,20 +185,7 @@ func (s *Service) maybeCompress(ctx context.Context, client agentsdk.Client, run
 			})
 		}
 
-		totalRunes := utf8.RuneCountInString(systemPrompt) + utf8.RuneCountInString(sum) + sessioncompress.ApproximateContextRunes(mapped)
-		if totalRunes <= s.compressOpts.MaxContextRunes {
-			break
-		}
-		if len(mapped) == 0 {
-			break
-		}
-
-		toSummarize, _, newCursor, keepFrom := sessioncompress.SplitForCompression(mapped, uint(cur), s.compressOpts.KeepTextMessages)
-		if len(toSummarize) == 0 {
-			break
-		}
-
-		deltaTranscript := sessioncompress.FormatForSummaryInput(toSummarize, sessioncompress.DefaultOptions())
+		deltaTranscript := sessioncompress.FormatForSummaryInput(mapped, sessioncompress.DefaultOptions())
 		if strings.TrimSpace(deltaTranscript) == "" {
 			break
 		}
@@ -184,7 +197,7 @@ func (s *Service) maybeCompress(ctx context.Context, client agentsdk.Client, run
 			_, _ = s.compress.Append(ctx, CompressionRecord{
 				CursorBefore: cur,
 				CursorAfter:  cur,
-				KeepFrom:     int64(keepFrom),
+				KeepFrom:     keepFrom,
 				Summary:      sum,
 				Backend:      backend,
 				Error:        sumErr.Error(),
@@ -197,7 +210,7 @@ func (s *Service) maybeCompress(ctx context.Context, client agentsdk.Client, run
 			_, _ = s.compress.Append(ctx, CompressionRecord{
 				CursorBefore: cur,
 				CursorAfter:  cur,
-				KeepFrom:     int64(keepFrom),
+				KeepFrom:     keepFrom,
 				Summary:      sum,
 				Backend:      backend,
 				Error:        "compression summary was empty",
@@ -205,10 +218,12 @@ func (s *Service) maybeCompress(ctx context.Context, client agentsdk.Client, run
 			break
 		}
 
+		cursorAfter := toSummarize[len(toSummarize)-1].ID
+
 		_, err = s.compress.Append(ctx, CompressionRecord{
 			CursorBefore: cur,
-			CursorAfter:  int64(newCursor),
-			KeepFrom:     int64(keepFrom),
+			CursorAfter:  cursorAfter,
+			KeepFrom:     keepFrom,
 			Summary:      newSummary,
 			Backend:      backend,
 			Error:        "",
@@ -218,7 +233,7 @@ func (s *Service) maybeCompress(ctx context.Context, client agentsdk.Client, run
 		}
 
 		sum = newSummary
-		cur = int64(newCursor)
+		cur = cursorAfter
 	}
 
 	return sum, cur, nil
