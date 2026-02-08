@@ -6,11 +6,14 @@ function readText(relativePath: string) {
   return readFileSync(new URL(relativePath, import.meta.url), "utf8");
 }
 
-test("Header menu exposes a Providers entrypoint", () => {
+test("Header menu no longer exposes a Providers entrypoint", () => {
   const appVue = readText("../src/App.vue");
-  assert.match(appVue, /function onOpenProvidersFromMenu\(\)\s*{[\s\S]*openProvidersSettings\(\);/);
-  assert.match(appVue, /class=\"headerMoreItem\"[\s\S]*@click=\"onOpenProvidersFromMenu\"/);
-  assert.match(appVue, />\s*Providers\s*</);
+  assert.doesNotMatch(
+    appVue,
+    /function onOpenProvidersFromMenu\(\)\s*{[\s\S]*openProvidersSettings\(\);/,
+  );
+  assert.doesNotMatch(appVue, /class=\"headerMoreItem\"[\s\S]*@click=\"onOpenProvidersFromMenu\"/);
+  assert.doesNotMatch(appVue, /class=\"headerMoreItem\"[\s\S]*>\s*Providers\s*</);
 });
 
 test("Auth settings can open Providers", () => {

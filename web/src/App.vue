@@ -2922,11 +2922,6 @@ function onOpenSettingsFromMenu() {
   closeHeaderMoreMenu();
 }
 
-function onOpenProvidersFromMenu() {
-  openProvidersSettings();
-  closeHeaderMoreMenu();
-}
-
 function isTerminalStatus(s: string): boolean {
   return (
     s === "succeeded" ||
@@ -5274,9 +5269,6 @@ watch(
               </button>
               <button type="button" class="headerMoreItem" @click="onOpenSettingsFromMenu">
                 设置
-              </button>
-              <button type="button" class="headerMoreItem" @click="onOpenProvidersFromMenu">
-                Providers
               </button>
             </div>
           </details>
