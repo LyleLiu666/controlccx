@@ -86,16 +86,16 @@ type LogEntry struct {
 }
 
 type CreateTaskInput struct {
-	WorkerType       WorkerType `json:"worker_type"`
-	Mode             Mode       `json:"mode"`
-	ConversationID   string     `json:"conversation_id,omitempty"`
-	IdempotencyKey   string     `json:"idempotency_key,omitempty"`
-	WorkDirStrategy  string     `json:"workdir_strategy,omitempty"`
-	BaseWorkDir      string     `json:"base_workdir,omitempty"`
-	WorktreeDir      string     `json:"worktree_dir,omitempty"`
-	WorktreeBranch   string     `json:"worktree_branch,omitempty"`
-	WorktreeUntracked string    `json:"worktree_untracked,omitempty"`
-	UnsafeAutomation bool       `json:"unsafe_automation,omitempty"`
+	WorkerType        WorkerType `json:"worker_type"`
+	Mode              Mode       `json:"mode"`
+	ConversationID    string     `json:"conversation_id,omitempty"`
+	IdempotencyKey    string     `json:"idempotency_key,omitempty"`
+	WorkDirStrategy   string     `json:"workdir_strategy,omitempty"`
+	BaseWorkDir       string     `json:"base_workdir,omitempty"`
+	WorktreeDir       string     `json:"worktree_dir,omitempty"`
+	WorktreeBranch    string     `json:"worktree_branch,omitempty"`
+	WorktreeUntracked string     `json:"worktree_untracked,omitempty"`
+	UnsafeAutomation  bool       `json:"unsafe_automation,omitempty"`
 	// SafetyEnvelope is an optional autopilot hint (UI-level “one-time unlock”).
 	// It is not persisted; it only affects server-side defaults when run safety options are omitted.
 	SafetyEnvelope        string   `json:"safety_envelope,omitempty"`

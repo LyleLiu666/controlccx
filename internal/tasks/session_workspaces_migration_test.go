@@ -69,4 +69,3 @@ func TestStore_SetSessionID_MigratesSessionWorkspacesKeyForLegacyTasks(t *testin
 		t.Fatalf("expected legacy session_workspaces key removed")
 	}
 }
-

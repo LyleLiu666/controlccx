@@ -57,4 +57,3 @@ func TestCountKeywordHits(t *testing.T) {
 		t.Fatalf("hits=%d, want 0", got)
 	}
 }
-

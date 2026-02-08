@@ -48,4 +48,3 @@ func TestStore_Invocation_SetAndGet(t *testing.T) {
 		t.Fatalf("env=%v", got.EnvInjectedKeys)
 	}
 }
-

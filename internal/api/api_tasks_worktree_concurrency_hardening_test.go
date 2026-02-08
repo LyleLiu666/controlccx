@@ -117,13 +117,13 @@ func TestAPI_CreateTask_WorktreeUntrackedTooLargeRequiresConfirmThenSkipProceeds
 
 	// Retry with explicit skip.
 	req2 := tasks.CreateTaskInput{
-		WorkerType:         tasks.WorkerExec,
-		Mode:               tasks.ModeNew,
-		Prompt:             "echo hello",
-		WorkDir:            repo,
-		WorkDirStrategy:    "worktree",
-		ConversationID:     anyString(cid),
-		WorktreeUntracked:  "skip",
+		WorkerType:        tasks.WorkerExec,
+		Mode:              tasks.ModeNew,
+		Prompt:            "echo hello",
+		WorkDir:           repo,
+		WorkDirStrategy:   "worktree",
+		ConversationID:    anyString(cid),
+		WorktreeUntracked: "skip",
 	}
 	buf2, _ := json.Marshal(req2)
 	res2, err := http.Post(srv.URL+"/api/tasks", "application/json", bytes.NewReader(buf2))

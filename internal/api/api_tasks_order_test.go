@@ -9,10 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"controlccx/internal/chat"
 	"controlccx/internal/db"
 	"controlccx/internal/events"
-	"controlccx/internal/observer"
 	"controlccx/internal/tasks"
 )
 
@@ -25,15 +23,12 @@ func TestAPI_ListTasks_SortsByLatestExecutionTimeDesc(t *testing.T) {
 	t.Cleanup(func() { _ = conn.Close() })
 
 	taskStore := tasks.NewStore(conn)
-	chatStore := chat.NewStore(conn)
 	hub := events.NewHub()
 
 	apiSvc := &API{
-		Tasks:    taskStore,
-		Workers:  nil,
-		Observer: &observer.Service{Store: taskStore, Chat: chatStore},
-		Chat:     chatStore,
-		Hub:      hub,
+		Tasks:   taskStore,
+		Workers: nil,
+		Hub:     hub,
 	}
 	srv := httptest.NewServer(apiSvc.Handler())
 	t.Cleanup(srv.Close)

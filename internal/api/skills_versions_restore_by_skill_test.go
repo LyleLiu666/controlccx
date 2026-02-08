@@ -74,4 +74,3 @@ func TestAPI_SkillVersionsBySkill_Restore(t *testing.T) {
 		t.Fatalf("backup README=%q", string(got))
 	}
 }
-

@@ -16,10 +16,10 @@ import (
 	"controlccx/internal/auth"
 	"controlccx/internal/chat"
 	"controlccx/internal/events"
-	"controlccx/internal/observer"
 	"controlccx/internal/providers"
 	"controlccx/internal/runsafe"
 	"controlccx/internal/runworkspace"
+	"controlccx/internal/secretary"
 	"controlccx/internal/skills"
 	"controlccx/internal/systeminfo"
 	"controlccx/internal/tasks"
@@ -31,8 +31,8 @@ import (
 
 type API struct {
 	Tasks                *tasks.Store
-	Workers              observer.TaskRunner
-	Observer             *observer.Service
+	Workers              TaskRunner
+	Secretary            *secretary.Service
 	Chat                 *chat.Store
 	Hub                  *events.Hub
 	FSRoots              []FSRoot
@@ -46,6 +46,11 @@ type API struct {
 	Workspaces           *runworkspace.Service
 }
 
+type TaskRunner interface {
+	Start(ctx context.Context, taskID string) error
+	Cancel(ctx context.Context, taskID string) (bool, error)
+}
+
 func (a *API) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/system", a.handleSystem)
@@ -54,6 +59,8 @@ func (a *API) Handler() http.Handler {
 	mux.HandleFunc("/api/sessions/", a.handleSessionByKey)
 	mux.HandleFunc("/api/acceptance", a.handleAcceptance)
 	mux.HandleFunc("/api/context", a.handleProjectContext)
+	mux.HandleFunc("/api/secretary/messages", a.handleSecretaryMessages)
+	mux.HandleFunc("/api/secretary/clear", a.handleSecretaryClear)
 	mux.HandleFunc("/api/templates", a.handlePromptTemplates)
 	mux.HandleFunc("/api/templates/upsert", a.handlePromptTemplatesUpsert)
 	mux.HandleFunc("/api/templates/delete", a.handlePromptTemplatesDelete)
@@ -437,14 +444,10 @@ func (a *API) handleTasks(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		envelope := runsafe.SafetyEnvelope(strings.TrimSpace(in.SafetyEnvelope))
-		llm := runsafe.LLMBackend(nil)
-		if a.Observer != nil {
-			llm = a.Observer.LLM
-		}
 		in, ap := runsafe.ApplyAutopilot(r.Context(), in, runsafe.ApplyOptions{
 			Driver:   driver,
 			Envelope: envelope,
-			Classify: runsafe.ClassifyOptions{LLM: llm},
+			Classify: runsafe.ClassifyOptions{},
 		})
 
 		// Workdir strategy: allow creating a parallel git worktree when the base workdir is busy.
@@ -760,14 +763,10 @@ func (a *API) handleSessionByKey(w http.ResponseWriter, r *http.Request) {
 			}
 
 			envelope := runsafe.SafetyEnvelope(strings.TrimSpace(in.SafetyEnvelope))
-			llm := runsafe.LLMBackend(nil)
-			if a.Observer != nil {
-				llm = a.Observer.LLM
-			}
 			in, ap := runsafe.ApplyAutopilot(r.Context(), in, runsafe.ApplyOptions{
 				Driver:   driver,
 				Envelope: envelope,
-				Classify: runsafe.ClassifyOptions{LLM: llm},
+				Classify: runsafe.ClassifyOptions{},
 			})
 
 			newTask, err := a.Tasks.CreateTask(r.Context(), in)
@@ -896,14 +895,10 @@ func (a *API) handleSessionByKey(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		envelope := runsafe.SafetyEnvelope(strings.TrimSpace(resumeIn.SafetyEnvelope))
-		llm := runsafe.LLMBackend(nil)
-		if a.Observer != nil {
-			llm = a.Observer.LLM
-		}
 		resumeIn, ap := runsafe.ApplyAutopilot(r.Context(), resumeIn, runsafe.ApplyOptions{
 			Driver:   driver,
 			Envelope: envelope,
-			Classify: runsafe.ClassifyOptions{LLM: llm},
+			Classify: runsafe.ClassifyOptions{},
 		})
 
 		newTask, err := a.Tasks.CreateTask(r.Context(), resumeIn)
@@ -1350,14 +1345,10 @@ func (a *API) handleTaskByID(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		envelope := runsafe.SafetyEnvelope(strings.TrimSpace(resumeIn.SafetyEnvelope))
-		llm := runsafe.LLMBackend(nil)
-		if a.Observer != nil {
-			llm = a.Observer.LLM
-		}
 		resumeIn, ap := runsafe.ApplyAutopilot(r.Context(), resumeIn, runsafe.ApplyOptions{
 			Driver:   driver,
 			Envelope: envelope,
-			Classify: runsafe.ClassifyOptions{LLM: llm},
+			Classify: runsafe.ClassifyOptions{},
 		})
 
 		newTask, err := a.Tasks.CreateTask(r.Context(), resumeIn)
@@ -1524,14 +1515,10 @@ func (a *API) handleTaskByID(w http.ResponseWriter, r *http.Request) {
 		}
 
 		envelope := runsafe.SafetyEnvelope(strings.TrimSpace(in.SafetyEnvelope))
-		llm := runsafe.LLMBackend(nil)
-		if a.Observer != nil {
-			llm = a.Observer.LLM
-		}
 		in, ap := runsafe.ApplyAutopilot(r.Context(), in, runsafe.ApplyOptions{
 			Driver:   driver,
 			Envelope: envelope,
-			Classify: runsafe.ClassifyOptions{LLM: llm},
+			Classify: runsafe.ClassifyOptions{},
 		})
 
 		newTask, err := a.Tasks.CreateTask(r.Context(), in)

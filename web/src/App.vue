@@ -93,6 +93,7 @@ import SkillsPanel from "./components/SkillsPanel.vue";
 import SkillsGovernanceModal from "./components/SkillsGovernanceModal.vue";
 import SkillVersionsModal from "./components/SkillVersionsModal.vue";
 import LiveDrawer from "./components/LiveDrawer.vue";
+import SecretaryDrawer from "./components/SecretaryDrawer.vue";
 import FilesModal from "./components/FilesModal.vue";
 import AuthSettingsModal from "./components/AuthSettingsModal.vue";
 import ToolsSettingsModal from "./components/ToolsSettingsModal.vue";
@@ -114,6 +115,7 @@ import { useSkills } from "./composables/useSkills";
 import { useControlPlaneHealth } from "./composables/useControlPlaneHealth";
 import { useTasks } from "./composables/useTasks";
 import { useLiveFeed } from "./composables/useLiveFeed";
+import { useSecretaryChat } from "./composables/useSecretaryChat";
 import { useSessionWorkspace } from "./composables/useSessionWorkspace";
 import { shouldDismissRunLaunchMask } from "./runLaunchMask";
 import { buildSkillMountPlan, type SkillMountConfirmItem } from "./skillsPreflight";
@@ -963,6 +965,20 @@ const {
     saveInt(LS_KEY_LIVE_WIDTH, width);
   },
 });
+
+const {
+  open: secretaryOpen,
+  messages: secretaryMessages,
+  input: secretaryInput,
+  loading: secretaryLoading,
+  sending: secretarySending,
+  error: secretaryError,
+  refresh: refreshSecretary,
+  openDrawer: openSecretaryDrawer,
+  closeDrawer: closeSecretaryDrawer,
+  send: sendSecretaryChat,
+  clear: clearSecretaryChat,
+} = useSecretaryChat();
 
 const feedCoachDismissed = ref(false);
 const feedCoachOpen = ref(false);
@@ -2578,6 +2594,18 @@ function openLive() {
   liveOpen.value = true;
 }
 
+function onSecretaryQuick(message: string) {
+  const m = String(message ?? "").trim();
+  if (!m) return;
+  secretaryInput.value = m;
+  void sendSecretaryChat({ message: m });
+}
+
+function onSecretaryClear() {
+  if (secretaryMessages.value.length > 0 && !window.confirm("清空秘书历史？")) return;
+  void clearSecretaryChat();
+}
+
 function openRuns() {
   runsOpen.value = true;
 }
@@ -2829,6 +2857,11 @@ function onToggleReducedFxFromMenu() {
 
 function onOpenLiveFromMenu() {
   openLive();
+  closeHeaderMoreMenu();
+}
+
+function onOpenSecretaryFromMenu() {
+  void openSecretaryDrawer();
   closeHeaderMoreMenu();
 }
 
@@ -5198,6 +5231,9 @@ watch(
                 <span v-if="anyRunning" class="liveDot" aria-hidden="true">●</span>
                 实时
               </button>
+              <button type="button" class="headerMoreItem" @click="onOpenSecretaryFromMenu">
+                秘书
+              </button>
               <button type="button" class="headerMoreItem" @click="onOpenSettingsFromMenu">
                 设置
               </button>
@@ -6523,6 +6559,20 @@ watch(
 		      @reconnect="reconnectEvents"
 		      @startResize="startLiveResize"
 		    />
+
+        <SecretaryDrawer
+          v-if="secretaryOpen"
+          :messages="secretaryMessages"
+          :loading="secretaryLoading"
+          :sending="secretarySending"
+          :error="secretaryError"
+          v-model:input="secretaryInput"
+          @close="closeSecretaryDrawer"
+          @refresh="refreshSecretary"
+          @clear="onSecretaryClear"
+          @send="sendSecretaryChat"
+          @quick="onSecretaryQuick"
+        />
 
 		    <div v-if="runsOpen" class="modalOverlay" @click.self="runsOpen = false">
 		      <div class="modal runsModal">

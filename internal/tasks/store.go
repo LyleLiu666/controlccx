@@ -311,6 +311,56 @@ func (s *Store) ListTasks(ctx context.Context, limit int) ([]Task, error) {
 	return s.ListTasksWithOptions(ctx, limit, ListTasksOptions{})
 }
 
+func (s *Store) CountByStatus(ctx context.Context, opts ListTasksOptions) (map[Status]int, int, error) {
+	if s == nil || s.db == nil {
+		return nil, 0, errors.New("tasks: store not initialized")
+	}
+	query := `
+		SELECT t.status, COUNT(*)
+		FROM tasks t
+		LEFT JOIN session_meta sm ON sm.key = (
+			CASE
+				WHEN t.conversation_id IS NOT NULL AND t.conversation_id != '' THEN 'c:' || t.conversation_id
+				WHEN t.session_id IS NOT NULL AND t.session_id != '' THEN 's:' || t.session_id
+				ELSE 't:' || t.id
+			END
+		)
+	`
+	if !opts.IncludeDeleted {
+		query += `
+		WHERE sm.deleted_at IS NULL
+	`
+	}
+	query += `
+		GROUP BY t.status;
+	`
+
+	rows, err := s.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, 0, fmt.Errorf("tasks: count by status: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	out := map[Status]int{}
+	total := 0
+	for rows.Next() {
+		var (
+			status string
+			n      int64
+		)
+		if err := rows.Scan(&status, &n); err != nil {
+			return nil, 0, fmt.Errorf("tasks: count by status scan: %w", err)
+		}
+		st := Status(strings.TrimSpace(status))
+		out[st] = int(n)
+		total += int(n)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, fmt.Errorf("tasks: count by status rows: %w", err)
+	}
+	return out, total, nil
+}
+
 func (s *Store) ListTasksWithOptions(ctx context.Context, limit int, opts ListTasksOptions) ([]Task, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 100

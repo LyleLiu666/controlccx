@@ -92,4 +92,3 @@ func TestStore_AcceptanceState_UpsertAndGet(t *testing.T) {
 		t.Fatalf("updated_at=%s", state3.UpdatedAt)
 	}
 }
-

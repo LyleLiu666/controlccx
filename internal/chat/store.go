@@ -3,6 +3,7 @@ package chat
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 )
@@ -51,9 +52,9 @@ func (s *Store) List(ctx context.Context, afterID int64, limit int) ([]Message, 
 	var out []Message
 	for rows.Next() {
 		var (
-			m       Message
+			m        Message
 			tsMillis int64
-			roleStr string
+			roleStr  string
 		)
 		if err := rows.Scan(&m.ID, &tsMillis, &roleStr, &m.Content); err != nil {
 			return nil, fmt.Errorf("chat: scan: %w", err)
@@ -87,9 +88,9 @@ func (s *Store) Tail(ctx context.Context, limit int) ([]Message, error) {
 	var out []Message
 	for rows.Next() {
 		var (
-			m       Message
+			m        Message
 			tsMillis int64
-			roleStr string
+			roleStr  string
 		)
 		if err := rows.Scan(&m.ID, &tsMillis, &roleStr, &m.Content); err != nil {
 			return nil, fmt.Errorf("chat: scan: %w", err)
@@ -107,6 +108,43 @@ func (s *Store) Tail(ctx context.Context, limit int) ([]Message, error) {
 		out[i], out[j] = out[j], out[i]
 	}
 	return out, nil
+}
+
+func (s *Store) Clear(ctx context.Context) error {
+	if s == nil || s.db == nil {
+		return errors.New("chat: store not initialized")
+	}
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM chat_messages;`); err != nil {
+		return fmt.Errorf("chat: clear: %w", err)
+	}
+	return nil
+}
+
+// PruneKeepLast keeps the most recent N messages (by autoincrement id) and deletes older entries.
+func (s *Store) PruneKeepLast(ctx context.Context, keep int) error {
+	if s == nil || s.db == nil {
+		return errors.New("chat: store not initialized")
+	}
+	if keep <= 0 {
+		return s.Clear(ctx)
+	}
+	var cutoff int64
+	err := s.db.QueryRowContext(ctx, `
+		SELECT id
+		FROM chat_messages
+		ORDER BY id DESC
+		LIMIT 1 OFFSET ?;
+	`, keep-1).Scan(&cutoff)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		return fmt.Errorf("chat: prune cutoff: %w", err)
+	}
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM chat_messages WHERE id < ?;`, cutoff); err != nil {
+		return fmt.Errorf("chat: prune: %w", err)
+	}
+	return nil
 }
 
 func toMillis(t time.Time) int64 {

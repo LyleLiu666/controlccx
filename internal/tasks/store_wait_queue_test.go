@@ -106,4 +106,3 @@ func TestStore_DequeueNextWaitingForWorkdir_ClaimsFIFO(t *testing.T) {
 		t.Fatalf("dequeue3 id=%q, want %q", next2.ID, wait2.ID)
 	}
 }
-

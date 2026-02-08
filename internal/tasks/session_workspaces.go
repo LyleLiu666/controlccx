@@ -45,4 +45,3 @@ func migrateSessionWorkspacesKeyTx(tx *sql.Tx, fromKey, toKey string, nowMs int6
 	}
 	return nil
 }
-

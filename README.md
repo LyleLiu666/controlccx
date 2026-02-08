@@ -1,6 +1,6 @@
 # ControlCCX
 
-Go + Vue “control center” for running multiple agent workers (Claude Code / Codex) asynchronously, with a built-in observer that can answer questions about current task state.
+Go + Vue “control center” for running multiple agent workers (Claude Code / Codex) asynchronously, with a built-in secretary agent (“系统级秘书”) for read-only questions about task/system state.
 
 ## Vision（愿景）
 
@@ -77,9 +77,17 @@ Workers inherit environment variables from the ControlCCX server process. You ca
 - Claude Code (subscription token): `ANTHROPIC_AUTH_TOKEN` (or run `claude /login` once in a terminal on this machine)
 - Codex: `OPENAI_API_KEY`
 
-## Secretary status
+## Secretary（系统级秘书）
 
-Secretary 功能已下线（2026-02-08），当前版本不再提供秘书抽屉与 `/api/chat` 接口；后续会重做后再上线。
+用自然语言查询系统信息（只读），例如：任务总数 / 已完成 / 失败等。
+
+- UI：右上角 `⋯` 菜单 → `秘书`
+- API：
+  - `GET  /api/secretary/messages?limit=200`
+  - `POST /api/secretary/messages` body `{ "message": "..." }` → `{ "reply": "..." }`
+  - `POST /api/secretary/clear` → `{ "ok": true }`
+- 历史：服务端持久化到 SQLite `chat_messages`（全局 1 条历史，自动保留最近 2000 条）
+- 旧接口：`/api/chat` 仍保持移除，统一使用 `/api/secretary/*`
 
 ## Approvals
 

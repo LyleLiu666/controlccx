@@ -14,7 +14,6 @@ import (
 
 	"controlccx/internal/db"
 	"controlccx/internal/events"
-	"controlccx/internal/observer"
 	"controlccx/internal/tasks"
 )
 
@@ -47,9 +46,6 @@ func TestAPI_TasksCreate_DegradesExplicitlyWhenRunnerUnavailable(t *testing.T) {
 		Tasks:   taskStore,
 		Workers: failingRunner{startErr: context.DeadlineExceeded},
 		Hub:     hub,
-		Observer: &observer.Service{
-			Store: taskStore,
-		},
 	}
 
 	srv := httptest.NewServer(apiSvc.Handler())

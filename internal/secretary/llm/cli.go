@@ -1,4 +1,4 @@
-package observer
+package llm
 
 import (
 	"bufio"

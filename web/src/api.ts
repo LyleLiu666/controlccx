@@ -43,6 +43,10 @@ import type {
   SystemInfo,
   SessionWorkspaceGetResponse,
   SessionWorkspaceMergeResponse,
+  SecretaryClearResponse,
+  SecretaryMessagesResponse,
+  SecretarySendResponse,
+  SecretaryMessage,
   Task,
   TaskTraceResponse,
   Tool,
@@ -125,6 +129,20 @@ async function postJSON<T>(
 
 export async function fetchSystemInfo(): Promise<SystemInfo> {
   return getJSON<SystemInfo>("/api/system");
+}
+
+export async function fetchSecretaryMessages(limit = 200): Promise<SecretaryMessage[]> {
+  const qs = new URLSearchParams({ limit: String(limit) });
+  const res = await getJSON<SecretaryMessagesResponse>(`/api/secretary/messages?${qs.toString()}`);
+  return res.messages ?? [];
+}
+
+export async function sendSecretaryMessage(message: string): Promise<SecretarySendResponse> {
+  return postJSON<SecretarySendResponse>("/api/secretary/messages", { message: String(message ?? "") });
+}
+
+export async function clearSecretaryMessages(): Promise<SecretaryClearResponse> {
+  return postJSON<SecretaryClearResponse>("/api/secretary/clear", {});
 }
 
 export async function fetchControlPlaneStatus(): Promise<ControlPlaneStatus> {

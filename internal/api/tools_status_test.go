@@ -105,4 +105,3 @@ func TestAPI_Tools_Status(t *testing.T) {
 		t.Fatalf("codex available=true, want false")
 	}
 }
-

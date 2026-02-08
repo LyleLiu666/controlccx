@@ -7,8 +7,6 @@ import (
 )
 
 const (
-	// MaxProjectContextRunesForObserver bounds context injected into the Observer LLM prompt.
-	MaxProjectContextRunesForObserver = 6000
 	// MaxProjectContextRunesForWorker bounds context prefixed to worker stdin prompts (claude-code/codex).
 	MaxProjectContextRunesForWorker = 6000
 )

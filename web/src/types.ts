@@ -398,6 +398,31 @@ export type ServerEvent = {
   payload?: any;
 };
 
+export type SecretaryMessageRole = "user" | "assistant";
+
+export type SecretaryMessage = {
+  id: number;
+  time: string;
+  role: SecretaryMessageRole;
+  content: string;
+};
+
+export type SecretaryMessagesResponse = {
+  messages: SecretaryMessage[];
+};
+
+export type SecretarySendRequest = {
+  message: string;
+};
+
+export type SecretarySendResponse = {
+  reply: string;
+};
+
+export type SecretaryClearResponse = {
+  ok: boolean;
+};
+
 export type AuthFieldStatus = {
   effective: "env" | "stored" | "live" | "default" | "none";
   masked?: string;

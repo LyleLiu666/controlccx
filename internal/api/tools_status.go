@@ -19,4 +19,3 @@ func (a *API) handleToolsStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, map[string]any{"tools": a.Tools.Status()})
 }
-

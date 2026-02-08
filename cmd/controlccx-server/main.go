@@ -19,12 +19,14 @@ import (
 	"controlccx"
 	"controlccx/internal/api"
 	"controlccx/internal/auth"
+	"controlccx/internal/chat"
 	"controlccx/internal/config"
 	"controlccx/internal/daemon"
 	"controlccx/internal/db"
 	"controlccx/internal/events"
 	"controlccx/internal/providers"
 	"controlccx/internal/runworkspace"
+	"controlccx/internal/secretary"
 	"controlccx/internal/skills"
 	"controlccx/internal/tasks"
 	"controlccx/internal/tooling"
@@ -131,6 +133,8 @@ func main() {
 		log.Fatal(err)
 	}
 
+	chatStore := chat.NewStore(conn)
+
 	authStore, err := auth.Load(filepath.Join(cfg.Paths.DataDir, "secrets.json"))
 	if err != nil {
 		log.Fatal(err)
@@ -148,6 +152,8 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+
+	secretarySvc := secretary.NewService(cfg, taskStore, chatStore, authStore, providersStore)
 
 	hub := events.NewHub()
 
@@ -172,6 +178,7 @@ func main() {
 		Hub:                  hub,
 		Auth:                 authStore,
 		Providers:            providersStore,
+		Secretary:            secretarySvc,
 		Skills:               skillsSvc,
 		SkillVersions:        skillVersionsSvc,
 		SkillVersionsBySkill: perSkillVersionsSvc,
