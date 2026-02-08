@@ -264,12 +264,21 @@ func validateTool(t Tool) error {
 	if !isSafeID(t.ID) {
 		return fmt.Errorf("tooling: invalid id %q", t.ID)
 	}
-	switch t.Driver {
-	case DriverClaudeCode, DriverCodex, DriverExec:
-		// ok
-	default:
-		return fmt.Errorf("tooling: invalid driver %q", t.Driver)
+
+	// ControlCCX only supports configuring built-in worker CLIs.
+	// Custom tools are intentionally not supported.
+	allowed := map[string]Driver{
+		"claude-code": DriverClaudeCode,
+		"codex":       DriverCodex,
 	}
+	wantDriver, ok := allowed[t.ID]
+	if !ok {
+		return fmt.Errorf("tooling: unknown tool id %q", t.ID)
+	}
+	if t.Driver != wantDriver {
+		return fmt.Errorf("tooling: invalid driver %q for tool %q", t.Driver, t.ID)
+	}
+
 	if t.Command == "" {
 		return errors.New("tooling: command is required")
 	}

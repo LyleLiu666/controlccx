@@ -51,6 +51,7 @@ func TestService_PersistAndReload(t *testing.T) {
 		DataDir: dir,
 		Defaults: []Tool{
 			{ID: "claude-code", Driver: DriverClaudeCode, Command: "claude"},
+			{ID: "codex", Driver: DriverCodex, Command: "codex"},
 		},
 	})
 	if err != nil {
@@ -58,10 +59,10 @@ func TestService_PersistAndReload(t *testing.T) {
 	}
 
 	if err := svc1.Upsert(Tool{
-		ID:      "claude-cn",
-		Driver:  DriverClaudeCode,
-		Command: "claude",
-		Env:     map[string]string{"ANTHROPIC_BASE_URL": "https://example.invalid"},
+		ID:      "codex",
+		Driver:  DriverCodex,
+		Command: "/x/codex",
+		Env:     map[string]string{"CONTROLCCX_TEST_ENV": "1"},
 		Args:    []string{"--foo"},
 	}); err != nil {
 		t.Fatalf("Upsert: %v", err)
@@ -76,16 +77,20 @@ func TestService_PersistAndReload(t *testing.T) {
 		DataDir: dir,
 		Defaults: []Tool{
 			{ID: "claude-code", Driver: DriverClaudeCode, Command: "claude"},
+			{ID: "codex", Driver: DriverCodex, Command: "codex"},
 		},
 	})
 	if err != nil {
 		t.Fatalf("NewService(reload): %v", err)
 	}
-	got, ok := svc2.Resolve("claude-cn")
+	got, ok := svc2.Resolve("codex")
 	if !ok {
 		t.Fatalf("expected tool to persist")
 	}
-	if got.Env["ANTHROPIC_BASE_URL"] != "https://example.invalid" {
+	if got.Command != "/x/codex" {
+		t.Fatalf("command not persisted: %q", got.Command)
+	}
+	if got.Env["CONTROLCCX_TEST_ENV"] != "1" {
 		t.Fatalf("env not persisted: %#v", got.Env)
 	}
 	if len(got.Args) != 1 || got.Args[0] != "--foo" {
@@ -100,13 +105,19 @@ func TestService_Validate(t *testing.T) {
 		t.Fatalf("NewService: %v", err)
 	}
 
+	if err := svc.Upsert(Tool{ID: "claude-cn", Driver: DriverClaudeCode, Command: "x"}); err == nil {
+		t.Fatalf("expected unknown id error")
+	}
 	if err := svc.Upsert(Tool{ID: "bad id", Driver: DriverClaudeCode, Command: "x"}); err == nil {
 		t.Fatalf("expected invalid id error")
 	}
-	if err := svc.Upsert(Tool{ID: "ok", Driver: "nope", Command: "x"}); err == nil {
+	if err := svc.Upsert(Tool{ID: "codex", Driver: DriverClaudeCode, Command: "x"}); err == nil {
+		t.Fatalf("expected driver mismatch error")
+	}
+	if err := svc.Upsert(Tool{ID: "claude-code", Driver: "nope", Command: "x"}); err == nil {
 		t.Fatalf("expected invalid driver error")
 	}
-	if err := svc.Upsert(Tool{ID: "ok2", Driver: DriverClaudeCode, Command: ""}); err == nil {
+	if err := svc.Upsert(Tool{ID: "claude-code", Driver: DriverClaudeCode, Command: ""}); err == nil {
 		t.Fatalf("expected missing command error")
 	}
 }

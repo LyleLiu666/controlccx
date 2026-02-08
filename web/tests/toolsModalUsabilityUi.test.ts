@@ -6,15 +6,15 @@ function readText(relativePath: string) {
   return readFileSync(new URL(relativePath, import.meta.url), "utf8");
 }
 
-test("Tools modal includes practical setup guidance", () => {
+test("Tools modal focuses on CLI configuration (no custom tools)", () => {
   const modal = readText("../src/components/ToolsSettingsModal.vue");
-  assert.ok(modal.includes("怎么新增工具"));
-  assert.ok(modal.includes("先点“新建”"));
-  assert.ok(modal.includes("再点“保存”"));
+  assert.ok(modal.includes("这里能做什么"));
+  assert.ok(modal.includes("只支持配置 Claude Code / Codex"));
+  assert.ok(modal.includes("恢复默认"));
 });
 
-test("new tool flow defaults to exec driver for custom command tools", () => {
+test("App removes custom tool creation flow", () => {
   const app = readText("../src/App.vue");
-  assert.match(app, /function startNewTool\(\)[\s\S]*toolEditDriver\.value = "exec";/);
+  assert.ok(!app.includes("function startNewTool"), "expected startNewTool to be removed");
+  assert.ok(!app.includes("@newTool"), "expected ToolsSettingsModal newTool event to be removed");
 });
-

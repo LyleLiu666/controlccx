@@ -10,15 +10,13 @@ test("Tools modal is localized to Chinese", () => {
   const modal = readText("../src/components/ToolsSettingsModal.vue");
   for (const s of [
     "工具设置",
-    "新建",
     "刷新",
     "工具列表",
     "保存中...",
     "关闭",
-    "删除",
+    "恢复默认",
     "保存",
   ]) {
     assert.ok(modal.includes(s), `expected Tools modal to include ${JSON.stringify(s)}`);
   }
 });
-

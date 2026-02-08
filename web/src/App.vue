@@ -678,8 +678,6 @@ const toolsStatus = ref<ToolStatus[]>([]);
 const toolsSettingsOpen = ref(false);
 const toolsSaving = ref(false);
 const toolsSelectedID = ref<string>("");
-const toolEditID = ref("");
-const toolEditDriver = ref<ToolDriver>("claude-code");
 const toolEditCommand = ref("");
 const toolEditArgs = ref("");
 const toolEditEnv = ref("");
@@ -4425,8 +4423,6 @@ function formatEnvForEdit(env?: Record<string, string>) {
 
 function loadToolIntoEditor(t: Tool) {
   toolsSelectedID.value = t.id;
-  toolEditID.value = t.id;
-  toolEditDriver.value = t.driver;
   toolEditCommand.value = t.command;
   toolEditArgs.value = formatArgsForEdit(t.args);
   toolEditEnv.value = formatEnvForEdit(t.env);
@@ -4438,15 +4434,6 @@ function openToolsSettings() {
   if (!toolsList.value.length) void refreshTools();
   const selected = toolForID(toolsSelectedID.value) ?? toolsList.value[0] ?? null;
   if (selected) loadToolIntoEditor(selected);
-}
-
-function startNewTool() {
-  toolsSelectedID.value = "";
-  toolEditID.value = "";
-  toolEditDriver.value = "exec";
-  toolEditCommand.value = "";
-  toolEditArgs.value = "";
-  toolEditEnv.value = "";
 }
 
 function parseArgsText(s: string): string[] {
@@ -4479,9 +4466,13 @@ async function saveTool() {
   toolsError.value = "";
   toolsSaving.value = true;
   try {
+    const selected = toolForID(toolsSelectedID.value);
+    if (!selected) {
+      throw new Error("请选择要配置的工具。");
+    }
     const tool: Tool = {
-      id: toolEditID.value.trim(),
-      driver: toolEditDriver.value,
+      id: selected.id.trim(),
+      driver: selected.driver,
       command: toolEditCommand.value.trim(),
       args: parseArgsText(toolEditArgs.value),
       env: parseEnvText(toolEditEnv.value),
@@ -4497,8 +4488,8 @@ async function saveTool() {
   }
 }
 
-async function deleteToolOverride() {
-  const id = toolEditID.value.trim();
+async function resetToolOverride() {
+  const id = toolsSelectedID.value.trim();
   if (!id) return;
   toolsError.value = "";
   toolsSaving.value = true;
@@ -6870,16 +6861,14 @@ watch(
 		      :saving="toolsSaving"
 		      :error="toolsError"
 	      :tools="toolsList"
-	      v-model:editID="toolEditID"
-	      v-model:editDriver="toolEditDriver"
+	      :selectedID="toolsSelectedID"
 	      v-model:editCommand="toolEditCommand"
 	      v-model:editArgs="toolEditArgs"
 	      v-model:editEnv="toolEditEnv"
 	      @close="toolsSettingsOpen = false"
-	      @newTool="startNewTool"
 	      @refresh="refreshTools"
 	      @selectTool="loadToolIntoEditor"
-		      @delete="deleteToolOverride"
+		      @reset="resetToolOverride"
 		      @save="saveTool"
 		    />
 

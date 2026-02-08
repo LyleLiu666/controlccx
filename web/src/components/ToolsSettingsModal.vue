@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import type { Tool, ToolDriver } from "../types";
+import type { Tool } from "../types";
 
 const props = defineProps<{
   open: boolean;
@@ -8,8 +8,7 @@ const props = defineProps<{
   saving: boolean;
   error: string;
   tools: Tool[];
-  editID: string;
-  editDriver: ToolDriver;
+  selectedID: string;
   editCommand: string;
   editArgs: string;
   editEnv: string;
@@ -17,26 +16,15 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: "close"): void;
-  (e: "newTool"): void;
   (e: "refresh"): void;
   (e: "selectTool", tool: Tool): void;
-  (e: "delete"): void;
+  (e: "reset"): void;
   (e: "save"): void;
-  (e: "update:editID", value: string): void;
-  (e: "update:editDriver", value: ToolDriver): void;
   (e: "update:editCommand", value: string): void;
   (e: "update:editArgs", value: string): void;
   (e: "update:editEnv", value: string): void;
 }>();
 
-const editIDModel = computed({
-  get: () => props.editID,
-  set: (value: string) => emit("update:editID", value),
-});
-const editDriverModel = computed({
-  get: () => props.editDriver,
-  set: (value: ToolDriver) => emit("update:editDriver", value),
-});
 const editCommandModel = computed({
   get: () => props.editCommand,
   set: (value: string) => emit("update:editCommand", value),
@@ -49,6 +37,12 @@ const editEnvModel = computed({
   get: () => props.editEnv,
   set: (value: string) => emit("update:editEnv", value),
 });
+
+const selectedTool = computed<Tool | null>(() => {
+  const id = String(props.selectedID ?? "").trim();
+  if (!id) return props.tools?.[0] ?? null;
+  return props.tools?.find((t) => t.id === id) ?? props.tools?.[0] ?? null;
+});
 </script>
 
 <template>
@@ -56,9 +50,6 @@ const editEnvModel = computed({
     <div class="modal toolsModal">
       <div class="modalHeader">
         <div class="modalTitle">工具设置</div>
-        <button type="button" class="headerMiniBtn" @click="emit('newTool')">
-          新建
-        </button>
         <button
           type="button"
           class="headerMiniBtn"
@@ -72,11 +63,11 @@ const editEnvModel = computed({
 
       <div class="modalBody toolsBody">
         <div class="setupHint">
-          <div><strong>怎么新增工具？</strong></div>
+          <div><strong>这里能做什么？</strong></div>
           <ol class="setupSteps">
-            <li>先点“新建”，填写 `id`、`command`，driver 建议默认 `exec`。</li>
-            <li>再点“保存”；保存成功后会出现在左侧工具列表。</li>
-            <li>`claude-code` / `codex` 是系统内置入口，通常只需改命令或环境变量。</li>
+            <li>只支持配置 Claude Code / Codex 的可执行文件路径（command）。</li>
+            <li>保存后立即生效；若要回到默认值，点“恢复默认”。</li>
+            <li>通常情况下你不需要改参数/环境变量；优先在“提供方/认证设置”里配置授权与模型。</li>
           </ol>
         </div>
 
@@ -88,43 +79,31 @@ const editEnvModel = computed({
               <div class="toolsListTitleRow">
                 <div class="tinyHint">工具列表（点击切换）</div>
               </div>
-              <button
-                v-for="t in tools"
-                :key="t.id"
-                type="button"
-                class="toolsItem"
-                :class="{ active: t.id === editID }"
-                @click="emit('selectTool', t)"
-                :title="t.command"
-              >
-                <div class="mono">{{ t.id }}</div>
+                <button
+                  v-for="t in tools"
+                  :key="t.id"
+                  type="button"
+                  class="toolsItem"
+                  :class="{ active: t.id === selectedID }"
+                  @click="emit('selectTool', t)"
+                  :title="t.command"
+                >
+                  <div class="mono">{{ t.id }}</div>
                 <div class="tinyHint mono">{{ t.driver }}</div>
               </button>
             </div>
 
             <div class="toolsEditor">
               <div class="toolsEditorGrid">
-                <label class="full">
-                  工具 ID
-                  <input
-                    v-model="editIDModel"
-                    placeholder="my-tool（唯一）"
-                    autocomplete="off"
-                  />
-                </label>
                 <label>
-                  驱动
-                  <select v-model="editDriverModel">
-                    <option value="claude-code">claude-code</option>
-                    <option value="codex">codex</option>
-                    <option value="exec">exec</option>
-                  </select>
+                  工具
+                  <input :value="selectedTool?.id ?? ''" disabled />
                 </label>
                 <label class="full">
                   命令
                   <input
                     v-model="editCommandModel"
-                    placeholder="例如：claude / codex / bash"
+                    placeholder="例如：claude / codex / /opt/homebrew/bin/claude"
                     autocomplete="off"
                   />
                 </label>
@@ -144,7 +123,7 @@ const editEnvModel = computed({
                     placeholder="ANTHROPIC_BASE_URL=https://..."
                   ></textarea>
                 </label>
-                <div class="tinyHint">保存按钮需要填写：工具 ID + 命令。</div>
+                <div class="tinyHint">保存按钮需要填写：命令。</div>
               </div>
             </div>
           </div>
@@ -153,14 +132,14 @@ const editEnvModel = computed({
 
       <div class="modalFooter">
         <button type="button" @click="emit('close')">关闭</button>
-        <button type="button" @click="emit('delete')" :disabled="saving || !editID.trim()">
-          删除
+        <button type="button" @click="emit('reset')" :disabled="saving || !selectedID.trim()">
+          恢复默认
         </button>
         <button
           type="button"
           class="primary"
           @click="emit('save')"
-          :disabled="saving || !editID.trim() || !editCommand.trim()"
+          :disabled="saving || !selectedID.trim() || !editCommand.trim()"
         >
           {{ saving ? "保存中..." : "保存" }}
         </button>
