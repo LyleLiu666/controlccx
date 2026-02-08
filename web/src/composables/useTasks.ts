@@ -104,6 +104,19 @@ export function useTasks(opts: UseTasksOptions) {
   }
 
   let es: EventSource | null = null;
+  let normalizeOrderTimer: ReturnType<typeof setTimeout> | null = null;
+
+  function scheduleOrderNormalization() {
+    if (normalizeOrderTimer) return;
+    normalizeOrderTimer = setTimeout(async () => {
+      normalizeOrderTimer = null;
+      try {
+        await refreshTasks(200);
+      } catch {
+        // ignore normalize failures; SSE updates still keep task content fresh.
+      }
+    }, 100);
+  }
 
   function connectEvents() {
     if (es) {
@@ -142,6 +155,12 @@ export function useTasks(opts: UseTasksOptions) {
           const prevTask = tasks.value.get(nextTask.id);
           upsertTask(nextTask);
           if (opts.onTaskUpsert) opts.onTaskUpsert(prevTask, nextTask);
+          const orderKeyChanged =
+            !prevTask ||
+            prevTask.created_at !== nextTask.created_at ||
+            prevTask.started_at !== nextTask.started_at ||
+            prevTask.finished_at !== nextTask.finished_at;
+          if (orderKeyChanged) scheduleOrderNormalization();
         } else if (evt.type === "task.log") {
           appendLog(evt.payload as LogEntry);
         } else if (evt.type === "chat.message") {
@@ -169,6 +188,10 @@ export function useTasks(opts: UseTasksOptions) {
   }
 
   onBeforeUnmount(() => {
+    if (normalizeOrderTimer) {
+      clearTimeout(normalizeOrderTimer);
+      normalizeOrderTimer = null;
+    }
     if (!es) return;
     try {
       es.close();

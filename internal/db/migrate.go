@@ -134,6 +134,8 @@ func Migrate(ctx context.Context, conn *sql.DB) error {
 			created_at INTEGER NOT NULL DEFAULT 0,
 			updated_at INTEGER NOT NULL DEFAULT 0
 		);`,
+		`CREATE INDEX IF NOT EXISTS idx_tasks_latest_execution_sort
+			ON tasks(COALESCE(finished_at, started_at, created_at) DESC, created_at DESC, id DESC);`,
 	)
 
 	for _, stmt := range stmts {

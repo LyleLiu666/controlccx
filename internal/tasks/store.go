@@ -315,11 +315,7 @@ func (s *Store) ListTasksWithOptions(ctx context.Context, limit int, opts ListTa
 	if limit <= 0 || limit > 500 {
 		limit = 100
 	}
-	includeDeleted := 0
-	if opts.IncludeDeleted {
-		includeDeleted = 1
-	}
-	rows, err := s.db.QueryContext(ctx, `
+	query := `
 		SELECT
 			t.id, t.conversation_id, t.worker_type, t.mode, t.status,
 			COALESCE(o.unsafe_automation, 0),
@@ -340,10 +336,22 @@ func (s *Store) ListTasksWithOptions(ctx context.Context, limit int, opts ListTa
 				ELSE 't:' || t.id
 			END
 		)
-		WHERE (? = 1 OR sm.deleted_at IS NULL)
-		ORDER BY t.created_at DESC
+	`
+	args := make([]any, 0, 1)
+	if !opts.IncludeDeleted {
+		query += `
+		WHERE sm.deleted_at IS NULL
+	`
+	}
+	query += `
+		ORDER BY
+			COALESCE(t.finished_at, t.started_at, t.created_at) DESC,
+			t.created_at DESC,
+			t.id DESC
 		LIMIT ?;
-	`, includeDeleted, limit)
+	`
+	args = append(args, limit)
+	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("tasks: list: %w", err)
 	}
@@ -405,11 +413,7 @@ func (s *Store) ListTasksByConversationID(ctx context.Context, conversationID st
 	if limit <= 0 || limit > 500 {
 		limit = 100
 	}
-	includeDeleted := 0
-	if opts.IncludeDeleted {
-		includeDeleted = 1
-	}
-	rows, err := s.db.QueryContext(ctx, `
+	query := `
 		SELECT
 			t.id, t.conversation_id, t.worker_type, t.mode, t.status,
 			COALESCE(o.unsafe_automation, 0),
@@ -431,10 +435,19 @@ func (s *Store) ListTasksByConversationID(ctx context.Context, conversationID st
 			END
 		)
 		WHERE t.conversation_id = ?
-			AND (? = 1 OR sm.deleted_at IS NULL)
+	`
+	args := []any{conversationID}
+	if !opts.IncludeDeleted {
+		query += `
+			AND sm.deleted_at IS NULL
+	`
+	}
+	query += `
 		ORDER BY t.created_at DESC
 		LIMIT ?;
-	`, conversationID, includeDeleted, limit)
+	`
+	args = append(args, limit)
+	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("tasks: list by conversation_id: %w", err)
 	}

@@ -5085,10 +5085,6 @@ const sessionsAll = computed<SessionGroup[]>(() => {
     });
   }
 
-  out.sort((a, b) => {
-    if (a.score === b.score) return b.updated_at.localeCompare(a.updated_at);
-    return b.score - a.score;
-  });
   return out;
 });
 
