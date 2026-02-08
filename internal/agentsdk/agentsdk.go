@@ -25,6 +25,13 @@ type ChatCompletionOptions struct {
 	Temperature *float64
 	MaxTokens   *int
 	Stop        []string
+
+	// EnablePromptCache toggles provider-specific KV cache / prompt caching hints (best-effort).
+	EnablePromptCache bool
+
+	// CacheEpoch is a best-effort cache invalidation bump used by some providers/clients.
+	// It SHOULD be increased when the stable prompt prefix changes (e.g. after context compression).
+	CacheEpoch int
 }
 
 // Client is the minimal LLM interface required by the agent loop.

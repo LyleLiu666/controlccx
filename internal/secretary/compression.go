@@ -265,7 +265,11 @@ func (s *Service) summarizeSecretaryHistory(ctx context.Context, client agentsdk
 
 请输出更新后的摘要：`, prev, delta))
 
-	opts := &agentsdk.ChatCompletionOptions{MaxTokens: &maxTokens}
+	opts := &agentsdk.ChatCompletionOptions{
+		MaxTokens:         &maxTokens,
+		EnablePromptCache: true,
+		CacheEpoch:        1,
+	}
 
 	messages := []agentsdk.Message{
 		{Role: "system", Content: system},

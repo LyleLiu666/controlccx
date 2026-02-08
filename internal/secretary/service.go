@@ -125,10 +125,11 @@ func (s *Service) Send(ctx context.Context, userText string) (string, error) {
 	messages = append(messages, agentsdk.Message{Role: "user", Content: msg})
 
 	out, runErr := xmlprotocol.RunLoop(ctx, xmlprotocol.RunLoopInput{
-		Client:   client,
-		Messages: messages,
-		Executor: reg,
-		MaxSteps: 60,
+		Client:     client,
+		Messages:   messages,
+		LLMOptions: s.llmOptionsBestEffort(ctx),
+		Executor:   reg,
+		MaxSteps:   60,
 		Callbacks: xmlprotocol.Callbacks{
 			EventSink: sink,
 		},
@@ -272,4 +273,25 @@ func newRunID() string {
 		return hex.EncodeToString(b[:])
 	}
 	return fmt.Sprintf("%d", time.Now().UnixNano())
+}
+
+func (s *Service) llmOptionsBestEffort(ctx context.Context) *agentsdk.ChatCompletionOptions {
+	opts := &agentsdk.ChatCompletionOptions{
+		EnablePromptCache: true,
+		CacheEpoch:        1,
+	}
+	if s == nil || s.compress == nil {
+		return opts
+	}
+	rec, ok, err := s.compress.Latest(ctx)
+	if err != nil || !ok || rec.ID <= 0 {
+		return opts
+	}
+	maxInt := int64(^uint(0) >> 1)
+	if rec.ID > maxInt {
+		opts.CacheEpoch = int(maxInt)
+		return opts
+	}
+	opts.CacheEpoch = int(rec.ID)
+	return opts
 }

@@ -14,9 +14,16 @@ type Client struct {
 }
 
 func (c *Client) ChatCompletionStream(ctx context.Context, messages []agentsdk.Message, opts *agentsdk.ChatCompletionOptions, callback agentsdk.StreamCallback) error {
-	_ = opts
 	if c == nil || c.Backend == nil {
 		return callback("秘书不可用：未配置可用的 LLM backend。")
+	}
+
+	if cb, ok := c.Backend.(ChatBackend); ok {
+		out, err := cb.CompleteChat(ctx, messages, opts)
+		if err != nil {
+			return err
+		}
+		return callback(out)
 	}
 
 	prompt := flattenMessages(messages)

@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"controlccx/internal/agentsdk"
 	"controlccx/internal/auth"
 	"controlccx/internal/config"
 	"controlccx/internal/providers"
@@ -49,6 +50,35 @@ func NewSimpleHTTPBackendWithProviders(cfg config.Config, authStore *auth.Store,
 func (b *SimpleHTTPBackend) Name() string { return "simple-http" }
 
 func (b *SimpleHTTPBackend) Complete(ctx context.Context, prompt string) (string, error) {
+	return b.CompleteChat(ctx, []agentsdk.Message{{Role: "user", Content: prompt}}, nil)
+}
+
+type anthropicCacheControl struct {
+	Type string `json:"type"`
+}
+
+type anthropicContent struct {
+	Type         string                 `json:"type"`
+	Text         string                 `json:"text"`
+	CacheControl *anthropicCacheControl `json:"cache_control,omitempty"`
+}
+
+type anthropicMessage struct {
+	Role    string             `json:"role"`
+	Content []anthropicContent `json:"content"`
+}
+
+type anthropicRequest struct {
+	Model         string             `json:"model"`
+	MaxTokens     int                `json:"max_tokens"`
+	Messages      []anthropicMessage `json:"messages"`
+	System        []anthropicContent `json:"system,omitempty"`
+	Temperature   *float64           `json:"temperature,omitempty"`
+	StopSequences []string           `json:"stop_sequences,omitempty"`
+	Stream        bool               `json:"stream,omitempty"`
+}
+
+func (b *SimpleHTTPBackend) CompleteChat(ctx context.Context, messages []agentsdk.Message, opts *agentsdk.ChatCompletionOptions) (string, error) {
 	ctx, cancel := withDefaultTimeout(ctx, defaultSimpleHTTPTimeout)
 	defer cancel()
 
@@ -88,20 +118,52 @@ func (b *SimpleHTTPBackend) Complete(ctx context.Context, prompt string) (string
 			model = defaultSimpleHTTPModel
 		}
 	}
+	if opts != nil && strings.TrimSpace(opts.Model) != "" {
+		model = strings.TrimSpace(opts.Model)
+	}
 
 	endpoint, err := normalizeMessagesEndpoint(baseURL)
 	if err != nil {
 		return "", err
 	}
 
-	body := map[string]any{
-		"model":      model,
-		"max_tokens": defaultSimpleHTTPTokens,
-		"messages": []map[string]any{
-			{"role": "user", "content": prompt},
-		},
+	maxTokens := defaultSimpleHTTPTokens
+	if opts != nil && opts.MaxTokens != nil && *opts.MaxTokens > 0 {
+		maxTokens = *opts.MaxTokens
 	}
-	data, err := json.Marshal(body)
+
+	enableCache := true
+	if opts != nil {
+		enableCache = opts.EnablePromptCache
+	}
+
+	systemBlocks, anthropicMessages := buildAnthropicPayload(messages, enableCache)
+	if enableCache && opts != nil && opts.CacheEpoch > 0 {
+		epochBlock := anthropicContent{
+			Type:         "text",
+			Text:         fmt.Sprintf("controlccx_kv_epoch=%d", opts.CacheEpoch),
+			CacheControl: &anthropicCacheControl{Type: "ephemeral"},
+		}
+		systemBlocks = append([]anthropicContent{epochBlock}, systemBlocks...)
+	}
+
+	reqBody := anthropicRequest{
+		Model:         model,
+		MaxTokens:     maxTokens,
+		Messages:      anthropicMessages,
+		System:        systemBlocks,
+		Temperature:   nil,
+		StopSequences: nil,
+		Stream:        false,
+	}
+	if opts != nil {
+		reqBody.Temperature = opts.Temperature
+		if len(opts.Stop) > 0 {
+			reqBody.StopSequences = append([]string(nil), opts.Stop...)
+		}
+	}
+
+	data, err := json.Marshal(reqBody)
 	if err != nil {
 		return "", fmt.Errorf("simple-http marshal request: %w", err)
 	}
@@ -113,6 +175,9 @@ func (b *SimpleHTTPBackend) Complete(ctx context.Context, prompt string) (string
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("anthropic-version", "2023-06-01")
+	if enableCache {
+		req.Header.Set("anthropic-beta", "prompt-caching")
+	}
 	if authToken != "" {
 		// Compatibility-first: many gateways accept Bearer; some accept x-api-key style.
 		req.Header.Set("Authorization", "Bearer "+authToken)
@@ -153,6 +218,68 @@ func (b *SimpleHTTPBackend) Complete(ctx context.Context, prompt string) (string
 		return "", fmt.Errorf("simple-http empty completion from %s", endpoint)
 	}
 	return strings.TrimSpace(text), nil
+}
+
+func buildAnthropicPayload(messages []agentsdk.Message, enableCache bool) ([]anthropicContent, []anthropicMessage) {
+	cacheIndexes := map[int]bool{}
+	if enableCache {
+		cacheIndexes = cacheMessageIndexes(messages)
+	}
+
+	system := make([]anthropicContent, 0)
+	converted := make([]anthropicMessage, 0)
+
+	for idx, msg := range messages {
+		role := strings.ToLower(strings.TrimSpace(msg.Role))
+		content := strings.TrimSpace(msg.Content)
+		if content == "" {
+			continue
+		}
+
+		block := anthropicContent{
+			Type: "text",
+			Text: content,
+		}
+		if enableCache && cacheIndexes[idx] {
+			block.CacheControl = &anthropicCacheControl{Type: "ephemeral"}
+		}
+
+		if role == "system" {
+			system = append(system, block)
+			continue
+		}
+		if role != "user" && role != "assistant" {
+			role = "user"
+		}
+
+		converted = append(converted, anthropicMessage{
+			Role:    role,
+			Content: []anthropicContent{block},
+		})
+	}
+
+	return system, converted
+}
+
+func cacheMessageIndexes(messages []agentsdk.Message) map[int]bool {
+	indexes := make(map[int]bool)
+	systemCount := 0
+
+	for i, msg := range messages {
+		if strings.ToLower(strings.TrimSpace(msg.Role)) == "system" {
+			indexes[i] = true
+			systemCount++
+			if systemCount >= 2 {
+				break
+			}
+		}
+	}
+
+	for i := len(messages) - 1; i >= 0 && i >= len(messages)-2; i-- {
+		indexes[i] = true
+	}
+
+	return indexes
 }
 
 func readClaudeLiveEnvBestEffort() map[string]string {
