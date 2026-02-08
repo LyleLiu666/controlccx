@@ -10,9 +10,12 @@ import (
 )
 
 type Config struct {
-	Server  ServerConfig  `yaml:"server"`
-	Paths   PathsConfig   `yaml:"paths"`
-	Workers WorkersConfig `yaml:"workers"`
+	Server                ServerConfig  `yaml:"server"`
+	Paths                 PathsConfig   `yaml:"paths"`
+	Workers               WorkersConfig `yaml:"workers"`
+	AuditRetentionDays    int           `yaml:"audit_retention_days"`
+	AuditMaxRowsPerSource int           `yaml:"audit_max_rows_per_source"`
+	AuditGCInterval       string        `yaml:"audit_gc_interval"`
 }
 
 type ServerConfig struct {
@@ -54,6 +57,9 @@ func Default() Config {
 		Workers: WorkersConfig{
 			UnsafeAutomation: false,
 		},
+		AuditRetentionDays:    90,
+		AuditMaxRowsPerSource: 500000,
+		AuditGCInterval:       "1h",
 	}
 }
 

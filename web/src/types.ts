@@ -423,6 +423,81 @@ export type SecretaryClearResponse = {
   ok: boolean;
 };
 
+export type AuditSource =
+  | "task_log"
+  | "task_trace"
+  | "secretary_event"
+  | "secretary_compression"
+  | "secretary_chat";
+
+export type AuditEntry = {
+  id: string;
+  source: AuditSource;
+  time: string;
+  task_id?: string;
+  run_id?: string;
+  title: string;
+  summary: string;
+  raw_preview: string;
+};
+
+export type AuditEntryDetail = AuditEntry & {
+  raw: string;
+  meta?: Record<string, any>;
+};
+
+export type AuditSourceInfo = {
+  source: AuditSource;
+  label: string;
+  default_enabled: boolean;
+  supports_task_id: boolean;
+  supports_run_id: boolean;
+  supports_streams: boolean;
+  default_streams?: Array<"stdout" | "stderr" | "system" | "assistant">;
+};
+
+export type AuditQuery = {
+  sources?: AuditSource[];
+  q?: string;
+  from?: string;
+  to?: string;
+  task_id?: string;
+  run_id?: string;
+  streams?: Array<"stdout" | "stderr" | "system" | "assistant">;
+  limit?: number;
+  cursor?: string;
+};
+
+export type AuditEntriesResponse = {
+  entries: AuditEntry[];
+  next_cursor?: string;
+};
+
+export type AuditSourcesResponse = {
+  sources: AuditSourceInfo[];
+};
+
+export type AuditGCSourceResult = {
+  source: AuditSource;
+  table: string;
+  deleted_by_age: number;
+  deleted_by_count: number;
+  error?: string;
+};
+
+export type AuditGCStatus = {
+  run_at: string;
+  duration_ms: number;
+  results: AuditGCSourceResult[];
+};
+
+export type AuditRetentionStatus = {
+  days: number;
+  max_rows_per_source: number;
+  gc_interval_seconds: number;
+  last_run?: AuditGCStatus;
+};
+
 export type AuthFieldStatus = {
   effective: "env" | "stored" | "live" | "default" | "none";
   masked?: string;

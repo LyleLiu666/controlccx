@@ -35,6 +35,7 @@ const emit = defineEmits<{
   (e: "close"): void;
   (e: "openTools"): void;
   (e: "openProviders"): void;
+  (e: "openAudit"): void;
   (e: "importEnv", target: "claude" | "codex" | "all"): void;
   (e: "save"): void;
   (e: "clearStored", key: StoredAuthKey): void;
@@ -145,6 +146,9 @@ function formatAuthEffective(v: string | undefined | null): string {
         </button>
         <button type="button" class="headerMiniBtn" @click="emit('openProviders')">
           提供方
+        </button>
+        <button type="button" class="headerMiniBtn" @click="emit('openAudit')">
+          审计日志
         </button>
         <button class="iconBtn" type="button" @click="emit('close')">✕</button>
       </div>

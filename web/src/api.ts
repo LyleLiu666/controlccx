@@ -47,6 +47,11 @@ import type {
   SecretaryMessagesResponse,
   SecretarySendResponse,
   SecretaryMessage,
+  AuditEntryDetail,
+  AuditEntriesResponse,
+  AuditQuery,
+  AuditRetentionStatus,
+  AuditSourcesResponse,
   Task,
   TaskTraceResponse,
   Tool,
@@ -143,6 +148,32 @@ export async function sendSecretaryMessage(message: string): Promise<SecretarySe
 
 export async function clearSecretaryMessages(): Promise<SecretaryClearResponse> {
   return postJSON<SecretaryClearResponse>("/api/secretary/clear", {});
+}
+
+export async function fetchAuditEntries(query: AuditQuery): Promise<AuditEntriesResponse> {
+  const qs = new URLSearchParams();
+  if (Array.isArray(query.sources) && query.sources.length > 0) qs.set("sources", query.sources.join(","));
+  if (query.q) qs.set("q", String(query.q));
+  if (query.from) qs.set("from", String(query.from));
+  if (query.to) qs.set("to", String(query.to));
+  if (query.task_id) qs.set("task_id", String(query.task_id));
+  if (query.run_id) qs.set("run_id", String(query.run_id));
+  if (Array.isArray(query.streams) && query.streams.length > 0) qs.set("streams", query.streams.join(","));
+  if (query.limit && Number.isFinite(query.limit)) qs.set("limit", String(query.limit));
+  if (query.cursor) qs.set("cursor", String(query.cursor));
+  return getJSON<AuditEntriesResponse>(`/api/audit/entries?${qs.toString()}`);
+}
+
+export async function fetchAuditEntry(id: string): Promise<AuditEntryDetail> {
+  return getJSON<AuditEntryDetail>(`/api/audit/entries/${encodeURIComponent(String(id ?? "").trim())}`);
+}
+
+export async function fetchAuditSources(): Promise<AuditSourcesResponse> {
+  return getJSON<AuditSourcesResponse>("/api/audit/sources");
+}
+
+export async function fetchAuditRetention(): Promise<AuditRetentionStatus> {
+  return getJSON<AuditRetentionStatus>("/api/audit/retention");
 }
 
 export async function fetchControlPlaneStatus(): Promise<ControlPlaneStatus> {

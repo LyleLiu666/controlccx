@@ -96,6 +96,7 @@ import LiveDrawer from "./components/LiveDrawer.vue";
 import SecretaryDrawer from "./components/SecretaryDrawer.vue";
 import FilesModal from "./components/FilesModal.vue";
 import AuthSettingsModal from "./components/AuthSettingsModal.vue";
+import AuditPanel from "./components/AuditPanel.vue";
 import ToolsSettingsModal from "./components/ToolsSettingsModal.vue";
 import ProvidersPanel from "./components/ProvidersPanel.vue";
 import NewRunModal from "./components/NewRunModal.vue";
@@ -979,12 +980,13 @@ const feedCoachDismissed = ref(false);
 const feedCoachOpen = ref(false);
 
 const runsOpen = ref(false);
+const auditOpen = ref(false);
 
 const isPhone = ref(false);
 const sessionsDrawerOpen = ref(false);
 const sessionsFiltersOpen = ref(false);
 const sessionsHostAllowsPanel = computed(
-  () => !skillsOpen.value && !contextOpen.value && !filesOpen.value,
+  () => !skillsOpen.value && !contextOpen.value && !filesOpen.value && !auditOpen.value,
 );
 const showSessionsPanel = computed(
   () => sessionsHostAllowsPanel.value && sessionsDrawerOpen.value,
@@ -2474,6 +2476,10 @@ function goHome() {
     closeFilesPage();
     return;
   }
+  if (auditOpen.value) {
+    closeAuditPage();
+    return;
+  }
   if (providersSettingsOpen.value) {
     closeProvidersPage();
     return;
@@ -2642,6 +2648,7 @@ function encodePathForQueryValue(path: string): string {
 async function openSkillsPage() {
   navigateTo("/skills");
   sessionsDrawerOpen.value = false;
+  auditOpen.value = false;
   contextOpen.value = false;
   providersSettingsOpen.value = false;
   await openSkills();
@@ -2650,6 +2657,7 @@ async function openSkillsPage() {
 function openContextPage() {
   navigateTo("/context");
   sessionsDrawerOpen.value = false;
+  auditOpen.value = false;
   skillsGovernanceOpen.value = false;
   skillsOpen.value = false;
   providersSettingsOpen.value = false;
@@ -2663,6 +2671,27 @@ function openContextPage() {
 
 function closeContextPage() {
   contextOpen.value = false;
+  navigateTo("/");
+}
+
+function openAuditPage() {
+  navigateTo("/audit");
+  sessionsDrawerOpen.value = false;
+  authSettingsOpen.value = false;
+  toolsSettingsOpen.value = false;
+  providersSettingsOpen.value = false;
+  skillsGovernanceOpen.value = false;
+  skillsOpen.value = false;
+  contextOpen.value = false;
+  if (filesOpen.value) {
+    closeFiles();
+    if (filesOpen.value) return;
+  }
+  auditOpen.value = true;
+}
+
+function closeAuditPage() {
+  auditOpen.value = false;
   navigateTo("/");
 }
 
@@ -2745,6 +2774,7 @@ function applyRouteFromLocation() {
   }
 
   if (path === "/skills") {
+    auditOpen.value = false;
     if (filesOpen.value) {
       closeFiles();
       if (filesOpen.value) {
@@ -2757,6 +2787,7 @@ function applyRouteFromLocation() {
     return;
   }
   if (path === "/context") {
+    auditOpen.value = false;
     if (filesOpen.value) {
       closeFiles();
       if (filesOpen.value) {
@@ -2772,12 +2803,32 @@ function applyRouteFromLocation() {
     return;
   }
   if (path === "/files") {
+    auditOpen.value = false;
     skillsOpen.value = false;
     contextOpen.value = false;
     void openFilesPageFromLocation();
     return;
   }
+  if (path === "/audit") {
+    if (filesOpen.value) {
+      closeFiles();
+      if (filesOpen.value) {
+        restoreFilesRoute();
+        return;
+      }
+    }
+    sessionsDrawerOpen.value = false;
+    authSettingsOpen.value = false;
+    toolsSettingsOpen.value = false;
+    providersSettingsOpen.value = false;
+    skillsGovernanceOpen.value = false;
+    skillsOpen.value = false;
+    contextOpen.value = false;
+    auditOpen.value = true;
+    return;
+  }
   if (path === "/providers") {
+    auditOpen.value = false;
     if (filesOpen.value) {
       closeFiles();
       if (filesOpen.value) {
@@ -2797,6 +2848,7 @@ function applyRouteFromLocation() {
   }
   if (skillsOpen.value) skillsOpen.value = false;
   if (contextOpen.value) contextOpen.value = false;
+  if (auditOpen.value) auditOpen.value = false;
   if (filesOpen.value) {
     closeFiles();
     if (filesOpen.value) restoreFilesRoute();
@@ -3858,6 +3910,7 @@ function rememberWorkspaceRecent(path: string) {
 
 function openProvidersSettings() {
   providersError.value = "";
+  auditOpen.value = false;
   authSettingsOpen.value = false;
   toolsSettingsOpen.value = false;
   if (filesOpen.value) {
@@ -5009,6 +5062,10 @@ function onGlobalKeyDown(e: KeyboardEvent) {
       closeFilesPage();
       return;
     }
+    if (auditOpen.value) {
+      closeAuditPage();
+      return;
+    }
     if (skillsOpen.value) {
       closeSkillsPage();
       return;
@@ -5619,6 +5676,11 @@ watch(
         @delete="deleteProviderProfile"
         @save="saveProviderProfile"
         @activate="activateProviderTarget"
+      />
+
+      <AuditPanel
+        v-else-if="auditOpen"
+        @back="closeAuditPage"
       />
 
 	      <section v-else class="panel">
@@ -6839,6 +6901,7 @@ watch(
 	      @close="authSettingsOpen = false"
 	      @openTools="openToolsSettings"
 	      @openProviders="openProvidersSettings"
+	      @openAudit="openAuditPage"
 	      @importEnv="importAuthEnv"
 	      @save="saveAuthSettings"
 	      @clearStored="clearStoredAuth"

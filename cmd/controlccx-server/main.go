@@ -18,6 +18,7 @@ import (
 
 	"controlccx"
 	"controlccx/internal/api"
+	"controlccx/internal/audit"
 	"controlccx/internal/auth"
 	"controlccx/internal/chat"
 	"controlccx/internal/config"
@@ -132,6 +133,14 @@ func main() {
 	if err := taskStore.EnsureConversationIDs(ctx); err != nil {
 		log.Fatal(err)
 	}
+	auditSvc := audit.NewService(conn, audit.Options{
+		Retention: audit.RetentionOptions{
+			Days:         cfg.AuditRetentionDays,
+			MaxRows:      cfg.AuditMaxRowsPerSource,
+			GCInterval:   parseAuditGCInterval(cfg.AuditGCInterval),
+			StartupRunGC: true,
+		},
+	})
 
 	chatStore := chat.NewStore(conn)
 	secretaryEvents := secretary.NewEventStore(conn)
@@ -186,6 +195,7 @@ func main() {
 		Tasks:                taskStore,
 		Workers:              runnerClient,
 		Hub:                  hub,
+		Audit:                auditSvc,
 		Auth:                 authStore,
 		Providers:            providersStore,
 		Secretary:            secretarySvc,
@@ -213,6 +223,7 @@ func main() {
 
 	bridgeCtx, cancelBridge := context.WithCancel(context.Background())
 	srv.RegisterOnShutdown(cancelBridge)
+	srv.RegisterOnShutdown(audit.StartGCLoop(auditSvc, log.Printf))
 	go func() {
 		if err := daemon.BridgeSSEToHub(bridgeCtx, runnerBaseURL+"/api/events", hub, daemon.SSEBridgeOptions{
 			Logf:  log.Printf,
@@ -289,6 +300,18 @@ func waitForShutdown(srv *http.Server) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	_ = srv.Shutdown(ctx)
+}
+
+func parseAuditGCInterval(raw string) time.Duration {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return time.Hour
+	}
+	dur, err := time.ParseDuration(value)
+	if err != nil || dur <= 0 {
+		return time.Hour
+	}
+	return dur
 }
 
 func resolveUIFS(staticDirFlag string) fs.FS {

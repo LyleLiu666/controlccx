@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"controlccx/internal/audit"
 	"controlccx/internal/auth"
 	"controlccx/internal/chat"
 	"controlccx/internal/events"
@@ -33,6 +34,7 @@ type API struct {
 	Tasks                *tasks.Store
 	Workers              TaskRunner
 	Secretary            *secretary.Service
+	Audit                *audit.Service
 	Chat                 *chat.Store
 	Hub                  *events.Hub
 	FSRoots              []FSRoot
@@ -61,6 +63,10 @@ func (a *API) Handler() http.Handler {
 	mux.HandleFunc("/api/context", a.handleProjectContext)
 	mux.HandleFunc("/api/secretary/messages", a.handleSecretaryMessages)
 	mux.HandleFunc("/api/secretary/clear", a.handleSecretaryClear)
+	mux.HandleFunc("/api/audit/entries", a.handleAuditEntries)
+	mux.HandleFunc("/api/audit/entries/", a.handleAuditEntryByID)
+	mux.HandleFunc("/api/audit/sources", a.handleAuditSources)
+	mux.HandleFunc("/api/audit/retention", a.handleAuditRetention)
 	mux.HandleFunc("/api/templates", a.handlePromptTemplates)
 	mux.HandleFunc("/api/templates/upsert", a.handlePromptTemplatesUpsert)
 	mux.HandleFunc("/api/templates/delete", a.handlePromptTemplatesDelete)
