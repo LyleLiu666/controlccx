@@ -105,6 +105,62 @@ export function useTasks(opts: UseTasksOptions) {
   let es: EventSource | null = null;
   let normalizeOrderTimer: ReturnType<typeof setTimeout> | null = null;
 
+  let lastEventSeq = 0;
+  let resyncInFlight = false;
+  let lastResyncMs = 0;
+
+  const resyncThrottleMs = 1500;
+  const periodicResyncMs = 60_000;
+  const resyncLogsLimit = 2000;
+
+  function mergeLogsByID(existing: LogEntry[], fetched: LogEntry[]) {
+    if (existing.length === 0) return fetched;
+    if (fetched.length === 0) return existing;
+    const byID = new Map<number, LogEntry>();
+    for (const e of existing) byID.set(e.id, e);
+    for (const e of fetched) byID.set(e.id, e);
+    return Array.from(byID.values()).sort((a, b) => a.id - b.id);
+  }
+
+  async function resync(reason: string, opts?: { fullLogs?: boolean }) {
+    const now = Date.now();
+    if (resyncInFlight) return;
+    if (now - lastResyncMs < resyncThrottleMs) return;
+    resyncInFlight = true;
+    lastResyncMs = now;
+
+    try {
+      await refreshTasks(200);
+
+      const taskID = selectedTaskId.value;
+      if (!taskID) return;
+
+      const existing = logsByTask.value.get(taskID) ?? [];
+      const full = opts?.fullLogs || existing.length === 0;
+
+      if (full) {
+        const fetched = await fetchLogs(taskID, 0, resyncLogsLimit);
+        const merged = mergeLogsByID(logsByTask.value.get(taskID) ?? [], fetched);
+        const next = new Map(logsByTask.value);
+        next.set(taskID, merged);
+        logsByTask.value = next;
+        return;
+      }
+
+      const lastID = existing[existing.length - 1]?.id ?? 0;
+      const delta = await fetchLogs(taskID, lastID, resyncLogsLimit);
+      if (delta.length === 0) return;
+      const merged = mergeLogsByID(logsByTask.value.get(taskID) ?? [], delta);
+      const next = new Map(logsByTask.value);
+      next.set(taskID, merged);
+      logsByTask.value = next;
+    } catch {
+      // ignore resync failures; SSE updates still keep task content fresh.
+    } finally {
+      resyncInFlight = false;
+    }
+  }
+
   function scheduleOrderNormalization() {
     if (normalizeOrderTimer) return;
     normalizeOrderTimer = setTimeout(async () => {
@@ -130,12 +186,14 @@ export function useTasks(opts: UseTasksOptions) {
     eventsConnected.value = true;
     eventsLastError.value = "";
     eventsLastEventMs.value = Date.now();
+    lastEventSeq = 0;
     es = new EventSource("/api/events");
 
     es.onopen = () => {
       eventsConnected.value = true;
       eventsLastError.value = "";
       eventsLastEventMs.value = Date.now();
+      void resync("events open", { fullLogs: true });
     };
 
     es.onerror = () => {
@@ -149,6 +207,17 @@ export function useTasks(opts: UseTasksOptions) {
         const evt = JSON.parse(e.data) as ServerEvent;
         eventsConnected.value = true;
         eventsLastEventMs.value = Date.now();
+
+        const seq = Number(evt.seq ?? 0);
+        if (seq > 0) {
+          if (lastEventSeq > 0 && seq <= lastEventSeq) {
+            void resync("events seq reset", { fullLogs: true });
+          } else if (lastEventSeq > 0 && seq > lastEventSeq + 1) {
+            void resync("events gap", { fullLogs: true });
+          }
+          lastEventSeq = seq;
+        }
+
         if (evt.type === "task.created" || evt.type === "task.updated") {
           const nextTask = evt.payload as Task;
           const prevTask = tasks.value.get(nextTask.id);
@@ -176,6 +245,9 @@ export function useTasks(opts: UseTasksOptions) {
       eventsConnected.value = true;
       eventsLastHeartbeatMs.value = Date.now();
       eventsLastEventMs.value = eventsLastHeartbeatMs.value;
+      if (Date.now() - lastResyncMs > periodicResyncMs) {
+        void resync("events heartbeat");
+      }
     });
   }
 

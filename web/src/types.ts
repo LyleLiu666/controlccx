@@ -392,6 +392,7 @@ export type FSDeleteResponse = {
 };
 
 export type ServerEvent = {
+  seq?: number;
   type: string;
   time: string;
   payload?: any;

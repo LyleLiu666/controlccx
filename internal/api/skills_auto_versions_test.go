@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -49,9 +50,10 @@ func TestAPI_Skills_AutoVersions_StatusAndAck(t *testing.T) {
 		t.Fatalf("new per-skill versions: %v", err)
 	}
 
-	now := t1
+	var now atomic.Int64
+	now.Store(t1.UnixNano())
 	scanner := skills.NewAutoVersionScanner(skillsSvc, perSkillVers, skills.AutoVersionScanOptions{
-		Now: func() time.Time { return now },
+		Now: func() time.Time { return time.Unix(0, now.Load()).UTC() },
 		// Keep list-trigger quiet while we assert.
 		ThrottleTTL: 24 * time.Hour,
 	})
@@ -78,7 +80,7 @@ func TestAPI_Skills_AutoVersions_StatusAndAck(t *testing.T) {
 		CreatedAt:      t1.Format(time.RFC3339),
 		UpdatedAt:      t2.Format(time.RFC3339),
 	})
-	now = t2
+	now.Store(t2.UnixNano())
 	if err := scanner.EnsureSkill(ctx, "skill-a", false); err != nil {
 		t.Fatalf("ensure update: %v", err)
 	}
@@ -190,9 +192,10 @@ func TestAPI_Skills_AutoVersions_ListTriggerIsThrottled(t *testing.T) {
 		t.Fatalf("new per-skill versions: %v", err)
 	}
 
-	now := t1
+	var now atomic.Int64
+	now.Store(t1.UnixNano())
 	scanner := skills.NewAutoVersionScanner(skillsSvc, perSkillVers, skills.AutoVersionScanOptions{
-		Now:         func() time.Time { return now },
+		Now:         func() time.Time { return time.Unix(0, now.Load()).UTC() },
 		ThrottleTTL: 24 * time.Hour,
 	})
 
@@ -238,7 +241,7 @@ func TestAPI_Skills_AutoVersions_ListTriggerIsThrottled(t *testing.T) {
 		CreatedAt:      t1.Format(time.RFC3339),
 		UpdatedAt:      t2.Format(time.RFC3339),
 	})
-	now = t2
+	now.Store(t2.UnixNano())
 
 	{
 		res, err := http.Get(srv.URL + "/api/skills")
