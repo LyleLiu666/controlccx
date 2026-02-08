@@ -22,10 +22,9 @@ type controlPlaneComponent struct {
 }
 
 type controlPlaneStatus struct {
-	Server     controlPlaneComponent `json:"server"`
-	Runnerd    controlPlaneComponent `json:"runnerd"`
-	Secretaryd controlPlaneComponent `json:"secretaryd"`
-	TSMS       int64                 `json:"ts_ms"`
+	Server  controlPlaneComponent `json:"server"`
+	Runnerd controlPlaneComponent `json:"runnerd"`
+	TSMS    int64                 `json:"ts_ms"`
 }
 
 type daemonHealthPayload struct {
@@ -37,9 +36,8 @@ type daemonHealthPayload struct {
 	TSMS            int64  `json:"ts_ms"`
 }
 
-func controlPlaneHandler(runnerBaseURL, secretaryBaseURL, instanceToken string) http.HandlerFunc {
+func controlPlaneHandler(runnerBaseURL, instanceToken string) http.HandlerFunc {
 	runnerBaseURL = strings.TrimRight(strings.TrimSpace(runnerBaseURL), "/")
-	secretaryBaseURL = strings.TrimRight(strings.TrimSpace(secretaryBaseURL), "/")
 	instanceToken = strings.TrimSpace(instanceToken)
 
 	client := &http.Client{Timeout: 450 * time.Millisecond}
@@ -121,9 +119,8 @@ func controlPlaneHandler(runnerBaseURL, secretaryBaseURL, instanceToken string) 
 				PID:   0,
 				Error: "",
 			},
-			Runnerd:    fetch(ctx, runnerBaseURL, "runnerd"),
-			Secretaryd: fetch(ctx, secretaryBaseURL, "secretaryd"),
-			TSMS:       now,
+			Runnerd: fetch(ctx, runnerBaseURL, "runnerd"),
+			TSMS:    now,
 		}
 
 		w.Header().Set("Content-Type", "application/json")

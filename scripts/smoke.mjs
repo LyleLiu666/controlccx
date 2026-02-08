@@ -183,7 +183,6 @@ process.stdout.write('{"type":"item.completed","thread_id":"thr-smoke-codex","it
 async function spawnServer({ env, claudePath = "", codexPath = "" }) {
   const port = await pickPort();
   const runnerPort = await pickPort();
-  const secretaryPort = await pickPort();
   const base = `http://127.0.0.1:${port}`;
   const dataDir = mkdtempSync(path.join(os.tmpdir(), "controlccx-smoke-"));
 
@@ -203,8 +202,6 @@ async function spawnServer({ env, claudePath = "", codexPath = "" }) {
     `127.0.0.1:${port}`,
     "--runnerd-addr",
     `127.0.0.1:${runnerPort}`,
-    "--secretaryd-addr",
-    `127.0.0.1:${secretaryPort}`,
   ];
   if (claudePath) args.push("--claude-path", claudePath);
   if (codexPath) args.push("--codex-path", codexPath);
@@ -220,7 +217,7 @@ async function spawnServer({ env, claudePath = "", codexPath = "" }) {
     instanceToken = "";
   }
 
-  return { child, base, dataDir, port, runnerPort, secretaryPort, instanceToken };
+  return { child, base, dataDir, port, runnerPort, instanceToken };
 }
 
 async function killDaemon(port, instanceToken) {
@@ -237,7 +234,7 @@ async function killDaemon(port, instanceToken) {
   }
 }
 
-async function shutdownServer({ child, runnerPort, secretaryPort, instanceToken }) {
+async function shutdownServer({ child, runnerPort, instanceToken }) {
   try {
     child.kill();
   } catch {
@@ -245,7 +242,6 @@ async function shutdownServer({ child, runnerPort, secretaryPort, instanceToken 
   }
   // Best-effort cleanup: daemons are detached and may outlive the server process.
   await killDaemon(runnerPort, instanceToken);
-  await killDaemon(secretaryPort, instanceToken);
 }
 
 async function waitForTaskFinish(base, id, { timeoutMS = 12_000 } = {}) {

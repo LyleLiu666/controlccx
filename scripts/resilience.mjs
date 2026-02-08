@@ -97,34 +97,6 @@ async function killChildBestEffort(child, { name = "process" } = {}) {
   await waitForExit(child, { timeoutMs: 5_000, name: `${name} (SIGKILL)` });
 }
 
-async function spawnUntilHealthy(spawnFn, isHealthyFn, { timeoutMs = 15_000, name = "daemon" } = {}) {
-  const deadline = Date.now() + timeoutMs;
-  let lastErr = null;
-  while (Date.now() < deadline) {
-    const child = spawnFn();
-    const exitPromise = new Promise((resolve) => child.once("exit", (code, signal) => resolve({ code, signal })));
-
-    const remainingMs = Math.max(0, deadline - Date.now());
-    try {
-      const v = await Promise.race([
-        waitFor(isHealthyFn, { timeoutMs: remainingMs, intervalMs: 200, name }),
-        exitPromise.then(({ code, signal }) => {
-          throw new Error(`${name} exited before healthy (code=${code} signal=${signal})`);
-        }),
-      ]);
-      child.unref();
-      return v;
-    } catch (err) {
-      lastErr = err;
-      // If the child is still around, make sure it doesn't linger across retries.
-      killBestEffort(child.pid);
-      await Promise.race([exitPromise, sleep(400)]).catch(() => {});
-      await sleep(500);
-    }
-  }
-  throw lastErr ?? new Error(`timeout waiting for ${name}`);
-}
-
 const isWin = process.platform === "win32";
 const binName = isWin ? "controlccx.exe" : "controlccx";
 const binPath = path.join("dist", binName);
@@ -141,10 +113,8 @@ if (isWin) {
 
 const port = await pickPort();
 const runnerPort = await pickPort();
-const secretaryPort = await pickPort();
 const base = `http://127.0.0.1:${port}`;
 const runnerBaseURL = `http://127.0.0.1:${runnerPort}`;
-const secretaryBaseURL = `http://127.0.0.1:${secretaryPort}`;
 const dataDir = mkdtempSync(path.join(os.tmpdir(), "controlccx-resilience-"));
 
 function cleanupDir() {
@@ -167,25 +137,6 @@ function spawnServer() {
       `127.0.0.1:${port}`,
       "--runnerd-addr",
       `127.0.0.1:${runnerPort}`,
-      "--secretaryd-addr",
-      `127.0.0.1:${secretaryPort}`,
-    ],
-    { stdio: "inherit" }
-  );
-}
-
-function spawnSecretary() {
-  return spawn(
-    path.resolve(binPath),
-    [
-      "--mode",
-      "secretaryd",
-      "--data-dir",
-      dataDir,
-      "--runnerd-addr",
-      `127.0.0.1:${runnerPort}`,
-      "--secretaryd-addr",
-      `127.0.0.1:${secretaryPort}`,
     ],
     { stdio: "inherit" }
   );
@@ -222,13 +173,6 @@ async function cleanup() {
   try {
     const run = await fetchJson(`${runnerBaseURL}/health`, { headers });
     killBestEffort(run?.pid);
-  } catch {
-    // ignore
-  }
-
-  try {
-    const sec = await fetchJson(`${secretaryBaseURL}/health`, { headers });
-    killBestEffort(sec?.pid);
   } catch {
     // ignore
   }
@@ -338,47 +282,14 @@ if (status1 !== "succeeded") {
   throw new Error(`task1 unexpected status: ${status1}`);
 }
 
-// 2) Secretary restart does not affect runner task lifecycle.
-const task2 = await startTickTask("res2", 10);
-await waitFor(async () => {
-  const logs = await fetchLogs(task2);
-  return maxTickFromLogs(logs, "res2") >= 1;
-}, { timeoutMs: 10_000, name: "task2 ticks >= 1" });
-
-const cp1 = await controlPlane();
-if (cp1?.secretaryd?.ok !== true || !Number.isFinite(cp1?.secretaryd?.pid) || cp1.secretaryd.pid <= 0) {
-  throw new Error(`expected secretaryd running before restart, got: ${JSON.stringify(cp1?.secretaryd ?? null)}`);
-}
-const secretaryPid = cp1.secretaryd.pid;
-killBestEffort(secretaryPid);
-
-// Bring secretary back.
-const token = instanceTokenBestEffort();
-await spawnUntilHealthy(
-  spawnSecretary,
-  async () => {
-    const headers = { Accept: "application/json", "X-ControlCCX-Token": token };
-    const sec = await fetchJson(`${secretaryBaseURL}/health`, { headers });
-    if (sec?.ok !== true || sec?.name !== "secretaryd") return false;
-    if (sec?.pid === secretaryPid) return false;
-    return true;
-  },
-  { timeoutMs: 25_000, name: "secretaryd healthy after restart" }
-);
-
-const status2 = await waitForTaskDone(task2, 30_000);
-if (status2 !== "succeeded") {
-  throw new Error(`task2 unexpected status: ${status2}`);
-}
-
-// 3) Killing runnerd degrades task plane but keeps secretary explicit.
+// 2) Killing runnerd degrades task plane and blocks new task creation.
 const cp2 = await controlPlane();
 const runnerPid = cp2?.runnerd?.pid;
 killBestEffort(runnerPid);
 
 await waitFor(async () => {
   const cp = await controlPlane();
-  return cp?.runnerd?.ok === false && cp?.secretaryd?.name;
+  return cp?.runnerd?.ok === false;
 }, { timeoutMs: 10_000, name: "runnerd degraded" });
 
 const res = await fetch(`${base}/api/tasks`, {

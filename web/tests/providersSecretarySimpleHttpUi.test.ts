@@ -17,6 +17,8 @@ test("Providers modal supports Secretary simple-http auth fields", () => {
 
 test("App wires Secretary simple-http provider fields", () => {
   const appVue = readText("../src/App.vue");
+  assert.match(appVue, /v-model:secretaryBackend=\"providerSecretaryBackend\"/);
+  assert.ok(!appVue.includes("v-model:chatBackend"));
   assert.match(
     appVue,
     /v-model:secretarySimpleHTTPBaseURL=\"providerSecretarySimpleHTTPBaseURL\"/,

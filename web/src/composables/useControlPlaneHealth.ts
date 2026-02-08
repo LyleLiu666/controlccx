@@ -18,11 +18,6 @@ export function useControlPlaneHealth(opts?: {
     if (!s) return true;
     return !!s.runnerd?.ok;
   });
-  const secretaryOK = computed<boolean>(() => {
-    const s = status.value;
-    if (!s) return true;
-    return !!s.secretaryd?.ok;
-  });
 
   async function refresh() {
     if (loading.value) return;
@@ -58,8 +53,6 @@ export function useControlPlaneHealth(opts?: {
     error,
     loading,
     runnerOK,
-    secretaryOK,
     refresh,
   };
 }
-

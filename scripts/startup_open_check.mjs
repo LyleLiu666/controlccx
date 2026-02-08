@@ -157,11 +157,9 @@ if (!existsSync(binPath) || !existsSync("web/dist/index.html")) {
 
 const port = await pickPort();
 const runnerPort = await pickPort();
-const secretaryPort = await pickPort();
 
 const base = `http://127.0.0.1:${port}`;
 const runnerBaseURL = `http://127.0.0.1:${runnerPort}`;
-const secretaryBaseURL = `http://127.0.0.1:${secretaryPort}`;
 const expectedURL = `http://127.0.0.1:${port}`;
 
 const tmpDir = mkdtempSync(path.join(os.tmpdir(), "controlccx-startup-open-"));
@@ -211,12 +209,6 @@ async function killDaemonsBestEffort() {
   } catch {
     // ignore
   }
-  try {
-    const sec = await fetchJson(`${secretaryBaseURL}/health`, { headers });
-    killBestEffort(sec?.pid);
-  } catch {
-    // ignore
-  }
 }
 
 function spawnServer(args, { stdio = "inherit" } = {}) {
@@ -237,8 +229,6 @@ function spawnServer(args, { stdio = "inherit" } = {}) {
       `127.0.0.1:${port}`,
       "--runnerd-addr",
       `127.0.0.1:${runnerPort}`,
-      "--secretaryd-addr",
-      `127.0.0.1:${secretaryPort}`,
       ...args,
     ],
     { stdio, env }

@@ -15,31 +15,10 @@ import (
 	"time"
 
 	"controlccx/internal/auth"
-	"controlccx/internal/chat"
 	"controlccx/internal/db"
 	"controlccx/internal/events"
-	"controlccx/internal/observer"
 	"controlccx/internal/tasks"
 )
-
-type stubObserverBackend struct {
-	i       int
-	outputs []string
-}
-
-func (s *stubObserverBackend) Name() string { return "stub" }
-
-func (s *stubObserverBackend) Complete(ctx context.Context, prompt string) (string, error) {
-	if s == nil {
-		return "", nil
-	}
-	if s.i >= len(s.outputs) {
-		return `{"action":"final","message":"done"}`, nil
-	}
-	out := s.outputs[s.i]
-	s.i++
-	return out, nil
-}
 
 func TestAPI_TasksAndChat(t *testing.T) {
 	ctx := context.Background()
@@ -50,15 +29,12 @@ func TestAPI_TasksAndChat(t *testing.T) {
 	t.Cleanup(func() { _ = conn.Close() })
 
 	taskStore := tasks.NewStore(conn)
-	chatStore := chat.NewStore(conn)
 	hub := events.NewHub()
 
 	apiSvc := &API{
-		Tasks:    taskStore,
-		Workers:  nil,
-		Observer: &observer.Service{Store: taskStore, Chat: chatStore},
-		Chat:     chatStore,
-		Hub:      hub,
+		Tasks:   taskStore,
+		Workers: nil,
+		Hub:     hub,
 	}
 
 	srv := httptest.NewServer(apiSvc.Handler())
@@ -148,26 +124,6 @@ func TestAPI_TasksAndChat(t *testing.T) {
 		}
 	})
 
-	t.Run("chat", func(t *testing.T) {
-		req := map[string]string{"message": "我们有几个任务在执行？"}
-		buf, _ := json.Marshal(req)
-		res, err := http.Post(srv.URL+"/api/chat", "application/json", bytes.NewReader(buf))
-		if err != nil {
-			t.Fatalf("post: %v", err)
-		}
-		defer res.Body.Close()
-		if res.StatusCode != http.StatusOK {
-			t.Fatalf("status=%d, want 200", res.StatusCode)
-		}
-		var reply map[string]string
-		if err := json.NewDecoder(res.Body).Decode(&reply); err != nil {
-			t.Fatalf("decode: %v", err)
-		}
-		if reply["message"] == "" {
-			t.Fatalf("expected reply message")
-		}
-	})
-
 	t.Run("acceptance", func(t *testing.T) {
 		baseDir := t.TempDir()
 		// Create a task so we can reference via session key.
@@ -223,99 +179,6 @@ func TestAPI_TasksAndChat(t *testing.T) {
 		if res2.StatusCode != http.StatusOK {
 			body, _ := io.ReadAll(res2.Body)
 			t.Fatalf("status=%d, want 200; body=%s", res2.StatusCode, string(body))
-		}
-	})
-
-	t.Run("chat stream", func(t *testing.T) {
-		sb := &stubObserverBackend{
-			outputs: []string{
-				`{"action":"tool","tool":"system_info","args":{}}`,
-				`{"action":"final","message":"ok"}`,
-			},
-		}
-		var _ observer.Backend = sb
-
-		// Replace observer service with an LLM-backed agent for this test.
-		apiSvc.Observer = &observer.Service{
-			Store:      taskStore,
-			Chat:       chatStore,
-			LLM:        sb,
-			ForceAgent: true,
-		}
-
-		req := map[string]any{"message": "hello", "stream": true}
-		buf, _ := json.Marshal(req)
-		httpReq, err := http.NewRequest(http.MethodPost, srv.URL+"/api/chat?stream=1", bytes.NewReader(buf))
-		if err != nil {
-			t.Fatalf("new req: %v", err)
-		}
-		httpReq.Header.Set("Content-Type", "application/json")
-		httpReq.Header.Set("Accept", "text/event-stream")
-		res, err := http.DefaultClient.Do(httpReq)
-		if err != nil {
-			t.Fatalf("post: %v", err)
-		}
-		defer res.Body.Close()
-		if res.StatusCode != http.StatusOK {
-			body, _ := io.ReadAll(res.Body)
-			t.Fatalf("status=%d, want 200; body=%s", res.StatusCode, string(body))
-		}
-		if ct := res.Header.Get("Content-Type"); !strings.HasPrefix(ct, "text/event-stream") {
-			t.Fatalf("content-type=%q, want text/event-stream", ct)
-		}
-
-		body, err := io.ReadAll(res.Body)
-		if err != nil {
-			t.Fatalf("read body: %v", err)
-		}
-		s := string(body)
-		if !strings.Contains(s, "event: tool_call") {
-			t.Fatalf("expected tool_call event, got:\n%s", s)
-		}
-		if !strings.Contains(s, "event: tool_result") {
-			t.Fatalf("expected tool_result event, got:\n%s", s)
-		}
-		if !strings.Contains(s, "event: final") {
-			t.Fatalf("expected final event, got:\n%s", s)
-		}
-	})
-
-	t.Run("chat stream explicit simple-http backend", func(t *testing.T) {
-		sb := &stubObserverBackend{
-			outputs: []string{
-				`{"action":"final","message":"from simple-http"}`,
-			},
-		}
-		apiSvc.Observer = &observer.Service{
-			Store:      taskStore,
-			Chat:       chatStore,
-			SimpleHTTP: sb,
-			ForceAgent: true,
-		}
-
-		req := map[string]any{"message": "hello", "stream": true, "backend": "simple-http"}
-		buf, _ := json.Marshal(req)
-		httpReq, err := http.NewRequest(http.MethodPost, srv.URL+"/api/chat?stream=1", bytes.NewReader(buf))
-		if err != nil {
-			t.Fatalf("new req: %v", err)
-		}
-		httpReq.Header.Set("Content-Type", "application/json")
-		httpReq.Header.Set("Accept", "text/event-stream")
-		res, err := http.DefaultClient.Do(httpReq)
-		if err != nil {
-			t.Fatalf("post: %v", err)
-		}
-		defer res.Body.Close()
-		if res.StatusCode != http.StatusOK {
-			body, _ := io.ReadAll(res.Body)
-			t.Fatalf("status=%d, want 200; body=%s", res.StatusCode, string(body))
-		}
-		body, err := io.ReadAll(res.Body)
-		if err != nil {
-			t.Fatalf("read body: %v", err)
-		}
-		if !strings.Contains(string(body), `from simple-http`) {
-			t.Fatalf("expected streamed final message, got:\n%s", string(body))
 		}
 	})
 
@@ -501,12 +364,12 @@ func TestAPI_TasksAndChat(t *testing.T) {
 			if body.StoragePath != store.Path() {
 				t.Fatalf("storage_path=%q, want %q", body.StoragePath, store.Path())
 			}
-				if body.Status.Claude.BaseURL.Effective != "stored" || body.Status.Claude.APIKey.Effective != "stored" {
-					t.Fatalf("expected stored effective status, got claude=%+v", body.Status.Claude)
-				}
-				if body.Status.Codex.APIKey.Effective != "stored" {
-					t.Fatalf("expected stored effective status, got codex=%+v", body.Status.Codex)
-				}
+			if body.Status.Claude.BaseURL.Effective != "stored" || body.Status.Claude.APIKey.Effective != "stored" {
+				t.Fatalf("expected stored effective status, got claude=%+v", body.Status.Claude)
+			}
+			if body.Status.Codex.APIKey.Effective != "stored" {
+				t.Fatalf("expected stored effective status, got codex=%+v", body.Status.Codex)
+			}
 
 			secrets := store.Get()
 			if secrets.AnthropicBaseURL != "https://anthropic.example.test" {

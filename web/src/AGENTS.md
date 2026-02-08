@@ -18,7 +18,6 @@ This folder is intentionally organized so both humans and AI agents can quickly 
 
 ## Where to Change What (target state)
 - Skills UI: `components/SkillsPanel.vue` + `components/SkillsVersionsPanel.vue` + `composables/useSkills.ts` + `composables/useSkillVersions.ts` (route: `/skills`)
-- Secretary chat/drawer: `components/SecretaryDrawer.vue` + `composables/useSecretaryChat.ts`
 - Live feed: `components/LiveDrawer.vue` + `composables/useLiveFeed.ts`
 - Tasks + logs + trace: `composables/useTasks.ts` (and keep API calls in `api.ts`)
 - Files (tree/preview/edit): `components/FilesModal.vue` + `composables/useFs.ts`
@@ -40,7 +39,6 @@ If backend code is touched:
 
 ## Manual Smoke Checklist (quick)
 - Open Skills page, filter, page Next/Prev, enable/disable does not break UI
-- Open Secretary drawer, long messages readable, input stays visible
 - Open Live, logs stream, wrap/pause works
 - Files modal: tree loads, preview/edit/save works
 - New Run modal: create run, blocked state shows guidance

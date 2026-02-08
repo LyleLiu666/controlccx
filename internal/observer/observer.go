@@ -391,7 +391,7 @@ func (s *Service) recentChatContext(ctx context.Context, currentUserMessage stri
 		return "", nil
 	}
 
-	// When called via /api/chat, the current user message has already been appended.
+	// If the latest persisted user message is the same as currentUserMessage, drop it to avoid duplication.
 	last := msgs[len(msgs)-1]
 	if last.Role == chat.RoleUser && strings.TrimSpace(last.Content) == strings.TrimSpace(currentUserMessage) {
 		msgs = msgs[:len(msgs)-1]

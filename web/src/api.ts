@@ -4,7 +4,6 @@ import type {
   AuthImportEnvResponse,
   AuthPatch,
   AuthStatus,
-  ChatMessage,
   ProviderActivateResponse,
   ProviderDeleteResponse,
   ProviderImportEnvResponse,
@@ -296,112 +295,6 @@ export async function fetchLogs(taskId: string, after = 0, limit = 500): Promise
 
 export async function fetchTaskTrace(taskId: string): Promise<TaskTraceResponse> {
   return getJSON<TaskTraceResponse>(`/api/tasks/${taskId}/trace`);
-}
-
-export async function fetchChat(after = 0, limit = 200): Promise<ChatMessage[]> {
-  const res = await getJSON<{ messages: ChatMessage[] }>(`/api/chat?after=${after}&limit=${limit}`);
-  return res.messages;
-}
-
-export type ChatSendOptions = {
-  backend?: "auto" | "simple-http" | "claude" | "codex";
-  max_steps?: number;
-  idempotency_key?: string;
-};
-
-export async function sendChat(message: string, opts?: ChatSendOptions): Promise<{ message: string }> {
-  const body: Record<string, any> = { message };
-  if (opts?.backend) body.backend = opts.backend;
-  if (typeof opts?.max_steps === "number") body.max_steps = opts.max_steps;
-  if (opts?.idempotency_key) body.idempotency_key = opts.idempotency_key;
-  const headers: Record<string, string> = {};
-  if (opts?.idempotency_key) headers["Idempotency-Key"] = opts.idempotency_key;
-  return postJSON<{ message: string }>("/api/chat", body, { headers });
-}
-
-export type ChatStreamEvent = {
-  event: string;
-  data: any;
-};
-
-export async function sendChatStream(
-  message: string,
-  opts: ChatSendOptions,
-  onEvent: (evt: ChatStreamEvent) => void,
-): Promise<string> {
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-    Accept: "text/event-stream",
-  };
-  if (opts?.idempotency_key) headers["Idempotency-Key"] = String(opts.idempotency_key);
-
-  const res = await fetch("/api/chat?stream=1", {
-    method: "POST",
-    headers,
-    body: JSON.stringify({ message, stream: true, ...opts }),
-    credentials: "same-origin",
-  });
-
-  if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
-
-  const ct = (res.headers.get("Content-Type") || "").toLowerCase();
-  if (!ct.includes("text/event-stream")) {
-    const data = (await res.json()) as { message?: string };
-    const msg = data?.message ?? "";
-    onEvent({ event: "final", data: { message: msg } });
-    return msg;
-  }
-
-  if (!res.body) throw new Error("missing response body");
-
-  const reader = res.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-  let finalMessage = "";
-
-  const flush = (chunk: string) => {
-    buffer += chunk.replaceAll("\r", "");
-    while (true) {
-      const idx = buffer.indexOf("\n\n");
-      if (idx < 0) break;
-      const block = buffer.slice(0, idx);
-      buffer = buffer.slice(idx + 2);
-      const lines = block.split("\n").filter(Boolean);
-      let event = "message";
-      const dataLines: string[] = [];
-      for (const line of lines) {
-        if (line.startsWith("event:")) {
-          event = line.slice("event:".length).trim();
-          continue;
-        }
-        if (line.startsWith("data:")) {
-          dataLines.push(line.slice("data:".length).trim());
-        }
-      }
-      const dataRaw = dataLines.join("\n");
-      let data: any = dataRaw;
-      try {
-        data = JSON.parse(dataRaw);
-      } catch {
-        // ignore
-      }
-      onEvent({ event, data });
-      if (event === "final" && data && typeof data.message === "string") {
-        finalMessage = data.message;
-      }
-      if (event === "error" && data && typeof data.error === "string") {
-        throw new Error(data.error);
-      }
-    }
-  };
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    if (value) flush(decoder.decode(value, { stream: true }));
-  }
-  flush(decoder.decode());
-  return finalMessage;
 }
 
 export async function fetchFSRoots(): Promise<FSRoot[]> {

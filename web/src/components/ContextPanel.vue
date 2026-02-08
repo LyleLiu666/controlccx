@@ -258,7 +258,7 @@ onMounted(() => {
             </select>
           </label>
           <div class="tinyHint templatesHint">
-            New Run 使用 <span class="mono">task</span> 模板；Secretary 使用 <span class="mono">chat</span> 模板。
+            New Run 使用 <span class="mono">task</span> 模板；<span class="mono">chat</span> 模板保留为后续能力扩展。
           </div>
         </div>
 

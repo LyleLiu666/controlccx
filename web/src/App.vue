@@ -8,7 +8,6 @@ import type {
   AuthInfo,
   AuthPatch,
   AuthStatus,
-  ChatMessage,
   FSEntry,
   FSListEntry,
   FSRoot,
@@ -33,7 +32,6 @@ import {
   createTask,
   deleteSession,
   fetchAuthInfo,
-  fetchChat,
   fetchFSEntries,
   fetchFSList,
   fetchFSRead,
@@ -61,14 +59,12 @@ import {
   continueSessionWithOptions,
   resumeTaskWithOptions,
   rehydrateTaskWithOptions,
-  sendChat,
   upsertTool,
   updateAuth,
   importAuthFromEnv,
   fetchAcceptance,
   isAPIError,
 } from "./api";
-import { appendChatMessageUnique } from "./chatOps";
 import {
   attentionAutopilotIsNoConversationFound,
   attentionAutopilotMarkSeen,
@@ -76,7 +72,6 @@ import {
   attentionAutopilotShouldAttempt,
   attentionAutopilotStopForSession,
 } from "./attentionAutopilot";
-import { shouldSkipAutoDeliveryForemanForTask } from "./deliveryForeman";
 import { shouldOfferRehydrateForTask, type ResumeOrigin } from "./rehydrate";
 import { computePopupPosition } from "./menuPosition";
 import { prettifyLogMessage } from "./logPretty";
@@ -97,7 +92,6 @@ import {
 import SkillsPanel from "./components/SkillsPanel.vue";
 import SkillsGovernanceModal from "./components/SkillsGovernanceModal.vue";
 import SkillVersionsModal from "./components/SkillVersionsModal.vue";
-import SecretaryDrawer from "./components/SecretaryDrawer.vue";
 import LiveDrawer from "./components/LiveDrawer.vue";
 import FilesModal from "./components/FilesModal.vue";
 import AuthSettingsModal from "./components/AuthSettingsModal.vue";
@@ -117,7 +111,6 @@ import WorktreeUntrackedModal from "./components/WorktreeUntrackedModal.vue";
 import WorkdirCombobox from "./components/WorkdirCombobox.vue";
 import ContextPanel from "./components/ContextPanel.vue";
 import { useSkills } from "./composables/useSkills";
-import { useSecretaryChat } from "./composables/useSecretaryChat";
 import { useControlPlaneHealth } from "./composables/useControlPlaneHealth";
 import { useTasks } from "./composables/useTasks";
 import { useLiveFeed } from "./composables/useLiveFeed";
@@ -192,14 +185,8 @@ const runnerdState = computed<"ok" | "bad" | "unknown">(() => {
   if (!s) return "unknown";
   return s.runnerd?.ok ? "ok" : "bad";
 });
-const secretarydState = computed<"ok" | "bad" | "unknown">(() => {
-  const s = controlPlaneStatus.value;
-  if (!s) return "unknown";
-  return s.secretaryd?.ok ? "ok" : "bad";
-});
 
 const taskPlaneDegraded = computed<boolean>(() => runnerdState.value === "bad");
-const secretaryDegraded = computed<boolean>(() => secretarydState.value === "bad");
 
 const controlPlaneBanner = computed<string>(() => {
   const s = controlPlaneStatus.value;
@@ -207,9 +194,6 @@ const controlPlaneBanner = computed<string>(() => {
   const msgs: string[] = [];
   if (s.runnerd?.ok === false) {
     msgs.push("任务执行面不可用：Runner daemon 未连接，任务相关操作已禁用。");
-  }
-  if (s.secretaryd?.ok === false) {
-    msgs.push("秘书不可用：Secretary daemon 未连接，对话已禁用。");
   }
   return msgs.join(" ");
 });
@@ -654,32 +638,6 @@ function cancelSkillMountConfirm() {
   closeSkillMountConfirm(false);
 }
 
-const {
-  chat,
-  chatInput,
-  chatBackend,
-  chatMaxSteps,
-  chatStreamStatus,
-  chatStreamAnswer,
-  chatStreamToolError,
-  chatSendError,
-  chatSending,
-  syncChatFrom,
-  sendChatMessage,
-} = useSecretaryChat({
-  onError: (message: string) => {
-    errorBanner.value = message;
-  },
-});
-
-async function sendChatMessageGuarded() {
-  if (secretaryDegraded.value) {
-    errorBanner.value = "秘书不可用：请确认 `controlccx-secretaryd` 正在运行，或重启 ControlCCX。";
-    return;
-  }
-  await sendChatMessage();
-}
-
 const theme = ref<"light" | "dark">("light");
 const fxReduced = ref(false);
 const headerMoreEl = ref<HTMLDetailsElement | null>(null);
@@ -883,14 +841,8 @@ const {
   autoSelectFirst: false,
   onTaskUpsert: (prev, next) => {
     maybeDismissRunLaunchMaskForTask(next);
-    // Fire-and-forget; avoid blocking SSE handling.
-    void maybeTriggerDeliveryForeman(prev, next);
-    maybeTriggerAttentionAutopilot(prev, next);
     void maybePromptBlocked(prev, next);
     void maybePromptRehydrate(prev, next);
-  },
-  onChatMessage: (m) => {
-    chat.value = appendChatMessageUnique(chat.value, m);
   },
 });
 
@@ -983,44 +935,6 @@ const filesDirty = computed(
   () => filesFileContent.value !== filesFileOriginal.value,
 );
 
-const secretaryOpen = ref(false);
-const secretaryView = ref<"chat" | "overview">("chat");
-const secretaryScope = ref<"current" | "all">("current");
-const secretaryFull = ref(false);
-const secretaryWidth = ref(1100);
-const secretaryResizing = ref(false);
-
-function startSecretaryResize(e: MouseEvent) {
-  if (secretaryFull.value) return;
-  secretaryResizing.value = true;
-  document.body.style.cursor = "col-resize";
-  document.body.style.userSelect = "none";
-
-  const startX = e.clientX;
-  const startWidth = secretaryWidth.value;
-
-  const onMove = (tm: MouseEvent) => {
-    const diff = startX - tm.clientX;
-    let newW = startWidth + diff;
-    const maxW = Math.min(1600, window.innerWidth - 32);
-    if (newW < 520) newW = 520;
-    if (newW > maxW) newW = maxW;
-    secretaryWidth.value = newW;
-  };
-
-  const onUp = () => {
-    secretaryResizing.value = false;
-    document.body.style.cursor = "";
-    document.body.style.userSelect = "";
-    window.removeEventListener("mousemove", onMove);
-    window.removeEventListener("mouseup", onUp);
-    saveInt(LS_KEY_SECRETARY_WIDTH, secretaryWidth.value);
-  };
-
-  window.addEventListener("mousemove", onMove);
-  window.addEventListener("mouseup", onUp);
-}
-
 const {
   liveOpen,
   liveScope,
@@ -1066,8 +980,6 @@ const sessionActionsMenuAnchor = ref<HTMLElement | null>(null);
 const sessionActionsMenuPos = ref({ left: 0, top: 0 });
 const sessionActionsMenuEl = ref<HTMLDivElement | null>(null);
 
-const LS_KEY_AUTO_DELIVERY_FOREMAN = "controlccx.auto_delivery_foreman.v1";
-const LS_KEY_DELIVERY_FOREMAN_SEEN = "controlccx.delivery_foreman.seen_runs.v1";
 const LS_KEY_CLAUDE_AUTO_APPROVE_LEGACY = "controlccx.claude.auto_approve.v1";
 const LS_KEY_MIGRATE_CLAUDE_DEFAULT_SAFETY_PRESET = "controlccx.migrate.claude_default_safety_preset.v1";
 const LS_KEY_RUN_SAFETY_PRESET_BY_TOOL = "controlccx.run_safety.preset_by_tool.v1";
@@ -1078,41 +990,6 @@ const LS_KEY_ATTENTION_AUTOPILOT_SEEN = "controlccx.attention_autopilot.seen.v1"
 const LS_KEY_ATTENTION_DISMISSED = "controlccx.attention_dismissed.v1";
 const LS_KEY_REHYDRATE_PROMPT_SEEN = "controlccx.rehydrate_prompt_seen.v1";
 const LS_KEY_BLOCKED_PROMPT_SEEN = "controlccx.blocked_prompt_seen.v1";
-
-const autoDeliveryForeman = ref<boolean>(true);
-const deliveryForemanSeenRuns = ref<Set<string>>(new Set());
-const deliveryForemanRunning = ref(false);
-const deliveryForemanQueue = ref<Task[]>([]);
-const deliveryForemanCurrent = ref<Task | null>(null);
-const deliveryForemanToast = ref("");
-const deliveryForemanToastOpen = ref(false);
-
-type SecretaryReviewPhase = "queued" | "reviewing";
-const secretaryReviewBySession = computed<Record<string, SecretaryReviewPhase>>(() => {
-  const out: Record<string, SecretaryReviewPhase> = {};
-  for (const t of deliveryForemanQueue.value) {
-    const k = sessionKeyForTask(t);
-    if (k) out[k] = "queued";
-  }
-  const cur = deliveryForemanCurrent.value;
-  if (cur) {
-    const k = sessionKeyForTask(cur);
-    if (k) out[k] = "reviewing";
-  }
-  return out;
-});
-
-function secretaryReviewLabel(phase: SecretaryReviewPhase): string {
-  if (phase === "queued") return "秘书审阅排队";
-  return "秘书审阅中";
-}
-
-function secretaryReviewTitle(phase: SecretaryReviewPhase): string {
-  if (phase === "queued") {
-    return "已加入 Delivery Foreman 队列：秘书即将进行交付审阅，可能会触发自动继续/重试。";
-  }
-  return "Delivery Foreman 审阅中：秘书正在进行交付审阅，可能会触发自动继续/重试。";
-}
 
 const attentionAutopilotEnabled = ref<boolean>(true);
 const attentionAutopilotRunning = ref(false);
@@ -1832,12 +1709,6 @@ const LS_KEY_PINNED_WORKSPACES = "controlccx.pinned_workspaces.v1";
 const LS_KEY_PINNED_WORKSPACE_NAMES = "controlccx.pinned_workspace_names.v1";
 const LS_KEY_WORKSPACE_FILTER = "controlccx.workspace_filter.v1";
 const LS_KEY_WORKSPACE_FILTERS = "controlccx.workspace_filters.v1";
-const LS_KEY_CHAT_BACKEND = "controlccx.chat.backend.v1";
-const LS_KEY_CHAT_MAX_STEPS = "controlccx.chat.max_steps.v1";
-const LS_KEY_SECRETARY_VIEW = "controlccx.secretary.view.v1";
-const LS_KEY_SECRETARY_SCOPE = "controlccx.secretary.scope.v1";
-const LS_KEY_SECRETARY_FULL = "controlccx.secretary.full.v1";
-const LS_KEY_SECRETARY_WIDTH = "controlccx.secretary.width.v1";
 const LS_KEY_THEME = "controlccx.theme.v1";
 const LS_KEY_FX_REDUCED = "controlccx.fx.reduced.v1";
 const LS_KEY_FEED_SCOPE = "controlccx.feed.scope.v1";
@@ -2036,27 +1907,6 @@ const workspaceFilters = ref<string[]>(loadStringArray(LS_KEY_WORKSPACE_FILTERS)
 const workspaceSelect = ref<string>(loadString(LS_KEY_WORKSPACE_FILTER));
 
 {
-  const v = loadString(LS_KEY_CHAT_BACKEND).trim();
-  if (v === "auto" || v === "simple-http" || v === "claude" || v === "codex")
-    chatBackend.value = v as any;
-  const n = loadInt(LS_KEY_CHAT_MAX_STEPS, 8);
-  chatMaxSteps.value = Math.max(1, Math.min(32, n));
-
-  const sec = loadString(LS_KEY_SECRETARY_VIEW).trim();
-  if (sec === "chat" || sec === "overview") secretaryView.value = sec;
-
-  const sc = loadString(LS_KEY_SECRETARY_SCOPE).trim();
-  if (sc === "current" || sc === "all") secretaryScope.value = sc as any;
-
-  secretaryFull.value = loadBool(LS_KEY_SECRETARY_FULL, false);
-  {
-    const maxW = typeof window !== "undefined" ? Math.max(520, window.innerWidth - 32) : 1600;
-    const sw = loadInt(LS_KEY_SECRETARY_WIDTH, 1100);
-    secretaryWidth.value = Math.max(520, Math.min(maxW, Math.min(1600, sw)));
-  }
-
-  autoDeliveryForeman.value = loadBool(LS_KEY_AUTO_DELIVERY_FOREMAN, true);
-  deliveryForemanSeenRuns.value = new Set(loadStringArray(LS_KEY_DELIVERY_FOREMAN_SEEN));
   rehydratePromptSeenRuns.value = new Set(loadStringArray(LS_KEY_REHYDRATE_PROMPT_SEEN));
   blockedPromptSeenRuns.value = new Set(loadStringArray(LS_KEY_BLOCKED_PROMPT_SEEN));
 
@@ -2177,12 +2027,6 @@ watch(sessionsShowDeleted, (v) => {
   saveBool(LS_KEY_SHOW_DELETED_SESSIONS, v);
   void refresh();
 });
-watch(chatBackend, (v) => saveString(LS_KEY_CHAT_BACKEND, v));
-watch(chatMaxSteps, (v) => saveInt(LS_KEY_CHAT_MAX_STEPS, v));
-watch(secretaryView, (v) => saveString(LS_KEY_SECRETARY_VIEW, v));
-watch(secretaryScope, (v) => saveString(LS_KEY_SECRETARY_SCOPE, v));
-watch(secretaryFull, (v) => saveBool(LS_KEY_SECRETARY_FULL, Boolean(v)));
-watch(autoDeliveryForeman, (v) => saveBool(LS_KEY_AUTO_DELIVERY_FOREMAN, Boolean(v)));
 watch(
   runSafetyPresetByTool,
   (v) => saveStringMap(LS_KEY_RUN_SAFETY_PRESET_BY_TOOL, v),
@@ -2289,22 +2133,11 @@ function scrollFocusedIntoView(el: HTMLElement) {
 }
 
 async function refresh() {
-  const [sys, taskList, chatList] = await Promise.all([
+  const [sys] = await Promise.all([
     fetchSystemInfo(),
     refreshTasks(200),
-    fetchChat(),
   ]);
   systemInfo.value = sys;
-  // If the page reloads while a session is interrupted, Autopilot should still try once.
-  if (attentionAutopilotEnabled.value) {
-    const keys = new Set<string>();
-    for (const t of taskList) {
-      if (t.status !== "interrupted") continue;
-      keys.add(sessionKeyForTask(t));
-    }
-    for (const k of keys) enqueueAttentionAutopilot(k);
-  }
-  chat.value = chatList;
 }
 
 async function refreshAuth() {
@@ -2716,20 +2549,9 @@ async function onCreateTaskFromModal() {
   }
 }
 
-function toggleSecretary() {
-  const next = !secretaryOpen.value;
-  if (next) liveOpen.value = false;
-  secretaryOpen.value = next;
-}
-
-function closeSecretary() {
-  secretaryOpen.value = false;
-}
-
 function openLive() {
   feedCoachOpen.value = false;
   feedCoachDismissed.value = true;
-  secretaryOpen.value = false;
   liveOpen.value = true;
 }
 
@@ -3012,13 +2834,6 @@ function onOpenProvidersFromMenu() {
   closeHeaderMoreMenu();
 }
 
-function openSecretaryForForeman() {
-  liveOpen.value = false;
-  secretaryOpen.value = true;
-  secretaryView.value = "chat";
-  deliveryForemanToastOpen.value = false;
-}
-
 function isTerminalStatus(s: string): boolean {
   return (
     s === "succeeded" ||
@@ -3027,26 +2842,6 @@ function isTerminalStatus(s: string): boolean {
     s === "interrupted" ||
     s === "blocked"
   );
-}
-
-function persistDeliveryForemanSeen(runID: string) {
-  const id = (runID ?? "").trim();
-  if (!id) return;
-  if (deliveryForemanSeenRuns.value.has(id)) return;
-  const next = new Set(deliveryForemanSeenRuns.value);
-  next.add(id);
-  // Limit growth to keep localStorage small.
-  const arr = Array.from(next).slice(-400);
-  deliveryForemanSeenRuns.value = new Set(arr);
-  saveStringArray(LS_KEY_DELIVERY_FOREMAN_SEEN, arr);
-}
-
-function showDeliveryForemanToast(message: string) {
-  deliveryForemanToast.value = message;
-  deliveryForemanToastOpen.value = true;
-  window.setTimeout(() => {
-    if (deliveryForemanToast.value === message) deliveryForemanToastOpen.value = false;
-  }, 10_000);
 }
 
 function persistRehydratePromptSeen(runID: string) {
@@ -3223,138 +3018,6 @@ async function maybePromptRehydrate(prev: Task | undefined, next: Task) {
   resumeOriginByRunID.delete(next.id);
 }
 
-async function buildDeliveryForemanPrompt(t: Task): Promise<string> {
-  const runID = t.id;
-  const sessionID = t.session_id?.trim() || "";
-  const sessKey = sessionKeyForTask(t);
-  const sess = sessionsAll.value.find((s) => s.key === sessKey);
-  const runsCount = sess?.runs.length ?? 1;
-
-  let tail = "";
-  try {
-    const logs = await fetchLogs(runID, 0, 200);
-    const filtered = logs.filter((l) => l.stream !== "stdout");
-    const last = filtered.slice(-40);
-    tail = last
-      .map((l) => `[${formatLogTime(l.time)} ${l.stream}] ${String(l.message ?? "").slice(0, 600)}`)
-      .join("\n");
-  } catch {
-    // ignore logs fetch failures
-  }
-
-  const parts: string[] = [];
-  parts.push("【Delivery Foreman / 交付前哨】");
-  parts.push("");
-  parts.push("请你作为系统秘书/观察者，判断该 run 是否真的完成，以及是否需要工业级交付检查。");
-  parts.push("如果未完成：你 SHOULD 优先调用 session_continue 工具继续该会话（会自动选择 resume/rehydrate，尽量不要让用户手动操作），并在回复里说明你做了什么；同时列出需要补齐的关键点。");
-  parts.push("如果你判断不适合自动 resume（例如需要用户选择/高权限/信息不足），才给出用户下一步最小 resume prompt（用户要输入的那句话）。");
-  parts.push("如果已完成且属于复杂任务：给出工业级交付 checklist（以可执行步骤/命令为主，不默认执行）。");
-  parts.push("如果是简单任务：一句话说明无需工业级交付检查并结束。");
-  parts.push("");
-  parts.push("【Acceptance Gates / 验收闸门（仅复杂任务启用）】");
-  parts.push("当你判断这是复杂任务时：");
-  parts.push("1) 先调用 acceptance_prepare({task_id: run_id, max_iterations: 10}) 获取 iteration i/10，并确保不会超过上限。");
-  parts.push("   - 若 can_continue=false：你 MUST 升级给用户（最小下一步 + 证据），不要继续自动迭代。");
-  parts.push("2) 再调用 acceptance_get({task_id: run_id}) 获取当前验收状态，避免重复触发/无限循环。");
-  parts.push("3) 你 SHOULD 调用 acceptance_build_contract({task_id: run_id}) 得到 deterministic baseline 的 plan_json，再结合用户要求补齐/修正。");
-  parts.push("4) 你 SHOULD 调用 acceptance_evaluate_objectives({task_id: run_id, plan_json}) 评估客观标准，并把测量值写入 report（Markdown）。");
-  parts.push("5) 你 MUST 使用 acceptance_update 写入/更新验收状态（server 持久化），让 UI 可见进度与报告。");
-  parts.push("");
-  parts.push("【验收方法论（不要把任务硬塞进固定分类）】");
-  parts.push("- 先复述交付意图：intent_summary（人类可读，不需要固定枚举）");
-  parts.push("- 抽取用户显式硬约束 -> objective_criteria（可测量阈值 + 证据来源）");
-  parts.push("- 把主观要求拆成 rubric -> subjective_rubrics（逐项 pass/fail + 理由 + 修改建议）");
-  parts.push("- 仅在明显需要“可运行/可验证交付”时才注入默认 gates，并写明适用性与理由；不适用要跳过并记录原因");
-  parts.push("");
-  parts.push("【默认 runnable DoD gates（仅适用时）】");
-  parts.push("- README 一键启动");
-  parts.push("- go test ./...");
-  parts.push("- pnpm test");
-  parts.push("- 启动后首页可打开（HTTP smoke）");
-  parts.push("- 可选：Playwright smoke（优先 Playwright MCP；不可用则降级 HTTP smoke，并在报告里说明）");
-  parts.push("");
-  parts.push("【Worker Verification Recipes（跨工具通用，写进 report 作为证据）】");
-  parts.push("3.1 Project DoD recipe（仅适用 runnable deliverable）：");
-  parts.push("- README：必须有 Quick Start/一键启动（给出单行命令）；没有就先补齐");
-  parts.push("- Go：若存在 go.mod -> 运行 `go test ./...`（把输出保留在日志）");
-  parts.push("- Node：若存在 package.json 且包含 test script -> 运行 `pnpm test`（或项目约定的 test 命令）；否则记录为 skipped（not applicable）");
-  parts.push("");
-  parts.push("3.2 Smoke recipe（start + HTTP smoke + stop cleanly）：");
-  parts.push("- 按 README 的启动命令启动服务（尽量前台运行，便于 Ctrl+C 退出）");
-  parts.push("- 发现端口后，用 `curl -fsS http://127.0.0.1:<port>/`（或 /health）确认可访问（记录 HTTP 状态码/响应片段）");
-  parts.push("- 停止服务（Ctrl+C），确认没有残留进程/端口占用（记录结果）");
-  parts.push("");
-  parts.push("3.3 Optional: Playwright MCP smoke（优先 MCP；不可用则降级）：");
-  parts.push("- 若环境提供 Playwright MCP：打开首页并断言关键 UI 可见（截图/断言结果作为证据）");
-  parts.push("- 若不可用：降级为 3.2 的 HTTP smoke，并在 report 里写明“为何降级”");
-  parts.push("");
-  parts.push("【plan_json schema（作为 JSON 字符串写入 acceptance_update.plan_json）】");
-  parts.push(
-    `{
-  "intent_summary": "...",
-  "complexity_reason": "...",
-  "objective_criteria": [
-    {"id":"word_count","title":">=30000 words","method":"task_output_stats.words","min":30000},
-    {"id":"sections","title":"14 parts","method":"task_output_stats.sections","min":14}
-  ],
-  "subjective_rubrics": [
-    {"id":"wechat","title":"适合公众号","items":[{"item":"标题/结构/可读性/CTA/合规提示","pass_criteria":"..."}]}
-  ],
-  "default_gates": [
-    {"id":"runnable.dod","applies_if":"deliverable must run","reason":"..."}
-  ]
-}`,
-  );
-  parts.push("");
-  parts.push("【写入时序（示例）】");
-  parts.push("- 第一次：acceptance_update({task_id, status:'running', iteration:i, max_iterations:10, current_gate:'contract', summary:'...', plan_json:'{...}'})");
-  parts.push("- 评估中：acceptance_update({task_id, status:'running', current_gate:'...', summary:'...'})");
-  parts.push("- 验收通过：acceptance_update({task_id, status:'accepted', current_gate:'done', summary:'...', report:'...markdown...'})");
-  parts.push("- 验收失败/需用户介入/到达上限：acceptance_update({task_id, status:'failed', summary:'...', report:'...markdown...'})");
-  parts.push("注意：不要重复刷屏；每轮只汇报新增信息，并确保用户能看到 iteration i/10 的进展。");
-  parts.push("");
-  parts.push("【上下文】");
-  parts.push(`run_id: ${runID}`);
-  if (sessionID) parts.push(`session_id: ${sessionID}`);
-  parts.push(`worker: ${t.worker_type}`);
-  parts.push(`status: ${t.status}`);
-  parts.push(`workdir: ${t.workdir}`);
-  parts.push(`runs_in_session: ${runsCount}`);
-  if (t.warning) parts.push(`warning: ${t.warning}`);
-  if (t.error) parts.push(`error: ${t.error}`);
-  parts.push("");
-  parts.push("prompt:");
-  parts.push(t.prompt || "");
-  if (tail) {
-    parts.push("");
-    parts.push("recent_logs_tail:");
-    parts.push(tail);
-  }
-  return parts.join("\n");
-}
-
-async function runDeliveryForemanOnce(t: Task) {
-  deliveryForemanCurrent.value = t;
-  showDeliveryForemanToast("Delivery Foreman: analyzing completed run…");
-  try {
-    const prompt = await buildDeliveryForemanPrompt(t);
-    const after = chat.value.length ? chat.value[chat.value.length - 1]!.id : 0;
-    const idempotencyKey = `delivery-foreman:${String(t.id ?? "").trim()}`;
-    await sendChat(prompt, {
-      backend: chatBackend.value,
-      max_steps: chatMaxSteps.value,
-      idempotency_key: idempotencyKey,
-    });
-    await syncChatFrom(after);
-    if (selectedSessionKey.value === sessionKeyForTask(t)) {
-      await refreshAcceptance();
-    }
-    showDeliveryForemanToast("Delivery Foreman: suggestion ready (open Secretary to view).");
-  } finally {
-    if (deliveryForemanCurrent.value?.id === t.id) deliveryForemanCurrent.value = null;
-  }
-}
-
 async function refreshAcceptance() {
   const key = selectedSessionKey.value.trim();
   if (!key) {
@@ -3374,47 +3037,6 @@ async function refreshAcceptance() {
     acceptanceState.value = null;
   } finally {
     acceptanceLoading.value = false;
-  }
-}
-
-async function maybeTriggerDeliveryForeman(prev: Task | undefined, next: Task) {
-  if (!autoDeliveryForeman.value) return;
-  if (!next?.id) return;
-  if (!prev) return;
-  const runID = next.id;
-  if (deliveryForemanSeenRuns.value.has(runID)) return;
-  const prevStatus = prev?.status ?? "";
-  const nextStatus = next.status ?? "";
-  // Auto Delivery Foreman is a "delivery check" for completed runs.
-  // Avoid auto-triggering on failed/blocked runs to prevent noisy auto-resume loops.
-  if (nextStatus !== "succeeded") return;
-  // Avoid noisy auto loops for "blocked" + resume-missing-session failures.
-  if (shouldSkipAutoDeliveryForemanForTask(next)) return;
-
-  // Only auto-trigger on transitions into terminal states.
-  if (isTerminalStatus(prevStatus) || !isTerminalStatus(nextStatus)) return;
-  if (!(prevStatus === "running" || prevStatus === "queued" || prevStatus === "waiting" || prevStatus === "")) return;
-
-  persistDeliveryForemanSeen(runID);
-
-  // Non-disruptive: do not auto-open secretary or steal focus.
-  if (deliveryForemanRunning.value) {
-    deliveryForemanQueue.value = [...deliveryForemanQueue.value, next];
-    showDeliveryForemanToast("Delivery Foreman: queued (multiple runs finished).");
-    return;
-  }
-  deliveryForemanRunning.value = true;
-  try {
-    await runDeliveryForemanOnce(next);
-    while (deliveryForemanQueue.value.length) {
-      const [head, ...rest] = deliveryForemanQueue.value;
-      deliveryForemanQueue.value = rest;
-      if (head?.id) await runDeliveryForemanOnce(head);
-    }
-  } catch (e: any) {
-    showDeliveryForemanToast(`Delivery Foreman failed: ${e?.message ?? String(e)}`);
-  } finally {
-    deliveryForemanRunning.value = false;
   }
 }
 
@@ -3548,78 +3170,6 @@ async function onCancelTask() {
       return;
     }
     errorBanner.value = msg;
-  }
-}
-
-async function secretaryCancelSessionRun(s: SessionGroup) {
-  if (!s?.latest?.id) return;
-  if (!ensureTaskPlaneAvailable()) return;
-  errorBanner.value = "";
-  try {
-    await cancelTask(s.latest.id);
-  } catch (e: any) {
-    errorBanner.value = e?.message ?? String(e);
-  }
-}
-
-function dismissAttentionSession(s: SessionGroup) {
-  const key = String(s?.key ?? "").trim();
-  if (!key) return;
-  attentionDismissed.value = {
-    ...attentionDismissed.value,
-    [key]: String(Date.now()),
-  };
-  saveStringMap(LS_KEY_ATTENTION_DISMISSED, attentionDismissed.value);
-}
-
-async function secretaryResumeSessionRun(s: SessionGroup) {
-  if (!s?.latest?.id) return;
-  if (s.deleted_at) {
-    errorBanner.value = "该会话已删除（软删除），无法继续。";
-    return;
-  }
-  if (!s.session_id) {
-    errorBanner.value = "该会话还没有 session_id，无法继续。";
-    return;
-  }
-  if (s.latest.status === "running" || s.latest.status === "queued" || s.latest.status === "waiting") {
-    errorBanner.value = "该会话仍在运行中，暂不需要继续。";
-    return;
-  }
-  if (!ensureTaskPlaneAvailable()) return;
-  errorBanner.value = "";
-  try {
-    const driver = toolDriverForWorkerType(s.worker_type);
-    const savedPreset = runSafetyPresetByTool.value[s.worker_type] ?? "";
-    const basePreset = savedPreset || effectiveSafetyPresetForTask(driver, s.latest);
-    const preset = normalizeSafetyPreset(
-      driver,
-      normalizeTaskIntent(s.latest.task_intent ?? "code"),
-      basePreset,
-    );
-    const intent = inferTaskIntentFromSafetyPreset(driver, preset);
-    if (isHighRiskPreset(driver, preset)) {
-      const ok = await requestHighRiskConfirm({
-        title: "高权限确认",
-        message: "该继续操作需要更高权限设置。继续吗？",
-        detail: highRiskPresetSummary(driver, preset),
-        confirmLabel: "继续（已知晓权限）",
-      });
-      if (!ok) return;
-    }
-    const safety = buildRunSafetyPayload(driver, intent, preset);
-    openRunLaunchMask({ title: "继续中…", detail: "正在继续会话…" });
-    const nt = await continueSessionWithOptions(s.key, { prompt: "continue", ...safety });
-    trackRunLaunchMaskForTask(nt);
-    resumeOriginByRunID.set(nt.id, "manual");
-    upsertTask(nt);
-    selectedTaskId.value = nt.id;
-    await loadLogs(nt.id);
-    outputTab.value = "logs";
-    closeSecretary();
-  } catch (e: any) {
-    closeRunLaunchMask();
-    errorBanner.value = e?.message ?? String(e);
   }
 }
 
@@ -5393,87 +4943,9 @@ const workdirRecentOptions = computed<WorkdirOption[]>(() =>
   }),
 );
 
-const secretarySessionsAll = computed(() => {
-  const scope = secretaryScope.value;
-  if (scope === "all") return sessionsAll.value;
-  const filters = workspaceFilters.value;
-  if (!filters.length) return sessionsAll.value;
-  return sessionsAll.value.filter((s) =>
-    filters.some((w) => isWithinWorkspace(w, s.workdir)),
-  );
-});
-
-const secretaryCounts = computed(() => {
-  const sess = secretarySessionsAll.value;
-  const out: Record<string, number> = {
-    total: sess.length,
-    running: 0,
-    queued: 0,
-    blocked: 0,
-    failed: 0,
-    interrupted: 0,
-    succeeded: 0,
-    canceled: 0,
-  };
-  for (const s of sess) {
-    out[s.status] = (out[s.status] ?? 0) + 1;
-  }
-  return out;
-});
-
 const anyRunning = computed(() =>
   Array.from(tasks.value.values()).some((t) => t.status === "running"),
 );
-
-const needsAttentionSessions = computed(() => {
-  const dismissed = attentionDismissed.value;
-  return secretarySessionsAll.value
-    .filter(
-      (s) =>
-        s.status !== "succeeded" &&
-        (s.score > 0 ||
-          s.status === "failed" ||
-          s.status === "blocked" ||
-          s.status === "interrupted"),
-    )
-    .filter((s) => !dismissed[String(s.key ?? "").trim()])
-    .slice(0, 6);
-});
-
-const secretaryBriefing = computed(() => {
-  const c = secretaryCounts.value;
-  if (c.total === 0) return "当前还没有 session。";
-
-  const lines: string[] = [];
-  if (secretaryScope.value === "all") {
-    lines.push("scope: all");
-  } else if (workspaceFilters.value.length) {
-    lines.push(`scope: current · workspaces ${workspaceFilters.value.length}`);
-  } else {
-    lines.push("scope: current · no workspace filters");
-  }
-  lines.push(`Session 总数：${c.total}`);
-  lines.push(
-    `running ${c.running} · blocked ${c.blocked} · failed ${c.failed} · interrupted ${c.interrupted} · queued ${c.queued} · succeeded ${c.succeeded}`,
-  );
-
-  const top = needsAttentionSessions.value;
-  if (top.length === 0) {
-    lines.push("");
-    lines.push("需要关注：暂无（看起来都很顺利）。");
-    return lines.join("\n");
-  }
-
-  lines.push("");
-  lines.push("需要关注（按 score / 最近更新）：");
-  for (const s of top) {
-    const sid = s.session_id
-      ? s.session_id.slice(0, 8)
-      : s.latest.id.slice(0, 8);
-    lines.push(`- ${sid} · ${s.status} · score ${s.score} · ${s.workdir}`);
-  }
-  return lines.join("\n");
-});
 
 function shouldIgnoreGlobalHotkey(e: KeyboardEvent): boolean {
   const t = e.target as any;
@@ -5513,10 +4985,6 @@ function onGlobalKeyDown(e: KeyboardEvent) {
       closeSkillsPage();
       return;
     }
-    if (secretaryOpen.value) {
-      closeSecretary();
-      return;
-    }
     if (liveOpen.value) {
       liveOpen.value = false;
       return;
@@ -5538,10 +5006,6 @@ function onGlobalKeyDown(e: KeyboardEvent) {
   if (e.key === "n" || e.key === "N") {
     e.preventDefault();
     openNewRun();
-  }
-  if (e.key === "s" || e.key === "S") {
-    e.preventDefault();
-    toggleSecretary();
   }
   if (e.key === "l" || e.key === "L") {
     e.preventDefault();
@@ -5619,10 +5083,10 @@ watch([theme, filePreviewOpen, filePreviewTab, filePreviewMarkdownHtml], async (
 
 let feedCoachTimer: number | null = null;
 watch(
-  [anyRunning, feedCoachDismissed, secretaryOpen, liveOpen],
-  ([running, dismissed, secOpen, isLiveOpen]) => {
+  [anyRunning, feedCoachDismissed, liveOpen],
+  ([running, dismissed, isLiveOpen]) => {
     if (dismissed) return;
-    if (secOpen || isLiveOpen) {
+    if (isLiveOpen) {
       feedCoachOpen.value = false;
       return;
     }
@@ -5679,19 +5143,6 @@ watch(
           >
             <span class="controlPlaneDot" aria-hidden="true"></span>
             任务
-          </span>
-          <span
-            :class="['controlPlanePill', secretarydState]"
-            :title="
-              !controlPlaneStatus
-                ? 'secretaryd: unknown'
-                : controlPlaneStatus?.secretaryd?.ok
-                  ? 'secretaryd: ok'
-                  : `secretaryd: ${controlPlaneStatus?.secretaryd?.error || 'unavailable'}`
-            "
-          >
-            <span class="controlPlaneDot" aria-hidden="true"></span>
-            秘书
           </span>
         </div>
         <button
@@ -6052,12 +5503,6 @@ watch(
                   >⚠</span
                 >
                 <span class="pill" :class="s.status">{{ s.status }}</span>
-                <span
-                  v-if="secretaryReviewBySession[s.key]"
-                  class="pill review"
-                  :title="secretaryReviewTitle(secretaryReviewBySession[s.key])"
-                  >{{ secretaryReviewLabel(secretaryReviewBySession[s.key]) }}</span
-                >
                 <span class="pill kind">{{ s.runs.length }} 次运行</span>
                 <span
 	                  v-if="s.last_run_at"
@@ -6131,7 +5576,7 @@ watch(
         v-model:secretarySimpleHTTPModel="providerSecretarySimpleHTTPModel"
         :secretarySimpleHTTPApiKeyHint="providerSecretarySimpleHTTPApiKeyHint"
         :secretarySimpleHTTPAuthTokenHint="providerSecretarySimpleHTTPAuthTokenHint"
-        v-model:chatBackend="chatBackend"
+        v-model:secretaryBackend="providerSecretaryBackend"
         :speedTesting="providerSpeedTesting"
         :speedTestTarget="providerSpeedTestTarget"
         :claudeSpeedTest="providerClaudeSpeedTest"
@@ -6319,12 +5764,6 @@ watch(
                 <span class="pill" :class="selectedSession.status">{{
                   selectedSession.status
                 }}</span>
-                <span
-                  v-if="secretaryReviewBySession[selectedSession.key]"
-                  class="pill review"
-                  :title="secretaryReviewTitle(secretaryReviewBySession[selectedSession.key])"
-                  >{{ secretaryReviewLabel(secretaryReviewBySession[selectedSession.key]) }}</span
-                >
                 <span
                   v-if="acceptanceState"
                   class="pill acceptance"
@@ -7044,23 +6483,6 @@ watch(
       </template>
     </div>
 
-    <button
-      type="button"
-      class="secOrb"
-      :class="{
-        open: secretaryOpen,
-        attention: needsAttentionSessions.length > 0,
-      }"
-      @click="toggleSecretary"
-      :title="secretaryOpen ? 'Close secretary (S)' : 'Open secretary (S)'"
-      aria-label="Secretary"
-    >
-      <span class="secOrbIcon">S</span>
-      <span v-if="needsAttentionSessions.length" class="secOrbBadge">{{
-        needsAttentionSessions.length
-      }}</span>
-    </button>
-
     <div v-if="feedCoachOpen" class="feedCoach" role="note">
       <div class="feedCoachText">
         Live Feed available · press <span class="mono">L</span> or click
@@ -7071,53 +6493,6 @@ watch(
         <button type="button" @click="dismissFeedCoach">✕</button>
       </div>
     </div>
-
-    <div v-if="deliveryForemanToastOpen" class="foremanToast" role="status">
-      <div class="foremanText">{{ deliveryForemanToast }}</div>
-      <div class="foremanActions">
-        <button type="button" class="primary" @click="openSecretaryForForeman">
-          Open
-        </button>
-        <button type="button" @click="deliveryForemanToastOpen = false">✕</button>
-      </div>
-    </div>
-
-	    <SecretaryDrawer
-	      v-if="secretaryOpen"
-	      v-model:full="secretaryFull"
-	      v-model:view="secretaryView"
-	      v-model:scope="secretaryScope"
-	      v-model:autopilotEnabled="attentionAutopilotEnabled"
-	      v-model:chatBackend="chatBackend"
-	      v-model:chatMaxSteps="chatMaxSteps"
-	      v-model:chatInput="chatInput"
-	      :width="secretaryWidth"
-	      :resizing="secretaryResizing"
-	      :counts="secretaryCounts"
-	      :needsAttentionSessions="needsAttentionSessions"
-	      :autopilotNote="attentionAutopilotNote"
-	      :briefing="secretaryBriefing"
-	      :chat="chat"
-	      :secretaryAvailable="!secretaryDegraded"
-	      :chatStreamStatus="chatStreamStatus"
-	      :chatStreamAnswer="chatStreamAnswer"
-	      :chatStreamToolError="chatStreamToolError"
-	      :chatSendError="chatSendError"
-	      :chatSending="chatSending"
-	      :theme="theme"
-	      :authStatus="authStatus"
-	      :renderMarkdownSafe="renderMarkdownSafe"
-	      @close="closeSecretary"
-	      @startResize="startSecretaryResize"
-	      @selectTask="onSelectTask"
-	      @resumeSession="secretaryResumeSessionRun"
-	      @cancelSession="secretaryCancelSessionRun"
-	      @dismissAttention="dismissAttentionSession"
-	      @sendChat="sendChatMessageGuarded"
-	      @openAuthSettings="openAuthSettings"
-	      @openProvidersSettings="openProvidersSettings"
-	      @markdownClick="onResultMarkdownClick"
-	    />
 
 		    <LiveDrawer
 		      v-if="liveOpen"

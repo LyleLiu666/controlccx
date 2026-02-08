@@ -593,7 +593,7 @@ h2 {
   overflow: auto;
 }
 
-.form, .list, .detail, .secretary {
+.form, .list, .detail {
   padding: 20px;
 }
 
@@ -637,8 +637,7 @@ h2 {
   font-size: 13px;
 }
 
-:global(:root[data-theme="dark"]) .authHint,
-:global(:root[data-theme="dark"]) .secAttentionHint {
+:global(:root[data-theme="dark"]) .authHint {
   background: rgba(251, 146, 60, 0.12);
   border-color: rgba(251, 146, 60, 0.22);
   color: #fdba74;
@@ -1308,63 +1307,6 @@ h2 {
   padding-top: 12px;
 }
 
-.secOrb {
-  position: fixed;
-  right: -18px;
-  bottom: max(26px, env(safe-area-inset-bottom));
-  width: 56px;
-  height: 56px;
-  border-radius: 999px;
-  border: none;
-  background: linear-gradient(135deg, #0d9488 0%, #0891b2 100%);
-  color: white;
-  box-shadow: var(--shadow-lg);
-  display: grid;
-  place-items: center;
-  cursor: pointer;
-  transition:
-    right 0.2s ease,
-    transform 0.2s ease,
-    box-shadow 0.2s ease;
-  z-index: 250;
-}
-
-.secOrb:hover,
-.secOrb.open {
-  right: max(16px, env(safe-area-inset-right));
-}
-
-.secOrb:hover {
-  transform: translateY(-2px);
-}
-
-.secOrb.attention {
-  background: linear-gradient(135deg, #f97316 0%, #ef4444 100%);
-}
-
-.secOrbIcon {
-  font-weight: 900;
-  letter-spacing: -0.02em;
-}
-
-.secOrbBadge {
-  position: absolute;
-  top: -6px;
-  right: 6px;
-  min-width: 20px;
-  height: 20px;
-  padding: 0 6px;
-  border-radius: 999px;
-  background: #ef4444;
-  color: white;
-  border: 2px solid var(--bg-panel);
-  font-size: 12px;
-  font-weight: 900;
-  display: grid;
-  place-items: center;
-  line-height: 1;
-}
-
 :deep(.secDrawerOverlay) {
   position: fixed;
   inset: 0;
@@ -1386,10 +1328,6 @@ h2 {
   overflow: hidden;
   display: grid;
   grid-template-rows: auto 1fr;
-}
-
-:deep(.secDrawer.secDrawerSecretary) {
-  width: min(1100px, calc(100vw - 32px));
 }
 
 :deep(.secDrawer.wide) {
@@ -1482,101 +1420,12 @@ h2 {
   color: var(--text-main);
 }
 
-:deep(.secTabs) {
-  display: flex;
-  gap: 6px;
-  flex: 1;
-  justify-content: center;
-}
-
-:deep(.secTab) {
-  border: 1px solid var(--border-color);
-  background: var(--bg-panel);
-  border-radius: 999px;
-  padding: 6px 10px;
-  font-size: 12px;
-  font-weight: 800;
-  color: var(--text-sub);
-  position: relative;
-}
-
-:deep(.secTab.active) {
-  background: var(--color-primary);
-  color: white;
-  border-color: var(--color-primary);
-}
-
-:deep(.secTabBadge) {
-  margin-left: 6px;
-  display: inline-grid;
-  place-items: center;
-  min-width: 18px;
-  height: 18px;
-  padding: 0 6px;
-  border-radius: 999px;
-  background: rgba(239, 68, 68, 0.12);
-  border: 1px solid rgba(239, 68, 68, 0.25);
-  color: #ef4444;
-  font-size: 11px;
-  font-weight: 900;
-}
-
 :deep(.secDrawerBody) {
   padding: 14px;
   overflow: hidden;
   display: flex;
   flex-direction: column;
   min-height: 0;
-}
-
-:deep(.secOverview) {
-  display: grid;
-  gap: 20px;
-  overflow: auto;
-  min-height: 0;
-  flex: 1;
-}
-
-:deep(.secChatView) {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  flex: 1;
-  min-width: 0;
-  min-height: 0;
-  overflow: hidden;
-}
-
-:deep(.secAttentionHint) {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  background: #fff7ed;
-  border: 1px solid #ffedd5;
-  color: #c2410c;
-  padding: 10px 12px;
-  border-radius: var(--radius-md);
-  font-size: 13px;
-}
-
-:deep(.secDegradedHint) {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  background: rgba(251, 191, 36, 0.12);
-  border: 1px solid rgba(251, 191, 36, 0.18);
-  color: #fbbf24;
-  padding: 10px 12px;
-  border-radius: var(--radius-md);
-  font-size: 13px;
-}
-
-:deep(.secDegradedHint .text) {
-  flex: 1;
-}
-
-:deep(.secAttentionHint .text) {
-  flex: 1;
 }
 
 :deep(.secFeed) {
@@ -3377,43 +3226,6 @@ h2 {
   gap: 10px;
   font-size: 13px;
   color: var(--text-main);
-}
-
-.foremanToast {
-  position: fixed;
-  right: 18px;
-  bottom: calc(92px + env(safe-area-inset-bottom));
-  z-index: 999;
-  max-width: min(520px, calc(100vw - 36px));
-  background: var(--bg-panel);
-  border: 1px solid var(--border-color);
-  box-shadow: var(--shadow-lg);
-  border-radius: 14px;
-  padding: 12px;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.foremanText {
-  flex: 1 1 auto;
-  min-width: 0;
-  font-size: 13px;
-  color: var(--text-main);
-}
-
-.foremanActions {
-  flex: 0 0 auto;
-  display: inline-flex;
-  gap: 8px;
-}
-
-@media (max-width: 520px) {
-  .foremanToast {
-    left: 18px;
-    right: 18px;
-    bottom: calc(86px + env(safe-area-inset-bottom));
-  }
 }
 
 :deep(.kv) {
@@ -5223,500 +5035,6 @@ h2 {
   color: #f472b6;
 }
 
-:deep(.secretary) {
-  display: grid;
-  gap: 20px;
-  height: auto; /* Allow auto height now that we are sticky */
-  grid-template-rows: auto 1fr auto;
-}
-
-:deep(.secretaryCards) {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 12px;
-}
-
-:deep(.secCard) {
-  border: none;
-  border-radius: var(--radius-md);
-  background: linear-gradient(135deg, var(--bg-subtle) 0%, var(--color-primary-bg) 100%);
-  padding: 16px;
-  box-shadow: 0 2px 8px rgba(13, 148, 136, 0.1);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  text-align: center;
-  transition: transform 0.2s, box-shadow 0.2s;
-}
-
-:deep(.secCard:hover) {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(13, 148, 136, 0.15);
-}
-
-:deep(.secK) {
-  font-size: 11px;
-  color: var(--text-sub);
-  text-transform: uppercase;
-  font-weight: 700;
-  letter-spacing: 0.05em;
-}
-
-:deep(.secV) {
-  font-size: 24px;
-  font-weight: 800;
-  color: var(--color-primary);
-  margin-top: 6px;
-}
-
-:deep(.secSection) {
-  display: grid;
-  gap: 12px;
-  padding: 16px;
-  border-radius: 16px;
-  border: 1px solid rgba(148, 163, 184, 0.22);
-  background:
-    radial-gradient(120% 140% at 0% 0%, rgba(45, 212, 191, 0.16) 0%, rgba(45, 212, 191, 0) 56%),
-    radial-gradient(100% 120% at 100% 0%, rgba(56, 189, 248, 0.14) 0%, rgba(56, 189, 248, 0) 58%),
-    var(--bg-panel);
-  backdrop-filter: blur(8px);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.07),
-    0 12px 24px rgba(2, 6, 23, 0.24);
-}
-
-:deep(.secSectionAttention) {
-  gap: 14px;
-}
-
-:deep(.secSectionBriefing) {
-  gap: 10px;
-}
-
-:deep(.secSectionHead) {
-  display: grid;
-  gap: 4px;
-  min-width: 0;
-}
-
-:deep(.secSectionTitle) {
-  font-size: 14px;
-  font-weight: 800;
-  color: var(--text-main);
-  letter-spacing: 0.02em;
-}
-
-:deep(.secSectionSubtitle) {
-  font-size: 12px;
-  color: var(--text-sub);
-  line-height: 1.45;
-}
-
-:deep(.secSectionTitleRow) {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-:deep(.secSectionControls) {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-}
-
-:deep(.secScopeSelect) {
-  min-height: 40px;
-  padding: 8px 12px;
-  font-size: 12px;
-  border-radius: 999px;
-  border: 1px solid rgba(148, 163, 184, 0.3);
-  background: rgba(15, 23, 42, 0.32);
-  color: var(--text-main);
-  font-weight: 700;
-}
-
-:deep(.secMiniToggle) {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 40px;
-  padding: 8px 12px;
-  border-radius: 999px;
-  border: 1px solid rgba(45, 212, 191, 0.35);
-  background: rgba(45, 212, 191, 0.12);
-  color: var(--text-main);
-  font-size: 12px;
-  font-weight: 800;
-  white-space: nowrap;
-  user-select: none;
-}
-
-:deep(.secMiniToggle input) {
-  width: 16px;
-  height: 16px;
-}
-
-:deep(.secAutopilotNote) {
-  font-size: 12px;
-  color: var(--text-sub);
-  background: rgba(15, 23, 42, 0.3);
-  border: 1px solid rgba(148, 163, 184, 0.2);
-  padding: 10px 12px;
-  border-radius: var(--radius-md);
-  overflow-wrap: anywhere;
-}
-
-:deep(.secEmptyState) {
-  display: grid;
-  gap: 6px;
-  border: 1px dashed rgba(148, 163, 184, 0.4);
-  border-radius: 14px;
-  padding: 14px 16px;
-  background: rgba(15, 23, 42, 0.26);
-}
-
-:deep(.secEmptyTitle) {
-  font-size: 15px;
-  font-weight: 800;
-  color: var(--text-main);
-}
-
-:deep(.secEmptyHint) {
-  font-size: 12px;
-  color: var(--text-sub);
-  line-height: 1.5;
-}
-
-:deep(.secRows) {
-  display: grid;
-  gap: 10px;
-}
-
-:deep(.secRow) {
-  background: rgba(15, 23, 42, 0.28);
-  border: 1px solid rgba(148, 163, 184, 0.25);
-  border-radius: var(--radius-md);
-  padding: 0;
-  transition: all 0.2s;
-  display: flex;
-  align-items: stretch;
-  gap: 10px;
-  overflow: hidden;
-}
-
-:deep(.secRow:hover) {
-  transform: translateY(-2px);
-  box-shadow: var(--shadow-md);
-  border-color: rgba(45, 212, 191, 0.45);
-}
-
-:deep(.secRowMain) {
-  flex: 1;
-  border: none;
-  background: transparent;
-  padding: 12px;
-  text-align: left;
-  cursor: pointer;
-}
-
-:deep(.secRowActions) {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 12px;
-}
-
-:deep(.secAction) {
-  padding: 6px 10px;
-  font-size: 12px;
-  border-radius: 999px;
-  white-space: nowrap;
-}
-
-:deep(.briefing) {
-  margin: 0;
-  border: 1px solid rgba(148, 163, 184, 0.25);
-  border-radius: var(--radius-md);
-  padding: 14px;
-  background: rgba(15, 23, 42, 0.3);
-  font-size: 13px;
-  color: var(--text-main);
-  white-space: pre-wrap;
-  overflow: auto;
-  max-height: 200px;
-  min-height: 108px;
-  line-height: 1.6;
-}
-
-@media (max-width: 900px) {
-  :deep(.secSectionTitleRow) {
-    flex-direction: column;
-    align-items: stretch;
-  }
-
-  :deep(.secSectionControls) {
-    justify-content: flex-start;
-  }
-}
-
-@media (max-width: 640px) {
-  :deep(.secScopeSelect),
-  :deep(.secMiniToggle) {
-    flex: 1 1 calc(50% - 6px);
-    justify-content: center;
-  }
-}
-
-:deep(.secChat) {
-  flex: 1;
-  min-width: 0;
-  min-height: 0;
-  display: flex;
-  border: none;
-  border-radius: 0;
-  padding: 0;
-  background: transparent;
-}
-
-:deep(.secChat summary) {
-  font-weight: 600;
-  color: var(--color-primary);
-  cursor: pointer;
-}
-
-:deep(.secChat .chat) {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  min-width: 0;
-  min-height: 0;
-  flex: 1;
-}
-
-:deep(.chatControls) {
-  display: flex;
-  gap: 12px;
-  align-items: flex-end;
-  margin: 0;
-  flex-wrap: wrap;
-}
-
-:deep(.chatSettingsHint) {
-  margin-top: 4px;
-  font-size: 12px;
-  color: var(--text-sub);
-  line-height: 1.5;
-}
-
-:deep(.secInlineLink) {
-  display: inline-flex;
-  align-items: center;
-  border: none;
-  background: transparent;
-  color: var(--color-primary);
-  font-size: 12px;
-  font-weight: 800;
-  padding: 0 2px;
-  margin: 0 2px;
-  text-decoration: underline;
-  text-underline-offset: 2px;
-}
-
-:deep(.secInlineLink:hover:not(:disabled)) {
-  color: var(--color-primary-hover);
-}
-
-:deep(.chatControls label) {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  font-size: 12px;
-  color: var(--text-sub);
-}
-
-:deep(.chatControls select),
-:deep(.chatControls input[type="number"]) {
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-md);
-  padding: 8px 10px;
-  background: var(--bg-panel);
-  font-size: 13px;
-}
-
-:deep(.chatControls label.chatToggle) {
-  flex-direction: row;
-  gap: 8px;
-  align-items: center;
-  padding-bottom: 8px;
-}
-
-:deep(.msgs) {
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-md);
-  padding: 12px;
-  overflow: auto;
-  background: var(--bg-panel);
-  flex: 1;
-  min-width: 0;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-:deep(.secStreamToolError) {
-  border: 1px solid rgba(239, 68, 68, 0.35);
-  background: rgba(239, 68, 68, 0.1);
-  color: #b91c1c;
-  border-radius: var(--radius-md);
-  padding: 9px 12px;
-  font-size: 12px;
-  line-height: 1.5;
-}
-
-:deep(.secChatError) {
-  border: 1px solid rgba(239, 68, 68, 0.35);
-  background: rgba(239, 68, 68, 0.08);
-  color: #b91c1c;
-  border-radius: var(--radius-md);
-  padding: 9px 12px;
-  font-size: 12px;
-  line-height: 1.5;
-  white-space: pre-wrap;
-}
-
-:deep(.msg) {
-  padding: 10px 14px;
-  border-radius: var(--radius-md);
-  margin: 0;
-  background: var(--bg-subtle);
-  border: 1px solid transparent;
-  max-width: min(92%, 820px);
-  min-width: 0;
-  box-sizing: border-box;
-  align-self: flex-start;
-}
-
-:deep(.msg.user) {
-  background: var(--color-primary-bg);
-  color: var(--color-primary-hover);
-  align-self: flex-end;
-}
-
-:deep(.msg.user .content) {
-  color: var(--color-primary-hover);
-}
-
-:deep(.msg.streaming) {
-  border-style: dashed;
-  opacity: 0.9;
-}
-
-:deep(.role) {
-  font-size: 11px;
-  color: var(--text-sub);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  margin-bottom: 4px;
-  font-weight: 700;
-}
-
-:deep(.msg .content) {
-  font-size: 13px;
-  line-height: 1.65;
-  color: var(--text-main);
-  max-width: 100%;
-  overflow-wrap: anywhere;
-  word-break: break-word;
-}
-
-:deep(.msg .content.chatMarkdown) {
-  white-space: normal;
-}
-
-:deep(.msg .content.chatMarkdown p) {
-  margin: 0 0 10px;
-}
-
-:deep(.msg .content.chatMarkdown pre) {
-  margin: 10px 0;
-  padding: 12px;
-  background: var(--bg-panel);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-md);
-  max-width: 100%;
-  box-sizing: border-box;
-  overflow: auto;
-}
-
-:deep(.msg .content.chatMarkdown code) {
-  font-family: var(--font-mono);
-  font-size: 12px;
-}
-
-:deep(.msg .content.chatMarkdown p code),
-:deep(.msg .content.chatMarkdown li code) {
-  background: var(--bg-panel);
-  border: 1px solid rgba(148, 163, 184, 0.22);
-  padding: 1px 6px;
-  border-radius: 8px;
-}
-
-:deep(.msg .content.chatMarkdown code.fileRef) {
-  cursor: pointer;
-  border-color: rgba(45, 212, 191, 0.45);
-}
-
-:deep(.msg .content.chatMarkdown code.fileRef:hover) {
-  color: var(--color-primary);
-  text-decoration: underline;
-}
-
-:deep(.msg .content.chatMarkdown a) {
-  color: var(--color-primary);
-  text-decoration: none;
-}
-
-:deep(.msg .content.chatMarkdown a:hover) {
-  text-decoration: underline;
-}
-
-:deep(.secChatTemplatesRow) {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-
-:deep(.secChatTemplatesRow select) {
-  min-width: min(420px, 100%);
-}
-
-:deep(.secChat .input) {
-  display: flex;
-  gap: 10px;
-  align-items: flex-end;
-}
-
-:deep(.secChat .input textarea) {
-  flex: 1;
-  width: auto;
-  min-height: 48px;
-  max-height: 220px;
-  resize: vertical;
-}
-
-:deep(.secChat .input button) {
-  flex: 0 0 auto;
-  min-width: 92px;
-  padding-left: 16px;
-  padding-right: 16px;
-}
-
 @media (max-width: 640px) {
   :deep(.secDrawer) {
     top: 0;
@@ -5746,9 +5064,6 @@ h2 {
       minmax(480px, 2fr);
     gap: 16px;
   }
-  :deep(.secretaryCards) {
-    grid-template-columns: repeat(4, 1fr);
-  }
 }
 
 @media (max-width: 900px) {
@@ -5777,7 +5092,6 @@ h2 {
     min-height: 40px;
   }
 
-  :deep(.secTab),
   :deep(.feedConn),
   :deep(.feedReconnect),
   :deep(.feedHint),
@@ -5805,11 +5119,6 @@ h2 {
     flex-wrap: wrap;
     justify-content: flex-end;
     gap: 8px;
-  }
-
-  .secOrb {
-    right: max(16px, env(safe-area-inset-right));
-    bottom: max(16px, env(safe-area-inset-bottom));
   }
 
   :deep(.secDrawer) {
@@ -5886,10 +5195,8 @@ h2 {
   }
 
   .row:hover,
-  .secRow:hover,
   button.primary:hover:not(:disabled),
-  button.dangerBtn:hover:not(:disabled),
-  .secOrb:hover {
+  button.dangerBtn:hover:not(:disabled) {
     transform: none !important;
   }
 }

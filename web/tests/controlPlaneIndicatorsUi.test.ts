@@ -11,7 +11,6 @@ test("UI exposes control-plane health and degraded states", () => {
   const api = readText("../src/api.ts");
   const types = readText("../src/types.ts");
   const composable = readText("../src/composables/useControlPlaneHealth.ts");
-  const drawer = readText("../src/components/SecretaryDrawer.vue");
   const css = readText("../src/App.css");
 
   assert.match(types, /export type ControlPlaneStatus/);
@@ -22,12 +21,10 @@ test("UI exposes control-plane health and degraded states", () => {
 
   assert.match(appVue, /controlPlanePills/);
   assert.match(appVue, /taskPlaneDegraded/);
-  assert.match(appVue, /secretaryDegraded/);
-
-  assert.match(drawer, /secretaryAvailable/);
-  assert.match(drawer, /secDegradedHint/);
+  assert.ok(!appVue.includes("secretaryd"));
+  assert.ok(!types.includes("secretaryd"));
+  assert.ok(!composable.includes("secretaryOK"));
 
   assert.match(css, /\.controlPlanePills/);
   assert.match(css, /\.banner\.warn/);
 });
-

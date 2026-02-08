@@ -8,7 +8,7 @@ import type {
   ProviderSpeedTestResult,
 } from "../types";
 
-type ChatBackend = "auto" | "simple-http" | "claude" | "codex";
+type SecretaryBackend = "auto" | "simple-http" | "claude" | "codex";
 type ProviderTarget = "claude" | "codex" | "secretary";
 type ProvidersPage = "overview" | ProviderTarget;
 type SpeedTestTarget = "claude" | "codex" | "";
@@ -21,7 +21,7 @@ const props = defineProps<{
   authStatus: AuthStatus | null;
   profiles: ProviderProfile[];
   active: ProviderActiveSelection;
-  chatBackend: ChatBackend;
+  secretaryBackend: SecretaryBackend;
 
   editID: string;
   editName: string;
@@ -90,7 +90,7 @@ const emit = defineEmits<{
   (e: "update:secretarySimpleHTTPAuthToken", value: string): void;
   (e: "update:secretarySimpleHTTPModel", value: string): void;
 
-  (e: "update:chatBackend", value: ChatBackend): void;
+  (e: "update:secretaryBackend", value: SecretaryBackend): void;
 }>();
 
 const editNameModel = computed({
@@ -161,9 +161,9 @@ const secretarySimpleHTTPModelModel = computed({
   set: (value: string) => emit("update:secretarySimpleHTTPModel", value),
 });
 
-const chatBackendModel = computed({
-  get: () => props.chatBackend,
-  set: (value: ChatBackend) => emit("update:chatBackend", value),
+const secretaryBackendModel = computed({
+  get: () => props.secretaryBackend,
+  set: (value: SecretaryBackend) => emit("update:secretaryBackend", value),
 });
 
 const page = ref<ProvidersPage>("overview");
@@ -349,7 +349,7 @@ function onSaveAndActivate() {
 }
 
 const showSecretaryHTTPNotice = computed<boolean>(() => {
-  return props.chatBackend === "auto" || props.chatBackend === "simple-http";
+  return props.secretaryBackend === "auto" || props.secretaryBackend === "simple-http";
 });
 
 watch(
@@ -483,7 +483,7 @@ watch(
                         当前启用：<span class="mono">{{ profileLabel(activeProfileFor('secretary')) }}</span>
                       </div>
                       <div>
-                        后端：<span class="mono">{{ chatBackendModel }}</span>
+                        后端：<span class="mono">{{ secretaryBackendModel }}</span>
                       </div>
                     </div>
                     <div class="providersOverviewCardActions">
@@ -645,7 +645,7 @@ watch(
                   <div v-else class="toolsEditorGrid providersSubsectionGrid">
                     <label class="full">
                       秘书后端（对话/评审使用）
-                      <select v-model="chatBackendModel">
+                      <select v-model="secretaryBackendModel">
                         <option value="auto">auto（优先 HTTP → Claude → Codex）</option>
                         <option value="simple-http">simple-http（独立 HTTP）</option>
                         <option value="claude">claude（复用 Claude Code）</option>
@@ -683,7 +683,7 @@ watch(
                     </div>
 
                     <div v-else class="tinyHint">
-                      当前选择为 <span class="mono">{{ chatBackendModel }}</span>；秘书会复用对应工具的启用配置（AUTH + 模型）。
+                      当前选择为 <span class="mono">{{ secretaryBackendModel }}</span>；秘书会复用对应工具的启用配置（AUTH + 模型）。
                     </div>
                   </div>
                 </div>
@@ -759,7 +759,7 @@ watch(
                       </div>
                     </div>
                     <div v-else class="tinyHint">
-                      当前选择为 <span class="mono">{{ chatBackendModel }}</span>；无需在此配置模型。
+                      当前选择为 <span class="mono">{{ secretaryBackendModel }}</span>；无需在此配置模型。
                     </div>
                   </div>
                 </div>
@@ -770,7 +770,7 @@ watch(
                     <template v-else>启用</template>
                   </div>
                   <div v-if="page === 'secretary' && !showSecretaryHTTPNotice" class="tinyHint">
-                    当前后端为 <span class="mono">{{ chatBackendModel }}</span>；秘书会复用对应工具的启用配置，无需启用秘书配置。
+                    当前后端为 <span class="mono">{{ secretaryBackendModel }}</span>；秘书会复用对应工具的启用配置，无需启用秘书配置。
                     如需使用 <span class="mono">simple-http</span>，请先切换秘书后端。
                   </div>
                   <div v-else class="toolsEditorGrid providersSubsectionGrid">

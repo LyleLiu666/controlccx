@@ -313,13 +313,6 @@ export type SessionWorkspaceMergeResponse = {
   conflicts?: string[];
 };
 
-export type ChatMessage = {
-  id: number;
-  time: string;
-  role: "user" | "assistant";
-  content: string;
-};
-
 export type SystemInfo = {
   hostname: string;
   os: string;
@@ -341,7 +334,6 @@ export type ControlPlaneComponent = {
 export type ControlPlaneStatus = {
   server: ControlPlaneComponent;
   runnerd: ControlPlaneComponent;
-  secretaryd: ControlPlaneComponent;
   ts_ms: number;
 };
 

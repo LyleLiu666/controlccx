@@ -1,12 +1,11 @@
 import { computed, onBeforeUnmount, ref, type Ref } from "vue";
-import type { ChatMessage, LogEntry, ServerEvent, Task, TaskTraceResponse } from "../types";
+import type { LogEntry, ServerEvent, Task, TaskTraceResponse } from "../types";
 import { fetchLogs, fetchTaskTrace, fetchTasks } from "../api";
 import { deriveNextSelectedTaskId } from "../taskSelection";
 
 export type UseTasksOptions = {
   showDeleted: Ref<boolean>;
   onTaskUpsert?: (prev: Task | undefined, next: Task) => void;
-  onChatMessage?: (msg: ChatMessage) => void;
   autoSelectFirst?: boolean;
 };
 
@@ -163,8 +162,6 @@ export function useTasks(opts: UseTasksOptions) {
           if (orderKeyChanged) scheduleOrderNormalization();
         } else if (evt.type === "task.log") {
           appendLog(evt.payload as LogEntry);
-        } else if (evt.type === "chat.message") {
-          if (opts.onChatMessage) opts.onChatMessage(evt.payload as ChatMessage);
         }
       } catch {
         // ignore
@@ -174,7 +171,6 @@ export function useTasks(opts: UseTasksOptions) {
     es.addEventListener("task.created", onAny);
     es.addEventListener("task.updated", onAny);
     es.addEventListener("task.log", onAny);
-    es.addEventListener("chat.message", onAny);
     es.addEventListener("hello", onAny);
     es.addEventListener("heartbeat", () => {
       eventsConnected.value = true;

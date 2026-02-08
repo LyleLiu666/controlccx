@@ -39,38 +39,18 @@ func TestStartupIntegration_FirstAndSecondLaunch_AttachOrSpawn(t *testing.T) {
 		t.Fatalf("openURLForListenAddr(runner): %v", err)
 	}
 
-	secretaryAddr := fmt.Sprintf("127.0.0.1:%d", pickPort(t))
-	secretaryBaseURL, err := openURLForListenAddr(secretaryAddr)
-	if err != nil {
-		t.Fatalf("openURLForListenAddr(secretary): %v", err)
-	}
-
-	if err := ensureRunnerd(ctx, runnerBaseURL, instanceToken, helperSpawnArgs("runnerd", dataDir, runnerAddr, secretaryAddr, runnerBaseURL)); err != nil {
+	if err := ensureRunnerd(ctx, runnerBaseURL, instanceToken, helperSpawnArgs("runnerd", dataDir, runnerAddr)); err != nil {
 		t.Fatalf("ensureRunnerd(first): %v", err)
 	}
 	runnerPID1 := mustDaemonPID(t, runnerBaseURL, instanceToken)
 	t.Cleanup(func() { _ = killPID(runnerPID1) })
 
-	if err := ensureRunnerd(ctx, runnerBaseURL, instanceToken, helperSpawnArgs("runnerd", dataDir, runnerAddr, secretaryAddr, runnerBaseURL)); err != nil {
+	if err := ensureRunnerd(ctx, runnerBaseURL, instanceToken, helperSpawnArgs("runnerd", dataDir, runnerAddr)); err != nil {
 		t.Fatalf("ensureRunnerd(second): %v", err)
 	}
 	runnerPID2 := mustDaemonPID(t, runnerBaseURL, instanceToken)
 	if runnerPID2 != runnerPID1 {
 		t.Fatalf("runnerd pid changed on second ensure: got=%d want=%d", runnerPID2, runnerPID1)
-	}
-
-	if err := ensureSecretaryd(ctx, secretaryBaseURL, instanceToken, helperSpawnArgs("secretaryd", dataDir, runnerAddr, secretaryAddr, runnerBaseURL)); err != nil {
-		t.Fatalf("ensureSecretaryd(first): %v", err)
-	}
-	secretaryPID1 := mustDaemonPID(t, secretaryBaseURL, instanceToken)
-	t.Cleanup(func() { _ = killPID(secretaryPID1) })
-
-	if err := ensureSecretaryd(ctx, secretaryBaseURL, instanceToken, helperSpawnArgs("secretaryd", dataDir, runnerAddr, secretaryAddr, runnerBaseURL)); err != nil {
-		t.Fatalf("ensureSecretaryd(second): %v", err)
-	}
-	secretaryPID2 := mustDaemonPID(t, secretaryBaseURL, instanceToken)
-	if secretaryPID2 != secretaryPID1 {
-		t.Fatalf("secretaryd pid changed on second ensure: got=%d want=%d", secretaryPID2, secretaryPID1)
 	}
 }
 
@@ -100,7 +80,7 @@ func TestDaemonSingleInstanceGuard_SecondStartExits(t *testing.T) {
 		t.Fatalf("openURLForListenAddr(runner): %v", err)
 	}
 
-	if err := ensureRunnerd(ctx, runnerBaseURL, instanceToken, helperSpawnArgs("runnerd", dataDir, runnerAddr, "", runnerBaseURL)); err != nil {
+	if err := ensureRunnerd(ctx, runnerBaseURL, instanceToken, helperSpawnArgs("runnerd", dataDir, runnerAddr)); err != nil {
 		t.Fatalf("ensureRunnerd(first): %v", err)
 	}
 	runnerPID := mustDaemonPID(t, runnerBaseURL, instanceToken)
@@ -110,7 +90,7 @@ func TestDaemonSingleInstanceGuard_SecondStartExits(t *testing.T) {
 	if err != nil {
 		t.Fatalf("os.Executable: %v", err)
 	}
-	cmd := exec.Command(exe, helperSpawnArgs("runnerd", dataDir, runnerAddr, "", runnerBaseURL)...)
+	cmd := exec.Command(exe, helperSpawnArgs("runnerd", dataDir, runnerAddr)...)
 	cmd.Stdout = nil
 	cmd.Stderr = nil
 	if err := cmd.Start(); err != nil {
@@ -136,7 +116,7 @@ func TestDaemonSingleInstanceGuard_SecondStartExits(t *testing.T) {
 	}
 }
 
-func helperSpawnArgs(mode string, dataDir string, runnerAddr string, secretaryAddr string, runnerBaseURL string) []string {
+func helperSpawnArgs(mode string, dataDir string, runnerAddr string) []string {
 	args := []string{
 		"-test.run=TestControlCCXDaemonHelperProcess",
 		"--",
@@ -146,12 +126,6 @@ func helperSpawnArgs(mode string, dataDir string, runnerAddr string, secretaryAd
 	}
 	if strings.TrimSpace(runnerAddr) != "" {
 		args = append(args, "--runnerd-addr", strings.TrimSpace(runnerAddr))
-	}
-	if strings.TrimSpace(secretaryAddr) != "" {
-		args = append(args, "--secretaryd-addr", strings.TrimSpace(secretaryAddr))
-	}
-	if strings.TrimSpace(runnerBaseURL) != "" {
-		args = append(args, "--runner-base-url", strings.TrimSpace(runnerBaseURL))
 	}
 	return args
 }
@@ -167,8 +141,6 @@ func TestControlCCXDaemonHelperProcess(t *testing.T) {
 	fs.SetOutput(os.Stderr)
 	dataDir := fs.String("data-dir", "", "data dir")
 	runnerAddr := fs.String("runnerd-addr", "", "runner addr")
-	secretaryAddr := fs.String("secretaryd-addr", "", "secretary addr")
-	runnerBaseURL := fs.String("runner-base-url", "", "runner base url")
 	if err := fs.Parse(args[2:]); err != nil {
 		os.Exit(2)
 	}
@@ -182,11 +154,6 @@ func TestControlCCXDaemonHelperProcess(t *testing.T) {
 	switch mode {
 	case "runnerd":
 		if err := runRunnerd(cfg, strings.TrimSpace(*runnerAddr)); err != nil {
-			fmt.Fprintln(os.Stderr, err.Error())
-			os.Exit(2)
-		}
-	case "secretaryd":
-		if err := runSecretaryd(cfg, strings.TrimSpace(*secretaryAddr), strings.TrimSpace(*runnerBaseURL)); err != nil {
 			fmt.Fprintln(os.Stderr, err.Error())
 			os.Exit(2)
 		}

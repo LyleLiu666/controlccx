@@ -77,26 +77,11 @@ Workers inherit environment variables from the ControlCCX server process. You ca
 - Claude Code (subscription token): `ANTHROPIC_AUTH_TOKEN` (or run `claude /login` once in a terminal on this machine)
 - Codex: `OPENAI_API_KEY`
 
-## Secretary (Observer) is LLM-only (禁止 deterministic/heuristic)
+## Secretary status
 
-The built-in Secretary (Observer) is an **agentic** role: it MUST use an LLM backend (simple-http / Claude Code CLI / Codex CLI) and tools to reason, inspect real system state, and perform actions.
+Secretary 功能已下线（2026-02-08），当前版本不再提供秘书抽屉与 `/api/chat` 接口；后续会重做后再上线。
 
-ControlCCX intentionally does **not** provide deterministic/heuristic “fallback answers” for the Secretary (e.g. “count tasks from DB without LLM”, or “auto resume when LLM is missing”). If the LLM backend is not configured/available, the Secretary will fail-fast and tell you the minimal fix steps.
-
-Backend selection in Secretary chat:
-
-- `auto` (default): `simple-http` -> `claude` -> `codex`
-- explicit `simple-http` / `claude` / `codex`: no fallback to other providers
-
-`simple-http` is designed for `baseURL + ANTHROPIC_AUTH_TOKEN` style integration. Claude Code compatible vendors (e.g. Kimi/Minimax/GLM gateways) are supported via standard env vars:
-
-- `ANTHROPIC_BASE_URL`
-- `ANTHROPIC_AUTH_TOKEN` (required to support)
-- `ANTHROPIC_MODEL`
-
-## Approvals (三档审批策略)
-
-部分 worker（尤其是 Claude Code）在调用工具/执行敏感动作时会要求 approval。ControlCCX 计划使用“驾驶室 + 秘书（Secretary）”的三档审批策略：
+## Approvals
 
 ### Run Safety Autopilot（默认推荐）
 
@@ -104,30 +89,6 @@ Backend selection in Secretary chat:
 
 - “Install unlock”（一次性解锁，高风险）：仅当你明确勾选后，系统才会把 `install` 类任务升级到更宽松/危险的模式（例如 Codex 的 `danger-full-access`、Claude 的 `--dangerously-skip-permissions`）。
 - 未解锁时，`install` 任务会回退到更保守的 sandbox 默认值。
-
-1) Level 1（直通）：完全不需要审批，全部自动通过（效率最高、风险最高）。
-   - 适用：你明确接受风险，希望不中断。
-   - 风险：可能在未提示的情况下执行危险命令（例如删除文件、远端 push、安装脚本）。
-
-2) Level 2（秘书全审）：所有审批都交给秘书自动决策（用户不被频繁打断）。
-   - 适用：你信任秘书，追求不中断，同时希望避免明显危险操作。
-   - 约束：秘书的自动决策必须可追溯（system log 可回看）。
-
-3) Level 3（秘书优先 + 升级）：秘书先决策；遇到高风险/不确定时再升级给用户确认。
-   - 适用：默认安全、只在关键时刻打断你。
-
-“升级给用户”常见触发示例（2～4 条）：
-- 大范围删除/破坏性改动（例如 `rm -rf`、删除大量文件、清空目录）
-- 远端/网络敏感操作（例如 `git push/pull/fetch/remote`、`curl/wget` 到陌生域名）
-- 可能泄露 secrets 的操作（例如打印 env、读取 secrets 文件、上传日志到远端）
-- 执行未知脚本/安装依赖链（例如运行安装脚本、执行未知二进制）
-
-注意：不提供“所有决策都必须用户审批”的模式；New Run 与 Resume 使用同一策略。
-
-当前状态（2026-01-28）：
-- 已实现 blocked 基础能力：当 CLI 要求 approval 时，任务会进入 `blocked`（避免被误判为 failed）。
-- 已提供 Level 1 相关开关：全局 `workers.unsafe_automation` + UI 的 Auto-approve（危险）。
-- Level 2/3 的完整链路（秘书全审/升级面板）按 OpenSpec 分阶段实现中。
 
 ## Resume (断点接续)
 
