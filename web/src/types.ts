@@ -2,6 +2,7 @@ export type TaskStatus =
   | "queued"
   | "waiting"
   | "running"
+  | "awaiting_approval"
   | "succeeded"
   | "failed"
   | "canceled"
@@ -73,6 +74,25 @@ export type Task = {
   updated_at: string;
   started_at?: string;
   finished_at?: string;
+};
+
+export type ApprovalStatus = "pending" | "approved" | "denied" | "expired";
+
+export type RiskLevel = "low" | "medium" | "high";
+
+export type ApprovalRequest = {
+  id: string;
+  task_id: string;
+  worker_type: WorkerType;
+  workdir: string;
+  action_type: string;
+  risk_level: RiskLevel;
+  summary: string;
+  raw: any;
+  status: ApprovalStatus;
+  reason: string;
+  created_at: string;
+  updated_at: string;
 };
 
 export type AcceptanceState = {

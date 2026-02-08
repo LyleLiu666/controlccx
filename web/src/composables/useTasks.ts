@@ -1,12 +1,13 @@
 import { computed, onBeforeUnmount, ref, type Ref } from "vue";
 import type { LogEntry, ServerEvent, Task, TaskTraceResponse } from "../types";
-import { fetchLogs, fetchTaskTrace, fetchTasks } from "../api";
+import { buildInstanceTokenHeaders, fetchLogs, fetchTaskTrace, fetchTasks, INSTANCE_TOKEN_REQUIRED_ERROR } from "../api";
 import { deriveNextSelectedTaskId } from "../taskSelection";
 
 export type UseTasksOptions = {
   showDeleted: Ref<boolean>;
   onTaskUpsert?: (prev: Task | undefined, next: Task) => void;
   autoSelectFirst?: boolean;
+  onTokenRequired?: (message: string) => void;
 };
 
 export function useTasks(opts: UseTasksOptions) {
@@ -102,7 +103,8 @@ export function useTasks(opts: UseTasksOptions) {
     opts?.closeRunsModal?.();
   }
 
-  let es: EventSource | null = null;
+  let eventsAbort: AbortController | null = null;
+  let eventsLoopToken = 0;
   let normalizeOrderTimer: ReturnType<typeof setTimeout> | null = null;
 
   let lastEventSeq = 0;
@@ -173,82 +175,228 @@ export function useTasks(opts: UseTasksOptions) {
     }, 100);
   }
 
-  function connectEvents() {
-    if (es) {
-      try {
-        es.close();
-      } catch {
-        // ignore
+  function handleServerEvent(evt: ServerEvent) {
+    eventsConnected.value = true;
+    eventsLastEventMs.value = Date.now();
+
+    const seq = Number(evt.seq ?? 0);
+    if (seq > 0) {
+      if (lastEventSeq > 0 && seq <= lastEventSeq) {
+        void resync("events seq reset", { fullLogs: true });
+      } else if (lastEventSeq > 0 && seq > lastEventSeq + 1) {
+        void resync("events gap", { fullLogs: true });
       }
-      es = null;
+      lastEventSeq = seq;
     }
 
-    eventsConnected.value = true;
-    eventsLastError.value = "";
-    eventsLastEventMs.value = Date.now();
-    lastEventSeq = 0;
-    es = new EventSource("/api/events");
-
-    es.onopen = () => {
-      eventsConnected.value = true;
-      eventsLastError.value = "";
-      eventsLastEventMs.value = Date.now();
-      void resync("events open", { fullLogs: true });
-    };
-
-    es.onerror = () => {
-      // EventSource will auto-reconnect, but we surface status to the user.
-      eventsConnected.value = false;
-      eventsLastError.value = "disconnected";
-    };
-
-    const onAny = (e: MessageEvent) => {
-      try {
-        const evt = JSON.parse(e.data) as ServerEvent;
-        eventsConnected.value = true;
-        eventsLastEventMs.value = Date.now();
-
-        const seq = Number(evt.seq ?? 0);
-        if (seq > 0) {
-          if (lastEventSeq > 0 && seq <= lastEventSeq) {
-            void resync("events seq reset", { fullLogs: true });
-          } else if (lastEventSeq > 0 && seq > lastEventSeq + 1) {
-            void resync("events gap", { fullLogs: true });
-          }
-          lastEventSeq = seq;
-        }
-
-        if (evt.type === "task.created" || evt.type === "task.updated") {
-          const nextTask = evt.payload as Task;
-          const prevTask = tasks.value.get(nextTask.id);
-          upsertTask(nextTask);
-          if (opts.onTaskUpsert) opts.onTaskUpsert(prevTask, nextTask);
-          const orderKeyChanged =
-            !prevTask ||
-            prevTask.created_at !== nextTask.created_at ||
-            prevTask.started_at !== nextTask.started_at ||
-            prevTask.finished_at !== nextTask.finished_at;
-          if (orderKeyChanged) scheduleOrderNormalization();
-        } else if (evt.type === "task.log") {
-          appendLog(evt.payload as LogEntry);
-        }
-      } catch {
-        // ignore
-      }
-    };
-
-    es.addEventListener("task.created", onAny);
-    es.addEventListener("task.updated", onAny);
-    es.addEventListener("task.log", onAny);
-    es.addEventListener("hello", onAny);
-    es.addEventListener("heartbeat", () => {
-      eventsConnected.value = true;
+    if (evt.type === "heartbeat") {
       eventsLastHeartbeatMs.value = Date.now();
       eventsLastEventMs.value = eventsLastHeartbeatMs.value;
       if (Date.now() - lastResyncMs > periodicResyncMs) {
         void resync("events heartbeat");
       }
+      return;
+    }
+
+    if (evt.type === "task.created" || evt.type === "task.updated") {
+      const nextTask = evt.payload as Task;
+      const prevTask = tasks.value.get(nextTask.id);
+      upsertTask(nextTask);
+      if (opts.onTaskUpsert) opts.onTaskUpsert(prevTask, nextTask);
+      const orderKeyChanged =
+        !prevTask ||
+        prevTask.created_at !== nextTask.created_at ||
+        prevTask.started_at !== nextTask.started_at ||
+        prevTask.finished_at !== nextTask.finished_at;
+      if (orderKeyChanged) scheduleOrderNormalization();
+      return;
+    }
+    if (evt.type === "task.log") {
+      appendLog(evt.payload as LogEntry);
+    }
+  }
+
+  function parseSSEBlock(block: string): { eventName: string; dataRaw: string } | null {
+    const lines = block.split(/\r?\n/);
+    let eventName = "";
+    const dataLines: string[] = [];
+    for (const rawLine of lines) {
+      const line = rawLine.trimEnd();
+      if (!line) continue;
+      if (line.startsWith("event:")) {
+        eventName = line.slice("event:".length).trim();
+        continue;
+      }
+      if (line.startsWith("data:")) {
+        dataLines.push(line.slice("data:".length).trimStart());
+      }
+    }
+    if (!eventName) return null;
+    return { eventName, dataRaw: dataLines.join("\n") };
+  }
+
+  function isAbortError(e: any): boolean {
+    const msg = String(e?.name || e?.message || "").toLowerCase();
+    return msg.includes("abort");
+  }
+
+  function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      let t: ReturnType<typeof setTimeout> | null = null;
+
+      function removeAbortListener() {
+        if (!signal) return;
+        try {
+          signal.removeEventListener("abort", onAbort);
+        } catch {
+          // ignore
+        }
+      }
+
+      function onAbort() {
+        if (settled) return;
+        settled = true;
+        if (t) clearTimeout(t);
+        removeAbortListener();
+        reject(new Error("aborted"));
+      }
+
+      t = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        removeAbortListener();
+        resolve();
+      }, ms);
+
+      if (!signal) return;
+      if (signal.aborted) {
+        onAbort();
+        return;
+      }
+      signal.addEventListener("abort", onAbort);
     });
+  }
+
+  async function runEventsLoop(loopToken: number, signal: AbortSignal) {
+    let attempt = 0;
+    while (loopToken === eventsLoopToken && !signal.aborted) {
+      try {
+        const res = await fetch("/api/events", {
+          method: "GET",
+          headers: buildInstanceTokenHeaders({ "Accept": "text/event-stream" }),
+          credentials: "same-origin",
+          signal,
+        });
+
+        if (!res.ok) {
+          let rawText = "";
+          let err: any = null;
+          try {
+            rawText = await res.text();
+            const ct = String(res.headers.get("Content-Type") || "").toLowerCase();
+            if (ct.includes("application/json")) {
+              try {
+                err = JSON.parse(rawText);
+              } catch {
+                err = null;
+              }
+            }
+          } catch {
+            // ignore
+          }
+
+          const code = String(err?.error ?? "").trim();
+          const msg = String(err?.message ?? rawText ?? res.statusText ?? "events connect failed").trim();
+          eventsConnected.value = false;
+          eventsLastError.value = msg || `HTTP ${res.status}`;
+
+          if ((res.status === 401 || res.status === 403) && code === INSTANCE_TOKEN_REQUIRED_ERROR) {
+            opts.onTokenRequired?.(msg || "missing instance token");
+            return;
+          }
+
+          attempt += 1;
+          await sleep(Math.min(10_000, 800 + attempt * 600), signal);
+          continue;
+        }
+
+        const reader = res.body?.getReader();
+        if (!reader) {
+          eventsConnected.value = false;
+          eventsLastError.value = "stream body unavailable";
+          attempt += 1;
+          await sleep(Math.min(10_000, 800 + attempt * 600), signal);
+          continue;
+        }
+
+        // Connected.
+        attempt = 0;
+        eventsConnected.value = true;
+        eventsLastError.value = "";
+        eventsLastEventMs.value = Date.now();
+        lastEventSeq = 0;
+        void resync("events open", { fullLogs: true });
+
+        const decoder = new TextDecoder();
+        let pending = "";
+
+        while (loopToken === eventsLoopToken && !signal.aborted) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          pending += decoder.decode(value, { stream: true });
+          while (true) {
+            const splitAt = pending.indexOf("\n\n");
+            if (splitAt < 0) break;
+            const block = pending.slice(0, splitAt);
+            pending = pending.slice(splitAt + 2);
+            const parsed = parseSSEBlock(block);
+            if (!parsed) continue;
+            if (!parsed.dataRaw) continue;
+            try {
+              const evt = JSON.parse(parsed.dataRaw) as ServerEvent;
+              handleServerEvent(evt);
+            } catch {
+              // ignore
+            }
+          }
+        }
+
+        // Connection ended. Retry.
+        eventsConnected.value = false;
+        eventsLastError.value = "disconnected";
+        attempt += 1;
+        await sleep(Math.min(10_000, 800 + attempt * 600), signal);
+      } catch (e: any) {
+        if (signal.aborted || loopToken !== eventsLoopToken || isAbortError(e)) return;
+        eventsConnected.value = false;
+        eventsLastError.value = String(e?.message ?? e ?? "disconnected");
+        attempt += 1;
+        await sleep(Math.min(10_000, 800 + attempt * 600), signal);
+      }
+    }
+  }
+
+  function connectEvents() {
+    // Force a new loop token so any in-flight reader exits.
+    eventsLoopToken += 1;
+    const token = eventsLoopToken;
+
+    if (eventsAbort) {
+      try {
+        eventsAbort.abort();
+      } catch {
+        // ignore
+      }
+    }
+    eventsAbort = new AbortController();
+
+    eventsConnected.value = false;
+    eventsLastError.value = "";
+    eventsLastEventMs.value = Date.now();
+    lastEventSeq = 0;
+
+    void runEventsLoop(token, eventsAbort.signal);
   }
 
   function reconnectEvents() {
@@ -260,13 +408,14 @@ export function useTasks(opts: UseTasksOptions) {
       clearTimeout(normalizeOrderTimer);
       normalizeOrderTimer = null;
     }
-    if (!es) return;
+    eventsLoopToken += 1;
+    if (!eventsAbort) return;
     try {
-      es.close();
+      eventsAbort.abort();
     } catch {
       // ignore
     }
-    es = null;
+    eventsAbort = null;
   });
 
   return {

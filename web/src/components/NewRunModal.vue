@@ -356,7 +356,7 @@ watch(
                       "
                       class="tinyHint"
                     >
-                      启用 Claude Code WebFetch。默认禁止通过
+                      启用 Claude Code WebFetch/WebSearch。默认禁止通过
                       <span class="mono">curl</span>/<span class="mono"
                         >wget</span
                       >

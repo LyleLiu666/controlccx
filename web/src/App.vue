@@ -63,7 +63,11 @@ import {
   updateAuth,
   importAuthFromEnv,
   fetchAcceptance,
+  getInstanceToken,
   isAPIError,
+  isInstanceTokenRequiredError,
+  sessionTaskInFlightFromError,
+  setInstanceToken,
 } from "./api";
 import {
   attentionAutopilotIsNoConversationFound,
@@ -107,6 +111,8 @@ import HighRiskConfirmModal from "./components/HighRiskConfirmModal.vue";
 import SkillMountConfirmModal from "./components/SkillMountConfirmModal.vue";
 import RunningSessionsStartupModal from "./components/RunningSessionsStartupModal.vue";
 import BlockedPromptModal from "./components/BlockedPromptModal.vue";
+import ApprovalPromptModal from "./components/ApprovalPromptModal.vue";
+import InstanceTokenModal from "./components/InstanceTokenModal.vue";
 import RehydratePromptModal from "./components/RehydratePromptModal.vue";
 import WorkdirBusyModal from "./components/WorkdirBusyModal.vue";
 import WorktreeUntrackedModal from "./components/WorktreeUntrackedModal.vue";
@@ -805,6 +811,17 @@ const sessionsLimit = ref(40);
 const sessionsShowDeleted = ref(false);
 const homeRunBusy = ref(false);
 
+const instanceTokenOpen = ref(false);
+const instanceTokenBusy = ref(false);
+const instanceTokenError = ref("");
+const instanceTokenInitial = ref(getInstanceToken());
+
+function openInstanceTokenModal(message?: string) {
+  instanceTokenInitial.value = getInstanceToken();
+  instanceTokenError.value = String(message ?? "").trim();
+  instanceTokenOpen.value = true;
+}
+
 const filePreviewOpen = ref(false);
 const filePreviewRawPath = ref("");
 const filePreviewBase = ref("");
@@ -842,9 +859,11 @@ const {
 } = useTasks({
   showDeleted: sessionsShowDeleted,
   autoSelectFirst: false,
+  onTokenRequired: (msg) => openInstanceTokenModal(msg),
   onTaskUpsert: (prev, next) => {
     maybeDismissRunLaunchMaskForTask(next);
     void maybePromptBlocked(prev, next);
+    void maybePromptApproval(prev, next);
     void maybePromptRehydrate(prev, next);
   },
 });
@@ -859,7 +878,7 @@ const selectedRunInstruction = computed(() => {
 const selectedRunActivity = computed(() => {
   const t = selectedTask.value;
   if (!t) return null;
-  if (!(t.status === "running" || t.status === "queued" || t.status === "waiting")) return null;
+  if (!(t.status === "running" || t.status === "queued" || t.status === "waiting" || t.status === "awaiting_approval")) return null;
   return deriveRunActivity(selectedLogs.value);
 });
 
@@ -1033,8 +1052,17 @@ const blockedPromptBusy = ref(false);
 const blockedPromptError = ref("");
 const blockedPromptRunID = ref("");
 
+const approvalPromptOpen = ref(false);
+const approvalPromptRunID = ref("");
+
 const blockedPromptTask = computed<Task | null>(() => {
   const id = blockedPromptRunID.value.trim();
+  if (!id) return null;
+  return tasks.value.get(id) ?? null;
+});
+
+const approvalPromptTask = computed<Task | null>(() => {
+  const id = approvalPromptRunID.value.trim();
   if (!id) return null;
   return tasks.value.get(id) ?? null;
 });
@@ -1531,7 +1559,7 @@ async function mergeBackSelectedWorktree() {
     errorBanner.value = "该 run 不是 worktree 运行，或缺少 worktree 元信息，无法合并。";
     return;
   }
-  if (t.status === "running" || t.status === "queued" || t.status === "waiting") {
+  if (t.status === "running" || t.status === "queued" || t.status === "waiting" || t.status === "awaiting_approval") {
     errorBanner.value = "该 worktree run 仍在运行/排队中，建议结束后再合并。";
     return;
   }
@@ -1564,6 +1592,8 @@ async function mergeBackSelectedWorktree() {
     await loadLogs(next.id);
   } catch (e: any) {
     closeRunLaunchMask();
+    if (maybePromptInstanceToken(e)) return;
+    if (await maybeAttachSessionInFlightTask(e)) return;
     errorBanner.value = e?.message ?? String(e);
   }
 }
@@ -2082,7 +2112,7 @@ watch(feedCoachDismissed, (v) => saveBool(LS_KEY_COACH_FEED, v));
 
 function desiredOutputTabForTask(t: Task | null): "result" | "logs" {
   if (!t) return "result";
-  if (t.status === "running" || t.status === "queued" || t.status === "waiting") return "logs";
+  if (t.status === "running" || t.status === "queued" || t.status === "waiting" || t.status === "awaiting_approval") return "logs";
   return "result";
 }
 
@@ -2091,6 +2121,9 @@ watch(selectedTaskId, () => {
   if (!t) return;
   if (blockedPromptOpen.value && blockedPromptRunID.value !== selectedTaskId.value) {
     closeBlockedPrompt();
+  }
+  if (approvalPromptOpen.value && approvalPromptRunID.value !== selectedTaskId.value) {
+    closeApprovalPrompt();
   }
   if (rehydratePromptOpen.value && rehydratePromptRunID.value !== selectedTaskId.value) {
     closeRehydratePrompt();
@@ -2211,6 +2244,69 @@ function ensureTaskPlaneAvailable(): boolean {
   return false;
 }
 
+function maybePromptInstanceToken(e: unknown): boolean {
+  if (!isInstanceTokenRequiredError(e)) return false;
+  openInstanceTokenModal((e as any)?.message ?? "missing instance token");
+  return true;
+}
+
+function closeInstanceTokenModal() {
+  if (instanceTokenBusy.value) return;
+  instanceTokenOpen.value = false;
+  instanceTokenError.value = "";
+}
+
+function clearInstanceTokenModal() {
+  setInstanceToken("");
+  instanceTokenInitial.value = "";
+  instanceTokenError.value = "";
+}
+
+async function saveInstanceTokenModal(token: string) {
+  if (instanceTokenBusy.value) return;
+  instanceTokenBusy.value = true;
+  instanceTokenError.value = "";
+  setInstanceToken(token);
+  instanceTokenInitial.value = getInstanceToken();
+  try {
+    await refresh();
+    instanceTokenOpen.value = false;
+    instanceTokenError.value = "";
+    reconnectEvents();
+    void refreshAuth();
+    void refreshTools();
+  } catch (e: any) {
+    instanceTokenOpen.value = true;
+    instanceTokenError.value = e?.message ?? String(e);
+  } finally {
+    instanceTokenBusy.value = false;
+  }
+}
+
+async function maybeAttachSessionInFlightTask(e: unknown): Promise<boolean> {
+  const inFlight = sessionTaskInFlightFromError(e);
+  if (!inFlight) return false;
+
+  // Best-effort: refresh tasks in case the task isn't in the current list yet.
+  try {
+    await refreshTasks(200);
+  } catch {
+    // ignore
+  }
+
+  errorBanner.value =
+    inFlight.message ||
+    `已有 run 正在执行（${inFlight.status || "running"}），已切换到 ${inFlight.taskId.slice(0, 8)}。`;
+  selectedTaskId.value = inFlight.taskId;
+  try {
+    await loadLogs(inFlight.taskId);
+  } catch {
+    // ignore
+  }
+  outputTab.value = "logs";
+  return true;
+}
+
 async function onCreateTask(opts?: { idempotencyKey?: string }): Promise<boolean> {
   errorBanner.value = "";
   if (!ensureTaskPlaneAvailable()) return false;
@@ -2293,6 +2389,7 @@ async function onCreateTask(opts?: { idempotencyKey?: string }): Promise<boolean
       });
       return false;
     }
+    if (maybePromptInstanceToken(e)) return false;
     errorBanner.value = e?.message ?? String(e);
     return false;
   }
@@ -2972,6 +3069,11 @@ function closeBlockedPrompt() {
   blockedPromptRunID.value = "";
 }
 
+function closeApprovalPrompt() {
+  approvalPromptOpen.value = false;
+  approvalPromptRunID.value = "";
+}
+
 function openBlockedPromptForSelected() {
   const t = selectedTask.value;
   if (!t || t.status !== "blocked") return;
@@ -2980,6 +3082,26 @@ function openBlockedPromptForSelected() {
   blockedPromptBusy.value = false;
   blockedPromptOpen.value = true;
   persistBlockedPromptSeen(t.id);
+}
+
+function openApprovalPromptForSelected() {
+  const t = selectedTask.value;
+  if (!t || t.status !== "awaiting_approval") return;
+  approvalPromptRunID.value = t.id;
+  approvalPromptOpen.value = true;
+}
+
+async function onApprovalEnterUnsafe(task: Task) {
+  if (!task?.id) return;
+  closeApprovalPrompt();
+  upsertTask(task);
+  selectedTaskId.value = task.id;
+  try {
+    await loadLogs(task.id);
+  } catch {
+    // ignore
+  }
+  outputTab.value = "logs";
 }
 
 async function confirmBlockedPromptUnsafe() {
@@ -3022,6 +3144,11 @@ async function confirmBlockedPromptUnsafe() {
     closeBlockedPrompt();
   } catch (e: any) {
     closeRunLaunchMask();
+    if (maybePromptInstanceToken(e)) return;
+    if (await maybeAttachSessionInFlightTask(e)) {
+      closeBlockedPrompt();
+      return;
+    }
     blockedPromptError.value = e?.message ?? String(e);
   } finally {
     blockedPromptBusy.value = false;
@@ -3054,6 +3181,11 @@ async function confirmRehydratePrompt() {
     closeRehydratePrompt();
   } catch (e: any) {
     closeRunLaunchMask();
+    if (maybePromptInstanceToken(e)) return;
+    if (await maybeAttachSessionInFlightTask(e)) {
+      closeRehydratePrompt();
+      return;
+    }
     rehydratePromptError.value = e?.message ?? String(e);
   } finally {
     rehydratePromptBusy.value = false;
@@ -3079,6 +3211,24 @@ async function maybePromptBlocked(prev: Task | undefined, next: Task) {
   blockedPromptBusy.value = false;
   blockedPromptOpen.value = true;
   persistBlockedPromptSeen(next.id);
+}
+
+async function maybePromptApproval(prev: Task | undefined, next: Task) {
+  if (!prev || !next?.id) return;
+  if (approvalPromptOpen.value) return;
+
+  const prevStatus = prev?.status ?? "";
+  const nextStatus = next.status ?? "";
+  if (nextStatus !== "awaiting_approval") return;
+  if (prevStatus === nextStatus) return;
+  if (!(prevStatus === "running" || prevStatus === "queued" || prevStatus === "waiting" || prevStatus === "")) return;
+
+  // Non-disruptive: only prompt when the run belongs to the current session view.
+  const nextSessionKey = sessionKeyForTask(next);
+  if (selectedTaskId.value !== next.id && selectedSessionKey.value !== nextSessionKey) return;
+
+  approvalPromptRunID.value = next.id;
+  approvalPromptOpen.value = true;
 }
 
 async function maybePromptRehydrate(prev: Task | undefined, next: Task) {
@@ -3183,7 +3333,7 @@ async function runAttentionAutopilotLoop() {
       if (sess.deleted_at) continue;
       if (!sess.session_id) continue;
       if (sess.status !== "interrupted") continue;
-      if (sess.latest.status === "running" || sess.latest.status === "queued" || sess.latest.status === "waiting") continue;
+      if (sess.latest.status === "running" || sess.latest.status === "queued" || sess.latest.status === "waiting" || sess.latest.status === "awaiting_approval") continue;
 
       const now = Date.now();
       const last = attentionAutopilotSeenAtMs(attentionAutopilotSeen.value, key);
@@ -3625,7 +3775,7 @@ function selectedSessionWorkspaceMeta() {
 
 async function mergeBackSelectedWorkspace() {
   const t = selectedTask.value;
-  if (t && (t.status === "running" || t.status === "queued" || t.status === "waiting")) {
+  if (t && (t.status === "running" || t.status === "queued" || t.status === "waiting" || t.status === "awaiting_approval")) {
     sessionWorkspaceNotice.value = "";
     return;
   }
@@ -3657,7 +3807,7 @@ async function mergeBackSelectedWorkspace() {
 
 async function discardSelectedWorkspace() {
   const t = selectedTask.value;
-  if (t && (t.status === "running" || t.status === "queued" || t.status === "waiting")) {
+  if (t && (t.status === "running" || t.status === "queued" || t.status === "waiting" || t.status === "awaiting_approval")) {
     sessionWorkspaceNotice.value = "";
     return;
   }
@@ -4645,12 +4795,23 @@ const missingAuthText = computed(() => {
 });
 
 onMounted(async () => {
-  await refresh();
-  maybeOpenRunningSessionsStartupModal();
-  if (selectedTaskId.value) await loadLogs(selectedTaskId.value);
-  await refreshAuth();
-  await refreshTools();
-  if (missingAuthText.value && !authSettingsOpen.value && !runningSessionsStartupOpen.value) openAuthSettings();
+  let bootOK = false;
+  try {
+    await refresh();
+    bootOK = true;
+  } catch (e: any) {
+    if (!maybePromptInstanceToken(e)) {
+      errorBanner.value = e?.message ?? String(e);
+    }
+  }
+
+  if (bootOK) {
+    maybeOpenRunningSessionsStartupModal();
+    if (selectedTaskId.value) await loadLogs(selectedTaskId.value);
+    await refreshAuth();
+    await refreshTools();
+    if (missingAuthText.value && !authSettingsOpen.value && !runningSessionsStartupOpen.value) openAuthSettings();
+  }
   connectEvents();
   window.addEventListener("keydown", onGlobalKeyDown);
   window.addEventListener("popstate", onRoutePopState);
@@ -6091,6 +6252,15 @@ watch(
             </div>
           </div>
 
+            <div v-if="selectedTask?.status === 'awaiting_approval'" class="approvalHint">
+              <div class="text">
+                等待审批：当前 run 已暂停，等待你批准/拒绝一次工具调用。
+              </div>
+              <div class="actions">
+                <button type="button" @click="openApprovalPromptForSelected">审批…</button>
+              </div>
+            </div>
+
 	          <div v-if="selectedTask?.status === 'blocked'" class="blockedHint">
 	            <div class="text">
 	              运行被阻塞：触发了需要人工确认的操作，但当前为非交互运行，无法点击批准继续。
@@ -6258,7 +6428,7 @@ watch(
 	                  v-if="resumeDriver === 'claude-code' && resumeSafetyPreset === 'search-browse'"
 	                  class="tinyHint"
 	                >
-	                  Enables Claude Code WebFetch. Downloads via <span class="mono">curl</span>/<span class="mono">wget</span> remain denied by default.
+	                  Enables Claude Code WebFetch/WebSearch. Downloads via <span class="mono">curl</span>/<span class="mono">wget</span> remain denied by default.
 	                </div>
 	                <div
 	                  v-else-if="resumeDriver === 'codex' && resumeSafetyPreset === 'search-browse'"
@@ -6651,6 +6821,24 @@ watch(
 	        </div>
 		      </div>
 		    </div>
+
+        <InstanceTokenModal
+          :open="instanceTokenOpen"
+          :busy="instanceTokenBusy"
+          :error="instanceTokenError"
+          :initialToken="instanceTokenInitial"
+          @close="closeInstanceTokenModal"
+          @clear="clearInstanceTokenModal"
+          @save="saveInstanceTokenModal"
+        />
+
+        <ApprovalPromptModal
+          :open="approvalPromptOpen"
+          :task="approvalPromptTask"
+          @close="closeApprovalPrompt"
+          @tokenRequired="openInstanceTokenModal"
+          @enterUnsafe="onApprovalEnterUnsafe"
+        />
 
         <BlockedPromptModal
           :open="blockedPromptOpen"

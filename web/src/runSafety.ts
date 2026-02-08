@@ -40,8 +40,8 @@ export function safetyPresetsForDriver(driver: ToolDriver): SafetyPresetOption[]
   }
   if (driver === "claude-code") {
     return [
-      { value: "search-browse", label: "search-browse（查资料/浏览：开启 WebFetch）", risk: "med" },
-      { value: "no-network", label: "no-network（默认安全：禁 WebFetch，禁 curl/wget）", risk: "low" },
+      { value: "search-browse", label: "search-browse（查资料/浏览：开启 WebFetch/WebSearch）", risk: "med" },
+      { value: "no-network", label: "no-network（默认安全：禁 WebFetch/WebSearch，禁 curl/wget）", risk: "low" },
       { value: "unsafe", label: "unsafe（高风险：跳过权限确认，无 bash sandbox）", risk: "high" },
     ];
   }

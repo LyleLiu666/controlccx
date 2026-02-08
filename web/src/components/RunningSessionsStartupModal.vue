@@ -19,6 +19,8 @@ function statusLabel(status: string): string {
       return "等待中";
     case "running":
       return "运行中";
+    case "awaiting_approval":
+      return "待审批";
     default:
       return String(status);
   }
@@ -67,4 +69,3 @@ function statusLabel(status: string): string {
     </div>
   </div>
 </template>
-

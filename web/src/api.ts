@@ -4,6 +4,7 @@ import type {
   AuthImportEnvResponse,
   AuthPatch,
   AuthStatus,
+  ApprovalRequest,
   ProviderActivateResponse,
   ProviderDeleteResponse,
   ProviderImportEnvResponse,
@@ -60,6 +61,10 @@ import type {
   WorkerType,
 } from "./types";
 
+export const INSTANCE_TOKEN_STORAGE_KEY = "controlccx.instance_token.v1";
+export const INSTANCE_TOKEN_HEADER = "X-ControlCCX-Token";
+export const INSTANCE_TOKEN_REQUIRED_ERROR = "instance_token_required";
+
 export class APIError extends Error {
   status: number;
   statusText: string;
@@ -78,6 +83,64 @@ export class APIError extends Error {
 
 export function isAPIError(e: unknown): e is APIError {
   return e instanceof APIError;
+}
+
+function getLocalStorageSafe(): Storage | null {
+  try {
+    return window?.localStorage ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export function getInstanceToken(): string {
+  const st = getLocalStorageSafe();
+  if (!st) return "";
+  try {
+    return String(st.getItem(INSTANCE_TOKEN_STORAGE_KEY) ?? "").trim();
+  } catch {
+    return "";
+  }
+}
+
+export function setInstanceToken(token: string) {
+  const st = getLocalStorageSafe();
+  if (!st) return;
+  const v = String(token ?? "").trim();
+  try {
+    if (!v) st.removeItem(INSTANCE_TOKEN_STORAGE_KEY);
+    else st.setItem(INSTANCE_TOKEN_STORAGE_KEY, v);
+  } catch {
+    // ignore
+  }
+}
+
+export function buildInstanceTokenHeaders(extra?: Record<string, string>): Record<string, string> {
+  const token = getInstanceToken();
+  const out: Record<string, string> = { ...(extra ?? {}) };
+  if (token) out[INSTANCE_TOKEN_HEADER] = token;
+  return out;
+}
+
+export function isInstanceTokenRequiredError(e: unknown): boolean {
+  if (!isAPIError(e)) return false;
+  if (e.status !== 401 && e.status !== 403) return false;
+  const data = e.data;
+  if (!data || typeof data !== "object") return false;
+  return String((data as any).error ?? "").trim() === INSTANCE_TOKEN_REQUIRED_ERROR;
+}
+
+export function sessionTaskInFlightFromError(e: unknown): { taskId: string; status: string; message: string } | null {
+  if (!isAPIError(e)) return null;
+  if (e.status !== 409) return null;
+  const data = e.data;
+  if (!data || typeof data !== "object") return null;
+  if (String((data as any).error ?? "").trim() !== "session_task_in_flight") return null;
+  const taskId = String((data as any).existing_task_id ?? "").trim();
+  if (!taskId) return null;
+  const status = String((data as any).existing_status ?? "").trim();
+  const message = String((data as any).message ?? e.message ?? "").trim();
+  return { taskId, status, message };
 }
 
 async function parseErrorPayload(res: Response): Promise<{ data: any; rawText: string }> {
@@ -113,7 +176,10 @@ async function buildAPIError(res: Response): Promise<APIError> {
 }
 
 async function getJSON<T>(path: string): Promise<T> {
-  const res = await fetch(path, { credentials: "same-origin" });
+  const res = await fetch(path, {
+    credentials: "same-origin",
+    headers: buildInstanceTokenHeaders(),
+  });
   if (!res.ok) throw await buildAPIError(res);
   return (await res.json()) as T;
 }
@@ -126,7 +192,7 @@ async function postJSON<T>(
   const extraHeaders = opts?.headers ?? {};
   const res = await fetch(path, {
     method: "POST",
-    headers: { "Content-Type": "application/json", ...extraHeaders },
+    headers: buildInstanceTokenHeaders({ "Content-Type": "application/json", ...extraHeaders }),
     body: JSON.stringify(body),
     credentials: "same-origin",
   });
@@ -159,10 +225,10 @@ export async function sendSecretaryMessageStream(
 ): Promise<SecretaryStreamResult> {
   const res = await fetch("/api/secretary/messages/stream", {
     method: "POST",
-    headers: {
+    headers: buildInstanceTokenHeaders({
       "Content-Type": "application/json",
       "Accept": "text/event-stream",
-    },
+    }),
     body: JSON.stringify({ message: String(message ?? "") }),
     credentials: "same-origin",
   });
@@ -451,6 +517,37 @@ export async function fetchLogs(taskId: string, after = 0, limit = 500): Promise
 
 export async function fetchTaskTrace(taskId: string): Promise<TaskTraceResponse> {
   return getJSON<TaskTraceResponse>(`/api/tasks/${taskId}/trace`);
+}
+
+export async function fetchTaskApprovals(taskId: string, status?: string): Promise<ApprovalRequest[]> {
+  const id = encodeURIComponent(String(taskId ?? "").trim());
+  const qs = new URLSearchParams();
+  const st = String(status ?? "").trim();
+  if (st) qs.set("status", st);
+  const res = await getJSON<{ approvals: ApprovalRequest[] }>(`/api/tasks/${id}/approvals?${qs.toString()}`);
+  return res.approvals ?? [];
+}
+
+export async function decideTaskApproval(input: {
+  taskId: string;
+  approvalId: string;
+  decision: "approve" | "deny";
+  reason?: string;
+}): Promise<{ ok: boolean }> {
+  const taskId = encodeURIComponent(String(input.taskId ?? "").trim());
+  const approvalId = encodeURIComponent(String(input.approvalId ?? "").trim());
+  const decision = String(input.decision ?? "").trim() === "approve" ? "approve" : "deny";
+  const reason = String(input.reason ?? "").trim();
+  return postJSON<{ ok: boolean }>(`/api/tasks/${taskId}/approvals/${approvalId}/decision`, {
+    decision,
+    reason: reason || undefined,
+  });
+}
+
+export async function enterUnsafeTask(taskId: string, prompt?: string): Promise<Task> {
+  const id = encodeURIComponent(String(taskId ?? "").trim());
+  const res = await postJSON<{ task: Task }>(`/api/tasks/${id}/enter-unsafe`, { prompt: String(prompt ?? "") });
+  return res.task;
 }
 
 export async function fetchFSRoots(): Promise<FSRoot[]> {
