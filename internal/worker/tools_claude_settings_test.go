@@ -51,6 +51,9 @@ func TestBuildToolCommand_Claude_NoNetwork_DeniesWebFetchAndCurl(t *testing.T) {
 	if !contains(deny, "WebFetch") {
 		t.Fatalf("settings.permissions.deny=%v, expected WebFetch", deny)
 	}
+	if !contains(deny, "WebSearch") {
+		t.Fatalf("settings.permissions.deny=%v, expected WebSearch", deny)
+	}
 	if !contains(deny, "Bash(curl *)") {
 		t.Fatalf("settings.permissions.deny=%v, expected Bash(curl *)", deny)
 	}
@@ -88,10 +91,16 @@ func TestBuildToolCommand_Claude_SearchBrowse_AllowsWebFetchAndDeniesCurlWget(t 
 	if contains(deny, "WebFetch") {
 		t.Fatalf("settings.permissions.deny=%v, expected WebFetch not denied", deny)
 	}
+	if contains(deny, "WebSearch") {
+		t.Fatalf("settings.permissions.deny=%v, expected WebSearch not denied", deny)
+	}
 
 	allow := stringsFromAny(settings["permissions"], "allow")
 	if !contains(allow, "WebFetch(domain:docs.claude.com)") {
 		t.Fatalf("settings.permissions.allow=%v, expected WebFetch(domain:docs.claude.com) allowed", allow)
+	}
+	if !contains(allow, "WebSearch") {
+		t.Fatalf("settings.permissions.allow=%v, expected WebSearch allowed", allow)
 	}
 
 	sandbox := settings["sandbox"].(map[string]any)

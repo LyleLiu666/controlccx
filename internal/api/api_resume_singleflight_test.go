@@ -81,6 +81,23 @@ func TestAPI_ResumeTask_SingleFlightPerSession(t *testing.T) {
 	if res.StatusCode != http.StatusConflict {
 		t.Fatalf("status=%d, want %d", res.StatusCode, http.StatusConflict)
 	}
+	var conflict struct {
+		Error          string `json:"error"`
+		ExistingTaskID string `json:"existing_task_id"`
+		ExistingStatus string `json:"existing_status"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&conflict); err != nil {
+		t.Fatalf("decode conflict: %v", err)
+	}
+	if conflict.Error != "session_task_in_flight" {
+		t.Fatalf("error=%q, want %q", conflict.Error, "session_task_in_flight")
+	}
+	if conflict.ExistingTaskID != running.ID {
+		t.Fatalf("existing_task_id=%q, want %q", conflict.ExistingTaskID, running.ID)
+	}
+	if conflict.ExistingStatus != string(tasks.StatusRunning) {
+		t.Fatalf("existing_status=%q, want %q", conflict.ExistingStatus, tasks.StatusRunning)
+	}
 
 	list, err := taskStore.ListTasksWithOptions(ctx, 50, tasks.ListTasksOptions{IncludeDeleted: true})
 	if err != nil {

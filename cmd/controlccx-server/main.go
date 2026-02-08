@@ -197,6 +197,7 @@ func main() {
 		Hub:                  hub,
 		Audit:                auditSvc,
 		Auth:                 authStore,
+		InstanceToken:        instanceToken,
 		Providers:            providersStore,
 		Secretary:            secretarySvc,
 		Skills:               skillsSvc,
@@ -208,9 +209,10 @@ func main() {
 	}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/api/control-plane", controlPlaneHandler(runnerBaseURL, instanceToken))
-	mux.Handle("/api/", apiSvc.Handler())
-	mux.Handle("/api", apiSvc.Handler())
+	mux.Handle("/api/control-plane", withInstanceTokenGate(cfg.Server.Addr, instanceToken, http.HandlerFunc(controlPlaneHandler(runnerBaseURL, instanceToken))))
+	apiHandler := withInstanceTokenGate(cfg.Server.Addr, instanceToken, apiSvc.Handler())
+	mux.Handle("/api/", apiHandler)
+	mux.Handle("/api", apiHandler)
 	mux.Handle("/", spaOrFallback(resolveUIFS(*staticDirFlag)))
 
 	srv := &http.Server{

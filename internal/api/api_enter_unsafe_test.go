@@ -1,0 +1,114 @@
+package api
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"path/filepath"
+	"testing"
+
+	"controlccx/internal/db"
+	"controlccx/internal/events"
+	"controlccx/internal/tasks"
+)
+
+type stubRunner struct {
+	startCalls  []string
+	cancelCalls []string
+}
+
+func (s *stubRunner) Start(ctx context.Context, taskID string) error {
+	s.startCalls = append(s.startCalls, taskID)
+	return nil
+}
+
+func (s *stubRunner) Cancel(ctx context.Context, taskID string) (bool, error) {
+	s.cancelCalls = append(s.cancelCalls, taskID)
+	return true, nil
+}
+
+func TestAPI_TaskEnterUnsafe_CancelsAndCreatesFollowup(t *testing.T) {
+	ctx := context.Background()
+	conn, err := db.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "controlccx.db")})
+	if err != nil {
+		t.Fatalf("db open: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+
+	taskStore := tasks.NewStore(conn)
+	hub := events.NewHub()
+	runner := &stubRunner{}
+
+	apiSvc := &API{
+		Tasks:   taskStore,
+		Workers: runner,
+		Hub:     hub,
+	}
+
+	src, err := taskStore.CreateTask(ctx, tasks.CreateTaskInput{
+		WorkerType: tasks.WorkerClaudeCode,
+		Mode:       tasks.ModeNew,
+		Prompt:     "do A",
+		WorkDir:    ".",
+		SessionID:  "sess-1",
+	})
+	if err != nil {
+		t.Fatalf("create src: %v", err)
+	}
+	if err := taskStore.SetRunning(ctx, src.ID); err != nil {
+		t.Fatalf("set running: %v", err)
+	}
+
+	srv := httptest.NewServer(apiSvc.Handler())
+	t.Cleanup(srv.Close)
+
+	buf, _ := json.Marshal(map[string]any{"prompt": "continue"})
+	res, err := http.Post(srv.URL+"/api/tasks/"+src.ID+"/enter-unsafe", "application/json", bytes.NewReader(buf))
+	if err != nil {
+		t.Fatalf("post enter-unsafe: %v", err)
+	}
+	t.Cleanup(func() { _ = res.Body.Close() })
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d, want 200", res.StatusCode)
+	}
+
+	var out struct {
+		Task tasks.Task `json:"task"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if out.Task.ID == "" || out.Task.ID == src.ID {
+		t.Fatalf("task.id=%q, want new id", out.Task.ID)
+	}
+	if out.Task.Mode != tasks.ModeResume {
+		t.Fatalf("mode=%q, want %q", out.Task.Mode, tasks.ModeResume)
+	}
+	if out.Task.ConversationID != src.ConversationID {
+		t.Fatalf("conversation_id=%q, want %q", out.Task.ConversationID, src.ConversationID)
+	}
+	if out.Task.SessionID != "sess-1" {
+		t.Fatalf("session_id=%q, want %q", out.Task.SessionID, "sess-1")
+	}
+	if !out.Task.UnsafeAutomation {
+		t.Fatalf("unsafe_automation=false, want true")
+	}
+	if out.Task.SafetyPreset != "unsafe" {
+		t.Fatalf("safety_preset=%q, want %q", out.Task.SafetyPreset, "unsafe")
+	}
+	if out.Task.WorkDirStrategy != "wait" {
+		t.Fatalf("workdir_strategy=%q, want %q", out.Task.WorkDirStrategy, "wait")
+	}
+	if out.Task.Status != tasks.StatusWaiting {
+		t.Fatalf("status=%q, want %q", out.Task.Status, tasks.StatusWaiting)
+	}
+
+	if len(runner.cancelCalls) != 1 || runner.cancelCalls[0] != src.ID {
+		t.Fatalf("cancelCalls=%v, want [%s]", runner.cancelCalls, src.ID)
+	}
+	if len(runner.startCalls) != 0 {
+		t.Fatalf("startCalls=%v, want none (waiting task should not be started)", runner.startCalls)
+	}
+}

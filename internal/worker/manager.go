@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -21,6 +22,8 @@ import (
 	"controlccx/internal/runworkspace"
 	"controlccx/internal/tasks"
 	"controlccx/internal/tooling"
+
+	"github.com/google/uuid"
 )
 
 type Manager struct {
@@ -36,6 +39,10 @@ type Manager struct {
 
 	updateMu       sync.Mutex
 	lastTaskUpdate map[string]time.Time
+
+	approvalMu      sync.Mutex
+	approvalWaiters map[string]approvalWaiter
+	approvalTimeout time.Duration
 }
 
 func NewManager(cfg config.Config, store *tasks.Store, hub *events.Hub, authStore *auth.Store, tools *tooling.Service) *Manager {
@@ -51,6 +58,9 @@ func NewManager(cfg config.Config, store *tasks.Store, hub *events.Hub, authStor
 		tools:   tools,
 		ws:      ws,
 		cancels: make(map[string]context.CancelFunc),
+
+		approvalWaiters: make(map[string]approvalWaiter),
+		approvalTimeout: 5 * time.Minute,
 	}
 }
 
@@ -104,6 +114,52 @@ func (m *Manager) Cancel(ctx context.Context, taskID string) (bool, error) {
 	}
 	cancel()
 	return true, nil
+}
+
+type approvalDecision struct {
+	Decision string
+	Reason   string
+}
+
+type approvalWaiter struct {
+	TaskID string
+	C      chan approvalDecision
+}
+
+// SubmitApprovalDecision notifies a running task that an approval was decided.
+// Returns true if a waiting run was notified.
+func (m *Manager) SubmitApprovalDecision(taskID string, approvalID string, decision string, reason string) bool {
+	if m == nil {
+		return false
+	}
+	taskID = strings.TrimSpace(taskID)
+	approvalID = strings.TrimSpace(approvalID)
+	decision = strings.ToLower(strings.TrimSpace(decision))
+	reason = strings.TrimSpace(reason)
+	if taskID == "" || approvalID == "" {
+		return false
+	}
+	if decision != "approve" && decision != "deny" {
+		return false
+	}
+
+	m.approvalMu.Lock()
+	waiter, ok := m.approvalWaiters[approvalID]
+	m.approvalMu.Unlock()
+	if !ok {
+		return false
+	}
+	if strings.TrimSpace(waiter.TaskID) != taskID {
+		return false
+	}
+
+	select {
+	case waiter.C <- approvalDecision{Decision: decision, Reason: reason}:
+		return true
+	default:
+		// Already decided or receiver gone.
+		return false
+	}
 }
 
 func (m *Manager) run(ctx context.Context, task tasks.Task) error {
@@ -193,7 +249,17 @@ func (m *Manager) run(ctx context.Context, task tasks.Task) error {
 	if err != nil {
 		return m.failTask(task.ID, fmt.Errorf("stderr pipe: %w", err))
 	}
-	if tool.Stdin != "" {
+	var (
+		claudePeer  *claudeProtocolPeer
+		claudeStdin io.WriteCloser
+	)
+	if driver == tasks.WorkerClaudeCode {
+		claudeStdin, err = cmd.StdinPipe()
+		if err != nil {
+			return m.failTask(task.ID, fmt.Errorf("stdin pipe: %w", err))
+		}
+		claudePeer = newClaudeProtocolPeer(claudeStdin)
+	} else if tool.Stdin != "" {
 		cmd.Stdin = stringsReader(tool.Stdin)
 	}
 
@@ -202,6 +268,9 @@ func (m *Manager) run(ctx context.Context, task tasks.Task) error {
 			m.appendLog(task.ID, tasks.LogSystem, missingExecutableHint(tool.Command, driver))
 		}
 		return m.failTask(task.ID, fmt.Errorf("start: %w", err))
+	}
+	if claudeStdin != nil {
+		defer func() { _ = claudeStdin.Close() }()
 	}
 
 	var (
@@ -216,7 +285,7 @@ func (m *Manager) run(ctx context.Context, task tasks.Task) error {
 
 	go func() {
 		defer wg.Done()
-		m.consumeStdout(task, driver, stdout, &lastSessionIDMu, &lastSessionID, cancel, resumeFailure, blockedState)
+		m.consumeStdout(ctx, task, driver, stdout, claudePeer, &lastSessionIDMu, &lastSessionID, cancel, resumeFailure, blockedState)
 	}()
 
 	go func() {
@@ -224,13 +293,30 @@ func (m *Manager) run(ctx context.Context, task tasks.Task) error {
 		m.consumeLines(task, driver, tasks.LogStderr, stderr, cancel, resumeFailure, blockedState)
 	}()
 
+	if driver == tasks.WorkerClaudeCode && claudePeer != nil {
+		prompt := tool.Stdin
+		permissionMode := normalizeClaudePermissionMode(task.ClaudePermissionMode)
+		go func() {
+			// Note: do not fail the run if these protocol messages fail; surface as logs.
+			if err := claudePeer.SendInitialize(uuid.NewString(), nil); err != nil {
+				m.appendLog(task.ID, tasks.LogSystem, fmt.Sprintf("claude protocol init error: %v", err))
+				return
+			}
+			if err := claudePeer.SendSetPermissionMode(uuid.NewString(), permissionMode); err != nil {
+				m.appendLog(task.ID, tasks.LogSystem, fmt.Sprintf("claude protocol set_permission_mode error: %v", err))
+			}
+			if err := claudePeer.SendUserMessage(prompt); err != nil {
+				m.appendLog(task.ID, tasks.LogSystem, fmt.Sprintf("claude protocol send user message error: %v", err))
+			}
+		}()
+	}
+
 	wg.Wait()
 	waitErr := cmd.Wait()
 
 	exitCode := exitCode(waitErr)
 	status := tasks.StatusSucceeded
 	errText := ""
-	blockedReason := ""
 	if errors.Is(ctx.Err(), context.Canceled) {
 		status = tasks.StatusCanceled
 	} else if waitErr != nil {
@@ -247,7 +333,6 @@ func (m *Manager) run(ctx context.Context, task tasks.Task) error {
 		if status != tasks.StatusCanceled {
 			status = tasks.StatusBlocked
 			errText = ""
-			blockedReason = reason
 			if strings.TrimSpace(reason) != "" {
 				_ = m.store.SetWarning(context.Background(), task.ID, reason)
 			}
@@ -283,9 +368,6 @@ func (m *Manager) run(ctx context.Context, task tasks.Task) error {
 	})
 	m.publishTaskUpdated(task.ID)
 
-	if status == tasks.StatusBlocked && isApprovalBlockedReason(blockedReason, task.Warning) {
-		m.maybeAutoContinueApprovalBlocked(task, driver, sidToPersist)
-	}
 	m.maybeStartNextWaitingForWorkdir(task.WorkDir)
 	return nil
 }
@@ -639,7 +721,7 @@ func mergeEnvWithReport(base []string, additions map[string]string) ([]string, [
 	return out, applied
 }
 
-func (m *Manager) consumeStdout(task tasks.Task, driver tasks.WorkerType, stdout io.Reader, sidMu *sync.Mutex, sid *string, cancel context.CancelFunc, resumeFailure *resumeFailureState, blocked *blockedState) {
+func (m *Manager) consumeStdout(ctx context.Context, task tasks.Task, driver tasks.WorkerType, stdout io.Reader, claudePeer *claudeProtocolPeer, sidMu *sync.Mutex, sid *string, cancel context.CancelFunc, resumeFailure *resumeFailureState, blocked *blockedState) {
 	reader := newLineReader(stdout)
 	for {
 		line, tooLong, err := readLineWithLimit(reader, defaultJSONLineMaxBytes)
@@ -663,7 +745,11 @@ func (m *Manager) consumeStdout(task tasks.Task, driver tasks.WorkerType, stdout
 
 		m.handleResumeNotFound(task, driver, string(line), cancel, resumeFailure)
 
-		m.handleApprovalRequired(task, driver, string(line), line, blocked)
+		if claudePeer == nil {
+			m.handleApprovalRequired(task, driver, string(line), line, blocked)
+		} else if driver == tasks.WorkerClaudeCode {
+			m.handleClaudeControlRequest(ctx, task, line, claudePeer)
+		}
 
 		var parsed parsedLine
 		switch driver {
@@ -790,6 +876,246 @@ func (m *Manager) handleApprovalRequired(task tasks.Task, driver tasks.WorkerTyp
 		m.appendLog(task.ID, tasks.LogSystem, approvalRequiredBlockedReason)
 		m.publishTaskUpdatedForce(task.ID)
 	}
+}
+
+type approvalDecisionOutcome struct {
+	Decision  string
+	Reason    string
+	TimedOut  bool
+	Cancelled bool
+}
+
+func (m *Manager) waitForApprovalDecision(ctx context.Context, taskID string, approvalID string) approvalDecisionOutcome {
+	if m == nil {
+		return approvalDecisionOutcome{Decision: "deny", Reason: "approval manager unavailable"}
+	}
+	taskID = strings.TrimSpace(taskID)
+	approvalID = strings.TrimSpace(approvalID)
+	if taskID == "" || approvalID == "" {
+		return approvalDecisionOutcome{Decision: "deny", Reason: "invalid approval request"}
+	}
+
+	timeout := m.approvalTimeout
+	if timeout <= 0 {
+		timeout = 5 * time.Minute
+	}
+
+	ch := make(chan approvalDecision, 1)
+	m.approvalMu.Lock()
+	if m.approvalWaiters == nil {
+		m.approvalWaiters = make(map[string]approvalWaiter)
+	}
+	m.approvalWaiters[approvalID] = approvalWaiter{TaskID: taskID, C: ch}
+	m.approvalMu.Unlock()
+
+	defer func() {
+		m.approvalMu.Lock()
+		if w, ok := m.approvalWaiters[approvalID]; ok && w.C == ch {
+			delete(m.approvalWaiters, approvalID)
+		}
+		m.approvalMu.Unlock()
+	}()
+
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+
+	select {
+	case dec := <-ch:
+		out := approvalDecisionOutcome{
+			Decision: strings.ToLower(strings.TrimSpace(dec.Decision)),
+			Reason:   strings.TrimSpace(dec.Reason),
+		}
+		if out.Decision != "approve" && out.Decision != "deny" {
+			out.Decision = "deny"
+		}
+		return out
+	case <-timer.C:
+		return approvalDecisionOutcome{
+			Decision: "deny",
+			Reason:   "Approval timed out",
+			TimedOut: true,
+		}
+	case <-ctx.Done():
+		return approvalDecisionOutcome{
+			Decision:  "deny",
+			Reason:    "Approval cancelled",
+			Cancelled: true,
+		}
+	}
+}
+
+func (m *Manager) handleClaudeControlRequest(ctx context.Context, task tasks.Task, line []byte, peer *claudeProtocolPeer) {
+	if m == nil || peer == nil {
+		return
+	}
+	var env claudeControlRequestEnvelope
+	if err := json.Unmarshal(line, &env); err != nil {
+		return
+	}
+	if strings.TrimSpace(env.Type) != "control_request" {
+		return
+	}
+	requestID := strings.TrimSpace(env.RequestID)
+	if requestID == "" {
+		return
+	}
+
+	switch strings.TrimSpace(env.Request.Subtype) {
+	case "can_use_tool":
+		toolName := strings.TrimSpace(env.Request.ToolName)
+		result, err := m.onClaudeCanUseTool(ctx, task, toolName, env.Request.Input, env.Request.PermissionSuggestions, env.Request.ToolUseID)
+		if err != nil {
+			_ = peer.SendControlResponseError(requestID, err.Error())
+			return
+		}
+		_ = peer.SendControlResponseSuccess(requestID, result)
+	case "hook_callback":
+		// No hooks configured yet; acknowledge to avoid deadlocks.
+		_ = peer.SendControlResponseSuccess(requestID, map[string]any{})
+	default:
+		// Unknown control requests should not block execution.
+		_ = peer.SendControlResponseSuccess(requestID, map[string]any{})
+	}
+}
+
+func claudeRiskLevelForTool(toolName string) tasks.RiskLevel {
+	switch strings.ToLower(strings.TrimSpace(toolName)) {
+	case "read", "glob", "grep", "notebookread":
+		return tasks.RiskLow
+	case "webfetch", "websearch":
+		return tasks.RiskMedium
+	default:
+		return tasks.RiskHigh
+	}
+}
+
+func summarizeClaudeToolInput(toolName string, input json.RawMessage) string {
+	toolName = strings.TrimSpace(toolName)
+	if len(input) == 0 {
+		return toolName
+	}
+	var obj map[string]any
+	if err := json.Unmarshal(input, &obj); err != nil {
+		return toolName
+	}
+	getStr := func(k string) string {
+		v, ok := obj[k]
+		if !ok {
+			return ""
+		}
+		s, ok := v.(string)
+		if !ok {
+			return ""
+		}
+		return strings.TrimSpace(s)
+	}
+
+	switch strings.ToLower(toolName) {
+	case "bash":
+		if s := getStr("command"); s != "" {
+			return s
+		}
+		if s := getStr("description"); s != "" {
+			return s
+		}
+	case "webfetch":
+		if s := getStr("url"); s != "" {
+			return s
+		}
+		if s := getStr("domain"); s != "" {
+			return s
+		}
+	case "websearch":
+		if s := getStr("query"); s != "" {
+			return s
+		}
+		if s := getStr("q"); s != "" {
+			return s
+		}
+	case "write", "edit":
+		if s := getStr("file_path"); s != "" {
+			return s
+		}
+		if s := getStr("path"); s != "" {
+			return s
+		}
+	}
+	return toolName
+}
+
+func (m *Manager) onClaudeCanUseTool(ctx context.Context, task tasks.Task, toolName string, input json.RawMessage, suggestions json.RawMessage, toolUseID string) (claudePermissionResult, error) {
+	if m == nil || m.store == nil {
+		return claudePermissionResult{}, errors.New("store not configured")
+	}
+	toolName = strings.TrimSpace(toolName)
+	if toolName == "" {
+		toolName = "Unknown"
+	}
+	if len(input) == 0 {
+		input = []byte("{}")
+	}
+
+	type rawApproval struct {
+		ToolName              string          `json:"tool_name"`
+		ToolUseID             string          `json:"tool_use_id,omitempty"`
+		Input                 json.RawMessage `json:"input"`
+		PermissionSuggestions json.RawMessage `json:"permission_suggestions,omitempty"`
+	}
+	raw := rawApproval{
+		ToolName:  toolName,
+		ToolUseID: strings.TrimSpace(toolUseID),
+		Input:     input,
+	}
+	if s := strings.TrimSpace(string(suggestions)); s != "" && s != "null" {
+		raw.PermissionSuggestions = suggestions
+	}
+	rawJSON, _ := json.Marshal(raw)
+
+	ar, err := m.store.CreateApprovalRequest(context.Background(), tasks.CreateApprovalRequestInput{
+		TaskID:     task.ID,
+		WorkerType: tasks.WorkerClaudeCode,
+		WorkDir:    task.WorkDir,
+		ActionType: toolName,
+		RiskLevel:  claudeRiskLevelForTool(toolName),
+		Summary:    summarizeClaudeToolInput(toolName, input),
+		Raw:        rawJSON,
+	})
+	if err != nil {
+		return claudePermissionResult{}, err
+	}
+	_ = m.store.SetAwaitingApproval(context.Background(), task.ID)
+	m.appendLog(task.ID, tasks.LogSystem, fmt.Sprintf("awaiting approval: %s", toolName))
+	m.publishTaskUpdatedForce(task.ID)
+
+	outcome := m.waitForApprovalDecision(ctx, task.ID, ar.ID)
+	if outcome.TimedOut {
+		_ = m.store.UpdateApprovalRequestDecision(context.Background(), ar.ID, tasks.UpdateApprovalRequestDecisionInput{
+			Status: tasks.ApprovalStatusExpired,
+			Reason: outcome.Reason,
+		})
+	}
+
+	_ = m.store.SetRunningStatus(context.Background(), task.ID)
+	m.publishTaskUpdatedForce(task.ID)
+
+	m.appendLog(task.ID, tasks.LogSystem, fmt.Sprintf("approval decided: tool=%s decision=%s", toolName, outcome.Decision))
+
+	if outcome.Decision == "approve" {
+		return claudePermissionResult{
+			Behavior:     "allow",
+			UpdatedInput: input,
+		}, nil
+	}
+	msg := strings.TrimSpace(outcome.Reason)
+	if msg == "" {
+		msg = "Denied"
+	}
+	interrupt := false
+	return claudePermissionResult{
+		Behavior:  "deny",
+		Message:   msg,
+		Interrupt: &interrupt,
+	}, nil
 }
 
 func isApprovalBlockedReason(observed string, existingWarning string) bool {

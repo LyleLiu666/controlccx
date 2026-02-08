@@ -67,6 +67,21 @@ func TestIsControlCCXRunning(t *testing.T) {
 		t.Fatalf("expected ok server to be detected as ControlCCX")
 	}
 
+	tokenSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/auth/status" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"error":"instance_token_required","message":"missing token"}`))
+	}))
+	defer tokenSrv.Close()
+
+	if !isControlCCXRunning(ctx, tokenSrv.URL) {
+		t.Fatalf("expected token-gated server to be detected as running")
+	}
+
 	badSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/auth/status" {
 			http.NotFound(w, r)

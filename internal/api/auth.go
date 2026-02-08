@@ -10,10 +10,11 @@ import (
 	"strings"
 
 	"controlccx/internal/auth"
+	"controlccx/internal/daemon"
 )
 
 func (a *API) handleAuthStatus(w http.ResponseWriter, r *http.Request) {
-	if !isLoopbackRequest(r) {
+	if !a.allowSensitiveRequest(r) {
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
@@ -29,7 +30,7 @@ func (a *API) handleAuthStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) handleAuth(w http.ResponseWriter, r *http.Request) {
-	if !isLoopbackRequest(r) {
+	if !a.allowSensitiveRequest(r) {
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
@@ -70,7 +71,7 @@ func (a *API) handleAuth(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) handleAuthImportEnv(w http.ResponseWriter, r *http.Request) {
-	if !isLoopbackRequest(r) {
+	if !a.allowSensitiveRequest(r) {
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
@@ -150,6 +151,19 @@ func (a *API) handleAuthImportEnv(w http.ResponseWriter, r *http.Request) {
 		"imported":     imported,
 		"skipped":      skipped,
 	})
+}
+
+func (a *API) allowSensitiveRequest(r *http.Request) bool {
+	if isLoopbackRequest(r) {
+		return true
+	}
+	// Allow remote access only when the caller presents the instance token.
+	// This is required for configuring auth when controlccx binds to non-loopback interfaces.
+	instanceToken := strings.TrimSpace(a.InstanceToken)
+	if instanceToken == "" {
+		return false
+	}
+	return daemon.HasValidInstanceToken(r.Header, instanceToken)
 }
 
 func isLoopbackRequest(r *http.Request) bool {

@@ -108,10 +108,10 @@ func (s *Store) CreateTask(ctx context.Context, in CreateTaskInput) (Task, error
 			SELECT id, status
 			FROM tasks
 			WHERE workdir = ?
-				AND status IN (?, ?, ?)
+				AND status IN (?, ?, ?, ?)
 			ORDER BY created_at DESC
 			LIMIT 1;
-		`, workdir, string(StatusQueued), string(StatusWaiting), string(StatusRunning)).Scan(&existingID, &existingStatus)
+		`, workdir, string(StatusQueued), string(StatusWaiting), string(StatusRunning), string(StatusAwaitingApproval)).Scan(&existingID, &existingStatus)
 		if err == nil {
 			switch workdirStrategy {
 			case "wait":
@@ -523,8 +523,8 @@ func (s *Store) MarkInterrupted(ctx context.Context) (int64, error) {
 	res, err := s.db.ExecContext(ctx, `
 		UPDATE tasks
 		SET status = ?, updated_at = ?
-		WHERE status IN (?, ?);
-	`, string(StatusInterrupted), now, string(StatusRunning), string(StatusQueued))
+		WHERE status IN (?, ?, ?);
+	`, string(StatusInterrupted), now, string(StatusRunning), string(StatusQueued), string(StatusAwaitingApproval))
 	if err != nil {
 		return 0, fmt.Errorf("tasks: mark interrupted: %w", err)
 	}
@@ -570,10 +570,10 @@ func (s *Store) DequeueNextWaitingForWorkdir(ctx context.Context, workdir string
 		err := tx.QueryRowContext(ctx, `
 			SELECT id
 			FROM tasks
-			WHERE workdir = ? AND status IN (?, ?)
+			WHERE workdir = ? AND status IN (?, ?, ?)
 			ORDER BY created_at DESC
 			LIMIT 1;
-		`, workdir, string(StatusQueued), string(StatusRunning)).Scan(&existingID)
+		`, workdir, string(StatusQueued), string(StatusRunning), string(StatusAwaitingApproval)).Scan(&existingID)
 		if err == nil {
 			return Task{}, false, nil
 		}
@@ -621,6 +621,16 @@ func (s *Store) DequeueNextWaitingForWorkdir(ctx context.Context, workdir string
 
 func (s *Store) SetBlocked(ctx context.Context, id string) error {
 	return s.setStatus(ctx, id, StatusBlocked)
+}
+
+func (s *Store) SetAwaitingApproval(ctx context.Context, id string) error {
+	return s.setStatus(ctx, id, StatusAwaitingApproval)
+}
+
+// SetRunningStatus updates the task status back to running without touching started_at.
+// This is useful when a run temporarily pauses (e.g. awaiting approvals) and later resumes.
+func (s *Store) SetRunningStatus(ctx context.Context, id string) error {
+	return s.setStatus(ctx, id, StatusRunning)
 }
 
 func (s *Store) SetCanceled(ctx context.Context, id string) error {

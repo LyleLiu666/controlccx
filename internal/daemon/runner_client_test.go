@@ -2,6 +2,8 @@ package daemon
 
 import (
 	"context"
+	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -10,6 +12,13 @@ import (
 func TestRunnerClient_StartAndCancel(t *testing.T) {
 	var started string
 	var canceled string
+	var approval struct {
+		TaskID      string
+		ApprovalID  string
+		Decision    string
+		Reason      string
+		HasDecision bool
+	}
 	const token = "tok"
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -23,6 +32,20 @@ func TestRunnerClient_StartAndCancel(t *testing.T) {
 			w.WriteHeader(http.StatusOK)
 		case "/api/runner/tasks/t1/cancel":
 			canceled = "t1"
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"ok":true}`))
+		case "/api/runner/tasks/t1/approvals/a1/decision":
+			raw, _ := io.ReadAll(r.Body)
+			var body struct {
+				Decision string `json:"decision"`
+				Reason   string `json:"reason"`
+			}
+			_ = json.Unmarshal(raw, &body)
+			approval.TaskID = "t1"
+			approval.ApprovalID = "a1"
+			approval.Decision = body.Decision
+			approval.Reason = body.Reason
+			approval.HasDecision = true
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"ok":true}`))
 		default:
@@ -52,5 +75,12 @@ func TestRunnerClient_StartAndCancel(t *testing.T) {
 	}
 	if canceled != "t1" {
 		t.Fatalf("canceled=%q want %q", canceled, "t1")
+	}
+
+	if err := c.SubmitApprovalDecision(context.Background(), "t1", "a1", "approve", "ok"); err != nil {
+		t.Fatalf("SubmitApprovalDecision: %v", err)
+	}
+	if !approval.HasDecision || approval.Decision != "approve" || approval.Reason != "ok" {
+		t.Fatalf("approval=%+v want decision=%q reason=%q", approval, "approve", "ok")
 	}
 }

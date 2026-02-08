@@ -3,6 +3,7 @@ package worker
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -111,7 +112,19 @@ func buildClaude(cfg config.Config, task tasks.Task) (ToolCommand, error) {
 	if task.Mode == tasks.ModeResume && strings.TrimSpace(task.SessionID) != "" {
 		args = append(args, "-r", strings.TrimSpace(task.SessionID))
 	}
-	args = append(args, "--output-format", "stream-json", "--verbose", "-")
+	args = append(args,
+		"--permission-prompt-tool=stdio",
+		"--verbose",
+		"--output-format=stream-json",
+		"--input-format=stream-json",
+		"--include-partial-messages",
+		"--disallowedTools=AskUserQuestion",
+	)
+	if strings.TrimSpace(os.Getenv("CONTROLCCX_TEST_CLAUDE_HELPER_PROCESS")) != "" {
+		// Test-only escape hatch: allow worker tests to use the Go test binary as a fake Claude CLI.
+		// The helper process can access the original CLI args via flag.Args() after "--".
+		args = append([]string{"-test.run=TestCCXClaudeHelperProcess", "--", "ccx-helper-claude"}, args...)
+	}
 
 	tool := ToolCommand{
 		Command: cmd,
@@ -226,7 +239,7 @@ func claudeSettingsForTask(task tasks.Task) (string, bool) {
 		p.Deny = append(p.Deny, "Bash(curl *)", "Bash(wget *)")
 	}
 	if noNetwork {
-		p.Deny = append(p.Deny, "WebFetch")
+		p.Deny = append(p.Deny, "WebFetch", "WebSearch")
 	} else {
 		if len(task.ClaudeWebFetchDomains) > 0 {
 			for _, d := range task.ClaudeWebFetchDomains {
@@ -240,6 +253,8 @@ func claudeSettingsForTask(task tasks.Task) (string, bool) {
 			// Search/browse is considered low-risk. Allow WebFetch without requiring a domain allowlist.
 			p.Allow = append(p.Allow, "WebFetch")
 		}
+		// WebSearch is safe-by-default for non-interactive search/browse runs.
+		p.Allow = append(p.Allow, "WebSearch")
 	}
 
 	type sandboxSettings struct {

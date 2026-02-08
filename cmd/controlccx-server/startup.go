@@ -63,11 +63,19 @@ func isControlCCXRunning(ctx context.Context, baseURL string) bool {
 		return false
 	}
 	defer func() { _ = res.Body.Close() }()
-	if res.StatusCode != http.StatusOK {
-		return false
-	}
+
 	var payload map[string]any
 	if err := json.NewDecoder(res.Body).Decode(&payload); err != nil {
+		return false
+	}
+	if res.StatusCode == http.StatusUnauthorized || res.StatusCode == http.StatusForbidden {
+		if errCode, _ := payload["error"].(string); strings.TrimSpace(errCode) == tokenGateErrorCode {
+			// Server is running but requires an instance token.
+			return true
+		}
+		return false
+	}
+	if res.StatusCode != http.StatusOK {
 		return false
 	}
 	_, ok1 := payload["claude"].(map[string]any)

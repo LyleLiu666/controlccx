@@ -103,6 +103,25 @@ func Migrate(ctx context.Context, conn *sql.DB) error {
 			created_at INTEGER NOT NULL,
 			FOREIGN KEY(task_id) REFERENCES tasks(id) ON DELETE CASCADE
 		);`,
+		`CREATE TABLE IF NOT EXISTS approval_requests (
+			id TEXT PRIMARY KEY,
+			task_id TEXT NOT NULL,
+			worker_type TEXT NOT NULL DEFAULT '',
+			workdir TEXT NOT NULL DEFAULT '',
+			action_type TEXT NOT NULL DEFAULT '',
+			risk_level TEXT NOT NULL DEFAULT '',
+			summary TEXT NOT NULL DEFAULT '',
+			raw_json TEXT NOT NULL DEFAULT '',
+			status TEXT NOT NULL DEFAULT '',
+			reason TEXT NOT NULL DEFAULT '',
+			created_at INTEGER NOT NULL DEFAULT 0,
+			updated_at INTEGER NOT NULL DEFAULT 0,
+			FOREIGN KEY(task_id) REFERENCES tasks(id) ON DELETE CASCADE
+		);`,
+		`CREATE INDEX IF NOT EXISTS idx_approval_requests_task_id_created_at
+			ON approval_requests(task_id, created_at DESC, id DESC);`,
+		`CREATE INDEX IF NOT EXISTS idx_approval_requests_status_created_at
+			ON approval_requests(status, created_at DESC, id DESC);`,
 		`CREATE TABLE IF NOT EXISTS session_meta (
 			key TEXT PRIMARY KEY,
 			title TEXT NOT NULL DEFAULT '',

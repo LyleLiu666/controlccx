@@ -122,6 +122,64 @@ func runRunnerd(cfg config.Config, runnerAddr string) error {
 		}
 
 		switch action {
+		case "approvals":
+			if len(parts) != 4 || strings.TrimSpace(parts[3]) != "decision" {
+				http.NotFound(w, r)
+				return
+			}
+			approvalID := strings.TrimSpace(parts[2])
+			if approvalID == "" {
+				http.NotFound(w, r)
+				return
+			}
+			var body struct {
+				Decision string `json:"decision"`
+				Reason   string `json:"reason,omitempty"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				http.Error(w, "invalid json", http.StatusBadRequest)
+				return
+			}
+			decision := strings.ToLower(strings.TrimSpace(body.Decision))
+			var status tasks.ApprovalStatus
+			switch decision {
+			case "approve":
+				status = tasks.ApprovalStatusApproved
+			case "deny":
+				status = tasks.ApprovalStatusDenied
+			default:
+				http.Error(w, "invalid decision", http.StatusBadRequest)
+				return
+			}
+
+			ar, ok, err := taskStore.GetApprovalRequest(r.Context(), approvalID)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			if !ok || strings.TrimSpace(ar.TaskID) != taskID {
+				http.NotFound(w, r)
+				return
+			}
+			if err := taskStore.UpdateApprovalRequestDecision(r.Context(), approvalID, tasks.UpdateApprovalRequestDecisionInput{
+				Status: status,
+				Reason: strings.TrimSpace(body.Reason),
+			}); err != nil {
+				var notPending *tasks.ApprovalNotPendingError
+				if errors.As(err, &notPending) {
+					writeJSONStatus(w, http.StatusConflict, map[string]any{
+						"error":       "approval_not_pending",
+						"message":     notPending.Error(),
+						"approval_id": approvalID,
+						"status":      strings.TrimSpace(string(notPending.Status)),
+					})
+					return
+				}
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			workerMgr.SubmitApprovalDecision(taskID, approvalID, decision, strings.TrimSpace(body.Reason))
+			writeJSON(w, map[string]any{"ok": true})
 		case "start":
 			if authStore != nil {
 				_ = authStore.Reload()

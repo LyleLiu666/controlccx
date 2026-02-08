@@ -19,7 +19,7 @@ var keywordNeedles = []string{
 
 func ComputeScore(status Status, stderrCount, keywordCount int, exitCode *int) int {
 	score := 0
-	if status == StatusBlocked {
+	if status == StatusBlocked || status == StatusAwaitingApproval {
 		score += blockedScoreBonus
 	}
 	if stderrCount > maxStderrScoreLines {

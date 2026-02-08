@@ -39,6 +39,7 @@ type API struct {
 	Hub                  *events.Hub
 	FSRoots              []FSRoot
 	Auth                 *auth.Store
+	InstanceToken        string
 	Providers            *providers.Store
 	Skills               *skills.Service
 	SkillVersions        *skills.VersionsService
@@ -683,8 +684,13 @@ func (a *API) handleSessionByKey(w http.ResponseWriter, r *http.Request) {
 		}
 
 		for _, t := range runs {
-			if t.Status == tasks.StatusRunning || t.Status == tasks.StatusQueued || t.Status == tasks.StatusWaiting {
-				http.Error(w, "session already has a running task (task_id="+t.ID+" status="+string(t.Status)+")", http.StatusConflict)
+			if t.Status == tasks.StatusRunning || t.Status == tasks.StatusQueued || t.Status == tasks.StatusWaiting || t.Status == tasks.StatusAwaitingApproval {
+				writeJSONStatus(w, http.StatusConflict, map[string]any{
+					"error":            "session_task_in_flight",
+					"message":          "session already has an in-flight task",
+					"existing_task_id": t.ID,
+					"existing_status":  string(t.Status),
+				})
 				return
 			}
 		}
@@ -1171,6 +1177,117 @@ func (a *API) handleTaskByID(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		writeJSON(w, map[string]any{"ok": ok})
+	case "approvals":
+		if a.Tasks == nil {
+			http.Error(w, "tasks store not configured", http.StatusServiceUnavailable)
+			return
+		}
+		// GET /api/tasks/{id}/approvals?status=pending
+		if len(parts) == 2 {
+			if r.Method != http.MethodGet {
+				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+				return
+			}
+			rawStatus := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("status")))
+			var status tasks.ApprovalStatus
+			switch rawStatus {
+			case "":
+				status = ""
+			case string(tasks.ApprovalStatusPending):
+				status = tasks.ApprovalStatusPending
+			case string(tasks.ApprovalStatusApproved):
+				status = tasks.ApprovalStatusApproved
+			case string(tasks.ApprovalStatusDenied):
+				status = tasks.ApprovalStatusDenied
+			case string(tasks.ApprovalStatusExpired):
+				status = tasks.ApprovalStatusExpired
+			default:
+				http.Error(w, "invalid status", http.StatusBadRequest)
+				return
+			}
+			list, err := a.Tasks.ListApprovalRequestsByTask(r.Context(), id, tasks.ListApprovalRequestsOptions{
+				Status: status,
+			})
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			writeJSON(w, map[string]any{"approvals": list})
+			return
+		}
+
+		// POST /api/tasks/{id}/approvals/{approval_id}/decision
+		if len(parts) == 4 && strings.TrimSpace(parts[3]) == "decision" {
+			if r.Method != http.MethodPost {
+				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+				return
+			}
+			approvalID := strings.TrimSpace(parts[2])
+			if approvalID == "" {
+				http.NotFound(w, r)
+				return
+			}
+			var body struct {
+				Decision string `json:"decision"`
+				Reason   string `json:"reason,omitempty"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				http.Error(w, "invalid json", http.StatusBadRequest)
+				return
+			}
+			decision := strings.ToLower(strings.TrimSpace(body.Decision))
+			switch decision {
+			case "approve", "deny":
+				// ok
+			default:
+				http.Error(w, "invalid decision", http.StatusBadRequest)
+				return
+			}
+			ar, ok, err := a.Tasks.GetApprovalRequest(r.Context(), approvalID)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			if !ok || strings.TrimSpace(ar.TaskID) != strings.TrimSpace(id) {
+				http.NotFound(w, r)
+				return
+			}
+			if ar.Status != tasks.ApprovalStatusPending {
+				writeJSONStatus(w, http.StatusConflict, map[string]any{
+					"error":       "approval_not_pending",
+					"message":     "approval already decided",
+					"approval_id": approvalID,
+					"status":      ar.Status,
+				})
+				return
+			}
+			forwarder, ok := a.Workers.(interface {
+				SubmitApprovalDecision(ctx context.Context, taskID string, approvalID string, decision string, reason string) error
+			})
+			if !ok || forwarder == nil {
+				writeJSONStatus(w, http.StatusServiceUnavailable, map[string]any{
+					"error":   "runner_unavailable",
+					"message": "runner does not support approvals",
+					"hint":    "restart the runner daemon (controlccx-runnerd)",
+					"task_id": id,
+				})
+				return
+			}
+			if err := forwarder.SubmitApprovalDecision(r.Context(), id, approvalID, decision, strings.TrimSpace(body.Reason)); err != nil {
+				writeJSONStatus(w, http.StatusServiceUnavailable, map[string]any{
+					"error":       "runner_unavailable",
+					"message":     err.Error(),
+					"hint":        "restart the runner daemon (controlccx-runnerd)",
+					"task_id":     id,
+					"approval_id": approvalID,
+				})
+				return
+			}
+			writeJSON(w, map[string]any{"ok": true})
+			return
+		}
+
+		http.NotFound(w, r)
 	case "logs":
 		if len(parts) >= 3 && parts[2] == "export" {
 			if r.Method != http.MethodGet {
@@ -1284,8 +1401,13 @@ func (a *API) handleTaskByID(w http.ResponseWriter, r *http.Request) {
 				if strings.TrimSpace(t.SessionID) != sid {
 					continue
 				}
-				if t.Status == tasks.StatusRunning || t.Status == tasks.StatusQueued || t.Status == tasks.StatusWaiting {
-					http.Error(w, "session already has a running task (task_id="+t.ID+" status="+string(t.Status)+")", http.StatusConflict)
+				if t.Status == tasks.StatusRunning || t.Status == tasks.StatusQueued || t.Status == tasks.StatusWaiting || t.Status == tasks.StatusAwaitingApproval {
+					writeJSONStatus(w, http.StatusConflict, map[string]any{
+						"error":            "session_task_in_flight",
+						"message":          "session already has an in-flight task",
+						"existing_task_id": t.ID,
+						"existing_status":  string(t.Status),
+					})
 					return
 				}
 			}
@@ -1408,6 +1530,117 @@ func (a *API) handleTaskByID(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		writeJSON(w, newTask)
+	case "enter-unsafe":
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if a.Tasks == nil {
+			http.Error(w, "tasks store not configured", http.StatusServiceUnavailable)
+			return
+		}
+		var body struct {
+			Prompt string `json:"prompt,omitempty"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil && !errors.Is(err, io.EOF) {
+			http.Error(w, "invalid json", http.StatusBadRequest)
+			return
+		}
+
+		src, err := a.Tasks.GetTask(r.Context(), id)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+		if strings.TrimSpace(src.ConversationID) == "" {
+			http.Error(w, "task has no conversation_id", http.StatusBadRequest)
+			return
+		}
+
+		// Best-effort: cancel the current run so the follow-up can proceed.
+		if a.Workers != nil {
+			_, _ = a.Workers.Cancel(r.Context(), id)
+		}
+
+		prompt := strings.TrimSpace(body.Prompt)
+		if prompt == "" {
+			prompt = "continue"
+		}
+
+		mode := tasks.ModeNew
+		sessionID := ""
+		ctxPrompt := prompt
+		if strings.TrimSpace(src.SessionID) != "" {
+			mode = tasks.ModeResume
+			sessionID = strings.TrimSpace(src.SessionID)
+		} else {
+			// If we cannot resume (missing session_id), prefer rehydrate for claude-code so the new run can keep context.
+			driver := src.WorkerType
+			if a.Tools != nil {
+				if profile, ok := a.Tools.Resolve(string(src.WorkerType)); ok && strings.TrimSpace(string(profile.Driver)) != "" {
+					driver = tasks.WorkerType(strings.TrimSpace(string(profile.Driver)))
+				}
+			}
+			if driver == tasks.WorkerClaudeCode {
+				rehydrated, err := tasks.BuildRehydratePrompt(r.Context(), a.Tasks, strings.TrimSpace(src.ConversationID), prompt)
+				if err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+					return
+				}
+				ctxPrompt = rehydrated
+			}
+		}
+
+		in := tasks.CreateTaskInput{
+			WorkerType:       src.WorkerType,
+			Mode:             mode,
+			ConversationID:   src.ConversationID,
+			UnsafeAutomation: true,
+			SafetyPreset:     "unsafe",
+			TaskIntent:       "install",
+			Prompt:           ctxPrompt,
+			WorkDir:          src.WorkDir,
+			WorkDirStrategy:  "wait",
+			SessionID:        sessionID,
+			Warning:          src.Warning,
+		}
+
+		newTask, err := a.Tasks.CreateTask(r.Context(), in)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		_, _ = a.Tasks.AppendLog(r.Context(), newTask.ID, tasks.LogSystem, fmt.Sprintf("enter-unsafe: from run=%s", src.ID))
+
+		if a.Hub != nil {
+			a.Hub.Publish(events.Event{Type: "task.created", Time: time.Now().UTC(), Payload: newTask})
+		}
+		if a.Workers != nil && newTask.Status == tasks.StatusQueued {
+			if err := a.Workers.Start(r.Context(), newTask.ID); err != nil {
+				_, _ = a.Tasks.AppendLog(r.Context(), newTask.ID, tasks.LogSystem, fmt.Sprintf("runner start failed: %v", err))
+				_ = a.Tasks.FinishTask(r.Context(), newTask.ID, tasks.FinishTaskInput{
+					Status:     tasks.StatusFailed,
+					ExitCode:   nil,
+					Error:      err.Error(),
+					SessionID:  strings.TrimSpace(newTask.SessionID),
+					FinishedAt: time.Now().UTC(),
+				})
+				if a.Hub != nil {
+					if updated, err2 := a.Tasks.GetTask(r.Context(), newTask.ID); err2 == nil {
+						a.Hub.Publish(events.Event{Type: "task.updated", Time: time.Now().UTC(), Payload: updated})
+					}
+				}
+				writeJSONStatus(w, http.StatusServiceUnavailable, map[string]any{
+					"error":   "runner_unavailable",
+					"message": err.Error(),
+					"hint":    "restart the runner daemon (controlccx-runnerd)",
+					"task_id": newTask.ID,
+				})
+				return
+			}
+		}
+
+		writeJSON(w, map[string]any{"task": newTask})
 	case "rehydrate":
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)

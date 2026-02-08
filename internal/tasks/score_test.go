@@ -18,6 +18,12 @@ func TestComputeScore(t *testing.T) {
 		}
 	})
 
+	t.Run("awaiting approval bonus", func(t *testing.T) {
+		if got := ComputeScore(StatusAwaitingApproval, 0, 0, nil); got != blockedScoreBonus {
+			t.Fatalf("score=%d, want %d", got, blockedScoreBonus)
+		}
+	})
+
 	t.Run("stderr cap", func(t *testing.T) {
 		got := ComputeScore(StatusRunning, maxStderrScoreLines+5, 0, nil)
 		want := maxStderrScoreLines * stderrScorePerLine

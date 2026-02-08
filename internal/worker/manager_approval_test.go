@@ -1,10 +1,14 @@
 package worker
 
 import (
+	"bufio"
 	"context"
+	"encoding/json"
+	"errors"
+	"flag"
+	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -14,81 +18,103 @@ import (
 	"controlccx/internal/tasks"
 )
 
-func TestManager_run_ClaudeCode_RequiresApproval_BecomesBlocked(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("claude-code tests use unix shell scripts")
+func TestCCXClaudeHelperProcess(t *testing.T) {
+	// Helper process entrypoint: when the worker launches the test binary as "claude",
+	// tools.go prefixes args with `-test.run=TestCCXClaudeHelperProcess -- ccx-helper-claude`.
+	args := flag.Args()
+	if len(args) == 0 || args[0] != "ccx-helper-claude" {
+		return
 	}
 
-	ctx := context.Background()
-	dbPath := filepath.Join(t.TempDir(), "controlccx.db")
+	runFakeClaudeProtocol()
+	os.Exit(0)
+}
 
-	conn, err := db.Open(ctx, db.Options{Path: dbPath})
-	if err != nil {
-		t.Fatalf("db open: %v", err)
-	}
-	t.Cleanup(func() { _ = conn.Close() })
+func runFakeClaudeProtocol() {
+	stdout := bufio.NewWriter(os.Stdout)
+	defer func() { _ = stdout.Flush() }()
+	stderr := bufio.NewWriter(os.Stderr)
+	defer func() { _ = stderr.Flush() }()
 
-	store := tasks.NewStore(conn)
-	task, err := store.CreateTask(ctx, tasks.CreateTaskInput{
-		WorkerType: tasks.WorkerClaudeCode,
-		Mode:       tasks.ModeNew,
-		Prompt:     "x",
-		WorkDir:    t.TempDir(),
-	})
-	if err != nil {
-		t.Fatalf("create task: %v", err)
+	writeLine := func(s string) {
+		_, _ = stdout.WriteString(s)
+		_, _ = stdout.WriteString("\n")
+		_ = stdout.Flush()
 	}
 
-	claude := filepath.Join(t.TempDir(), "fake-claude")
-	script := strings.Join([]string{
-		"#!/bin/sh",
-		`echo '{"type":"system","subtype":"init","session_id":"sess-1"}'`,
-		`echo '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","content":"Error: This command requires approval","is_error":true}]},"session_id":"sess-1"}'`,
-		"exit 1",
-		"",
-	}, "\n")
-	if err := os.WriteFile(claude, []byte(script), 0o755); err != nil {
-		t.Fatalf("write fake claude: %v", err)
-	}
+	const (
+		sessionID = "sess-1"
+		reqID     = "req-1"
+	)
 
-	cfg := config.Default()
-	cfg.Paths.Claude = claude
+	// Emit init early so the worker can persist session_id.
+	writeLine(`{"type":"system","subtype":"init","session_id":"` + sessionID + `"}`)
 
-	m := &Manager{cfg: cfg, store: store}
-	if err := m.run(ctx, task); err != nil {
-		t.Fatalf("run: %v", err)
-	}
+	sc := bufio.NewScanner(os.Stdin)
+	sc.Buffer(make([]byte, 0, 64*1024), 1<<20)
 
-	updated, err := store.GetTask(ctx, task.ID)
-	if err != nil {
-		t.Fatalf("get task: %v", err)
-	}
-	if updated.Status != tasks.StatusBlocked {
-		t.Fatalf("status=%q, want %q (warning=%q error=%q)", updated.Status, tasks.StatusBlocked, updated.Warning, updated.Error)
-	}
-	if !strings.Contains(strings.ToLower(updated.Warning), "approval") {
-		t.Fatalf("warning=%q, want contains %q", updated.Warning, "approval")
-	}
-	if strings.TrimSpace(updated.Error) != "" {
-		t.Fatalf("error=%q, want empty", updated.Error)
-	}
-
-	logs, err := store.ListLogs(ctx, task.ID, 0, 2000)
-	if err != nil {
-		t.Fatalf("list logs: %v", err)
-	}
-	found := false
-	for _, l := range logs {
-		if l.Stream != tasks.LogSystem {
+	seenUser := false
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if line == "" {
 			continue
 		}
-		if strings.Contains(strings.ToLower(l.Message), "requires approval") {
-			found = true
+		var msg map[string]any
+		if err := json.Unmarshal([]byte(line), &msg); err != nil {
+			continue
+		}
+		typ, _ := msg["type"].(string)
+		if typ == "user" {
+			seenUser = true
 			break
 		}
 	}
-	if !found {
-		t.Fatalf("expected system log mentioning requires approval")
+	if err := sc.Err(); err != nil {
+		_, _ = fmt.Fprintf(stderr, "stdin scan error: %v\n", err)
+		return
+	}
+	if !seenUser {
+		return
+	}
+
+	// Request tool approval and block until we receive a control_response.
+	writeLine(`{"type":"control_request","request_id":"` + reqID + `","request":{"subtype":"can_use_tool","tool_name":"WebSearch","input":{"q":"weather","description":"Get weather"},"tool_use_id":"toolu-1"}}`)
+
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if line == "" {
+			continue
+		}
+		var msg struct {
+			Type     string `json:"type"`
+			Response struct {
+				Subtype   string `json:"subtype"`
+				RequestID string `json:"request_id"`
+				Response  struct {
+					Behavior string `json:"behavior"`
+					Message  string `json:"message,omitempty"`
+				} `json:"response"`
+			} `json:"response"`
+		}
+		if err := json.Unmarshal([]byte(line), &msg); err != nil {
+			continue
+		}
+		if msg.Type != "control_response" {
+			continue
+		}
+		if msg.Response.Subtype != "success" || msg.Response.RequestID != reqID {
+			continue
+		}
+		behavior := strings.ToLower(strings.TrimSpace(msg.Response.Response.Behavior))
+		switch behavior {
+		case "allow":
+			writeLine(`{"type":"assistant","session_id":"` + sessionID + `","result":"ok"}`)
+			return
+		default:
+			// Deny or unknown: return success so the worker can finish.
+			writeLine(`{"type":"assistant","session_id":"` + sessionID + `","result":"denied"}`)
+			return
+		}
 	}
 }
 
@@ -124,10 +150,8 @@ func TestIsApprovalRequiredLine(t *testing.T) {
 	}
 }
 
-func TestManager_run_ClaudeCode_NormalFailure_RemainsFailed(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("claude-code tests use unix shell scripts")
-	}
+func TestManager_run_ClaudeCode_ProtocolApproval_ApproveContinues(t *testing.T) {
+	t.Setenv("CONTROLCCX_TEST_CLAUDE_HELPER_PROCESS", "1")
 
 	ctx := context.Background()
 	dbPath := filepath.Join(t.TempDir(), "controlccx.db")
@@ -149,308 +173,167 @@ func TestManager_run_ClaudeCode_NormalFailure_RemainsFailed(t *testing.T) {
 		t.Fatalf("create task: %v", err)
 	}
 
-	claude := filepath.Join(t.TempDir(), "fake-claude")
-	script := strings.Join([]string{
-		"#!/bin/sh",
-		`echo '{"type":"system","subtype":"init","session_id":"sess-1"}'`,
-		`echo '{"type":"assistant","session_id":"sess-1","result":"boom"}'`,
-		"exit 1",
-		"",
-	}, "\n")
-	if err := os.WriteFile(claude, []byte(script), 0o755); err != nil {
-		t.Fatalf("write fake claude: %v", err)
-	}
-
 	cfg := config.Default()
-	cfg.Paths.Claude = claude
+	cfg.Paths.Claude = os.Args[0]
 
-	m := &Manager{cfg: cfg, store: store}
-	if err := m.run(ctx, task); err != nil {
-		t.Fatalf("run: %v", err)
+	m := NewManager(cfg, store, nil, nil, nil)
+	m.approvalTimeout = 2 * time.Second
+
+	done := make(chan error, 1)
+	go func() {
+		done <- m.run(ctx, task)
+	}()
+
+	awaitTaskStatus(t, store, task.ID, tasks.StatusAwaitingApproval, 2*time.Second)
+	approval := awaitPendingApproval(t, store, task.ID, 2*time.Second)
+
+	if err := store.UpdateApprovalRequestDecision(ctx, approval.ID, tasks.UpdateApprovalRequestDecisionInput{
+		Status: tasks.ApprovalStatusApproved,
+		Reason: "ok",
+	}); err != nil {
+		t.Fatalf("UpdateApprovalRequestDecision: %v", err)
+	}
+	if ok := m.SubmitApprovalDecision(task.ID, approval.ID, "approve", "ok"); !ok {
+		t.Fatalf("SubmitApprovalDecision ok=false, want true")
 	}
 
-	updated, err := store.GetTask(ctx, task.ID)
-	if err != nil {
-		t.Fatalf("get task: %v", err)
-	}
-	if updated.Status != tasks.StatusFailed {
-		t.Fatalf("status=%q, want %q", updated.Status, tasks.StatusFailed)
-	}
-}
-
-func TestManager_run_ClaudeCode_RequestedPermissions_BecomesBlocked(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("claude-code tests use unix shell scripts")
-	}
-
-	ctx := context.Background()
-	dbPath := filepath.Join(t.TempDir(), "controlccx.db")
-
-	conn, err := db.Open(ctx, db.Options{Path: dbPath})
-	if err != nil {
-		t.Fatalf("db open: %v", err)
-	}
-	t.Cleanup(func() { _ = conn.Close() })
-
-	store := tasks.NewStore(conn)
-	task, err := store.CreateTask(ctx, tasks.CreateTaskInput{
-		WorkerType: tasks.WorkerClaudeCode,
-		Mode:       tasks.ModeNew,
-		Prompt:     "x",
-		WorkDir:    t.TempDir(),
-	})
-	if err != nil {
-		t.Fatalf("create task: %v", err)
-	}
-
-	claude := filepath.Join(t.TempDir(), "fake-claude")
-	script := strings.Join([]string{
-		"#!/bin/sh",
-		`echo '{"type":"system","subtype":"init","session_id":"sess-1"}'`,
-		`echo 'Claude requested permissions to write to index.html, but you haven'"'"'t granted it yet.'`,
-		"exit 1",
-		"",
-	}, "\n")
-	if err := os.WriteFile(claude, []byte(script), 0o755); err != nil {
-		t.Fatalf("write fake claude: %v", err)
-	}
-
-	cfg := config.Default()
-	cfg.Paths.Claude = claude
-
-	m := &Manager{cfg: cfg, store: store}
-	if err := m.run(ctx, task); err != nil {
-		t.Fatalf("run: %v", err)
-	}
-
-	updated, err := store.GetTask(ctx, task.ID)
-	if err != nil {
-		t.Fatalf("get task: %v", err)
-	}
-	if updated.Status != tasks.StatusBlocked {
-		logs, _ := store.ListLogs(ctx, task.ID, 0, 2000)
-		var tail []string
-		for _, l := range logs {
-			tail = append(tail, string(l.Stream)+": "+l.Message)
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("run: %v", err)
 		}
-		if len(tail) > 20 {
-			tail = tail[len(tail)-20:]
+	case <-time.After(2 * time.Second):
+		t.Fatalf("timeout waiting for run to finish")
+	}
+
+	updated := awaitTaskTerminalStatus(t, store, task.ID, 2*time.Second)
+	if updated.Status != tasks.StatusSucceeded {
+		t.Fatalf("status=%q, want %q (warning=%q error=%q)", updated.Status, tasks.StatusSucceeded, updated.Warning, updated.Error)
+	}
+
+	ar, ok, err := store.GetApprovalRequest(ctx, approval.ID)
+	if err != nil {
+		t.Fatalf("GetApprovalRequest: %v", err)
+	}
+	if !ok {
+		t.Fatalf("expected approval request")
+	}
+	if ar.Status != tasks.ApprovalStatusApproved || strings.TrimSpace(ar.Reason) != "ok" {
+		t.Fatalf("approval status=%q reason=%q, want %q/%q", ar.Status, ar.Reason, tasks.ApprovalStatusApproved, "ok")
+	}
+}
+
+func TestManager_run_ClaudeCode_ProtocolApproval_TimeoutExpires(t *testing.T) {
+	t.Setenv("CONTROLCCX_TEST_CLAUDE_HELPER_PROCESS", "1")
+
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "controlccx.db")
+
+	conn, err := db.Open(ctx, db.Options{Path: dbPath})
+	if err != nil {
+		t.Fatalf("db open: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+
+	store := tasks.NewStore(conn)
+	task, err := store.CreateTask(ctx, tasks.CreateTaskInput{
+		WorkerType: tasks.WorkerClaudeCode,
+		Mode:       tasks.ModeNew,
+		Prompt:     "x",
+		WorkDir:    t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	cfg := config.Default()
+	cfg.Paths.Claude = os.Args[0]
+
+	m := NewManager(cfg, store, nil, nil, nil)
+	m.approvalTimeout = 50 * time.Millisecond
+
+	done := make(chan error, 1)
+	go func() {
+		done <- m.run(ctx, task)
+	}()
+
+	awaitTaskStatus(t, store, task.ID, tasks.StatusAwaitingApproval, 2*time.Second)
+	approval := awaitPendingApproval(t, store, task.ID, 2*time.Second)
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("run: %v", err)
 		}
-		t.Fatalf("status=%q, want %q (warning=%q error=%q logs_tail=%q)", updated.Status, tasks.StatusBlocked, updated.Warning, updated.Error, tail)
-	}
-}
-
-func TestManager_run_ClaudeCode_RequiresApproval_AutoContinuesWhenSafe(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("claude-code tests use unix shell scripts")
+	case <-time.After(2 * time.Second):
+		t.Fatalf("timeout waiting for run to finish")
 	}
 
-	ctx := context.Background()
-	dbPath := filepath.Join(t.TempDir(), "controlccx.db")
+	updated := awaitTaskTerminalStatus(t, store, task.ID, 2*time.Second)
+	if updated.Status != tasks.StatusSucceeded {
+		t.Fatalf("status=%q, want %q (warning=%q error=%q)", updated.Status, tasks.StatusSucceeded, updated.Warning, updated.Error)
+	}
 
-	conn, err := db.Open(ctx, db.Options{Path: dbPath})
+	ar, ok, err := store.GetApprovalRequest(ctx, approval.ID)
 	if err != nil {
-		t.Fatalf("db open: %v", err)
+		t.Fatalf("GetApprovalRequest: %v", err)
 	}
-	t.Cleanup(func() { _ = conn.Close() })
+	if !ok {
+		t.Fatalf("expected approval request")
+	}
+	if ar.Status != tasks.ApprovalStatusExpired {
+		t.Fatalf("approval status=%q, want %q (reason=%q)", ar.Status, tasks.ApprovalStatusExpired, ar.Reason)
+	}
+	if !strings.Contains(strings.ToLower(ar.Reason), "timed out") {
+		t.Fatalf("approval reason=%q, want contains %q", ar.Reason, "timed out")
+	}
 
-	store := tasks.NewStore(conn)
-	task, err := store.CreateTask(ctx, tasks.CreateTaskInput{
-		WorkerType: tasks.WorkerClaudeCode,
-		Mode:       tasks.ModeNew,
-		Prompt:     "x",
-		WorkDir:    t.TempDir(),
+	// A late decision should not panic/hang.
+	_ = store.UpdateApprovalRequestDecision(ctx, approval.ID, tasks.UpdateApprovalRequestDecisionInput{
+		Status: tasks.ApprovalStatusDenied,
+		Reason: "late",
 	})
-	if err != nil {
-		t.Fatalf("create task: %v", err)
-	}
-
-	claude := filepath.Join(t.TempDir(), "fake-claude")
-	script := strings.Join([]string{
-		"#!/bin/sh",
-		`case "$*" in`,
-		`  *--dangerously-skip-permissions*)`,
-		`    echo '{"type":"system","subtype":"init","session_id":"sess-1"}'`,
-		`    echo '{"type":"assistant","session_id":"sess-1","result":"ok"}'`,
-		`    exit 0`,
-		`    ;;`,
-		`esac`,
-		`echo '{"type":"system","subtype":"init","session_id":"sess-1"}'`,
-		`echo '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","content":"Error: This command requires approval","is_error":true}]},"session_id":"sess-1"}'`,
-		"exit 1",
-		"",
-	}, "\n")
-	if err := os.WriteFile(claude, []byte(script), 0o755); err != nil {
-		t.Fatalf("write fake claude: %v", err)
-	}
-
-	cfg := config.Default()
-	cfg.Paths.Claude = claude
-
-	m := NewManager(cfg, store, nil, nil, nil)
-	if err := m.run(ctx, task); err != nil {
-		t.Fatalf("run: %v", err)
-	}
-
-	updated, err := store.GetTask(ctx, task.ID)
-	if err != nil {
-		t.Fatalf("get task: %v", err)
-	}
-	if updated.Status != tasks.StatusBlocked {
-		t.Fatalf("status=%q, want %q (warning=%q error=%q)", updated.Status, tasks.StatusBlocked, updated.Warning, updated.Error)
-	}
-
-	runs := awaitConversationTaskCount(t, store, strings.TrimSpace(task.ConversationID), 2, 2*time.Second)
-	latest := runs[0]
-	if latest.ID == task.ID {
-		t.Fatalf("expected a follow-up task; got latest=%s", latest.ID)
-	}
-	if latest.UnsafeAutomation != true {
-		t.Fatalf("latest unsafe_automation=%v, want true", latest.UnsafeAutomation)
-	}
-	if latest.Mode != tasks.ModeResume {
-		t.Fatalf("latest mode=%q, want %q", latest.Mode, tasks.ModeResume)
-	}
-
-	latest = awaitTaskTerminal(t, store, latest.ID, 2*time.Second)
-	if latest.Status != tasks.StatusSucceeded {
-		t.Fatalf("latest status=%q, want %q (warning=%q error=%q)", latest.Status, tasks.StatusSucceeded, latest.Warning, latest.Error)
-	}
+	_ = m.SubmitApprovalDecision(task.ID, approval.ID, "deny", "late")
 }
 
-func TestManager_run_ClaudeCode_RequiresApproval_DeleteDir_RemainsBlocked(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("claude-code tests use unix shell scripts")
-	}
-
-	ctx := context.Background()
-	dbPath := filepath.Join(t.TempDir(), "controlccx.db")
-
-	conn, err := db.Open(ctx, db.Options{Path: dbPath})
-	if err != nil {
-		t.Fatalf("db open: %v", err)
-	}
-	t.Cleanup(func() { _ = conn.Close() })
-
-	store := tasks.NewStore(conn)
-	task, err := store.CreateTask(ctx, tasks.CreateTaskInput{
-		WorkerType: tasks.WorkerClaudeCode,
-		Mode:       tasks.ModeNew,
-		Prompt:     "x",
-		WorkDir:    t.TempDir(),
-	})
-	if err != nil {
-		t.Fatalf("create task: %v", err)
-	}
-
-	claude := filepath.Join(t.TempDir(), "fake-claude")
-	script := strings.Join([]string{
-		"#!/bin/sh",
-		`echo '{"type":"system","subtype":"init","session_id":"sess-1"}'`,
-		`echo "about to run: rm -rf some_dir" 1>&2`,
-		`echo "Error: This command requires approval" 1>&2`,
-		"exit 1",
-		"",
-	}, "\n")
-	if err := os.WriteFile(claude, []byte(script), 0o755); err != nil {
-		t.Fatalf("write fake claude: %v", err)
-	}
-
-	cfg := config.Default()
-	cfg.Paths.Claude = claude
-
-	m := NewManager(cfg, store, nil, nil, nil)
-	if err := m.run(ctx, task); err != nil {
-		t.Fatalf("run: %v", err)
-	}
-
-	updated, err := store.GetTask(ctx, task.ID)
-	if err != nil {
-		t.Fatalf("get task: %v", err)
-	}
-	if updated.Status != tasks.StatusBlocked {
-		t.Fatalf("status=%q, want %q (warning=%q error=%q)", updated.Status, tasks.StatusBlocked, updated.Warning, updated.Error)
-	}
-
-	assertConversationTaskCountNotExceed(t, store, strings.TrimSpace(task.ConversationID), 1, 600*time.Millisecond)
-}
-
-func TestManager_run_ClaudeCode_RequiresApproval_SystemRisk_RemainsBlocked(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("claude-code tests use unix shell scripts")
-	}
-
-	ctx := context.Background()
-	dbPath := filepath.Join(t.TempDir(), "controlccx.db")
-
-	conn, err := db.Open(ctx, db.Options{Path: dbPath})
-	if err != nil {
-		t.Fatalf("db open: %v", err)
-	}
-	t.Cleanup(func() { _ = conn.Close() })
-
-	store := tasks.NewStore(conn)
-	task, err := store.CreateTask(ctx, tasks.CreateTaskInput{
-		WorkerType: tasks.WorkerClaudeCode,
-		Mode:       tasks.ModeNew,
-		Prompt:     "x",
-		WorkDir:    t.TempDir(),
-	})
-	if err != nil {
-		t.Fatalf("create task: %v", err)
-	}
-
-	claude := filepath.Join(t.TempDir(), "fake-claude")
-	script := strings.Join([]string{
-		"#!/bin/sh",
-		`echo '{"type":"system","subtype":"init","session_id":"sess-1"}'`,
-		`echo "sudo reboot" 1>&2`,
-		`echo "Error: This command requires approval" 1>&2`,
-		"exit 1",
-		"",
-	}, "\n")
-	if err := os.WriteFile(claude, []byte(script), 0o755); err != nil {
-		t.Fatalf("write fake claude: %v", err)
-	}
-
-	cfg := config.Default()
-	cfg.Paths.Claude = claude
-
-	m := NewManager(cfg, store, nil, nil, nil)
-	if err := m.run(ctx, task); err != nil {
-		t.Fatalf("run: %v", err)
-	}
-
-	updated, err := store.GetTask(ctx, task.ID)
-	if err != nil {
-		t.Fatalf("get task: %v", err)
-	}
-	if updated.Status != tasks.StatusBlocked {
-		t.Fatalf("status=%q, want %q (warning=%q error=%q)", updated.Status, tasks.StatusBlocked, updated.Warning, updated.Error)
-	}
-
-	assertConversationTaskCountNotExceed(t, store, strings.TrimSpace(task.ConversationID), 1, 600*time.Millisecond)
-}
-
-func awaitConversationTaskCount(t *testing.T, store *tasks.Store, conversationID string, want int, timeout time.Duration) []tasks.Task {
+func awaitPendingApproval(t *testing.T, store *tasks.Store, taskID string, timeout time.Duration) tasks.ApprovalRequest {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		runs, err := store.ListTasksByConversationID(context.Background(), conversationID, 50, tasks.ListTasksOptions{IncludeDeleted: true})
+		list, err := store.ListApprovalRequestsByTask(context.Background(), taskID, tasks.ListApprovalRequestsOptions{
+			Status: tasks.ApprovalStatusPending,
+		})
 		if err != nil {
-			t.Fatalf("ListTasksByConversationID: %v", err)
+			t.Fatalf("ListApprovalRequestsByTask: %v", err)
 		}
-		if len(runs) >= want {
-			return runs
+		if len(list) > 0 {
+			return list[0]
 		}
-		time.Sleep(20 * time.Millisecond)
+		time.Sleep(10 * time.Millisecond)
 	}
-	runs, _ := store.ListTasksByConversationID(context.Background(), conversationID, 50, tasks.ListTasksOptions{IncludeDeleted: true})
-	t.Fatalf("timeout waiting for %d tasks in conversation %q (got %d)", want, conversationID, len(runs))
-	return nil
+	list, _ := store.ListApprovalRequestsByTask(context.Background(), taskID, tasks.ListApprovalRequestsOptions{})
+	t.Fatalf("timeout waiting for pending approval (got %d)", len(list))
+	return tasks.ApprovalRequest{}
 }
 
-func awaitTaskTerminal(t *testing.T, store *tasks.Store, taskID string, timeout time.Duration) tasks.Task {
+func awaitTaskStatus(t *testing.T, store *tasks.Store, taskID string, want tasks.Status, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		task, err := store.GetTask(context.Background(), taskID)
+		if err != nil {
+			t.Fatalf("GetTask(%s): %v", taskID, err)
+		}
+		if task.Status == want {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	task, _ := store.GetTask(context.Background(), taskID)
+	t.Fatalf("timeout waiting for task %s status=%s (got=%s)", taskID, want, task.Status)
+}
+
+func awaitTaskTerminalStatus(t *testing.T, store *tasks.Store, taskID string, timeout time.Duration) tasks.Task {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
@@ -459,8 +342,8 @@ func awaitTaskTerminal(t *testing.T, store *tasks.Store, taskID string, timeout 
 			t.Fatalf("GetTask(%s): %v", taskID, err)
 		}
 		switch task.Status {
-		case tasks.StatusQueued, tasks.StatusRunning:
-			time.Sleep(20 * time.Millisecond)
+		case tasks.StatusQueued, tasks.StatusWaiting, tasks.StatusRunning, tasks.StatusAwaitingApproval:
+			time.Sleep(10 * time.Millisecond)
 			continue
 		default:
 			return task
@@ -471,17 +354,54 @@ func awaitTaskTerminal(t *testing.T, store *tasks.Store, taskID string, timeout 
 	return tasks.Task{}
 }
 
-func assertConversationTaskCountNotExceed(t *testing.T, store *tasks.Store, conversationID string, max int, timeout time.Duration) {
-	t.Helper()
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		runs, err := store.ListTasksByConversationID(context.Background(), conversationID, 50, tasks.ListTasksOptions{IncludeDeleted: true})
-		if err != nil {
-			t.Fatalf("ListTasksByConversationID: %v", err)
+func TestApprovalRequests_CRUD(t *testing.T) {
+	// Ensure approvals store methods behave as expected, especially for "not pending" errors.
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "controlccx.db")
+	conn, err := db.Open(ctx, db.Options{Path: dbPath})
+	if err != nil {
+		t.Fatalf("db open: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+
+	store := tasks.NewStore(conn)
+	task, err := store.CreateTask(ctx, tasks.CreateTaskInput{
+		WorkerType: tasks.WorkerClaudeCode,
+		Mode:       tasks.ModeNew,
+		Prompt:     "x",
+		WorkDir:    t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	ar, err := store.CreateApprovalRequest(ctx, tasks.CreateApprovalRequestInput{
+		TaskID:     task.ID,
+		WorkerType: task.WorkerType,
+		WorkDir:    task.WorkDir,
+		ActionType: "shell.exec",
+		RiskLevel:  tasks.RiskHigh,
+		Summary:    "run command",
+		Raw:        []byte(`{"tool":"bash","command":"echo hi"}`),
+	})
+	if err != nil {
+		t.Fatalf("CreateApprovalRequest: %v", err)
+	}
+
+	if err := store.UpdateApprovalRequestDecision(ctx, ar.ID, tasks.UpdateApprovalRequestDecisionInput{
+		Status: tasks.ApprovalStatusApproved,
+		Reason: "ok",
+	}); err != nil {
+		t.Fatalf("UpdateApprovalRequestDecision: %v", err)
+	}
+	if err := store.UpdateApprovalRequestDecision(ctx, ar.ID, tasks.UpdateApprovalRequestDecisionInput{
+		Status: tasks.ApprovalStatusDenied,
+		Reason: "nope",
+	}); err == nil {
+		t.Fatalf("expected second decision to fail")
+	} else {
+		var notPending *tasks.ApprovalNotPendingError
+		if !errors.As(err, &notPending) {
+			t.Fatalf("err=%T want *ApprovalNotPendingError", err)
 		}
-		if len(runs) > max {
-			t.Fatalf("expected at most %d tasks in conversation %q, got %d", max, conversationID, len(runs))
-		}
-		time.Sleep(20 * time.Millisecond)
 	}
 }

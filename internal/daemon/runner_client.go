@@ -124,6 +124,50 @@ func (c *RunnerClient) Cancel(ctx context.Context, taskID string) (bool, error) 
 	return out.OK, nil
 }
 
+func (c *RunnerClient) SubmitApprovalDecision(ctx context.Context, taskID string, approvalID string, decision string, reason string) error {
+	if c == nil {
+		return errors.New("runner client: nil")
+	}
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" {
+		return errors.New("runner client: task id is required")
+	}
+	approvalID = strings.TrimSpace(approvalID)
+	if approvalID == "" {
+		return errors.New("runner client: approval id is required")
+	}
+	decision = strings.ToLower(strings.TrimSpace(decision))
+	if decision != "approve" && decision != "deny" {
+		return fmt.Errorf("runner client: invalid decision %q", decision)
+	}
+
+	body, _ := json.Marshal(map[string]any{
+		"decision": decision,
+		"reason":   strings.TrimSpace(reason),
+	})
+	u := c.baseURL + path.Join("/api/runner/tasks/", taskID, "approvals", approvalID, "decision")
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(InstanceTokenHeader, c.token)
+	res, err := c.client.Do(req)
+	if err != nil {
+		return &RunnerUnavailableError{Op: "approval", BaseURL: c.baseURL, Err: err}
+	}
+	defer func() { _ = res.Body.Close() }()
+	respBody, _ := io.ReadAll(io.LimitReader(res.Body, 1<<20))
+	if res.StatusCode < 200 || res.StatusCode >= 300 {
+		msg := strings.TrimSpace(string(respBody))
+		if msg == "" {
+			msg = http.StatusText(res.StatusCode)
+		}
+		return &RunnerResponseError{Op: "approval", BaseURL: c.baseURL, StatusCode: res.StatusCode, Message: msg}
+	}
+	return nil
+}
+
 type RunnerUnavailableError struct {
 	Op      string
 	BaseURL string

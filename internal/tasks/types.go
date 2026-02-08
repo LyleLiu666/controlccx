@@ -5,14 +5,15 @@ import "time"
 type Status string
 
 const (
-	StatusQueued      Status = "queued"
-	StatusWaiting     Status = "waiting"
-	StatusRunning     Status = "running"
-	StatusSucceeded   Status = "succeeded"
-	StatusFailed      Status = "failed"
-	StatusCanceled    Status = "canceled"
-	StatusInterrupted Status = "interrupted"
-	StatusBlocked     Status = "blocked"
+	StatusQueued           Status = "queued"
+	StatusWaiting          Status = "waiting"
+	StatusRunning          Status = "running"
+	StatusAwaitingApproval Status = "awaiting_approval"
+	StatusSucceeded        Status = "succeeded"
+	StatusFailed           Status = "failed"
+	StatusCanceled         Status = "canceled"
+	StatusInterrupted      Status = "interrupted"
+	StatusBlocked          Status = "blocked"
 )
 
 type WorkerType string
