@@ -419,6 +419,21 @@ export type SecretarySendResponse = {
   reply: string;
 };
 
+export type SecretaryThinkingKind = "trace" | "tool_call" | "tool_result" | "error";
+
+export type SecretaryThinkingEvent = {
+  kind?: SecretaryThinkingKind;
+  step?: number;
+  line?: string;
+  tool_name?: string;
+  ok?: boolean;
+  error?: string;
+};
+
+export type SecretaryStreamResult = {
+  reply: string;
+};
+
 export type SecretaryClearResponse = {
   ok: boolean;
 };

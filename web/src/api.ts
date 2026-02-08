@@ -47,6 +47,8 @@ import type {
   SecretaryMessagesResponse,
   SecretarySendResponse,
   SecretaryMessage,
+  SecretaryThinkingEvent,
+  SecretaryStreamResult,
   AuditEntryDetail,
   AuditEntriesResponse,
   AuditQuery,
@@ -144,6 +146,111 @@ export async function fetchSecretaryMessages(limit = 200): Promise<SecretaryMess
 
 export async function sendSecretaryMessage(message: string): Promise<SecretarySendResponse> {
   return postJSON<SecretarySendResponse>("/api/secretary/messages", { message: String(message ?? "") });
+}
+
+export async function sendSecretaryMessageStream(
+  message: string,
+  handlers?: {
+    onDelta?: (delta: string) => void;
+    onThinking?: (event: SecretaryThinkingEvent) => void;
+    onDone?: (reply: string) => void;
+    onError?: (message: string) => void;
+  },
+): Promise<SecretaryStreamResult> {
+  const res = await fetch("/api/secretary/messages/stream", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Accept": "text/event-stream",
+    },
+    body: JSON.stringify({ message: String(message ?? "") }),
+    credentials: "same-origin",
+  });
+  if (!res.ok) throw await buildAPIError(res);
+
+  const reader = res.body?.getReader();
+  if (!reader) {
+    throw new Error("stream body unavailable");
+  }
+
+  const decoder = new TextDecoder();
+  let pending = "";
+  let finalReply = "";
+
+  const parseEventBlock = (block: string) => {
+    const lines = block.split(/\r?\n/);
+    let eventName = "";
+    const dataLines: string[] = [];
+    for (const rawLine of lines) {
+      const line = rawLine.trimEnd();
+      if (!line) continue;
+      if (line.startsWith("event:")) {
+        eventName = line.slice("event:".length).trim();
+        continue;
+      }
+      if (line.startsWith("data:")) {
+        dataLines.push(line.slice("data:".length).trimStart());
+      }
+    }
+    if (!eventName) return;
+
+    let payload: any = {};
+    const dataRaw = dataLines.join("\n");
+    if (dataRaw) {
+      try {
+        payload = JSON.parse(dataRaw);
+      } catch {
+        payload = {};
+      }
+    }
+
+    switch (eventName) {
+      case "delta":
+        handlers?.onDelta?.(String(payload?.delta ?? ""));
+        break;
+      case "thinking":
+        handlers?.onThinking?.({
+          kind: payload?.kind,
+          step: Number.isFinite(payload?.step) ? Number(payload.step) : undefined,
+          line: typeof payload?.line === "string" ? payload.line : "",
+          tool_name: typeof payload?.tool_name === "string" ? payload.tool_name : undefined,
+          ok: typeof payload?.ok === "boolean" ? payload.ok : undefined,
+          error: typeof payload?.error === "string" ? payload.error : undefined,
+        });
+        break;
+      case "done":
+        finalReply = String(payload?.reply ?? "");
+        handlers?.onDone?.(finalReply);
+        break;
+      case "error": {
+        const errMsg = String(payload?.error ?? "secretary stream failed");
+        handlers?.onError?.(errMsg);
+        throw new Error(errMsg);
+      }
+      default:
+        break;
+    }
+  };
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) {
+      pending += decoder.decode();
+      break;
+    }
+    pending += decoder.decode(value, { stream: true });
+    while (true) {
+      const splitAt = pending.indexOf("\n\n");
+      if (splitAt < 0) break;
+      const block = pending.slice(0, splitAt);
+      pending = pending.slice(splitAt + 2);
+      parseEventBlock(block);
+    }
+  }
+  if (pending.trim()) {
+    parseEventBlock(pending.trim());
+  }
+  return { reply: finalReply };
 }
 
 export async function clearSecretaryMessages(): Promise<SecretaryClearResponse> {

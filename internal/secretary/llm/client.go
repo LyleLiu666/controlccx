@@ -7,8 +7,8 @@ import (
 	"controlccx/internal/agentsdk"
 )
 
-// Client adapts a completion-style backend into the agentsdk streaming interface.
-// It emits the full completion as a single chunk (no token streaming).
+// Client adapts completion backends into the agentsdk streaming interface.
+// If backend supports ChatStreamBackend, deltas are forwarded as they arrive.
 type Client struct {
 	Backend Backend
 }
@@ -16,6 +16,10 @@ type Client struct {
 func (c *Client) ChatCompletionStream(ctx context.Context, messages []agentsdk.Message, opts *agentsdk.ChatCompletionOptions, callback agentsdk.StreamCallback) error {
 	if c == nil || c.Backend == nil {
 		return callback("秘书不可用：未配置可用的 LLM backend。")
+	}
+
+	if csb, ok := c.Backend.(ChatStreamBackend); ok {
+		return csb.CompleteChatStream(ctx, messages, opts, callback)
 	}
 
 	if cb, ok := c.Backend.(ChatBackend); ok {

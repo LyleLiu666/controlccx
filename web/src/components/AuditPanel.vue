@@ -170,6 +170,26 @@ onMounted(() => {
             <div class="auditDetailTitle">{{ detail.title }}</div>
             <div class="tinyHint mono">{{ detail.id }}</div>
           </div>
+          <div v-if="detail.meta?.kv_cache || detail.meta?.provider_receipt" class="auditDetailInsights">
+            <div v-if="detail.meta?.kv_cache" class="auditInsight">
+              <div class="auditInsightK">KV Cache</div>
+              <div class="auditInsightV mono">
+                read={{ detail.meta?.kv_cache?.cache_read_input_tokens ?? detail.meta?.kv_cache?.prompt_cached_tokens ?? "-" }}
+                · create={{ detail.meta?.kv_cache?.cache_creation_input_tokens ?? "-" }}
+                · cached={{ detail.meta?.kv_cache?.cached_input_tokens ?? "-" }}
+                · epoch={{ detail.meta?.kv_cache?.request_cache_epoch ?? "-" }}
+              </div>
+            </div>
+            <div v-if="detail.meta?.provider_receipt" class="auditInsight">
+              <div class="auditInsightK">Provider Receipt</div>
+              <div class="auditInsightV mono">
+                provider={{ detail.meta?.provider_receipt?.provider ?? "-" }}
+                · model={{ detail.meta?.provider_receipt?.model ?? detail.meta?.provider_receipt?.request_model ?? "-" }}
+                · request_id={{ detail.meta?.provider_receipt?.request_id ?? "-" }}
+                · status={{ detail.meta?.provider_receipt?.status_code ?? "-" }}
+              </div>
+            </div>
+          </div>
           <pre class="auditDetailRaw">{{ detail.raw }}</pre>
           <pre v-if="detail.meta" class="auditDetailMeta">{{ JSON.stringify(detail.meta, null, 2) }}</pre>
         </template>
@@ -324,6 +344,32 @@ onMounted(() => {
 
 .auditDetailTitle {
   font-weight: 700;
+}
+
+.auditDetailInsights {
+  display: grid;
+  gap: 8px;
+}
+
+.auditInsight {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px;
+  background: color-mix(in oklab, var(--surface2) 84%, transparent);
+  display: grid;
+  gap: 6px;
+}
+
+.auditInsightK {
+  font-size: 12px;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.auditInsightV {
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .auditDetailRaw,

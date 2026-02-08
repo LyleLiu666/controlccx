@@ -1,6 +1,6 @@
 import { nextTick, ref } from "vue";
-import type { SecretaryMessage } from "../types";
-import { clearSecretaryMessages, fetchSecretaryMessages, sendSecretaryMessage } from "../api";
+import type { SecretaryMessage, SecretaryThinkingEvent } from "../types";
+import { clearSecretaryMessages, fetchSecretaryMessages, sendSecretaryMessageStream } from "../api";
 
 export function useSecretaryChat() {
   const open = ref(false);
@@ -9,6 +9,8 @@ export function useSecretaryChat() {
   const loading = ref(false);
   const sending = ref(false);
   const error = ref("");
+  const thinkingLines = ref<string[]>([]);
+  const streamingReply = ref("");
 
   async function refresh(limit = 200) {
     if (loading.value) return;
@@ -33,33 +35,96 @@ export function useSecretaryChat() {
     open.value = false;
   }
 
+  function appendThinkingLine(line: string) {
+    const v = String(line ?? "").trim();
+    if (!v) return;
+    const next = [...thinkingLines.value, v];
+    const keep = 300;
+    thinkingLines.value = next.length > keep ? next.slice(next.length - keep) : next;
+  }
+
+  function formatThinkingLine(event: SecretaryThinkingEvent): string {
+    const step = Number.isFinite(event?.step) ? `#${Number(event?.step)} ` : "";
+    const kind = String(event?.kind ?? "").trim();
+    const line = String(event?.line ?? "").trim();
+    const tool = String(event?.tool_name ?? "").trim();
+    if (kind === "tool_call") {
+      return step + (line || `调用工具：${tool || "unknown"}`);
+    }
+    if (kind === "tool_result") {
+      return step + (line || `工具完成：${tool || "unknown"}`);
+    }
+    if (kind === "error") {
+      const err = String(event?.error ?? "").trim();
+      return step + (line || err || "发生错误");
+    }
+    return step + line;
+  }
+
   async function send(opts?: { message?: string; refresh?: boolean }) {
     if (sending.value) return;
     const msg = String(opts?.message ?? input.value ?? "").trim();
     if (!msg) return;
     sending.value = true;
     error.value = "";
+    input.value = "";
+    thinkingLines.value = [];
+    streamingReply.value = "";
+
+    const now = new Date().toISOString();
+    const userID = Date.now();
+    messages.value = [
+      ...messages.value,
+      { id: userID, time: now, role: "user", content: msg },
+    ];
+
     try {
-      const res = await sendSecretaryMessage(msg);
-      input.value = "";
-      if (opts?.refresh ?? true) {
-        await refresh(200);
-      } else {
-        // Best-effort: append locally if caller opts out of refresh.
+      const res = await sendSecretaryMessageStream(msg, {
+        onDelta: (delta: string) => {
+          streamingReply.value += String(delta ?? "");
+        },
+        onThinking: (event: SecretaryThinkingEvent) => {
+          appendThinkingLine(formatThinkingLine(event));
+        },
+        onDone: (reply: string) => {
+          if (!streamingReply.value.trim()) {
+            streamingReply.value = String(reply ?? "");
+          }
+        },
+      });
+
+      let finalReply = String(res?.reply ?? "").trim();
+      if (!finalReply) {
+        finalReply = String(streamingReply.value ?? "").trim();
+      }
+      if (!finalReply) {
+        finalReply = "秘书没有返回内容，请重试。";
+      }
+      messages.value = [
+        ...messages.value,
+        {
+          id: Date.now() + 1,
+          time: new Date().toISOString(),
+          role: "assistant",
+          content: finalReply,
+        },
+      ];
+    } catch (e: any) {
+      error.value = e?.message ?? String(e);
+      const partial = String(streamingReply.value ?? "").trim();
+      if (partial) {
         messages.value = [
           ...messages.value,
-          { id: Date.now(), time: new Date().toISOString(), role: "user", content: msg },
           {
             id: Date.now() + 1,
             time: new Date().toISOString(),
             role: "assistant",
-            content: String(res?.reply ?? ""),
+            content: partial,
           },
         ];
       }
-    } catch (e: any) {
-      error.value = e?.message ?? String(e);
     } finally {
+      streamingReply.value = "";
       sending.value = false;
     }
   }
@@ -85,6 +150,8 @@ export function useSecretaryChat() {
     loading,
     sending,
     error,
+    thinkingLines,
+    streamingReply,
     refresh,
     openDrawer,
     closeDrawer,
@@ -92,4 +159,3 @@ export function useSecretaryChat() {
     clear,
   };
 }
-

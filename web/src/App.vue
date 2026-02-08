@@ -969,6 +969,8 @@ const {
   loading: secretaryLoading,
   sending: secretarySending,
   error: secretaryError,
+  thinkingLines: secretaryThinkingLines,
+  streamingReply: secretaryStreamingReply,
   refresh: refreshSecretary,
   openDrawer: openSecretaryDrawer,
   closeDrawer: closeSecretaryDrawer,
@@ -6600,6 +6602,8 @@ watch(
           :loading="secretaryLoading"
           :sending="secretarySending"
           :error="secretaryError"
+          :thinkingLines="secretaryThinkingLines"
+          :streamingReply="secretaryStreamingReply"
           v-model:input="secretaryInput"
           @close="closeSecretaryDrawer"
           @refresh="refreshSecretary"

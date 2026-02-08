@@ -8,6 +8,8 @@ const props = defineProps<{
   sending: boolean;
   error: string;
   input: string;
+  thinkingLines: string[];
+  streamingReply: string;
 }>();
 
 const emit = defineEmits<{
@@ -25,6 +27,7 @@ const inputModel = computed({
 });
 
 const listEl = ref<HTMLDivElement | null>(null);
+const thinkingEl = ref<HTMLDivElement | null>(null);
 
 function scrollToBottom() {
   const el = listEl.value;
@@ -32,8 +35,30 @@ function scrollToBottom() {
   el.scrollTop = el.scrollHeight;
 }
 
+function scrollThinkingToBottom() {
+  const el = thinkingEl.value;
+  if (!el) return;
+  el.scrollTop = el.scrollHeight;
+}
+
 watch(
   () => props.messages.length,
+  async () => {
+    await nextTick();
+    scrollToBottom();
+  },
+);
+
+watch(
+  () => props.thinkingLines.length,
+  async () => {
+    await nextTick();
+    scrollThinkingToBottom();
+  },
+);
+
+watch(
+  () => props.streamingReply,
   async () => {
     await nextTick();
     scrollToBottom();
@@ -74,7 +99,7 @@ const quickPrompts = [
 
         <div ref="listEl" class="secChatList" role="log" aria-label="Secretary chat">
           <div v-if="loading && messages.length === 0" class="tinyHint">加载中…</div>
-          <div v-else-if="messages.length === 0" class="tinyHint">还没有对话，试着问一句。</div>
+          <div v-else-if="messages.length === 0 && !streamingReply && !sending" class="tinyHint">还没有对话，试着问一句。</div>
           <div v-else class="secChatItems">
             <div
               v-for="m in messages"
@@ -85,6 +110,12 @@ const quickPrompts = [
               <div class="secChatBubble">
                 <div class="secChatRole">{{ m.role === "user" ? "你" : "秘书" }}</div>
                 <div class="secChatText">{{ m.content }}</div>
+              </div>
+            </div>
+            <div v-if="sending || streamingReply" class="secChatItem assistant">
+              <div class="secChatBubble">
+                <div class="secChatRole">秘书</div>
+                <div class="secChatText">{{ streamingReply || "思考中…" }}</div>
               </div>
             </div>
           </div>
@@ -101,6 +132,16 @@ const quickPrompts = [
           >
             {{ q }}
           </button>
+        </div>
+
+        <div class="secThinkingPanel">
+          <div class="secThinkingHead">思考与工具过程（固定 3 行窗口）</div>
+          <div ref="thinkingEl" class="secThinkingViewport mono">
+            <div v-if="thinkingLines.length === 0" class="tinyHint">等待思考过程流式输出…</div>
+            <div v-for="(line, idx) in thinkingLines" :key="`${idx}-${line}`" class="secThinkingLine">
+              {{ line }}
+            </div>
+          </div>
         </div>
 
         <div class="secChatComposer">
@@ -211,5 +252,37 @@ const quickPrompts = [
   resize: vertical;
   min-height: 44px;
 }
-</style>
 
+.secThinkingPanel {
+  --sec-thinking-lines: 3;
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  background: rgba(15, 23, 42, 0.08);
+  display: grid;
+  gap: 8px;
+}
+
+.secThinkingHead {
+  font-size: 12px;
+  color: var(--text-sub);
+  font-weight: 700;
+}
+
+.secThinkingViewport {
+  max-height: calc(var(--sec-thinking-lines) * 1.45em + 10px);
+  height: calc(var(--sec-thinking-lines) * 1.45em + 10px);
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 2px;
+}
+
+.secThinkingLine {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-main);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+</style>

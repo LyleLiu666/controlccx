@@ -179,6 +179,114 @@ func TestService_GetEntryDetail(t *testing.T) {
 	}
 }
 
+func TestService_GetSecretaryChatDetail_EnrichesKVCacheAndProviderReceipt(t *testing.T) {
+	ctx := context.Background()
+	conn, err := db.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "controlccx.db")})
+	if err != nil {
+		t.Fatalf("db open: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+
+	base := time.Date(2026, 2, 8, 22, 0, 0, 0, time.UTC)
+	mustExecDB(
+		t, ctx, conn,
+		`INSERT INTO secretary_events(ts, run_id, kind, protocol, step, event_json) VALUES (?, ?, ?, ?, ?, ?);`,
+		toMs(base.Add(1*time.Second)),
+		"run-kv",
+		"llm_request",
+		"xml",
+		0,
+		`{"kind":"llm_request","payload":{"options":{"EnablePromptCache":true,"CacheEpoch":12}}}`,
+	)
+	mustExecDB(
+		t, ctx, conn,
+		`INSERT INTO secretary_events(ts, run_id, kind, protocol, step, event_json) VALUES (?, ?, ?, ?, ?, ?);`,
+		toMs(base.Add(2*time.Second)),
+		"run-kv",
+		"provider_receipt",
+		"http",
+		0,
+		`{"kind":"provider_receipt","payload":{"provider":"anthropic","request_id":"req-xyz","usage":{"input_tokens":120,"output_tokens":30,"cache_read_input_tokens":90},"kv_cache":{"cache_read_input_tokens":90}}}`,
+	)
+	mustExecDB(t, ctx, conn, `INSERT INTO chat_messages(ts, role, content) VALUES (?, ?, ?);`, toMs(base.Add(3*time.Second)), "user", "查一下任务")
+	mustExecDB(t, ctx, conn, `INSERT INTO chat_messages(ts, role, content) VALUES (?, ?, ?);`, toMs(base.Add(4*time.Second)), "assistant", "好的")
+
+	svc := NewService(conn, Options{})
+	list, err := svc.Query(ctx, Query{
+		Sources: []Source{SourceSecretaryChat},
+		Limit:   10,
+	})
+	if err != nil {
+		t.Fatalf("query chat list: %v", err)
+	}
+	if len(list.Entries) == 0 {
+		t.Fatalf("expected secretary chat entries")
+	}
+
+	var assistantID string
+	for _, item := range list.Entries {
+		if strings.Contains(strings.ToLower(item.Title), "assistant") {
+			assistantID = item.ID
+			break
+		}
+	}
+	if strings.TrimSpace(assistantID) == "" {
+		t.Fatalf("expected assistant entry in secretary chat list")
+	}
+
+	detail, err := svc.GetEntry(ctx, assistantID)
+	if err != nil {
+		t.Fatalf("get assistant detail: %v", err)
+	}
+	if detail.Source != SourceSecretaryChat {
+		t.Fatalf("source=%s want %s", detail.Source, SourceSecretaryChat)
+	}
+	if detail.Meta == nil {
+		t.Fatalf("expected meta in secretary chat detail")
+	}
+	if got := strings.TrimSpace(anyString(detail.Meta["run_id"])); got != "run-kv" {
+		t.Fatalf("meta.run_id=%q want %q", got, "run-kv")
+	}
+
+	kv, _ := detail.Meta["kv_cache"].(map[string]any)
+	if kv == nil {
+		t.Fatalf("expected kv_cache map in meta, got=%T", detail.Meta["kv_cache"])
+	}
+	if got := int(anyFloat(kv["cache_read_input_tokens"])); got != 90 {
+		t.Fatalf("kv.cache_read_input_tokens=%d want 90", got)
+	}
+
+	receipt, _ := detail.Meta["provider_receipt"].(map[string]any)
+	if receipt == nil {
+		t.Fatalf("expected provider_receipt map in meta, got=%T", detail.Meta["provider_receipt"])
+	}
+	if got := strings.TrimSpace(anyString(receipt["request_id"])); got != "req-xyz" {
+		t.Fatalf("receipt.request_id=%q want req-xyz", got)
+	}
+}
+
+func anyString(v any) string {
+	if s, ok := v.(string); ok {
+		return s
+	}
+	return ""
+}
+
+func anyFloat(v any) float64 {
+	switch x := v.(type) {
+	case float64:
+		return x
+	case float32:
+		return float64(x)
+	case int:
+		return float64(x)
+	case int64:
+		return float64(x)
+	default:
+		return 0
+	}
+}
+
 func assertDescending(t *testing.T, entries []Entry) {
 	t.Helper()
 	for i := 1; i < len(entries); i++ {

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -132,5 +133,73 @@ func TestAPI_SecretaryEndpoints(t *testing.T) {
 	}
 	if len(hist2.Messages) != 0 {
 		t.Fatalf("messages len=%d want 0", len(hist2.Messages))
+	}
+}
+
+func TestAPI_SecretaryStreamEndpoint(t *testing.T) {
+	ctx := context.Background()
+	conn, err := db.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "controlccx.db")})
+	if err != nil {
+		t.Fatalf("db open: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+
+	taskStore := tasks.NewStore(conn)
+	chatStore := chat.NewStore(conn)
+
+	llmClient := &scriptedClient{
+		responses: []string{
+			"<tool_data><call><tool_name>tasks_count</tool_name></call></tool_data>",
+			"ok",
+		},
+	}
+	sec := secretary.NewService(config.Default(), taskStore, chatStore, nil, nil, secretary.WithClient(llmClient))
+
+	apiSvc := &API{
+		Tasks:     taskStore,
+		Secretary: sec,
+	}
+	srv := httptest.NewServer(apiSvc.Handler())
+	t.Cleanup(srv.Close)
+
+	body, _ := json.Marshal(map[string]any{"message": "统计一下"})
+	req, err := http.NewRequest(http.MethodPost, srv.URL+"/api/secretary/messages/stream", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "text/event-stream")
+
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("do request: %v", err)
+	}
+	t.Cleanup(func() { _ = res.Body.Close() })
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d want %d", res.StatusCode, http.StatusOK)
+	}
+	if ct := res.Header.Get("Content-Type"); !strings.Contains(ct, "text/event-stream") {
+		t.Fatalf("content-type=%q want text/event-stream", ct)
+	}
+
+	raw, err := io.ReadAll(res.Body)
+	if err != nil {
+		t.Fatalf("read stream body: %v", err)
+	}
+	streamText := string(raw)
+	if !strings.Contains(streamText, "event: thinking") {
+		t.Fatalf("expected thinking event in stream, got: %q", streamText)
+	}
+	if !strings.Contains(streamText, `"kind":"tool_call"`) {
+		t.Fatalf("expected tool_call thinking payload in stream, got: %q", streamText)
+	}
+	if !strings.Contains(streamText, "event: delta") {
+		t.Fatalf("expected delta event in stream, got: %q", streamText)
+	}
+	if !strings.Contains(streamText, `"delta":"ok"`) {
+		t.Fatalf("expected streamed delta payload in stream, got: %q", streamText)
+	}
+	if !strings.Contains(streamText, "event: done") {
+		t.Fatalf("expected done event in stream, got: %q", streamText)
 	}
 }

@@ -62,6 +62,7 @@ func (a *API) Handler() http.Handler {
 	mux.HandleFunc("/api/acceptance", a.handleAcceptance)
 	mux.HandleFunc("/api/context", a.handleProjectContext)
 	mux.HandleFunc("/api/secretary/messages", a.handleSecretaryMessages)
+	mux.HandleFunc("/api/secretary/messages/stream", a.handleSecretaryMessagesStream)
 	mux.HandleFunc("/api/secretary/clear", a.handleSecretaryClear)
 	mux.HandleFunc("/api/audit/entries", a.handleAuditEntries)
 	mux.HandleFunc("/api/audit/entries/", a.handleAuditEntryByID)

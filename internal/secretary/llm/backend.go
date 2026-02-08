@@ -22,6 +22,13 @@ type ChatBackend interface {
 	CompleteChat(ctx context.Context, messages []agentsdk.Message, opts *agentsdk.ChatCompletionOptions) (string, error)
 }
 
+// ChatStreamBackend is an optional extension interface for token/segment streaming.
+// Backends SHOULD call callback for each visible assistant delta in order.
+type ChatStreamBackend interface {
+	ChatBackend
+	CompleteChatStream(ctx context.Context, messages []agentsdk.Message, opts *agentsdk.ChatCompletionOptions, callback agentsdk.StreamCallback) error
+}
+
 // AutoBackend selects the first backend that successfully completes once, then sticks to it.
 // It is best-effort: failures before selection will fall through to later backends.
 type AutoBackend struct {

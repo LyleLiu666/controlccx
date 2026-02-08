@@ -14,6 +14,7 @@ import (
 	"controlccx/internal/chat"
 	"controlccx/internal/config"
 	"controlccx/internal/db"
+	"controlccx/internal/secretary/llm"
 	"controlccx/internal/tasks"
 )
 
@@ -21,6 +22,37 @@ type scriptedClient struct {
 	responses []string
 	calls     int
 	messages  [][]agentsdk.Message
+}
+
+type receiptBackendStub struct{}
+
+func (b *receiptBackendStub) Name() string { return "receipt-stub" }
+
+func (b *receiptBackendStub) Complete(ctx context.Context, prompt string) (string, error) {
+	_ = ctx
+	_ = prompt
+	return "ok", nil
+}
+
+func (b *receiptBackendStub) CompleteChat(ctx context.Context, messages []agentsdk.Message, opts *agentsdk.ChatCompletionOptions) (string, error) {
+	_ = ctx
+	_ = messages
+	_ = opts
+	return "ok", nil
+}
+
+func (b *receiptBackendStub) LastReceipt() map[string]any {
+	return map[string]any{
+		"provider":   "test-provider",
+		"request_id": "req-test-1",
+		"usage": map[string]any{
+			"cache_read_input_tokens": 7,
+			"output_tokens":           3,
+		},
+		"kv_cache": map[string]any{
+			"cache_read_input_tokens": 7,
+		},
+	}
 }
 
 func (c *scriptedClient) ChatCompletionStream(ctx context.Context, messages []agentsdk.Message, opts *agentsdk.ChatCompletionOptions, callback agentsdk.StreamCallback) error {
@@ -226,6 +258,112 @@ func TestService_Send_PersistsEventSinkEvents(t *testing.T) {
 	}
 	if !hasRequest {
 		t.Fatalf("expected at least one llm_request event")
+	}
+}
+
+func TestService_Send_PersistsProviderReceiptEvent_WhenBackendSupportsIt(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "controlccx.db")
+
+	conn, err := db.Open(ctx, db.Options{Path: dbPath})
+	if err != nil {
+		t.Fatalf("db open: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+
+	taskStore := tasks.NewStore(conn)
+	chatStore := chat.NewStore(conn)
+	eventStore := NewEventStore(conn)
+
+	client := &llm.Client{Backend: &receiptBackendStub{}}
+	svc := NewService(config.Default(), taskStore, chatStore, nil, nil, WithClient(client), WithEventStore(eventStore))
+
+	reply, err := svc.Send(ctx, "hi")
+	if err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	if strings.TrimSpace(reply) != "ok" {
+		t.Fatalf("reply=%q want %q", reply, "ok")
+	}
+
+	events, err := eventStore.Tail(ctx, 500)
+	if err != nil {
+		t.Fatalf("tail events: %v", err)
+	}
+	found := false
+	for _, ev := range events {
+		if string(ev.Kind) != "provider_receipt" {
+			continue
+		}
+		if !strings.Contains(ev.EventJSON, "req-test-1") {
+			t.Fatalf("provider_receipt missing request id, event=%s", ev.EventJSON)
+		}
+		found = true
+	}
+	if !found {
+		t.Fatalf("expected provider_receipt event in secretary_events")
+	}
+}
+
+func TestService_SendStream_EmitsVisibleAndToolHooks(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "controlccx.db")
+
+	conn, err := db.Open(ctx, db.Options{Path: dbPath})
+	if err != nil {
+		t.Fatalf("db open: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+
+	taskStore := tasks.NewStore(conn)
+	chatStore := chat.NewStore(conn)
+
+	c := &scriptedClient{
+		responses: []string{
+			"<tool_data><call><tool_name>tasks_count</tool_name></call></tool_data>",
+			"ok",
+		},
+	}
+	svc := NewService(config.Default(), taskStore, chatStore, nil, nil, WithClient(c))
+
+	var (
+		deltas      []string
+		toolCalls   []string
+		toolResults []string
+		traceLines  []string
+	)
+	reply, err := svc.SendStream(ctx, "hi", &SendHooks{
+		OnVisibleDelta: func(delta string) error {
+			deltas = append(deltas, delta)
+			return nil
+		},
+		OnTrace: func(step int, message string) {
+			traceLines = append(traceLines, strings.TrimSpace(message))
+		},
+		OnToolCall: func(step int, event agentsdk.ToolCallEvent) {
+			toolCalls = append(toolCalls, strings.TrimSpace(event.Name))
+		},
+		OnToolResult: func(step int, event agentsdk.ToolResultEvent) {
+			toolResults = append(toolResults, strings.TrimSpace(event.ToolName))
+		},
+	})
+	if err != nil {
+		t.Fatalf("send stream: %v", err)
+	}
+	if strings.TrimSpace(reply) != "ok" {
+		t.Fatalf("reply=%q want %q", reply, "ok")
+	}
+	if got := strings.TrimSpace(strings.Join(deltas, "")); got != "ok" {
+		t.Fatalf("visible deltas=%q want %q", got, "ok")
+	}
+	if len(toolCalls) == 0 || toolCalls[0] != "tasks_count" {
+		t.Fatalf("expected tool call hook for tasks_count, got: %#v", toolCalls)
+	}
+	if len(toolResults) == 0 || toolResults[0] != "tasks_count" {
+		t.Fatalf("expected tool result hook for tasks_count, got: %#v", toolResults)
+	}
+	if len(traceLines) == 0 {
+		t.Fatalf("expected at least one trace line")
 	}
 }
 

@@ -42,12 +42,13 @@ type Client interface {
 type EventKind string
 
 const (
-	EventKindLLMRequest  EventKind = "llm_request"
-	EventKindLLMResponse EventKind = "llm_response"
-	EventKindToolCall    EventKind = "tool_call"
-	EventKindToolResult  EventKind = "tool_result"
-	EventKindTrace       EventKind = "trace"
-	EventKindError       EventKind = "error"
+	EventKindLLMRequest      EventKind = "llm_request"
+	EventKindLLMResponse     EventKind = "llm_response"
+	EventKindToolCall        EventKind = "tool_call"
+	EventKindToolResult      EventKind = "tool_result"
+	EventKindTrace           EventKind = "trace"
+	EventKindError           EventKind = "error"
+	EventKindProviderReceipt EventKind = "provider_receipt"
 )
 
 // Event is a structured, append-only log record emitted by agent loops.

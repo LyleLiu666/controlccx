@@ -180,6 +180,38 @@ func (b *chatBackendStub) CompleteChat(ctx context.Context, messages []agentsdk.
 	return "ok", nil
 }
 
+type chatStreamBackendStub struct {
+	chatCalls   int
+	streamCalls int
+}
+
+func (b *chatStreamBackendStub) Name() string { return "stream-stub" }
+
+func (b *chatStreamBackendStub) Complete(ctx context.Context, prompt string) (string, error) {
+	_ = ctx
+	_ = prompt
+	return "ignored", nil
+}
+
+func (b *chatStreamBackendStub) CompleteChat(ctx context.Context, messages []agentsdk.Message, opts *agentsdk.ChatCompletionOptions) (string, error) {
+	_ = ctx
+	_ = messages
+	_ = opts
+	b.chatCalls++
+	return "fallback", nil
+}
+
+func (b *chatStreamBackendStub) CompleteChatStream(ctx context.Context, messages []agentsdk.Message, opts *agentsdk.ChatCompletionOptions, callback agentsdk.StreamCallback) error {
+	_ = ctx
+	_ = messages
+	_ = opts
+	b.streamCalls++
+	if err := callback("A"); err != nil {
+		return err
+	}
+	return callback("B")
+}
+
 func TestClient_PrefersChatBackendWhenAvailable(t *testing.T) {
 	stub := &chatBackendStub{}
 	c := &Client{Backend: stub}
@@ -194,5 +226,305 @@ func TestClient_PrefersChatBackendWhenAvailable(t *testing.T) {
 	}
 	if stub.calls != 1 {
 		t.Fatalf("calls=%d want 1", stub.calls)
+	}
+}
+
+func TestClient_PrefersChatStreamBackendWhenAvailable(t *testing.T) {
+	stub := &chatStreamBackendStub{}
+	c := &Client{Backend: stub}
+	var chunks []string
+	err := c.ChatCompletionStream(context.Background(), []agentsdk.Message{{Role: "user", Content: "hi"}}, &agentsdk.ChatCompletionOptions{}, func(chunk string) error {
+		chunks = append(chunks, chunk)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("stream: %v", err)
+	}
+	if stub.streamCalls != 1 {
+		t.Fatalf("stream_calls=%d want 1", stub.streamCalls)
+	}
+	if stub.chatCalls != 0 {
+		t.Fatalf("chat_calls=%d want 0", stub.chatCalls)
+	}
+	if strings.Join(chunks, "") != "AB" {
+		t.Fatalf("chunks=%v want [A B]", chunks)
+	}
+}
+
+func TestSimpleHTTPBackend_LastReceipt_IncludesUsageAndKVCache(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "test-key")
+	t.Setenv("ANTHROPIC_MODEL", "test-model")
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("request-id", "req-abc")
+		_, _ = w.Write([]byte(`{
+			"model":"claude-test",
+			"usage":{
+				"input_tokens":100,
+				"output_tokens":20,
+				"cache_read_input_tokens":80,
+				"cache_creation_input_tokens":12
+			},
+			"content":[{"type":"text","text":"OK"}]
+		}`))
+	}))
+	t.Cleanup(srv.Close)
+	t.Setenv("ANTHROPIC_BASE_URL", srv.URL)
+
+	backend := NewSimpleHTTPBackendWithProviders(config.Default(), nil, nil).(*SimpleHTTPBackend)
+	backend.client = srv.Client()
+
+	out, err := backend.CompleteChat(context.Background(), []agentsdk.Message{
+		{Role: "system", Content: "SYS"},
+		{Role: "user", Content: "hi"},
+	}, &agentsdk.ChatCompletionOptions{
+		EnablePromptCache: true,
+		CacheEpoch:        9,
+	})
+	if err != nil {
+		t.Fatalf("complete: %v", err)
+	}
+	if strings.TrimSpace(out) != "OK" {
+		t.Fatalf("out=%q", out)
+	}
+
+	receipt := backend.LastReceipt()
+	if strings.TrimSpace(anyToString(receipt["request_id"])) != "req-abc" {
+		t.Fatalf("request_id=%v", receipt["request_id"])
+	}
+	if strings.TrimSpace(anyToString(receipt["model"])) == "" {
+		t.Fatalf("expected model in receipt, got=%v", receipt["model"])
+	}
+
+	usage, _ := receipt["usage"].(map[string]any)
+	if usage == nil {
+		t.Fatalf("expected usage map in receipt, got=%T", receipt["usage"])
+	}
+	if got := int(anyToFloat(usage["cache_read_input_tokens"])); got != 80 {
+		t.Fatalf("cache_read_input_tokens=%d want 80", got)
+	}
+
+	kv, _ := receipt["kv_cache"].(map[string]any)
+	if kv == nil {
+		t.Fatalf("expected kv_cache map in receipt, got=%T", receipt["kv_cache"])
+	}
+	if got := int(anyToFloat(kv["cache_read_input_tokens"])); got != 80 {
+		t.Fatalf("kv.cache_read_input_tokens=%d want 80", got)
+	}
+	if got := int(anyToFloat(receipt["request_cache_epoch"])); got != 9 {
+		t.Fatalf("request_cache_epoch=%d want 9", got)
+	}
+}
+
+func TestSimpleHTTPBackend_CompleteChatStream_StreamsDeltasAndStoresReceipt(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "test-key")
+	t.Setenv("ANTHROPIC_MODEL", "test-model")
+
+	gotStream := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("method=%s", r.Method)
+		}
+		raw, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read request: %v", err)
+		}
+		var req map[string]any
+		if err := json.Unmarshal(raw, &req); err != nil {
+			t.Fatalf("unmarshal request: %v", err)
+		}
+		if v, _ := req["stream"].(bool); v {
+			gotStream = true
+		}
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("request-id", "req-stream-1")
+		flusher, _ := w.(http.Flusher)
+
+		_, _ = io.WriteString(w, "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"model\":\"claude-stream\",\"usage\":{\"input_tokens\":42,\"cache_read_input_tokens\":30}}}\n\n")
+		if flusher != nil {
+			flusher.Flush()
+		}
+		_, _ = io.WriteString(w, "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"Hel\"}}\n\n")
+		if flusher != nil {
+			flusher.Flush()
+		}
+		_, _ = io.WriteString(w, "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"lo\"}}\n\n")
+		if flusher != nil {
+			flusher.Flush()
+		}
+		_, _ = io.WriteString(w, "event: message_delta\ndata: {\"type\":\"message_delta\",\"usage\":{\"output_tokens\":5}}\n\n")
+		if flusher != nil {
+			flusher.Flush()
+		}
+		_, _ = io.WriteString(w, "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n")
+		if flusher != nil {
+			flusher.Flush()
+		}
+	}))
+	t.Cleanup(srv.Close)
+	t.Setenv("ANTHROPIC_BASE_URL", srv.URL)
+
+	backend := NewSimpleHTTPBackendWithProviders(config.Default(), nil, nil).(*SimpleHTTPBackend)
+	backend.client = srv.Client()
+
+	var chunks []string
+	err := backend.CompleteChatStream(context.Background(), []agentsdk.Message{
+		{Role: "system", Content: "SYS"},
+		{Role: "user", Content: "hi"},
+	}, &agentsdk.ChatCompletionOptions{
+		EnablePromptCache: true,
+		CacheEpoch:        3,
+	}, func(chunk string) error {
+		chunks = append(chunks, chunk)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("CompleteChatStream: %v", err)
+	}
+	if !gotStream {
+		t.Fatalf("expected request stream=true")
+	}
+	if got := strings.Join(chunks, ""); got != "Hello" {
+		t.Fatalf("chunks join=%q want %q", got, "Hello")
+	}
+
+	receipt := backend.LastReceipt()
+	if strings.TrimSpace(anyToString(receipt["request_id"])) != "req-stream-1" {
+		t.Fatalf("request_id=%v", receipt["request_id"])
+	}
+	if strings.TrimSpace(anyToString(receipt["model"])) != "claude-stream" {
+		t.Fatalf("model=%v", receipt["model"])
+	}
+	usage, _ := receipt["usage"].(map[string]any)
+	if usage == nil {
+		t.Fatalf("usage missing in receipt")
+	}
+	if got := int(anyToFloat(usage["output_tokens"])); got != 5 {
+		t.Fatalf("usage.output_tokens=%d want 5", got)
+	}
+	kv, _ := receipt["kv_cache"].(map[string]any)
+	if kv == nil {
+		t.Fatalf("kv_cache missing in receipt")
+	}
+	if got := int(anyToFloat(kv["cache_read_input_tokens"])); got != 30 {
+		t.Fatalf("kv.cache_read_input_tokens=%d want 30", got)
+	}
+}
+
+func TestSimpleHTTPBackend_CompleteChatStream_PreservesWhitespaceDeltas(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "test-key")
+	t.Setenv("ANTHROPIC_MODEL", "test-model")
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("method=%s", r.Method)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher, _ := w.(http.Flusher)
+
+		_, _ = io.WriteString(w, "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"Hello\"}}\n\n")
+		if flusher != nil {
+			flusher.Flush()
+		}
+		_, _ = io.WriteString(w, "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\" \"}}\n\n")
+		if flusher != nil {
+			flusher.Flush()
+		}
+		_, _ = io.WriteString(w, "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"world\"}}\n\n")
+		if flusher != nil {
+			flusher.Flush()
+		}
+		_, _ = io.WriteString(w, "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n")
+		if flusher != nil {
+			flusher.Flush()
+		}
+	}))
+	t.Cleanup(srv.Close)
+	t.Setenv("ANTHROPIC_BASE_URL", srv.URL)
+
+	backend := NewSimpleHTTPBackendWithProviders(config.Default(), nil, nil).(*SimpleHTTPBackend)
+	backend.client = srv.Client()
+
+	var chunks []string
+	err := backend.CompleteChatStream(context.Background(), []agentsdk.Message{
+		{Role: "user", Content: "hi"},
+	}, &agentsdk.ChatCompletionOptions{
+		EnablePromptCache: true,
+	}, func(chunk string) error {
+		chunks = append(chunks, chunk)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("CompleteChatStream: %v", err)
+	}
+	if got := strings.Join(chunks, ""); got != "Hello world" {
+		t.Fatalf("chunks join=%q want %q", got, "Hello world")
+	}
+}
+
+func TestSimpleHTTPBackend_CompleteChatStream_FallsBackToJSONWhenProviderNoSSE(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "test-key")
+	t.Setenv("ANTHROPIC_MODEL", "test-model")
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("method=%s", r.Method)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("request-id", "req-json-fallback")
+		_, _ = io.WriteString(w, `{"model":"claude-json","usage":{"input_tokens":11,"output_tokens":3},"content":[{"type":"text","text":"OK"}]}`)
+	}))
+	t.Cleanup(srv.Close)
+	t.Setenv("ANTHROPIC_BASE_URL", srv.URL)
+
+	backend := NewSimpleHTTPBackendWithProviders(config.Default(), nil, nil).(*SimpleHTTPBackend)
+	backend.client = srv.Client()
+
+	var chunks []string
+	err := backend.CompleteChatStream(context.Background(), []agentsdk.Message{
+		{Role: "user", Content: "hi"},
+	}, &agentsdk.ChatCompletionOptions{
+		EnablePromptCache: true,
+	}, func(chunk string) error {
+		chunks = append(chunks, chunk)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("CompleteChatStream fallback: %v", err)
+	}
+	if got := strings.Join(chunks, ""); got != "OK" {
+		t.Fatalf("chunks join=%q want %q", got, "OK")
+	}
+
+	receipt := backend.LastReceipt()
+	if strings.TrimSpace(anyToString(receipt["request_id"])) != "req-json-fallback" {
+		t.Fatalf("request_id=%v", receipt["request_id"])
+	}
+	if strings.TrimSpace(anyToString(receipt["model"])) != "claude-json" {
+		t.Fatalf("model=%v", receipt["model"])
+	}
+}
+
+func anyToString(v any) string {
+	if s, ok := v.(string); ok {
+		return s
+	}
+	return ""
+}
+
+func anyToFloat(v any) float64 {
+	switch x := v.(type) {
+	case float64:
+		return x
+	case float32:
+		return float64(x)
+	case int:
+		return float64(x)
+	case int64:
+		return float64(x)
+	default:
+		return 0
 	}
 }

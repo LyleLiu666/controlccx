@@ -38,6 +38,26 @@ type Service struct {
 
 type Option func(*Service)
 
+// SendHooks exposes best-effort streaming signals from secretary Send.
+// All callbacks are optional.
+type SendHooks struct {
+	// OnVisibleDelta receives visible assistant text chunks as they stream.
+	// Returning an error aborts the send.
+	OnVisibleDelta func(delta string) error
+
+	// OnTrace receives trace/thinking lines from the tool loop.
+	OnTrace func(step int, message string)
+
+	// OnToolCall receives structured tool call events.
+	OnToolCall func(step int, event agentsdk.ToolCallEvent)
+
+	// OnToolResult receives structured tool result events.
+	OnToolResult func(step int, event agentsdk.ToolResultEvent)
+
+	// OnError receives loop-level errors emitted by the agent runtime.
+	OnError func(step int, message string)
+}
+
 func WithClient(client agentsdk.Client) Option {
 	return func(s *Service) {
 		s.client = client
@@ -81,6 +101,14 @@ func NewService(cfg config.Config, taskStore *tasks.Store, chatStore *chat.Store
 }
 
 func (s *Service) Send(ctx context.Context, userText string) (string, error) {
+	return s.send(ctx, userText, nil)
+}
+
+func (s *Service) SendStream(ctx context.Context, userText string, hooks *SendHooks) (string, error) {
+	return s.send(ctx, userText, hooks)
+}
+
+func (s *Service) send(ctx context.Context, userText string, hooks *SendHooks) (string, error) {
 	if s == nil || s.tasks == nil {
 		return "", fmt.Errorf("secretary: tasks store is required")
 	}
@@ -105,14 +133,18 @@ func (s *Service) Send(ctx context.Context, userText string) (string, error) {
 		client = &llm.Client{Backend: backend}
 	}
 
-	var sink agentsdk.EventSink
+	var sinks []agentsdk.EventSink
 	var runID string
 	if s.events != nil {
 		runID = newRunID()
-		sink = agentsdk.EventSinkFunc(func(ctx context.Context, ev agentsdk.Event) {
+		sinks = append(sinks, agentsdk.EventSinkFunc(func(ctx context.Context, ev agentsdk.Event) {
 			_ = s.events.Append(ctx, runID, ev)
-		})
+		}))
 	}
+	if hookSink := hookEventSink(hooks); hookSink != nil {
+		sinks = append(sinks, hookSink)
+	}
+	sink := composeEventSink(sinks...)
 
 	promptHistory, err := s.promptHistory(ctx, client, runID)
 	if err != nil {
@@ -124,15 +156,20 @@ func (s *Service) Send(ctx context.Context, userText string) (string, error) {
 	messages = append(messages, promptHistory...)
 	messages = append(messages, agentsdk.Message{Role: "user", Content: msg})
 
+	callbacks := xmlprotocol.Callbacks{
+		EventSink: sink,
+	}
+	if hooks != nil && hooks.OnVisibleDelta != nil {
+		callbacks.OnContent = hooks.OnVisibleDelta
+	}
+
 	out, runErr := xmlprotocol.RunLoop(ctx, xmlprotocol.RunLoopInput{
 		Client:     client,
 		Messages:   messages,
 		LLMOptions: s.llmOptionsBestEffort(ctx),
 		Executor:   reg,
 		MaxSteps:   60,
-		Callbacks: xmlprotocol.Callbacks{
-			EventSink: sink,
-		},
+		Callbacks:  callbacks,
 	})
 
 	reply := strings.TrimSpace(out)
@@ -141,6 +178,18 @@ func (s *Service) Send(ctx context.Context, userText string) (string, error) {
 	}
 	if reply == "" {
 		reply = "秘书没有返回内容，请重试。"
+	}
+
+	if s.events != nil && strings.TrimSpace(runID) != "" {
+		if receipt, ok := providerReceiptBestEffort(client); ok && len(receipt) > 0 {
+			_ = s.events.Append(ctx, runID, agentsdk.Event{
+				Kind:     agentsdk.EventKindProviderReceipt,
+				Protocol: "http",
+				Step:     0,
+				Time:     time.Now().UTC(),
+				Payload:  receipt,
+			})
+		}
 	}
 
 	if _, err := s.chat.Append(ctx, chat.RoleUser, msg); err != nil {
@@ -154,6 +203,91 @@ func (s *Service) Send(ctx context.Context, userText string) (string, error) {
 		_ = s.events.PruneKeepLastRuns(ctx, 200)
 	}
 	return reply, nil
+}
+
+func composeEventSink(sinks ...agentsdk.EventSink) agentsdk.EventSink {
+	active := make([]agentsdk.EventSink, 0, len(sinks))
+	for _, s := range sinks {
+		if s != nil {
+			active = append(active, s)
+		}
+	}
+	switch len(active) {
+	case 0:
+		return nil
+	case 1:
+		return active[0]
+	default:
+		return agentsdk.EventSinkFunc(func(ctx context.Context, ev agentsdk.Event) {
+			for _, s := range active {
+				s.OnEvent(ctx, ev)
+			}
+		})
+	}
+}
+
+func hookEventSink(hooks *SendHooks) agentsdk.EventSink {
+	if hooks == nil {
+		return nil
+	}
+	if hooks.OnTrace == nil && hooks.OnToolCall == nil && hooks.OnToolResult == nil && hooks.OnError == nil {
+		return nil
+	}
+	return agentsdk.EventSinkFunc(func(ctx context.Context, ev agentsdk.Event) {
+		_ = ctx
+		switch ev.Kind {
+		case agentsdk.EventKindTrace:
+			if hooks.OnTrace == nil {
+				return
+			}
+			if payload, ok := ev.Payload.(agentsdk.TraceEvent); ok {
+				hooks.OnTrace(ev.Step, strings.TrimSpace(payload.Message))
+			}
+		case agentsdk.EventKindToolCall:
+			if hooks.OnToolCall == nil {
+				return
+			}
+			if payload, ok := ev.Payload.(agentsdk.ToolCallEvent); ok {
+				hooks.OnToolCall(ev.Step, payload)
+			}
+		case agentsdk.EventKindToolResult:
+			if hooks.OnToolResult == nil {
+				return
+			}
+			if payload, ok := ev.Payload.(agentsdk.ToolResultEvent); ok {
+				hooks.OnToolResult(ev.Step, payload)
+			}
+		case agentsdk.EventKindError:
+			if hooks.OnError == nil {
+				return
+			}
+			if payload, ok := ev.Payload.(agentsdk.ErrorEvent); ok {
+				hooks.OnError(ev.Step, strings.TrimSpace(payload.Error))
+			}
+		}
+	})
+}
+
+func providerReceiptBestEffort(client agentsdk.Client) (map[string]any, bool) {
+	if client == nil {
+		return nil, false
+	}
+	c, ok := client.(*llm.Client)
+	if !ok || c == nil || c.Backend == nil {
+		return nil, false
+	}
+	type receiptProvider interface {
+		LastReceipt() map[string]any
+	}
+	p, ok := c.Backend.(receiptProvider)
+	if !ok || p == nil {
+		return nil, false
+	}
+	receipt := p.LastReceipt()
+	if len(receipt) == 0 {
+		return nil, false
+	}
+	return receipt, true
 }
 
 func (s *Service) History(ctx context.Context, limit int) ([]chat.Message, error) {

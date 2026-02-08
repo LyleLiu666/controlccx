@@ -858,6 +858,23 @@ func (s *Service) getSecretaryChatDetail(ctx context.Context, id int64) (EntryDe
 		return EntryDetail{}, fmt.Errorf("audit: get secretary_chat detail: %w", err)
 	}
 	text := strings.TrimSpace(content)
+	meta := map[string]any{
+		"role": role,
+	}
+	if strings.EqualFold(strings.TrimSpace(role), "assistant") {
+		telemetry, err := s.secretaryChatTelemetry(ctx, ts)
+		if err == nil {
+			if strings.TrimSpace(telemetry.RunID) != "" {
+				meta["run_id"] = strings.TrimSpace(telemetry.RunID)
+			}
+			if len(telemetry.KVCache) > 0 {
+				meta["kv_cache"] = telemetry.KVCache
+			}
+			if len(telemetry.ProviderReceipt) > 0 {
+				meta["provider_receipt"] = telemetry.ProviderReceipt
+			}
+		}
+	}
 	return EntryDetail{
 		Entry: Entry{
 			ID:         fmt.Sprintf("%s:%d", SourceSecretaryChat, id),
@@ -867,11 +884,273 @@ func (s *Service) getSecretaryChatDetail(ctx context.Context, id int64) (EntryDe
 			Summary:    truncateRunes(text, 240),
 			RawPreview: truncateRunes(text, 1200),
 		},
-		Raw: text,
-		Meta: map[string]any{
-			"role": role,
-		},
+		Raw:  text,
+		Meta: meta,
 	}, nil
+}
+
+type secretaryChatTelemetryMeta struct {
+	RunID           string
+	KVCache         map[string]any
+	ProviderReceipt map[string]any
+}
+
+func (s *Service) secretaryChatTelemetry(ctx context.Context, chatTs int64) (secretaryChatTelemetryMeta, error) {
+	if s == nil || s.db == nil {
+		return secretaryChatTelemetryMeta{}, errors.New("audit: service not initialized")
+	}
+	if chatTs <= 0 {
+		return secretaryChatTelemetryMeta{}, nil
+	}
+
+	var runID string
+	err := s.db.QueryRowContext(ctx, `
+		SELECT run_id
+		FROM secretary_events
+		WHERE ts <= ?
+		ORDER BY ts DESC, id DESC
+		LIMIT 1;
+	`, chatTs).Scan(&runID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return secretaryChatTelemetryMeta{}, nil
+		}
+		return secretaryChatTelemetryMeta{}, fmt.Errorf("audit: secretary chat telemetry run: %w", err)
+	}
+	runID = strings.TrimSpace(runID)
+	if runID == "" {
+		return secretaryChatTelemetryMeta{}, nil
+	}
+
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT kind, event_json
+		FROM secretary_events
+		WHERE run_id = ?
+		ORDER BY id ASC;
+	`, runID)
+	if err != nil {
+		return secretaryChatTelemetryMeta{}, fmt.Errorf("audit: secretary chat telemetry events: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	out := secretaryChatTelemetryMeta{RunID: runID}
+
+	for rows.Next() {
+		var (
+			kind     string
+			eventRaw string
+		)
+		if err := rows.Scan(&kind, &eventRaw); err != nil {
+			return secretaryChatTelemetryMeta{}, fmt.Errorf("audit: secretary chat telemetry scan: %w", err)
+		}
+
+		parsedKind, payload := parseSecretaryEventPayload(kind, eventRaw)
+		switch parsedKind {
+		case "llm_request":
+			if reqKV := extractKVCacheFromLLMRequestPayload(payload); len(reqKV) > 0 && len(out.KVCache) == 0 {
+				out.KVCache = reqKV
+			}
+		case "provider_receipt":
+			if len(payload) > 0 {
+				out.ProviderReceipt = cloneMapAny(payload)
+			}
+			if kv := extractKVCacheFromProviderReceipt(payload); len(kv) > 0 {
+				out.KVCache = kv
+			}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return secretaryChatTelemetryMeta{}, fmt.Errorf("audit: secretary chat telemetry rows: %w", err)
+	}
+	return out, nil
+}
+
+func parseSecretaryEventPayload(kind string, eventRaw string) (string, map[string]any) {
+	rowKind := strings.ToLower(strings.TrimSpace(kind))
+	rawText := strings.TrimSpace(eventRaw)
+	if rawText == "" {
+		return rowKind, nil
+	}
+	var root map[string]any
+	if err := json.Unmarshal([]byte(rawText), &root); err != nil || len(root) == 0 {
+		return rowKind, nil
+	}
+
+	kindVal := strings.TrimSpace(anyStringValue(root["kind"]))
+	if kindVal == "" {
+		kindVal = strings.TrimSpace(anyStringValue(root["Kind"]))
+	}
+	if kindVal != "" {
+		rowKind = strings.ToLower(kindVal)
+	}
+
+	payload := anyMapValue(root["payload"])
+	if payload == nil {
+		payload = anyMapValue(root["Payload"])
+	}
+	if payload == nil {
+		payload = cloneMapAny(root)
+	}
+	return rowKind, payload
+}
+
+func extractKVCacheFromLLMRequestPayload(payload map[string]any) map[string]any {
+	if len(payload) == 0 {
+		return nil
+	}
+	opts := anyMapValue(payload["options"])
+	if opts == nil {
+		opts = anyMapValue(payload["Options"])
+	}
+	if len(opts) == 0 {
+		return nil
+	}
+	out := map[string]any{}
+	if v, ok := anyBoolValue(opts["enable_prompt_cache"]); ok {
+		out["request_prompt_cache_enabled"] = v
+	} else if v, ok := anyBoolValue(opts["EnablePromptCache"]); ok {
+		out["request_prompt_cache_enabled"] = v
+	}
+
+	if v, ok := anyIntValue(opts["cache_epoch"]); ok {
+		out["request_cache_epoch"] = v
+	} else if v, ok := anyIntValue(opts["CacheEpoch"]); ok {
+		out["request_cache_epoch"] = v
+	}
+
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func extractKVCacheFromProviderReceipt(payload map[string]any) map[string]any {
+	if len(payload) == 0 {
+		return nil
+	}
+	out := map[string]any{}
+
+	if kv := anyMapValue(payload["kv_cache"]); len(kv) > 0 {
+		for k, v := range kv {
+			out[k] = v
+		}
+	}
+
+	if usage := anyMapValue(payload["usage"]); len(usage) > 0 {
+		for _, key := range []string{"cache_read_input_tokens", "cache_creation_input_tokens", "cached_input_tokens"} {
+			if n, ok := anyIntValue(usage[key]); ok {
+				out[key] = n
+			}
+		}
+		if promptDetails := anyMapValue(usage["prompt_tokens_details"]); len(promptDetails) > 0 {
+			if n, ok := anyIntValue(promptDetails["cached_tokens"]); ok {
+				out["prompt_cached_tokens"] = n
+			}
+		}
+	}
+
+	for _, key := range []string{"request_prompt_cache_enabled", "request_cache_epoch", "request_cache_marked_blocks"} {
+		if v, ok := payload[key]; ok {
+			out[key] = v
+		}
+	}
+
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func anyMapValue(v any) map[string]any {
+	m, _ := v.(map[string]any)
+	if len(m) == 0 {
+		return nil
+	}
+	return m
+}
+
+func anyStringValue(v any) string {
+	s, _ := v.(string)
+	return strings.TrimSpace(s)
+}
+
+func anyBoolValue(v any) (bool, bool) {
+	switch x := v.(type) {
+	case bool:
+		return x, true
+	default:
+		return false, false
+	}
+}
+
+func anyIntValue(v any) (int64, bool) {
+	switch x := v.(type) {
+	case int:
+		return int64(x), true
+	case int8:
+		return int64(x), true
+	case int16:
+		return int64(x), true
+	case int32:
+		return int64(x), true
+	case int64:
+		return x, true
+	case uint:
+		return int64(x), true
+	case uint8:
+		return int64(x), true
+	case uint16:
+		return int64(x), true
+	case uint32:
+		return int64(x), true
+	case uint64:
+		if x > uint64(^uint(0)>>1) {
+			return 0, false
+		}
+		return int64(x), true
+	case float32:
+		return int64(x), true
+	case float64:
+		return int64(x), true
+	default:
+		return 0, false
+	}
+}
+
+func cloneMapAny(in map[string]any) map[string]any {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]any, len(in))
+	for k, v := range in {
+		switch x := v.(type) {
+		case map[string]any:
+			out[k] = cloneMapAny(x)
+		case []any:
+			out[k] = cloneSliceAny(x)
+		default:
+			out[k] = x
+		}
+	}
+	return out
+}
+
+func cloneSliceAny(in []any) []any {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]any, 0, len(in))
+	for _, v := range in {
+		switch x := v.(type) {
+		case map[string]any:
+			out = append(out, cloneMapAny(x))
+		case []any:
+			out = append(out, cloneSliceAny(x))
+		default:
+			out = append(out, x)
+		}
+	}
+	return out
 }
 
 func parseStringArray(raw string) []string {
