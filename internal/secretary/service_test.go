@@ -351,3 +351,92 @@ func TestService_Send_SerializesConcurrentRequests(t *testing.T) {
 		t.Fatalf("unexpected msg3: %+v", hist[3])
 	}
 }
+
+func TestService_Send_AutoCompressesHistory(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "controlccx.db")
+
+	conn, err := db.Open(ctx, db.Options{Path: dbPath})
+	if err != nil {
+		t.Fatalf("db open: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+
+	taskStore := tasks.NewStore(conn)
+	chatStore := chat.NewStore(conn)
+	compressStore := NewCompressionStore(conn)
+
+	// Seed a long-enough history to force compression with a small max context.
+	for i := 0; i < 6; i++ { // 12 messages
+		if _, err := chatStore.Append(ctx, chat.RoleUser, strings.Repeat("u", 600)); err != nil {
+			t.Fatalf("append user: %v", err)
+		}
+		if _, err := chatStore.Append(ctx, chat.RoleAssistant, strings.Repeat("a", 600)); err != nil {
+			t.Fatalf("append assistant: %v", err)
+		}
+	}
+
+	c := &scriptedClient{
+		responses: []string{
+			"这是压缩后的摘要",
+			"final",
+		},
+	}
+
+	compOpts := DefaultCompressionOptions()
+	compOpts.MaxContextRunes = 2000
+	compOpts.KeepTextMessages = 4
+	compOpts.MaxCompressionSteps = 1
+
+	svc := NewService(
+		config.Default(),
+		taskStore,
+		chatStore,
+		nil,
+		nil,
+		WithClient(c),
+		WithCompressionStore(compressStore),
+		WithCompressionOptions(compOpts),
+	)
+
+	reply, err := svc.Send(ctx, "hi")
+	if err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	if strings.TrimSpace(reply) != "final" {
+		t.Fatalf("reply=%q", reply)
+	}
+
+	rec, ok, err := compressStore.Latest(ctx)
+	if err != nil {
+		t.Fatalf("latest compression: %v", err)
+	}
+	if !ok {
+		t.Fatalf("expected compression record")
+	}
+	if strings.TrimSpace(rec.Summary) != "这是压缩后的摘要" {
+		t.Fatalf("summary=%q", rec.Summary)
+	}
+	if rec.CursorAfter <= 0 {
+		t.Fatalf("expected cursor_after to advance, got %d", rec.CursorAfter)
+	}
+
+	if len(c.messages) != 2 {
+		t.Fatalf("expected 2 llm calls (compress + answer), got %d", len(c.messages))
+	}
+	main := c.messages[1]
+	if len(main) > 10 {
+		t.Fatalf("expected compressed prompt history, got %d messages", len(main))
+	}
+
+	hasSummary := false
+	for _, m := range main {
+		if m.Role == "system" && strings.Contains(m.Content, "对话摘要") {
+			hasSummary = true
+			break
+		}
+	}
+	if !hasSummary {
+		t.Fatalf("expected summary to be injected into main prompt")
+	}
+}

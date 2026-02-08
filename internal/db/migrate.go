@@ -146,6 +146,16 @@ func Migrate(ctx context.Context, conn *sql.DB) error {
 			event_json TEXT NOT NULL
 		);`,
 		`CREATE INDEX IF NOT EXISTS idx_secretary_events_run_id_id ON secretary_events(run_id, id);`,
+		`CREATE TABLE IF NOT EXISTS secretary_compressions (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			ts INTEGER NOT NULL,
+			cursor_before INTEGER NOT NULL,
+			cursor_after INTEGER NOT NULL,
+			keep_from INTEGER NOT NULL,
+			summary TEXT NOT NULL,
+			backend TEXT NOT NULL DEFAULT '',
+			error TEXT NOT NULL DEFAULT ''
+		);`,
 	)
 
 	for _, stmt := range stmts {

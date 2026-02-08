@@ -25,12 +25,15 @@ type Service struct {
 	tasks     *tasks.Store
 	chat      *chat.Store
 	events    *EventStore
+	compress  *CompressionStore
 	auth      *auth.Store
 	providers *providers.Store
 
 	client agentsdk.Client
 
 	sendMu sync.Mutex
+
+	compressOpts CompressionOptions
 }
 
 type Option func(*Service)
@@ -47,19 +50,33 @@ func WithEventStore(store *EventStore) Option {
 	}
 }
 
+func WithCompressionStore(store *CompressionStore) Option {
+	return func(s *Service) {
+		s.compress = store
+	}
+}
+
+func WithCompressionOptions(opts CompressionOptions) Option {
+	return func(s *Service) {
+		s.compressOpts = opts
+	}
+}
+
 func NewService(cfg config.Config, taskStore *tasks.Store, chatStore *chat.Store, authStore *auth.Store, providersStore *providers.Store, opts ...Option) *Service {
 	s := &Service{
-		cfg:       cfg,
-		tasks:     taskStore,
-		chat:      chatStore,
-		auth:      authStore,
-		providers: providersStore,
+		cfg:          cfg,
+		tasks:        taskStore,
+		chat:         chatStore,
+		auth:         authStore,
+		providers:    providersStore,
+		compressOpts: DefaultCompressionOptions(),
 	}
 	for _, opt := range opts {
 		if opt != nil {
 			opt(s)
 		}
 	}
+	s.compressOpts = normalizeCompressionOptions(s.compressOpts)
 	return s
 }
 
@@ -80,11 +97,6 @@ func (s *Service) Send(ctx context.Context, userText string) (string, error) {
 	s.sendMu.Lock()
 	defer s.sendMu.Unlock()
 
-	history, err := s.History(ctx, 40)
-	if err != nil {
-		return "", err
-	}
-
 	reg := newToolRegistry(s.tasks)
 
 	client := s.client
@@ -92,21 +104,6 @@ func (s *Service) Send(ctx context.Context, userText string) (string, error) {
 		backend := s.selectBackend()
 		client = &llm.Client{Backend: backend}
 	}
-
-	messages := make([]agentsdk.Message, 0, 1+len(history)+1)
-	messages = append(messages, agentsdk.Message{Role: "system", Content: systemPrompt})
-	for _, m := range history {
-		role := strings.TrimSpace(string(m.Role))
-		if role == "" {
-			role = "user"
-		}
-		content := truncateRunes(strings.TrimSpace(m.Content), 2000)
-		if content == "" {
-			continue
-		}
-		messages = append(messages, agentsdk.Message{Role: role, Content: content})
-	}
-	messages = append(messages, agentsdk.Message{Role: "user", Content: msg})
 
 	var sink agentsdk.EventSink
 	var runID string
@@ -116,6 +113,16 @@ func (s *Service) Send(ctx context.Context, userText string) (string, error) {
 			_ = s.events.Append(ctx, runID, ev)
 		})
 	}
+
+	promptHistory, err := s.promptHistory(ctx, client, runID)
+	if err != nil {
+		return "", err
+	}
+
+	messages := make([]agentsdk.Message, 0, 1+len(promptHistory)+1)
+	messages = append(messages, agentsdk.Message{Role: "system", Content: systemPrompt})
+	messages = append(messages, promptHistory...)
+	messages = append(messages, agentsdk.Message{Role: "user", Content: msg})
 
 	out, runErr := xmlprotocol.RunLoop(ctx, xmlprotocol.RunLoopInput{
 		Client:   client,
