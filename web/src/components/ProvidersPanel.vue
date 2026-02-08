@@ -61,7 +61,7 @@ const emit = defineEmits<{
   (e: "close"): void;
   (e: "newProfile"): void;
   (e: "refresh"): void;
-  (e: "importLive"): void;
+  (e: "importFile"): void;
   (e: "importEnv", target: "claude" | "codex" | "secretary"): void;
   (e: "export", includeSecrets: boolean): void;
   (e: "speedtest", target: "claude" | "codex"): void;
@@ -387,14 +387,11 @@ watch(
         <button type="button" class="headerMiniBtn" @click="emit('refresh')" :disabled="loading || saving">
           刷新
         </button>
-        <button type="button" class="headerMiniBtn" @click="emit('importLive')" :disabled="loading || saving">
-          从 AUTH 文件导入
-        </button>
-        <button type="button" class="headerMiniBtn" @click="emit('export', false)" :disabled="loading || saving">
-          导出
+        <button type="button" class="headerMiniBtn" @click="emit('importFile')" :disabled="loading || saving">
+          导入
         </button>
         <button type="button" class="headerMiniBtn" @click="emit('export', true)" :disabled="loading || saving">
-          导出密钥
+          导出
         </button>
         <button type="button" class="headerMiniBtn" @click="emit('close')">
           返回
@@ -496,7 +493,7 @@ watch(
                 </div>
 
                 <div class="providersOverviewHint tinyHint">
-                  提示：如你已有本机 AUTH 文件，可直接点右上角“从 AUTH 文件导入”自动生成一套配置。
+                  提示：可导入已导出的 providers 备份文件（合并导入；同名会自动加后缀）。
                 </div>
               </div>
             </template>

@@ -301,6 +301,108 @@ func TestAPI_Providers_Upsert_RejectsDuplicateName(t *testing.T) {
 	}
 }
 
+func TestAPI_Providers_Import_MergeAndRenameOnDuplicateNames(t *testing.T) {
+	dataDir := t.TempDir()
+	providersStore, err := providers.NewStore(dataDir)
+	if err != nil {
+		t.Fatalf("providers.NewStore: %v", err)
+	}
+	authStore, err := auth.Load(filepath.Join(dataDir, "secrets.json"))
+	if err != nil {
+		t.Fatalf("auth.Load: %v", err)
+	}
+
+	_, err = providersStore.Upsert(providers.Profile{
+		Name: "Current",
+		Tool: "claude",
+		Targets: providers.Targets{
+			Claude: providers.ClaudeTarget{
+				BaseURL: "https://example.invalid",
+				Model:   "claude-3-7-sonnet",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("seed existing profile: %v", err)
+	}
+
+	apiSvc := &API{Providers: providersStore, Auth: authStore}
+	srv := httptest.NewServer(apiSvc.Handler())
+	t.Cleanup(srv.Close)
+
+	reqBody, _ := json.Marshal(map[string]any{
+		"profiles": []providers.Profile{
+			{
+				ID:   "import-fixed-id-1",
+				Name: "Current",
+				Tool: "claude",
+				Targets: providers.Targets{
+					Claude: providers.ClaudeTarget{
+						BaseURL:   "https://api.anthropic.com",
+						AuthToken: "sk-ant-import-123456",
+						Model:     "claude-import-a",
+					},
+				},
+			},
+			{
+				ID:   "import-fixed-id-2",
+				Name: "Current",
+				Tool: "codex",
+				Targets: providers.Targets{
+					Codex: providers.CodexTarget{
+						BaseURL: "https://api.openai.com",
+						APIKey:  "sk-openai-import-123456",
+						Model:   "gpt-5",
+					},
+				},
+			},
+		},
+	})
+	res, err := http.Post(srv.URL+"/api/providers/import", "application/json", bytes.NewReader(reqBody))
+	if err != nil {
+		t.Fatalf("post providers import: %v", err)
+	}
+	defer res.Body.Close()
+	rawBody, _ := io.ReadAll(res.Body)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("providers import status=%d, want 200; body=%s", res.StatusCode, string(rawBody))
+	}
+
+	var body struct {
+		Imported []providers.Profile `json:"imported"`
+	}
+	if err := json.Unmarshal(rawBody, &body); err != nil {
+		t.Fatalf("decode providers import: %v", err)
+	}
+	if len(body.Imported) != 2 {
+		t.Fatalf("imported len=%d, want 2", len(body.Imported))
+	}
+
+	if got := body.Imported[0].Name; got != "Current (导入)" {
+		t.Fatalf("first imported name=%q, want %q", got, "Current (导入)")
+	}
+	if got := body.Imported[1].Name; got != "Current (导入 2)" {
+		t.Fatalf("second imported name=%q, want %q", got, "Current (导入 2)")
+	}
+	if got := strings.TrimSpace(body.Imported[0].ID); got == "" || got == "import-fixed-id-1" {
+		t.Fatalf("first imported id=%q, expected new generated id", got)
+	}
+	if got := strings.TrimSpace(body.Imported[1].ID); got == "" || got == "import-fixed-id-2" {
+		t.Fatalf("second imported id=%q, expected new generated id", got)
+	}
+	if got := body.Imported[0].Targets.Claude.AuthToken; got == "sk-ant-import-123456" {
+		t.Fatalf("expected imported auth token masked in response")
+	}
+	if got := body.Imported[1].Targets.Codex.APIKey; got == "sk-openai-import-123456" {
+		t.Fatalf("expected imported api key masked in response")
+	}
+
+	profiles := providersStore.Profiles()
+	if len(profiles) != 3 {
+		t.Fatalf("store profiles len=%d, want 3", len(profiles))
+	}
+}
+
 func TestAPI_Providers_ImportEnv(t *testing.T) {
 	dataDir := t.TempDir()
 	providersStore, err := providers.NewStore(dataDir)

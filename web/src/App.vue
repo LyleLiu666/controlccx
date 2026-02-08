@@ -49,7 +49,7 @@ import {
   activateProvider,
   speedtestProvider,
   pingtestProvider,
-  importProvidersLive,
+  importProviders,
   importProviderEnv,
   exportProviders,
   fsDelete,
@@ -4555,14 +4555,64 @@ async function runProviderPingTest() {
   }
 }
 
-async function importProvidersFromLive() {
+async function pickProvidersImportFile(): Promise<File | null> {
+  if (typeof document === "undefined") return null;
+  return await new Promise((resolve) => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".json,application/json";
+    input.style.display = "none";
+    document.body.appendChild(input);
+
+    let settled = false;
+    const cleanup = () => {
+      input.removeEventListener("change", onChange);
+      window.removeEventListener("focus", onFocus);
+      input.remove();
+    };
+    const done = (file: File | null) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve(file);
+    };
+    const onChange = () => {
+      done(input.files?.[0] ?? null);
+    };
+    const onFocus = () => {
+      window.setTimeout(() => done(input.files?.[0] ?? null), 0);
+    };
+
+    input.addEventListener("change", onChange, { once: true });
+    window.addEventListener("focus", onFocus, { once: true });
+    input.click();
+  });
+}
+
+async function importProvidersFromFile() {
   providersError.value = "";
+  const file = await pickProvidersImportFile();
+  if (!file) return;
+
+  let payload: any = null;
+  try {
+    payload = JSON.parse(await file.text());
+  } catch {
+    providersError.value = "导入文件不是有效的 JSON";
+    return;
+  }
+  if (!payload || typeof payload !== "object" || !Array.isArray(payload.profiles)) {
+    providersError.value = "导入文件格式不正确：缺少 profiles 数组";
+    return;
+  }
+
   providersSaving.value = true;
   try {
-    const res = await importProvidersLive({ name: "Current" });
-    await refreshProviders(res.profile.id);
+    const res = await importProviders(payload);
+    const importedFirstID = String(res?.imported?.[0]?.id ?? "").trim();
+    await refreshProviders(importedFirstID);
   } catch (e: any) {
-    providersError.value = e?.message ?? String(e);
+    providersError.value = providerErrorMessage(e);
   } finally {
     providersSaving.value = false;
   }
@@ -6091,7 +6141,7 @@ watch(
         @close="closeProvidersPage"
         @newProfile="startNewProvider"
         @refresh="refreshProviders"
-        @importLive="importProvidersFromLive"
+        @importFile="importProvidersFromFile"
         @importEnv="importProvidersFromEnv"
         @export="exportProvidersToFile"
         @speedtest="runProviderSpeedTest"

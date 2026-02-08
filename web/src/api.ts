@@ -8,6 +8,7 @@ import type {
   ProviderActivateResponse,
   ProviderDeleteResponse,
   ProviderImportEnvResponse,
+  ProviderImportResponse,
   ProviderExportResponse,
   ProviderImportLiveResponse,
   ProviderProfile,
@@ -518,6 +519,10 @@ export async function importProviderEnv(input: {
   target: "claude" | "codex" | "secretary";
 }): Promise<ProviderImportEnvResponse> {
   return postJSON<ProviderImportEnvResponse>("/api/providers/import/env", input);
+}
+
+export async function importProviders(input: ProviderExportResponse): Promise<ProviderImportResponse> {
+  return postJSON<ProviderImportResponse>("/api/providers/import", input);
 }
 
 export async function exportProviders(includeSecrets: boolean): Promise<ProviderExportResponse> {

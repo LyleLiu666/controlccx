@@ -566,3 +566,8 @@ export type ProviderExportResponse = {
   active: ProviderActiveSelection;
   hint?: string;
 };
+
+export type ProviderImportResponse = {
+  imported: ProviderProfile[];
+  count?: number;
+};

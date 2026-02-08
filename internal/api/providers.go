@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -408,6 +409,87 @@ func (a *API) handleProvidersPing(w http.ResponseWriter, r *http.Request) {
 
 	res := providers.PingTest(r.Context(), cfg, providers.PingTestOptions{Timeout: timeout})
 	writeJSON(w, map[string]any{"result": res})
+}
+
+func (a *API) handleProvidersImport(w http.ResponseWriter, r *http.Request) {
+	if !isLoopbackRequest(r) {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if a.Providers == nil {
+		http.Error(w, "providers store not configured", http.StatusServiceUnavailable)
+		return
+	}
+
+	var body struct {
+		Profiles []providers.Profile `json:"profiles"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+	if len(body.Profiles) == 0 {
+		http.Error(w, "profiles are required", http.StatusBadRequest)
+		return
+	}
+
+	usedNames := make(map[string]bool, len(body.Profiles)+8)
+	for _, p := range a.Providers.Profiles() {
+		k := providerNameKey(p.Name)
+		if k != "" {
+			usedNames[k] = true
+		}
+	}
+
+	imported := make([]providers.Profile, 0, len(body.Profiles))
+	for _, p := range body.Profiles {
+		p.ID = ""
+		p.Name = nextImportedProviderName(p.Name, usedNames)
+		saved, err := a.Providers.Upsert(p)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		imported = append(imported, providers.MaskProfile(saved))
+	}
+
+	writeJSON(w, map[string]any{
+		"imported": imported,
+		"count":    len(imported),
+	})
+}
+
+func providerNameKey(name string) string {
+	return strings.ToLower(strings.TrimSpace(name))
+}
+
+func nextImportedProviderName(name string, used map[string]bool) string {
+	base := strings.TrimSpace(name)
+	if base == "" {
+		base = "导入配置"
+	}
+
+	if key := providerNameKey(base); !used[key] {
+		used[key] = true
+		return base
+	}
+
+	for i := 1; ; i++ {
+		suffix := " (导入)"
+		if i > 1 {
+			suffix = fmt.Sprintf(" (导入 %d)", i)
+		}
+		candidate := base + suffix
+		key := providerNameKey(candidate)
+		if !used[key] {
+			used[key] = true
+			return candidate
+		}
+	}
 }
 
 func (a *API) handleProvidersImportLive(w http.ResponseWriter, r *http.Request) {
