@@ -118,6 +118,11 @@ import { useSessionWorkspace } from "./composables/useSessionWorkspace";
 import { shouldDismissRunLaunchMask } from "./runLaunchMask";
 import { buildSkillMountPlan, type SkillMountConfirmItem } from "./skillsPreflight";
 import { listRunningSessionCandidates, type RunningSessionCandidate } from "./runningSessions";
+import {
+  listRecentWorkspacePaths,
+  mergeWorkspaceRecents,
+  rememberWorkspacePath,
+} from "./workspaceRecents";
 
 type CreateTaskPayload = {
   worker_type: WorkerType;
@@ -1709,6 +1714,7 @@ const LS_KEY_PINNED_WORKSPACES = "controlccx.pinned_workspaces.v1";
 const LS_KEY_PINNED_WORKSPACE_NAMES = "controlccx.pinned_workspace_names.v1";
 const LS_KEY_WORKSPACE_FILTER = "controlccx.workspace_filter.v1";
 const LS_KEY_WORKSPACE_FILTERS = "controlccx.workspace_filters.v1";
+const LS_KEY_WORKSPACE_RECENTS = "controlccx.workspace_recents.v1";
 const LS_KEY_THEME = "controlccx.theme.v1";
 const LS_KEY_FX_REDUCED = "controlccx.fx.reduced.v1";
 const LS_KEY_FEED_SCOPE = "controlccx.feed.scope.v1";
@@ -1718,6 +1724,7 @@ const LS_KEY_LIVE_FULL = "controlccx.live.full.v1";
 const LS_KEY_LIVE_WIDTH = "controlccx.live.width.v1";
 const LS_KEY_COACH_FEED = "controlccx.coach.feed.v1";
 const LS_KEY_SHOW_DELETED_SESSIONS = "controlccx.sessions.show_deleted.v1";
+const MAX_PINNED_WORKSPACES = 12;
 
 function getLocalStorage(): Storage | null {
   try {
@@ -1898,7 +1905,10 @@ function isWithinWorkspace(root: string, path: string): boolean {
 }
 
 const pinnedWorkspaces = ref<string[]>(
-  loadStringArray(LS_KEY_PINNED_WORKSPACES),
+  mergeWorkspaceRecents(loadStringArray(LS_KEY_PINNED_WORKSPACES), [], MAX_PINNED_WORKSPACES),
+);
+const workspaceRecents = ref<string[]>(
+  mergeWorkspaceRecents(loadStringArray(LS_KEY_WORKSPACE_RECENTS), []),
 );
 const pinnedWorkspaceNames = ref<Record<string, string>>(
   loadStringMap(LS_KEY_PINNED_WORKSPACE_NAMES),
@@ -1980,8 +1990,14 @@ const workspaceSelect = ref<string>(loadString(LS_KEY_WORKSPACE_FILTER));
 watch(
   pinnedWorkspaces,
   (v) => {
-    saveStringArray(LS_KEY_PINNED_WORKSPACES, v);
-    const pinnedKeys = new Set(v.map((p) => normalizePathForCompare(p)));
+    const normalized = mergeWorkspaceRecents(v, [], MAX_PINNED_WORKSPACES);
+    if (JSON.stringify(normalized) !== JSON.stringify(v)) {
+      pinnedWorkspaces.value = normalized;
+      return;
+    }
+
+    saveStringArray(LS_KEY_PINNED_WORKSPACES, normalized);
+    const pinnedKeys = new Set(normalized.map((p) => normalizePathForCompare(p)));
     const next: Record<string, string> = {};
     for (const [k, name] of Object.entries(pinnedWorkspaceNames.value)) {
       const key = normalizePathForCompare(k);
@@ -2003,6 +2019,11 @@ watch(
   { deep: true },
 );
 watch(
+  workspaceRecents,
+  (v) => saveStringArray(LS_KEY_WORKSPACE_RECENTS, v),
+  { deep: true },
+);
+watch(
   workspaceFilters,
   (v) => {
     saveStringArray(LS_KEY_WORKSPACE_FILTERS, v);
@@ -2021,6 +2042,7 @@ watch(workspaceSelect, (v) => {
   }
   // Selecting from dropdown sets a primary workspace.
   workspaceFilters.value = [s];
+  rememberWorkspaceRecent(s);
 });
 
 watch(sessionsShowDeleted, (v) => {
@@ -2224,6 +2246,7 @@ async function onCreateTask(opts?: { idempotencyKey?: string }): Promise<boolean
     trackRunLaunchMaskForTask(t);
     upsertTask(t);
     selectedTaskId.value = t.id;
+    rememberWorkspaceRecent(createdInput.workdir);
     newPrompt.value = "";
     await loadLogs(t.id);
     return true;
@@ -3738,7 +3761,10 @@ function toggleWorkspaceFilter(path: string) {
   const next = workspaceFilters.value.slice();
   const idx = next.findIndex((x) => normalizePathForCompare(x) === key);
   if (idx >= 0) next.splice(idx, 1);
-  else next.unshift(p);
+  else {
+    next.unshift(p);
+    rememberWorkspaceRecent(p);
+  }
   workspaceFilters.value = next.slice(0, 6);
   if (workspaceFilters.value.length <= 1) {
     workspaceSelect.value = workspaceFilters.value[0] ?? "";
@@ -3765,6 +3791,7 @@ function addWorkspaceFilter(path: string) {
   const next = workspaceFilters.value.slice();
   if (next.some((x) => normalizePathForCompare(x) === key)) return;
   next.unshift(p);
+  rememberWorkspaceRecent(p);
   workspaceFilters.value = next.slice(0, 6);
   workspaceSelect.value = "";
 }
@@ -3775,7 +3802,7 @@ function pinWorkspace(path: string) {
   const key = normalizePathForCompare(p);
   const existing = pinnedWorkspaces.value.filter(Boolean);
   if (existing.some((x) => normalizePathForCompare(x) === key)) return;
-  pinnedWorkspaces.value = [p, ...existing].slice(0, 12);
+  pinnedWorkspaces.value = [p, ...existing].slice(0, MAX_PINNED_WORKSPACES);
 }
 
 function unpinWorkspace(path: string) {
@@ -3793,6 +3820,12 @@ function openAuthSettings() {
   authSettingsNotice.value = "";
   authSettingsOpen.value = true;
   refreshAuth();
+}
+
+function rememberWorkspaceRecent(path: string) {
+  const next = rememberWorkspacePath(workspaceRecents.value, path);
+  if (JSON.stringify(next) === JSON.stringify(workspaceRecents.value)) return;
+  workspaceRecents.value = next;
 }
 
 function openProvidersSettings() {
@@ -4893,17 +4926,8 @@ watch(
 );
 
 const recentWorkspaces = computed(() => {
-  const latestByPath = new Map<string, string>();
-  for (const t of tasks.value.values()) {
-    const p = t.workdir?.trim();
-    if (!p) continue;
-    const prev = latestByPath.get(p);
-    if (!prev || t.created_at > prev) latestByPath.set(p, t.created_at);
-  }
-  return Array.from(latestByPath.entries())
-    .sort((a, b) => b[1].localeCompare(a[1]))
-    .map(([p]) => p)
-    .slice(0, 20);
+  const taskRecents = listRecentWorkspacePaths(Array.from(tasks.value.values()));
+  return mergeWorkspaceRecents(workspaceRecents.value, taskRecents);
 });
 
 const recentWorkspacesUnpinned = computed(() => {
