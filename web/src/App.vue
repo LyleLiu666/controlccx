@@ -2809,16 +2809,6 @@ function onOpenLiveFromMenu() {
   closeHeaderMoreMenu();
 }
 
-function onOpenSkillsFromMenu() {
-  void openSkillsPage();
-  closeHeaderMoreMenu();
-}
-
-function onOpenContextFromMenu() {
-  openContextPage();
-  closeHeaderMoreMenu();
-}
-
 function onToggleSkillsFromHeader() {
   if (skillsOpen.value) closeSkillsPage();
   else void openSkillsPage();
@@ -5183,12 +5173,6 @@ watch(
               >
                 <span v-if="anyRunning" class="liveDot" aria-hidden="true">●</span>
                 实时
-              </button>
-              <button type="button" class="headerMoreItem" @click="onOpenSkillsFromMenu">
-                技能
-              </button>
-              <button type="button" class="headerMoreItem" @click="onOpenContextFromMenu">
-                上下文
               </button>
               <button type="button" class="headerMoreItem" @click="onOpenSettingsFromMenu">
                 设置

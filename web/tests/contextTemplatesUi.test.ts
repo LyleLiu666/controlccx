@@ -6,16 +6,24 @@ function readText(relativePath: string) {
   return readFileSync(new URL(relativePath, import.meta.url), "utf8");
 }
 
-test("Context/Templates page is wired with task templates quick-insert (narrow layout safe)", () => {
+test("Context/Templates page keeps route wiring and removes duplicate overflow entries", () => {
   const appVue = readText("../src/App.vue");
   const css = readText("../src/App.css");
   const contextPanel = readText("../src/components/ContextPanel.vue");
   const newRunModal = readText("../src/components/NewRunModal.vue");
 
-  // Route + entrypoint.
+  // Route + panel wiring.
   assert.match(appVue, /path === \"\/context\"/);
-  assert.match(appVue, /headerMoreItem[\s\S]*?上下文/);
   assert.match(appVue, /<ContextPanel/);
+
+  // Overflow menu should avoid duplicate Skills/Context entries.
+  const headerMoreBlock = appVue.match(
+    /<div class="headerMorePopup">([\s\S]*?)<\/div>\s*<\/details>/,
+  );
+  assert.ok(headerMoreBlock, "expected header overflow popup block");
+  const headerMorePopup = headerMoreBlock[1];
+  assert.doesNotMatch(headerMorePopup, />\s*技能\s*</);
+  assert.doesNotMatch(headerMorePopup, />\s*上下文\s*</);
 
   // Context panel strings (page content).
   assert.match(contextPanel, /Project Context/);
