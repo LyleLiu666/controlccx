@@ -1108,7 +1108,7 @@ func (m *Manager) onClaudeCanUseTool(ctx context.Context, task tasks.Task, toolN
 	m.publishTaskUpdatedForce(task.ID)
 
 	outcome := m.waitForApprovalDecision(ctx, task.ID, ar.ID)
-	if outcome.TimedOut {
+	if outcome.TimedOut || outcome.Cancelled {
 		_ = m.store.UpdateApprovalRequestDecision(context.Background(), ar.ID, tasks.UpdateApprovalRequestDecisionInput{
 			Status: tasks.ApprovalStatusExpired,
 			Reason: outcome.Reason,

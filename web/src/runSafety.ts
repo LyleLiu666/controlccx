@@ -134,7 +134,7 @@ export function buildRunSafetyPayload(driver: ToolDriver, intent: TaskIntent, pr
       safety_preset: sp,
       task_intent: ti,
       codex_sandbox: sandbox,
-      codex_approval_policy: "never",
+      codex_approval_policy: "untrusted",
       codex_search: sp === "search-browse" || undefined,
     };
   }

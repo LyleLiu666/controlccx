@@ -64,7 +64,8 @@ func hasExplicitSafetyOptions(in tasks.CreateTaskInput) bool {
 func applyCodexAutopilot(in *tasks.CreateTaskInput, decision Decision, env SafetyEnvelope) {
 	intent := string(decision.Intent)
 	in.TaskIntent = intent
-	in.CodexApprovalPolicy = "never"
+	// Untrusted-by-default: require approvals for non-read-only actions, matching TUI behavior.
+	in.CodexApprovalPolicy = "untrusted"
 
 	switch decision.Intent {
 	case IntentAnalyze:

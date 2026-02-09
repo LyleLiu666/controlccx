@@ -28,8 +28,8 @@ func TestApplyAutopilot_Codex(t *testing.T) {
 	if out.CodexSandbox != "workspace-write" {
 		t.Fatalf("codex_sandbox=%q, want %q", out.CodexSandbox, "workspace-write")
 	}
-	if out.CodexApprovalPolicy != "never" {
-		t.Fatalf("codex_approval_policy=%q, want %q", out.CodexApprovalPolicy, "never")
+	if out.CodexApprovalPolicy != "untrusted" {
+		t.Fatalf("codex_approval_policy=%q, want %q", out.CodexApprovalPolicy, "untrusted")
 	}
 	if !out.CodexSearch {
 		t.Fatalf("codex_search=%v, want true", out.CodexSearch)

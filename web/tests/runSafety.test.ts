@@ -21,6 +21,13 @@ test("claude-code unsafe preset uses unsafe_automation", () => {
   assert.equal(payload.claude_sandbox, false);
 });
 
+test("codex safe preset sets untrusted approvals", () => {
+  const payload = buildRunSafetyPayload("codex", "code", "workspace-write");
+  assert.equal(payload.codex_sandbox, "workspace-write");
+  assert.equal(payload.codex_approval_policy, "untrusted");
+  assert.equal(payload.unsafe_automation, undefined);
+});
+
 test("toolDriverForWorkerType falls back to exec", () => {
   assert.equal(toolDriverForWorkerType(""), "exec");
   assert.equal(toolDriverForWorkerType("unknown"), "exec");

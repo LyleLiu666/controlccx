@@ -19,9 +19,10 @@ func normalizeCodexApprovalPolicy(raw string, unsafe bool) string {
 	case "untrusted", "on-failure", "on-request", "never":
 		return v
 	case "":
-		return "never"
+		// Safe default: require approvals for non-trusted actions.
+		return "untrusted"
 	default:
-		return "never"
+		return "untrusted"
 	}
 }
 
@@ -289,7 +290,7 @@ func (m *Manager) handleCodexServerRequest(ctx context.Context, task tasks.Task,
 	m.publishTaskUpdatedForce(task.ID)
 
 	outcome := m.waitForApprovalDecision(ctx, task.ID, ar.ID)
-	if outcome.TimedOut {
+	if outcome.TimedOut || outcome.Cancelled {
 		_ = m.store.UpdateApprovalRequestDecision(context.Background(), ar.ID, tasks.UpdateApprovalRequestDecisionInput{
 			Status: tasks.ApprovalStatusExpired,
 			Reason: outcome.Reason,

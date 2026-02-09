@@ -296,6 +296,75 @@ func TestManager_run_ClaudeCode_ProtocolApproval_TimeoutExpires(t *testing.T) {
 	_ = m.SubmitApprovalDecision(task.ID, approval.ID, "deny", "late")
 }
 
+func TestManager_run_ClaudeCode_ProtocolApproval_CancelExpiresApproval(t *testing.T) {
+	t.Setenv("CONTROLCCX_TEST_CLAUDE_HELPER_PROCESS", "1")
+
+	runCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	dbPath := filepath.Join(t.TempDir(), "controlccx.db")
+	conn, err := db.Open(runCtx, db.Options{Path: dbPath})
+	if err != nil {
+		t.Fatalf("db open: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+
+	store := tasks.NewStore(conn)
+	task, err := store.CreateTask(runCtx, tasks.CreateTaskInput{
+		WorkerType: tasks.WorkerClaudeCode,
+		Mode:       tasks.ModeNew,
+		Prompt:     "x",
+		WorkDir:    t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	cfg := config.Default()
+	cfg.Paths.Claude = os.Args[0]
+
+	m := NewManager(cfg, store, nil, nil, nil)
+	m.approvalTimeout = 5 * time.Minute
+
+	done := make(chan error, 1)
+	go func() {
+		done <- m.run(runCtx, task)
+	}()
+
+	awaitTaskStatus(t, store, task.ID, tasks.StatusAwaitingApproval, 2*time.Second)
+	approval := awaitPendingApproval(t, store, task.ID, 2*time.Second)
+
+	cancel()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("run: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatalf("timeout waiting for run to finish")
+	}
+
+	updated := awaitTaskTerminalStatus(t, store, task.ID, 2*time.Second)
+	if updated.Status != tasks.StatusCanceled {
+		t.Fatalf("status=%q, want %q (warning=%q error=%q)", updated.Status, tasks.StatusCanceled, updated.Warning, updated.Error)
+	}
+
+	ar, ok, err := store.GetApprovalRequest(context.Background(), approval.ID)
+	if err != nil {
+		t.Fatalf("GetApprovalRequest: %v", err)
+	}
+	if !ok {
+		t.Fatalf("expected approval request")
+	}
+	if ar.Status != tasks.ApprovalStatusExpired {
+		t.Fatalf("approval status=%q, want %q (reason=%q)", ar.Status, tasks.ApprovalStatusExpired, ar.Reason)
+	}
+	if !strings.Contains(strings.ToLower(ar.Reason), "cancel") {
+		t.Fatalf("approval reason=%q, want contains %q", ar.Reason, "cancel")
+	}
+}
+
 func awaitPendingApproval(t *testing.T, store *tasks.Store, taskID string, timeout time.Duration) tasks.ApprovalRequest {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
