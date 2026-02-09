@@ -289,3 +289,77 @@ func contains(items []string, want string) bool {
 	}
 	return false
 }
+
+func TestIsToolAutoAllowed_SearchBrowse_AllowsWebSearchAndWebFetch(t *testing.T) {
+	task := tasks.Task{
+		SafetyPreset:  "search-browse",
+		TaskIntent:    "search-browse",
+		ClaudeSandbox: true,
+	}
+	if !isToolAutoAllowed(task, "WebSearch", nil) {
+		t.Fatal("WebSearch should be auto-allowed for search-browse")
+	}
+	if !isToolAutoAllowed(task, "WebFetch", nil) {
+		t.Fatal("WebFetch should be auto-allowed for search-browse")
+	}
+	if !isToolAutoAllowed(task, "websearch", nil) {
+		t.Fatal("websearch (lowercase) should be auto-allowed")
+	}
+}
+
+func TestIsToolAutoAllowed_NoNetwork_DeniesWebSearch(t *testing.T) {
+	task := tasks.Task{
+		SafetyPreset:  "no-network",
+		TaskIntent:    "analyze",
+		ClaudeSandbox: true,
+	}
+	if isToolAutoAllowed(task, "WebSearch", nil) {
+		t.Fatal("WebSearch should NOT be auto-allowed for no-network")
+	}
+	if isToolAutoAllowed(task, "WebFetch", nil) {
+		t.Fatal("WebFetch should NOT be auto-allowed for no-network")
+	}
+}
+
+func TestIsToolAutoAllowed_NoSettings_ReturnsFalse(t *testing.T) {
+	task := tasks.Task{}
+	if isToolAutoAllowed(task, "WebSearch", nil) {
+		t.Fatal("WebSearch should NOT be auto-allowed when no settings")
+	}
+}
+
+func TestIsToolAutoAllowed_NonWebTool_ReturnsFalse(t *testing.T) {
+	task := tasks.Task{
+		SafetyPreset:  "search-browse",
+		TaskIntent:    "search-browse",
+		ClaudeSandbox: true,
+	}
+	if isToolAutoAllowed(task, "Bash", nil) {
+		t.Fatal("Bash should NOT be auto-allowed")
+	}
+	if isToolAutoAllowed(task, "Write", nil) {
+		t.Fatal("Write should NOT be auto-allowed")
+	}
+}
+
+func TestIsToolAutoAllowed_WebFetch_RespectsDomainAllowlist(t *testing.T) {
+	task := tasks.Task{
+		SafetyPreset:          "search-browse",
+		TaskIntent:            "search-browse",
+		ClaudeSandbox:         true,
+		ClaudeWebFetchDomains: []string{"docs.claude.com"},
+	}
+
+	if !isToolAutoAllowed(task, "WebFetch", json.RawMessage(`{"url":"https://docs.claude.com/en/docs"}`)) {
+		t.Fatal("WebFetch should be auto-allowed for allowed domains")
+	}
+	if isToolAutoAllowed(task, "WebFetch", json.RawMessage(`{"url":"https://example.com"}`)) {
+		t.Fatal("WebFetch should NOT be auto-allowed for non-allowlisted domains")
+	}
+	if isToolAutoAllowed(task, "WebFetch", json.RawMessage(`{"q":"https://example.com"}`)) {
+		t.Fatal("WebFetch should NOT be auto-allowed when URL is outside allowlist (q field)")
+	}
+	if isToolAutoAllowed(task, "WebFetch", json.RawMessage(`{}`)) {
+		t.Fatal("WebFetch should NOT be auto-allowed when input URL is missing and allowlist is configured")
+	}
+}

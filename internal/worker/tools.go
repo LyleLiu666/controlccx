@@ -3,6 +3,7 @@ package worker
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -325,6 +326,102 @@ func buildExec(cfg config.Config, task tasks.Task) ToolCommand {
 	tool.Command = "sh"
 	tool.Args = []string{"-lc", cmd}
 	return tool
+}
+
+// isToolAutoAllowed returns true when the task's safety settings already allow
+// the given tool, meaning the manager should auto-approve the permission request
+// instead of waiting for human approval.
+func isToolAutoAllowed(task tasks.Task, toolName string, input json.RawMessage) bool {
+	// Same guard as claudeSettingsForTask: no settings → no auto-allow.
+	if !task.ClaudeSandbox && len(task.ClaudeWebFetchDomains) == 0 && strings.TrimSpace(task.SafetyPreset) == "" && strings.TrimSpace(task.TaskIntent) == "" {
+		return false
+	}
+
+	preset := strings.ToLower(strings.TrimSpace(task.SafetyPreset))
+	noNetwork := strings.Contains(preset, "no-network")
+
+	lowerTool := strings.ToLower(strings.TrimSpace(toolName))
+
+	// Explicitly denied tools are never auto-allowed.
+	if noNetwork && (lowerTool == "webfetch" || lowerTool == "websearch") {
+		return false
+	}
+
+	// Non-network presets: WebSearch is always in the allow list.
+	if !noNetwork && lowerTool == "websearch" {
+		return true
+	}
+
+	// Non-network presets: WebFetch is allowed either unconditionally, or limited to the
+	// domain allowlist when configured.
+	if !noNetwork && lowerTool == "webfetch" {
+		if len(task.ClaudeWebFetchDomains) == 0 {
+			return true
+		}
+		return webFetchInputMatchesAllowedDomains(input, task.ClaudeWebFetchDomains)
+	}
+
+	return false
+}
+
+func webFetchInputMatchesAllowedDomains(input json.RawMessage, allowedDomains []string) bool {
+	rawURL := strings.TrimSpace(webFetchURLFromInput(input))
+	if rawURL == "" {
+		return false
+	}
+	host := hostnameFromMaybeURL(rawURL)
+	if host == "" {
+		return false
+	}
+	for _, d := range allowedDomains {
+		domain := hostnameFromMaybeURL(strings.TrimSpace(d))
+		if domain == "" {
+			continue
+		}
+		if host == domain || strings.HasSuffix(host, "."+domain) {
+			return true
+		}
+	}
+	return false
+}
+
+func webFetchURLFromInput(input json.RawMessage) string {
+	if len(input) == 0 {
+		return ""
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(input, &payload); err != nil {
+		return ""
+	}
+	for _, key := range []string{"url", "u", "q"} {
+		if v, ok := payload[key]; ok {
+			if s, ok := v.(string); ok {
+				s = strings.TrimSpace(s)
+				if s != "" {
+					return s
+				}
+			}
+		}
+	}
+	return ""
+}
+
+func hostnameFromMaybeURL(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	if u, err := url.Parse(raw); err == nil {
+		if h := strings.TrimSpace(u.Hostname()); h != "" {
+			return strings.ToLower(h)
+		}
+	}
+	if u, err := url.Parse("https://" + raw); err == nil {
+		if h := strings.TrimSpace(u.Hostname()); h != "" {
+			return strings.ToLower(h)
+		}
+	}
+	return ""
 }
 
 func shellJoin(command string, args []string) string {

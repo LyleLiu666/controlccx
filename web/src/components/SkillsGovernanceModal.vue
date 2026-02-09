@@ -13,6 +13,14 @@ const gov = reactive(useSkillsGovernance());
 const op = ref<"local" | "git">("local");
 const advancedOp = ref<"import" | "sync" | "update">("import");
 
+type NoticeKind = "success" | "error" | "info";
+
+const noticeOpen = ref(false);
+const noticeTitle = ref("提示");
+const noticeMessage = ref("");
+const noticeLines = ref<string[]>([]);
+const noticeKind = ref<NoticeKind>("info");
+
 const canImportExisting = computed(
   () => !!gov.importName.trim() && !!gov.importSourcePath.trim(),
 );
@@ -68,6 +76,86 @@ async function listGitCandidates() {
   await gov.runListGitCandidates();
 }
 
+function openNotice(opts: { title?: string; message: string; lines?: string[]; kind?: NoticeKind }) {
+  noticeTitle.value = String(opts.title ?? "").trim() || "提示";
+  noticeMessage.value = String(opts.message ?? "").trim();
+  noticeLines.value = opts.lines ?? [];
+  noticeKind.value = opts.kind ?? "info";
+  noticeOpen.value = true;
+}
+
+function closeNotice() {
+  noticeOpen.value = false;
+  noticeMessage.value = "";
+  noticeLines.value = [];
+}
+
+function parseKnownError(raw: string): { prefix: string; payload: string } | null {
+  const s = String(raw ?? "");
+  for (const prefix of ["TARGET_EXISTS|", "MULTI_SKILLS|", "TOOL_NOT_INSTALLED|"]) {
+    const idx = s.indexOf(prefix);
+    if (idx === -1) continue;
+    return { prefix, payload: s.slice(idx + prefix.length).trim() };
+  }
+  return null;
+}
+
+function basename(p: string): string {
+  const s = String(p ?? "").trim().replace(/[/\\]+$/, "");
+  if (!s) return "";
+  const parts = s.split(/[/\\]/).filter(Boolean);
+  return parts[parts.length - 1] ?? s;
+}
+
+function formatSkillsGovError(raw: string): { message: string; lines: string[] } {
+  const msg = String(raw ?? "").trim();
+  const hit = parseKnownError(msg);
+  if (!hit) return { message: msg || "操作失败", lines: [] };
+
+  switch (hit.prefix) {
+    case "TARGET_EXISTS|": {
+      const path = hit.payload;
+      const name = basename(path);
+      return {
+        message: "检测到同名技能已存在，且未勾选“覆盖同名”，本次操作未执行。",
+        lines: [name ? `同名：${name}` : "", path ? `路径：${path}` : "", "提示：你可以勾选“覆盖同名”或修改技能名。"].filter(
+          Boolean,
+        ),
+      };
+    }
+    case "TOOL_NOT_INSTALLED|": {
+      const tool = hit.payload || "unknown";
+      return {
+        message: `未检测到目标工具已安装：${tool}`,
+        lines: ["请先安装/配置该工具，或选择其他目标。"],
+      };
+    }
+    case "MULTI_SKILLS|": {
+      return {
+        message: "该仓库包含多个 Skills：请先点“列出候选”，再勾选要安装的技能。",
+        lines: hit.payload ? [hit.payload] : [],
+      };
+    }
+    default:
+      return { message: msg || "操作失败", lines: [] };
+  }
+}
+
+async function installLocal() {
+  const res = await gov.runInstallLocal();
+  if (gov.actionError) {
+    const info = formatSkillsGovError(gov.actionError);
+    openNotice({ title: "安装失败", message: info.message, lines: info.lines, kind: "error" });
+    return;
+  }
+  openNotice({
+    title: "安装成功",
+    message: "安装成功",
+    lines: res?.name ? [`技能：${res.name}`] : [],
+    kind: "success",
+  });
+}
+
 function setGitSelectAll(checked: boolean) {
   for (const c of gov.gitCandidates ?? []) {
     c.selected = checked;
@@ -76,7 +164,75 @@ function setGitSelectAll(checked: boolean) {
 
 async function installGitSelected() {
   gov.gitRepoURL = normalizeGitRepoURL(gov.gitRepoURL);
-  await gov.runInstallGitBatch();
+  const selected = (gov.gitCandidates ?? []).filter((c) => c.selected);
+  const requestedNames = selected.map((c) => String(c.name ?? "").trim() || String(c.default_name ?? "").trim());
+
+  const res = await gov.runInstallGitBatch();
+  if (gov.actionError) {
+    const info = formatSkillsGovError(gov.actionError);
+    openNotice({ title: "安装失败", message: info.message, lines: info.lines, kind: "error" });
+    return;
+  }
+
+  const installed = res?.installed ?? [];
+  const installedNames = installed.map((s) => String(s?.name ?? "").trim()).filter(Boolean);
+  const renamed: string[] = [];
+  for (let i = 0; i < requestedNames.length && i < installed.length; i++) {
+    const before = requestedNames[i];
+    const after = String(installed[i]?.name ?? "").trim();
+    if (!before || !after || before === after) continue;
+    renamed.push(`${before} → ${after}`);
+  }
+
+  const lines: string[] = [];
+  if (installedNames.length) lines.push(`技能：${installedNames.join(", ")}`);
+  if (renamed.length) {
+    lines.push("同名冲突已自动改名：");
+    lines.push(...renamed);
+    lines.push("如需覆盖，请勾选“覆盖同名”。");
+  }
+
+  openNotice({ title: "安装成功", message: "安装成功", lines, kind: "success" });
+}
+
+async function importExisting() {
+  const res = await gov.runImportExisting();
+  if (gov.actionError) {
+    const info = formatSkillsGovError(gov.actionError);
+    openNotice({ title: "操作失败", message: info.message, lines: info.lines, kind: "error" });
+    return;
+  }
+  openNotice({
+    title: "操作成功",
+    message: "接管成功",
+    lines: res?.name ? [`技能：${res.name}`] : [],
+    kind: "success",
+  });
+}
+
+async function sync() {
+  await gov.runSync();
+  if (gov.actionError) {
+    const info = formatSkillsGovError(gov.actionError);
+    openNotice({ title: "操作失败", message: info.message, lines: info.lines, kind: "error" });
+    return;
+  }
+  openNotice({ title: "操作成功", message: "同步成功", lines: gov.actionInfo ? [gov.actionInfo] : [], kind: "success" });
+}
+
+async function updateFromSource() {
+  const res = await gov.runUpdate();
+  if (gov.actionError) {
+    const info = formatSkillsGovError(gov.actionError);
+    openNotice({ title: "操作失败", message: info.message, lines: info.lines, kind: "error" });
+    return;
+  }
+  openNotice({
+    title: "操作成功",
+    message: "更新成功",
+    lines: res?.name ? [`技能：${res.name}`] : [],
+    kind: "success",
+  });
 }
 
 const didInit = ref(false);
@@ -89,6 +245,14 @@ watch(
     void gov.refreshTools();
   },
   { immediate: true },
+);
+
+watch(
+  () => props.open,
+  (open) => {
+    if (open) return;
+    closeNotice();
+  },
 );
 
 watch(
@@ -190,7 +354,7 @@ watch(
                 <button
                   type="button"
                   class="primary skillsGovPrimaryBtn"
-                  @click="gov.runInstallLocal"
+                  @click="installLocal"
                   :disabled="gov.installingLocal || !canInstallLocal"
                   :title="canInstallLocal ? '安装' : '请先填写本地路径'"
                 >
@@ -345,7 +509,7 @@ watch(
                 <button
                   type="button"
                   class="primary skillsGovPrimaryBtn"
-                  @click="gov.runImportExisting"
+                  @click="importExisting"
                   :disabled="gov.importing || !canImportExisting"
                   :title="canImportExisting ? '接管' : '请先填写技能名和源路径'"
                 >
@@ -383,7 +547,7 @@ watch(
                 <button
                   type="button"
                   class="primary skillsGovPrimaryBtn"
-                  @click="gov.runSync"
+                  @click="sync"
                   :disabled="gov.syncing || !canSync"
                   :title="canSync ? '同步' : '请先填写技能名'"
                 >
@@ -407,7 +571,7 @@ watch(
                 <button
                   type="button"
                   class="primary skillsGovPrimaryBtn"
-                  @click="gov.runUpdate"
+                  @click="updateFromSource"
                   :disabled="gov.updating || !canUpdate"
                   :title="canUpdate ? '更新' : '请先填写技能名'"
                 >
@@ -472,6 +636,25 @@ watch(
 
       <div class="modalFooter">
         <button type="button" @click="emit('close')">关闭</button>
+      </div>
+    </div>
+
+    <div v-if="noticeOpen" class="modalOverlay" @click.self="closeNotice">
+      <div class="modal smallModal" role="dialog" aria-modal="true">
+        <div class="modalHeader">
+          <div class="modalTitle">{{ noticeTitle }}</div>
+          <button class="iconBtn" type="button" @click="closeNotice" aria-label="关闭">✕</button>
+        </div>
+        <div class="modalBody">
+          <div v-if="noticeKind === 'error'" class="modalError">{{ noticeMessage }}</div>
+          <div v-else class="confirmText">{{ noticeMessage }}</div>
+          <div v-if="noticeLines.length" class="tinyHint mono">
+            <div v-for="(line, idx) in noticeLines" :key="idx">{{ line }}</div>
+          </div>
+        </div>
+        <div class="modalFooter">
+          <button type="button" class="primary" @click="closeNotice">确定</button>
+        </div>
       </div>
     </div>
   </div>

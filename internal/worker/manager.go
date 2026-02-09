@@ -1232,6 +1232,17 @@ func (m *Manager) onClaudeCanUseTool(ctx context.Context, task tasks.Task, toolN
 		}, nil
 	}
 
+	// Auto-approve tools that the task's safety settings already allow (e.g. WebSearch/WebFetch
+	// for search-browse intent). This avoids blocking non-interactive runs on tools that were
+	// explicitly permitted via --settings.
+	if isToolAutoAllowed(task, toolName, input) {
+		m.appendLog(task.ID, tasks.LogSystem, fmt.Sprintf("auto-approved (settings allow): %s", toolName))
+		return claudePermissionResult{
+			Behavior:     "allow",
+			UpdatedInput: input,
+		}, nil
+	}
+
 	type rawApproval struct {
 		ToolName              string          `json:"tool_name"`
 		ToolUseID             string          `json:"tool_use_id,omitempty"`
@@ -1305,196 +1316,6 @@ func isApprovalBlockedReason(observed string, existingWarning string) bool {
 		return true
 	}
 	return false
-}
-
-func (m *Manager) maybeAutoContinueApprovalBlocked(task tasks.Task, driver tasks.WorkerType, sessionID string) {
-	if m == nil || m.store == nil {
-		return
-	}
-	if driver != tasks.WorkerClaudeCode {
-		return
-	}
-	// Avoid infinite retries: if a run was already unsafe and still got blocked, stop here.
-	if task.UnsafeAutomation || m.cfg.Workers.UnsafeAutomation {
-		return
-	}
-
-	conversationID := strings.TrimSpace(task.ConversationID)
-	if conversationID == "" {
-		return
-	}
-
-	// Avoid duplicate continuations if something else already started a new run for this conversation.
-	runs, err := m.store.ListTasksByConversationID(context.Background(), conversationID, 50, tasks.ListTasksOptions{IncludeDeleted: true})
-	if err == nil {
-		for _, t := range runs {
-			if t.ID == task.ID {
-				continue
-			}
-			if t.Status == tasks.StatusQueued || t.Status == tasks.StatusWaiting || t.Status == tasks.StatusRunning {
-				return
-			}
-		}
-	}
-
-	evidence, err := m.collectApprovalEvidence(task.ID, task.Prompt)
-	if err != nil {
-		m.appendLog(task.ID, tasks.LogSystem, fmt.Sprintf("自动继续：获取证据失败：%v", err))
-		return
-	}
-
-	if shouldEscalate, why := approvalBlockedNeedsUser(evidence); shouldEscalate {
-		m.appendLog(task.ID, tasks.LogSystem, "自动继续：检测到高风险操作，需要你确认后才能继续（原因："+why+"）。")
-		return
-	}
-
-	sid := strings.TrimSpace(sessionID)
-	if sid == "" {
-		sid = strings.TrimSpace(task.SessionID)
-	}
-
-	prompt := "continue"
-
-	nextInput := tasks.CreateTaskInput{
-		WorkerType:            task.WorkerType,
-		ConversationID:        conversationID,
-		UnsafeAutomation:      true,
-		SafetyPreset:          strings.TrimSpace(task.SafetyPreset),
-		TaskIntent:            strings.TrimSpace(task.TaskIntent),
-		CodexSandbox:          strings.TrimSpace(task.CodexSandbox),
-		CodexApprovalPolicy:   strings.TrimSpace(task.CodexApprovalPolicy),
-		CodexSearch:           task.CodexSearch,
-		ClaudePermissionMode:  strings.TrimSpace(task.ClaudePermissionMode),
-		ClaudeSandbox:         task.ClaudeSandbox,
-		ClaudeWebFetchDomains: append([]string{}, task.ClaudeWebFetchDomains...),
-		Prompt:                prompt,
-		WorkDir:               task.WorkDir,
-	}
-
-	mode := tasks.ModeResume
-	if sid != "" {
-		nextInput.Mode = mode
-		nextInput.SessionID = sid
-	} else {
-		mode = tasks.ModeNew
-		nextInput.Mode = mode
-		ctxPrompt, err := tasks.BuildRehydratePrompt(context.Background(), m.store, conversationID, prompt)
-		if err != nil {
-			m.appendLog(task.ID, tasks.LogSystem, fmt.Sprintf("自动继续：生成上下文失败：%v", err))
-			return
-		}
-		nextInput.Prompt = ctxPrompt
-		nextInput.SessionID = ""
-	}
-
-	next, err := m.store.CreateTask(context.Background(), nextInput)
-	if err != nil {
-		m.appendLog(task.ID, tasks.LogSystem, fmt.Sprintf("自动继续：创建新 run 失败：%v", err))
-		return
-	}
-	_, _ = m.store.AppendLog(context.Background(), next.ID, tasks.LogSystem, fmt.Sprintf("auto-continue: from blocked run=%s", task.ID))
-	m.appendLog(task.ID, tasks.LogSystem, fmt.Sprintf("自动继续：已创建新 run（unsafe_automation=true）：%s", next.ID))
-	m.publishTaskUpdatedForce(task.ID)
-
-	if err := m.Start(context.Background(), next.ID); err != nil {
-		_ = m.store.FinishTask(context.Background(), next.ID, tasks.FinishTaskInput{
-			Status:     tasks.StatusFailed,
-			ExitCode:   nil,
-			Error:      err.Error(),
-			SessionID:  "",
-			FinishedAt: time.Now().UTC(),
-		})
-		m.appendLog(task.ID, tasks.LogSystem, fmt.Sprintf("自动继续：启动新 run 失败：%v", err))
-		m.publishTaskUpdatedForce(task.ID)
-	}
-}
-
-func (m *Manager) collectApprovalEvidence(taskID string, prompt string) (string, error) {
-	if m == nil || m.store == nil {
-		return "", errors.New("store not configured")
-	}
-	logs, err := m.store.ListLogs(context.Background(), taskID, 0, 2000)
-	if err != nil {
-		return "", err
-	}
-	const tail = 80
-	if len(logs) > tail {
-		logs = logs[len(logs)-tail:]
-	}
-
-	var b strings.Builder
-	prompt = strings.TrimSpace(prompt)
-	if prompt != "" {
-		b.WriteString("[prompt]\n")
-		b.WriteString(prompt)
-		b.WriteString("\n\n")
-	}
-	b.WriteString("[logs]\n")
-	for _, l := range logs {
-		msg := strings.TrimSpace(l.Message)
-		if msg == "" {
-			continue
-		}
-		b.WriteString(string(l.Stream))
-		b.WriteString(": ")
-		b.WriteString(msg)
-		b.WriteString("\n")
-	}
-	return b.String(), nil
-}
-
-func approvalBlockedNeedsUser(evidence string) (bool, string) {
-	s := strings.ToLower(evidence)
-
-	deleteDir := []string{
-		"rm -rf",
-		"rm -r",
-		"rmdir",
-		"remove directory",
-		"delete directory",
-		"remove folder",
-		"delete folder",
-		"删除目录",
-		"删除文件夹",
-		"移除目录",
-		"移除文件夹",
-		"git clean -fd",
-		"git clean -xdf",
-	}
-	for _, m := range deleteDir {
-		if strings.Contains(s, m) {
-			return true, "删除目录/文件夹"
-		}
-	}
-
-	systemRisk := []string{
-		"sudo ",
-		"sudo\t",
-		"mkfs",
-		"dd if=",
-		"shutdown",
-		"reboot",
-		"halt",
-		"poweroff",
-		"/etc/",
-		"/system/",
-		"/library/",
-		"/usr/",
-		"/bin/",
-		"/sbin/",
-		"diskutil erase",
-		"format c:",
-		"\\\\windows\\\\",
-		"reg delete",
-		"bcdedit",
-	}
-	for _, m := range systemRisk {
-		if strings.Contains(s, m) {
-			return true, "疑似危害系统的操作"
-		}
-	}
-
-	return false, ""
 }
 
 func (m *Manager) handleResumeNotFound(task tasks.Task, driver tasks.WorkerType, message string, cancel context.CancelFunc, resumeFailure *resumeFailureState) {

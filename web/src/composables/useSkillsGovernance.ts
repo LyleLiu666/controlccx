@@ -1,6 +1,8 @@
 import { computed, ref } from "vue";
 import type {
   InstallGitBatchItem,
+  InstallGitBatchResponse,
+  ManagedSkill,
   OnboardingPlan,
   SkillsToolInfo,
 } from "../types";
@@ -101,8 +103,8 @@ export function useSkillsGovernance() {
     }
   }
 
-  async function runImportExisting() {
-    if (importing.value) return;
+  async function runImportExisting(): Promise<ManagedSkill | null> {
+    if (importing.value) return null;
     importing.value = true;
     resetActionMessages();
     try {
@@ -114,15 +116,17 @@ export function useSkillsGovernance() {
       });
       actionInfo.value = `已接管技能：${res.name}`;
       await refreshOnboarding();
+      return res;
     } catch (e: any) {
       actionError.value = e?.message ?? String(e);
+      return null;
     } finally {
       importing.value = false;
     }
   }
 
-  async function runInstallLocal() {
-    if (installingLocal.value) return;
+  async function runInstallLocal(): Promise<ManagedSkill | null> {
+    if (installingLocal.value) return null;
     installingLocal.value = true;
     resetActionMessages();
     try {
@@ -132,8 +136,10 @@ export function useSkillsGovernance() {
         overwrite: localOverwrite.value,
       });
       actionInfo.value = `本地安装完成：${res.name}`;
+      return res;
     } catch (e: any) {
       actionError.value = e?.message ?? String(e);
+      return null;
     } finally {
       installingLocal.value = false;
     }
@@ -162,15 +168,15 @@ export function useSkillsGovernance() {
     }
   }
 
-  async function runInstallGitBatch() {
-    if (installingGit.value) return;
+  async function runInstallGitBatch(): Promise<InstallGitBatchResponse | null> {
+    if (installingGit.value) return null;
     installingGit.value = true;
     resetActionMessages();
     try {
       const selected = gitCandidates.value.filter((c) => c.selected);
       if (selected.length === 0) {
-        actionError.value = "请先选择至少一个候选技能"
-        return;
+        actionError.value = "请先选择至少一个候选技能";
+        return null;
       }
       const skills: InstallGitBatchItem[] = selected.map((c) => ({
         subpath: c.subpath,
@@ -184,40 +190,46 @@ export function useSkillsGovernance() {
       });
       const names = (res.installed ?? []).map((s) => s?.name).filter(Boolean);
       actionInfo.value = names.length ? `Git 安装完成：${names.join(", ")}` : "Git 安装完成";
+      return res;
     } catch (e: any) {
       actionError.value = e?.message ?? String(e);
+      return null;
     } finally {
       installingGit.value = false;
     }
   }
 
-  async function runSync() {
-    if (syncing.value) return;
+  async function runSync(): Promise<{ ok: boolean } | null> {
+    if (syncing.value) return null;
     syncing.value = true;
     resetActionMessages();
     try {
-      await syncSkill({
+      const res = await syncSkill({
         name: syncName.value.trim(),
         target: syncTarget.value,
         overwrite: syncOverwrite.value,
       });
       actionInfo.value = `已同步：${syncName.value.trim()} → ${syncTarget.value}`;
+      return res;
     } catch (e: any) {
       actionError.value = e?.message ?? String(e);
+      return null;
     } finally {
       syncing.value = false;
     }
   }
 
-  async function runUpdate() {
-    if (updating.value) return;
+  async function runUpdate(): Promise<ManagedSkill | null> {
+    if (updating.value) return null;
     updating.value = true;
     resetActionMessages();
     try {
       const res = await updateManagedSkill({ name: updateName.value.trim() });
       actionInfo.value = `已更新：${res.name}`;
+      return res;
     } catch (e: any) {
       actionError.value = e?.message ?? String(e);
+      return null;
     } finally {
       updating.value = false;
     }
