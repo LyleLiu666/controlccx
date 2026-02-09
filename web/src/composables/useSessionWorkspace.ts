@@ -1,6 +1,6 @@
 import { computed, ref, watch, type Ref } from "vue";
 import type { SessionWorkspace, SessionWorkspaceMergeResponse } from "../types";
-import { discardSessionWorkspace, fetchSessionWorkspace, mergeSessionWorkspace } from "../api";
+import { discardSessionWorkspace, ensureSessionWorkspace, fetchSessionWorkspace, mergeSessionWorkspace } from "../api";
 
 export function useSessionWorkspace(selectedKey: Ref<string>) {
   const workspaceByKey = ref<Map<string, SessionWorkspace | null>>(new Map());
@@ -51,6 +51,25 @@ export function useSessionWorkspace(selectedKey: Ref<string>) {
     }
   }
 
+  async function ensureWorkspace(key: string): Promise<SessionWorkspace | null> {
+    key = String(key ?? "").trim();
+    if (!key) return null;
+    workspaceLoading.value = true;
+    workspaceError.value = "";
+    try {
+      const res = await ensureSessionWorkspace(key);
+      const next = new Map(workspaceByKey.value);
+      next.set(key, res.ok ? (res.workspace ?? null) : null);
+      workspaceByKey.value = next;
+      return res.ok ? (res.workspace ?? null) : null;
+    } catch (e: any) {
+      workspaceError.value = e?.message ?? String(e);
+      return null;
+    } finally {
+      workspaceLoading.value = false;
+    }
+  }
+
   async function discardWorkspace(key: string): Promise<boolean> {
     key = String(key ?? "").trim();
     if (!key) return false;
@@ -84,8 +103,8 @@ export function useSessionWorkspace(selectedKey: Ref<string>) {
     workspaceError,
     selectedWorkspace,
     loadWorkspace,
+    ensureWorkspace,
     mergeWorkspace,
     discardWorkspace,
   };
 }
-

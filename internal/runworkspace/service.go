@@ -231,6 +231,11 @@ func (s *Service) tryCreateGitWorktree(ctx context.Context, key, baseWorkDir, co
 	if err != nil || !ok {
 		return tasks.SessionWorkspace{}, false, nil, nil
 	}
+	// A newly initialized repo without commits ("unborn HEAD") cannot be used for worktree mode
+	// because we rely on `git diff HEAD` to snapshot uncommitted changes. Fall back to copy mode.
+	if !gitHasHEAD(ctx, repoRoot) {
+		return tasks.SessionWorkspace{}, false, nil, nil
+	}
 
 	ws, logs, ok, err := createGitWorktreeWorkspace(ctx, key, baseWorkDir, repoRoot, conversationID)
 	if err != nil {

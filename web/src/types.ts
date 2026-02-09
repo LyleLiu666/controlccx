@@ -333,6 +333,12 @@ export type SessionWorkspaceMergeResponse = {
   conflicts?: string[];
 };
 
+export type SessionWorkspaceEnsureResponse = {
+  ok: boolean;
+  workspace?: SessionWorkspace | null;
+  logs?: string[];
+};
+
 export type SystemInfo = {
   hostname: string;
   os: string;

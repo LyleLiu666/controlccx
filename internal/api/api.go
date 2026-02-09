@@ -1004,6 +1004,35 @@ func (a *API) handleSessionByKey(w http.ResponseWriter, r *http.Request) {
 		}
 
 		switch parts[2] {
+		case "ensure":
+			if r.Method != http.MethodPost {
+				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+				return
+			}
+			runs, err := a.Tasks.ListTasksByConversationID(r.Context(), conversationID, 1, tasks.ListTasksOptions{IncludeDeleted: true})
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			if len(runs) == 0 {
+				http.Error(w, "session not found", http.StatusNotFound)
+				return
+			}
+			latest := runs[0]
+			ens, err := a.Workspaces.EnsureForTask(r.Context(), tasks.Task{
+				ID:             strings.TrimSpace(latest.ID),
+				ConversationID: conversationID,
+				WorkDir:        strings.TrimSpace(latest.WorkDir),
+			})
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			writeJSON(w, map[string]any{
+				"ok":        true,
+				"workspace": ens.Workspace,
+				"logs":      ens.Logs,
+			})
 		case "merge":
 			if r.Method != http.MethodPost {
 				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)

@@ -231,7 +231,7 @@ func codexApprovalSummary(method string, params json.RawMessage) string {
 	}
 }
 
-func (m *Manager) handleCodexServerRequest(ctx context.Context, task tasks.Task, peer *codexAppServerPeer, requestID json.RawMessage, method string, params json.RawMessage) {
+func (m *Manager) handleCodexServerRequest(ctx context.Context, task tasks.Task, peer *codexAppServerPeer, requestID json.RawMessage, method string, params json.RawMessage, runWorkspaceActive bool, initProject bool, blocked *blockedState) {
 	if peer == nil {
 		return
 	}
@@ -262,6 +262,31 @@ func (m *Manager) handleCodexServerRequest(ctx context.Context, task tasks.Task,
 			return
 		}
 		_ = peer.SendError(requestID, -32601, "unsupported server request: "+method)
+		return
+	}
+
+	// If this run is executing directly in the base workdir (no run workspace), block file writes and
+	// instruct the user to continue with an isolated workspace.
+	if (method == "item/fileChange/requestApproval" || method == "applyPatchApproval") &&
+		!runWorkspaceActive &&
+		!initProject &&
+		strings.ToLower(strings.TrimSpace(task.WorkDirStrategy)) != "worktree" {
+		summary := strings.TrimSpace(codexApprovalSummary(method, params))
+		detail := ""
+		if summary != "" {
+			detail = "（" + summary + "）"
+		}
+		reason := strings.TrimSpace(workspaceRequiredWarningPrefix + " 写入被拦截" + detail + "：当前 run 未启用 run workspace。请点击「创建 worktree/workspace 并继续」。")
+		if blocked != nil {
+			_ = blocked.setOnce(reason)
+		}
+		_ = m.store.SetBlocked(context.Background(), task.ID)
+		_ = m.store.SetWarning(context.Background(), task.ID, reason)
+		m.appendLog(task.ID, tasks.LogSystem, reason)
+		m.publishTaskUpdatedForce(task.ID)
+
+		_ = peer.SendResult(requestID, codexApprovalResponse(method, false))
+		_ = peer.CloseStdin()
 		return
 	}
 

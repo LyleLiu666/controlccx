@@ -234,6 +234,14 @@ func gitCurrentBranch(ctx context.Context, repoRoot string) (string, error) {
 	return branch, nil
 }
 
+func gitHasHEAD(ctx context.Context, repoRoot string) bool {
+	out, err := gitCombined(ctx, repoRoot, "rev-parse", "--verify", "HEAD")
+	if err != nil {
+		return false
+	}
+	return strings.TrimSpace(string(out)) != ""
+}
+
 func gitIsDirty(ctx context.Context, repoRoot string) (bool, error) {
 	out, err := gitCombined(ctx, repoRoot, "status", "--porcelain")
 	if err != nil {

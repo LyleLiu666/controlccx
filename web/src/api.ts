@@ -43,6 +43,7 @@ import type {
   ControlPlaneStatus,
   SystemInfo,
   SessionWorkspaceGetResponse,
+  SessionWorkspaceEnsureResponse,
   SessionWorkspaceMergeResponse,
   SecretaryClearResponse,
   SecretaryMessagesResponse,
@@ -498,6 +499,10 @@ export async function deleteSession(key: string): Promise<{ ok: boolean }> {
 
 export async function fetchSessionWorkspace(key: string): Promise<SessionWorkspaceGetResponse> {
   return getJSON<SessionWorkspaceGetResponse>(`/api/sessions/${encodeURIComponent(key)}/workspace`);
+}
+
+export async function ensureSessionWorkspace(key: string): Promise<SessionWorkspaceEnsureResponse> {
+  return postJSON<SessionWorkspaceEnsureResponse>(`/api/sessions/${encodeURIComponent(key)}/workspace/ensure`, {});
 }
 
 export async function mergeSessionWorkspace(key: string): Promise<SessionWorkspaceMergeResponse> {

@@ -45,6 +45,105 @@ type Manager struct {
 	approvalTimeout time.Duration
 }
 
+const workspaceRequiredWarningPrefix = "CCX_WORKSPACE_REQUIRED:"
+
+func shouldUseRunWorkspace(task tasks.Task, hasExistingWorkspace bool, initProject bool) (bool, string) {
+	if hasExistingWorkspace {
+		return true, "existing-workspace"
+	}
+	if initProject {
+		return false, "init-project"
+	}
+
+	// workdir_strategy=worktree already executes inside an isolated worktree.
+	if strings.ToLower(strings.TrimSpace(task.WorkDirStrategy)) == "worktree" {
+		return false, "worktree-strategy"
+	}
+
+	// Exec runs are unsafe to execute in the base workdir by default.
+	if task.WorkerType == tasks.WorkerExec {
+		return true, "exec-default"
+	}
+
+	intent := strings.ToLower(strings.TrimSpace(task.TaskIntent))
+	switch intent {
+	case "analyze", "search-browse":
+		return false, "intent:" + intent
+	case "code", "install":
+		return true, "intent:" + intent
+	case "":
+		// Safe default: preserve legacy behavior for missing intents.
+		return true, "intent:default"
+	default:
+		// Unknown intents are treated as code-like to preserve safety.
+		return true, "intent:" + intent
+	}
+}
+
+func detectGitRepoRoot(ctx context.Context, dir string) (string, bool) {
+	if _, err := exec.LookPath("git"); err != nil {
+		return "", false
+	}
+
+	dir = strings.TrimSpace(dir)
+	if dir == "" {
+		dir = "."
+	}
+	cmd := exec.CommandContext(ctx, "git", "-C", dir, "rev-parse", "--show-toplevel")
+	out, err := cmd.Output()
+	if err != nil {
+		return "", false
+	}
+	root := strings.TrimSpace(string(out))
+	if root == "" {
+		return "", false
+	}
+	return filepath.Clean(root), true
+}
+
+func gitHasHEAD(ctx context.Context, repoRoot string) bool {
+	repoRoot = strings.TrimSpace(repoRoot)
+	if repoRoot == "" {
+		return false
+	}
+	cmd := exec.CommandContext(ctx, "git", "-C", repoRoot, "rev-parse", "--verify", "HEAD")
+	if err := cmd.Run(); err != nil {
+		return false
+	}
+	return true
+}
+
+func isInitProject(ctx context.Context, baseWorkDir string) bool {
+	baseWorkDir = filepath.Clean(strings.TrimSpace(baseWorkDir))
+	if baseWorkDir == "" {
+		baseWorkDir = "."
+	}
+
+	if repoRoot, ok := detectGitRepoRoot(ctx, baseWorkDir); ok {
+		// Git repo without any commits (unborn HEAD).
+		return !gitHasHEAD(ctx, repoRoot)
+	}
+
+	// Non-git: treat an empty top-level directory as "init project".
+	entries, err := os.ReadDir(baseWorkDir)
+	if err != nil {
+		return false
+	}
+	for _, e := range entries {
+		name := strings.TrimSpace(e.Name())
+		if name == "" {
+			continue
+		}
+		switch name {
+		case ".git", ".ccx", ".DS_Store":
+			continue
+		default:
+			return false
+		}
+	}
+	return true
+}
+
 func NewManager(cfg config.Config, store *tasks.Store, hub *events.Hub, authStore *auth.Store, tools *tooling.Service) *Manager {
 	var ws *runworkspace.Service
 	if store != nil {
@@ -172,37 +271,65 @@ func (m *Manager) run(ctx context.Context, task tasks.Task) error {
 
 	// Run workspace: execute inside a session-scoped isolated directory (run_workdir).
 	effective := task
+	initProject := false
+	runWorkspaceActive := false
 	if m != nil && m.ws != nil {
 		if strings.ToLower(strings.TrimSpace(task.WorkDirStrategy)) != "worktree" {
-			ens, err := m.ws.EnsureForTask(ctx, task)
-			if err != nil {
-				m.appendLog(task.ID, tasks.LogSystem, fmt.Sprintf("workspace setup error: %v", err))
-				_ = m.store.FinishTask(context.Background(), task.ID, tasks.FinishTaskInput{
-					Status:     tasks.StatusFailed,
-					ExitCode:   nil,
-					Error:      err.Error(),
-					SessionID:  "",
-					FinishedAt: time.Now().UTC(),
-				})
-				m.publishTaskUpdated(task.ID)
-				return err
-			}
-			ws := ens.Workspace
-			if strings.TrimSpace(ws.RunWorkDir) != "" {
-				effective.WorkDir = strings.TrimSpace(ws.RunWorkDir)
-			}
-			effective.WorkDirStrategy = "workspace"
-			effective.BaseWorkDir = strings.TrimSpace(ws.BaseWorkDir)
-			effective.WorktreeDir = strings.TrimSpace(ws.RunWorkDir)
-			effective.WorktreeBranch = strings.TrimSpace(ws.WorkBranch)
+			initProject = isInitProject(ctx, task.WorkDir)
 
-			m.appendLog(task.ID, tasks.LogSystem, fmt.Sprintf("workspace: kind=%s base=%s run=%s", strings.TrimSpace(ws.Kind), filepath.Clean(ws.BaseWorkDir), filepath.Clean(ws.RunWorkDir)))
-			for _, msg := range ens.Logs {
-				msg = strings.TrimSpace(msg)
-				if msg == "" {
-					continue
+			key := strings.TrimSpace(tasks.SessionKeyForTask(task))
+			hasExistingWorkspace := false
+			if key != "" {
+				if ws, ok, err := m.ws.Get(ctx, key); err == nil && ok {
+					if strings.TrimSpace(ws.RunWorkDir) != "" {
+						if _, err := os.Stat(strings.TrimSpace(ws.RunWorkDir)); err == nil {
+							hasExistingWorkspace = true
+						}
+					}
 				}
-				m.appendLog(task.ID, tasks.LogSystem, msg)
+			}
+
+			useWorkspace, reason := shouldUseRunWorkspace(task, hasExistingWorkspace, initProject)
+			if useWorkspace {
+				ens, err := m.ws.EnsureForTask(ctx, task)
+				if err != nil {
+					m.appendLog(task.ID, tasks.LogSystem, fmt.Sprintf("workspace setup error: %v", err))
+					_ = m.store.FinishTask(context.Background(), task.ID, tasks.FinishTaskInput{
+						Status:     tasks.StatusFailed,
+						ExitCode:   nil,
+						Error:      err.Error(),
+						SessionID:  "",
+						FinishedAt: time.Now().UTC(),
+					})
+					m.publishTaskUpdated(task.ID)
+					return err
+				}
+				ws := ens.Workspace
+				if strings.TrimSpace(ws.RunWorkDir) != "" {
+					effective.WorkDir = strings.TrimSpace(ws.RunWorkDir)
+				}
+				effective.WorkDirStrategy = "workspace"
+				effective.BaseWorkDir = strings.TrimSpace(ws.BaseWorkDir)
+				effective.WorktreeDir = strings.TrimSpace(ws.RunWorkDir)
+				effective.WorktreeBranch = strings.TrimSpace(ws.WorkBranch)
+				effective.RunWorkspaceKind = strings.TrimSpace(ws.Kind)
+				effective.RunWorkspaceBaseBranch = strings.TrimSpace(ws.BaseBranch)
+				effective.RunWorkspaceWorkBranch = strings.TrimSpace(ws.WorkBranch)
+				runWorkspaceActive = true
+
+				m.appendLog(task.ID, tasks.LogSystem, fmt.Sprintf("workspace: kind=%s base=%s run=%s", strings.TrimSpace(ws.Kind), filepath.Clean(ws.BaseWorkDir), filepath.Clean(ws.RunWorkDir)))
+				if strings.TrimSpace(reason) != "" {
+					m.appendLog(task.ID, tasks.LogSystem, fmt.Sprintf("workspace: decision=%s", strings.TrimSpace(reason)))
+				}
+				for _, msg := range ens.Logs {
+					msg = strings.TrimSpace(msg)
+					if msg == "" {
+						continue
+					}
+					m.appendLog(task.ID, tasks.LogSystem, msg)
+				}
+			} else {
+				m.appendLog(task.ID, tasks.LogSystem, fmt.Sprintf("workspace: skipped reason=%s", strings.TrimSpace(reason)))
 			}
 		}
 	}
@@ -296,7 +423,7 @@ func (m *Manager) run(ctx context.Context, task tasks.Task) error {
 
 	go func() {
 		defer wg.Done()
-		m.consumeStdout(ctx, task, driver, stdout, claudePeer, codexPeer, &lastSessionIDMu, &lastSessionID, cancel, resumeFailure, blockedState)
+		m.consumeStdout(ctx, task, driver, stdout, claudePeer, codexPeer, runWorkspaceActive, initProject, &lastSessionIDMu, &lastSessionID, cancel, resumeFailure, blockedState)
 	}()
 
 	go func() {
@@ -736,7 +863,7 @@ func mergeEnvWithReport(base []string, additions map[string]string) ([]string, [
 	return out, applied
 }
 
-func (m *Manager) consumeStdout(ctx context.Context, task tasks.Task, driver tasks.WorkerType, stdout io.Reader, claudePeer *claudeProtocolPeer, codexPeer *codexAppServerPeer, sidMu *sync.Mutex, sid *string, cancel context.CancelFunc, resumeFailure *resumeFailureState, blocked *blockedState) {
+func (m *Manager) consumeStdout(ctx context.Context, task tasks.Task, driver tasks.WorkerType, stdout io.Reader, claudePeer *claudeProtocolPeer, codexPeer *codexAppServerPeer, runWorkspaceActive bool, initProject bool, sidMu *sync.Mutex, sid *string, cancel context.CancelFunc, resumeFailure *resumeFailureState, blocked *blockedState) {
 	reader := newLineReader(stdout)
 	for {
 		line, tooLong, err := readLineWithLimit(reader, defaultJSONLineMaxBytes)
@@ -763,11 +890,11 @@ func (m *Manager) consumeStdout(ctx context.Context, task tasks.Task, driver tas
 		if claudePeer == nil {
 			m.handleApprovalRequired(task, driver, string(line), line, blocked)
 		} else if driver == tasks.WorkerClaudeCode {
-			m.handleClaudeControlRequest(ctx, task, line, claudePeer)
+			m.handleClaudeControlRequest(ctx, task, line, claudePeer, runWorkspaceActive, initProject, blocked)
 		}
 		if driver == tasks.WorkerCodex && codexPeer != nil {
 			codexPeer.HandleLine(line, func(id json.RawMessage, method string, params json.RawMessage) {
-				go m.handleCodexServerRequest(ctx, task, codexPeer, id, method, params)
+				go m.handleCodexServerRequest(ctx, task, codexPeer, id, method, params, runWorkspaceActive, initProject, blocked)
 			}, nil)
 		}
 
@@ -967,7 +1094,7 @@ func (m *Manager) waitForApprovalDecision(ctx context.Context, taskID string, ap
 	}
 }
 
-func (m *Manager) handleClaudeControlRequest(ctx context.Context, task tasks.Task, line []byte, peer *claudeProtocolPeer) {
+func (m *Manager) handleClaudeControlRequest(ctx context.Context, task tasks.Task, line []byte, peer *claudeProtocolPeer, runWorkspaceActive bool, initProject bool, blocked *blockedState) {
 	if m == nil || peer == nil {
 		return
 	}
@@ -986,7 +1113,7 @@ func (m *Manager) handleClaudeControlRequest(ctx context.Context, task tasks.Tas
 	switch strings.TrimSpace(env.Request.Subtype) {
 	case "can_use_tool":
 		toolName := strings.TrimSpace(env.Request.ToolName)
-		result, err := m.onClaudeCanUseTool(ctx, task, toolName, env.Request.Input, env.Request.PermissionSuggestions, env.Request.ToolUseID)
+		result, err := m.onClaudeCanUseTool(ctx, task, toolName, env.Request.Input, env.Request.PermissionSuggestions, env.Request.ToolUseID, runWorkspaceActive, initProject, blocked)
 		if err != nil {
 			_ = peer.SendControlResponseError(requestID, err.Error())
 			return
@@ -1066,7 +1193,7 @@ func summarizeClaudeToolInput(toolName string, input json.RawMessage) string {
 	return toolName
 }
 
-func (m *Manager) onClaudeCanUseTool(ctx context.Context, task tasks.Task, toolName string, input json.RawMessage, suggestions json.RawMessage, toolUseID string) (claudePermissionResult, error) {
+func (m *Manager) onClaudeCanUseTool(ctx context.Context, task tasks.Task, toolName string, input json.RawMessage, suggestions json.RawMessage, toolUseID string, runWorkspaceActive bool, initProject bool, blocked *blockedState) (claudePermissionResult, error) {
 	if m == nil || m.store == nil {
 		return claudePermissionResult{}, errors.New("store not configured")
 	}
@@ -1076,6 +1203,33 @@ func (m *Manager) onClaudeCanUseTool(ctx context.Context, task tasks.Task, toolN
 	}
 	if len(input) == 0 {
 		input = []byte("{}")
+	}
+
+	lowerTool := strings.ToLower(strings.TrimSpace(toolName))
+	if (lowerTool == "write" || lowerTool == "edit") &&
+		!runWorkspaceActive &&
+		!initProject &&
+		strings.ToLower(strings.TrimSpace(task.WorkDirStrategy)) != "worktree" {
+		summary := strings.TrimSpace(summarizeClaudeToolInput(toolName, input))
+		detail := ""
+		if summary != "" {
+			detail = "（" + summary + "）"
+		}
+		reason := strings.TrimSpace(workspaceRequiredWarningPrefix + " 写入被拦截" + detail + "：当前 run 未启用 run workspace。请点击「创建 worktree/workspace 并继续」。")
+		if blocked != nil {
+			_ = blocked.setOnce(reason)
+		}
+		_ = m.store.SetBlocked(context.Background(), task.ID)
+		_ = m.store.SetWarning(context.Background(), task.ID, reason)
+		m.appendLog(task.ID, tasks.LogSystem, reason)
+		m.publishTaskUpdatedForce(task.ID)
+
+		interrupt := true
+		return claudePermissionResult{
+			Behavior:  "deny",
+			Message:   reason,
+			Interrupt: &interrupt,
+		}, nil
 	}
 
 	type rawApproval struct {

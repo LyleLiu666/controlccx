@@ -3114,12 +3114,44 @@ async function confirmBlockedPromptUnsafe() {
   if (blockedPromptBusy.value) return;
 
   blockedPromptError.value = "";
+  if (!ensureTaskPlaneAvailable()) return;
+
+  const warning = String(t.warning ?? "").trim();
+  const isWorkspaceRequired = warning.startsWith("CCX_WORKSPACE_REQUIRED:");
+  if (isWorkspaceRequired) {
+    blockedPromptBusy.value = true;
+    try {
+      const driver = toolDriverForWorkerType(t.worker_type);
+      const currentPreset = effectiveSafetyPresetForTask(driver, t);
+      const safety = buildRunSafetyPayload(driver, "code", currentPreset);
+      openRunLaunchMask({ title: "继续中…", detail: "正在创建 workspace 并继续运行…" });
+      const nt = await resumeTaskWithOptions(runID, { prompt: "continue", ...safety });
+      trackRunLaunchMaskForTask(nt);
+      resumeOriginByRunID.set(nt.id, "manual");
+      upsertTask(nt);
+      selectedTaskId.value = nt.id;
+      await loadLogs(nt.id);
+      outputTab.value = "logs";
+      closeBlockedPrompt();
+    } catch (e: any) {
+      closeRunLaunchMask();
+      if (maybePromptInstanceToken(e)) return;
+      if (await maybeAttachSessionInFlightTask(e)) {
+        closeBlockedPrompt();
+        return;
+      }
+      blockedPromptError.value = e?.message ?? String(e);
+    } finally {
+      blockedPromptBusy.value = false;
+    }
+    return;
+  }
+
   const driver = toolDriverForWorkerType(t.worker_type);
   if (driver !== "claude-code") {
     blockedPromptError.value = "当前仅支持对 Claude Code 的 blocked 运行进行一键重试。";
     return;
   }
-  if (!ensureTaskPlaneAvailable()) return;
 
   const ok = await requestHighRiskConfirm({
     title: "高权限确认",
@@ -3771,6 +3803,22 @@ function selectedSessionWorkspaceMeta() {
   const run = String(ws.run_workdir ?? "").trim();
   if (!kind || !base || !run) return null;
   return { kind, status, base, run };
+}
+
+async function ensureSelectedWorkspace() {
+  const key = String(selectedSessionKey.value ?? "").trim();
+  if (!key) {
+    sessionWorkspaceNotice.value = "";
+    return;
+  }
+
+  sessionWorkspaceNotice.value = "";
+  const ws = await ensureSessionWorkspace(key);
+  if (!ws) {
+    sessionWorkspaceNotice.value = "";
+    return;
+  }
+  sessionWorkspaceNotice.value = "已创建 workspace。";
 }
 
 async function mergeBackSelectedWorkspace() {
@@ -4879,6 +4927,7 @@ const {
   workspaceError: sessionWorkspaceError,
   selectedWorkspace: selectedSessionWorkspace,
   loadWorkspace: loadSessionWorkspace,
+  ensureWorkspace: ensureSessionWorkspace,
   mergeWorkspace: mergeSessionWorkspace,
   discardWorkspace: discardSessionWorkspace,
 } = useSessionWorkspace(selectedSessionKey);
@@ -6129,6 +6178,15 @@ watch(
                         Copy workdir
                       </button>
                       <button
+                        v-if="!selectedSessionWorkspace?.run_workdir"
+                        type="button"
+                        @click="ensureSelectedWorkspace"
+                        :disabled="sessionWorkspaceLoading"
+                        title="Create run workspace"
+                      >
+                        Create workspace
+                      </button>
+                      <button
                         v-if="selectedSessionWorkspace?.run_workdir"
                         type="button"
                         @click="openRunWorkspaceFilesInNewTab"
@@ -6220,6 +6278,14 @@ watch(
                         <span class="mono"
                           >{{ selectedSessionWorkspace.kind }} · {{ selectedSessionWorkspace.status }}</span
                         >
+                      </div>
+                      <div v-if="selectedSessionWorkspace?.base_branch" class="full">
+                        <span class="k">Base branch</span>
+                        <span class="mono">{{ selectedSessionWorkspace.base_branch }}</span>
+                      </div>
+                      <div v-if="selectedSessionWorkspace?.work_branch" class="full">
+                        <span class="k">Work branch</span>
+                        <span class="mono">{{ selectedSessionWorkspace.work_branch }}</span>
                       </div>
                       <div v-if="selectedSession.title" class="full">
                         <span class="k">Title</span>

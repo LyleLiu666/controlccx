@@ -180,3 +180,82 @@ func TestAPI_SessionWorkspace_GetMergeDiscard_CopyMode(t *testing.T) {
 		t.Fatalf("status=%q, want %q", ws.Status, "discarded")
 	}
 }
+
+func TestAPI_SessionWorkspace_Ensure_CreatesWorkspace(t *testing.T) {
+	ctx := context.Background()
+	conn, err := db.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "controlccx.db")})
+	if err != nil {
+		t.Fatalf("db open: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+
+	store := tasks.NewStore(conn)
+	workspacesSvc := runworkspace.NewService(store, runworkspace.Options{Retain: 5})
+	apiSvc := &API{Tasks: store, Workspaces: workspacesSvc}
+
+	base := t.TempDir()
+	task, err := store.CreateTask(ctx, tasks.CreateTaskInput{
+		WorkerType: tasks.WorkerExec,
+		Mode:       tasks.ModeNew,
+		Prompt:     "echo ok",
+		WorkDir:    base,
+	})
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	key := tasks.SessionKeyForTask(task)
+
+	srv := httptest.NewServer(apiSvc.Handler())
+	t.Cleanup(srv.Close)
+
+	// Ensure workspace.
+	{
+		res, err := http.Post(
+			srv.URL+"/api/sessions/"+url.PathEscape(key)+"/workspace/ensure",
+			"application/json",
+			bytes.NewReader([]byte("{}")),
+		)
+		if err != nil {
+			t.Fatalf("post ensure: %v", err)
+		}
+		t.Cleanup(func() { _ = res.Body.Close() })
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("status=%d, want 200", res.StatusCode)
+		}
+		var payload struct {
+			OK        bool                    `json:"ok"`
+			Workspace *tasks.SessionWorkspace `json:"workspace"`
+		}
+		if err := json.NewDecoder(res.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if !payload.OK || payload.Workspace == nil {
+			t.Fatalf("unexpected payload: %+v", payload)
+		}
+		if payload.Workspace.Key == "" || payload.Workspace.RunWorkDir == "" {
+			t.Fatalf("expected workspace key/run_workdir set: %+v", payload.Workspace)
+		}
+	}
+
+	// Get workspace metadata should now return ok=true.
+	{
+		res, err := http.Get(srv.URL + "/api/sessions/" + url.PathEscape(key) + "/workspace")
+		if err != nil {
+			t.Fatalf("get workspace: %v", err)
+		}
+		t.Cleanup(func() { _ = res.Body.Close() })
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("status=%d, want 200", res.StatusCode)
+		}
+		var payload struct {
+			OK        bool                    `json:"ok"`
+			Workspace *tasks.SessionWorkspace `json:"workspace"`
+		}
+		if err := json.NewDecoder(res.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if !payload.OK || payload.Workspace == nil {
+			t.Fatalf("unexpected payload: %+v", payload)
+		}
+	}
+}

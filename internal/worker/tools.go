@@ -21,25 +21,30 @@ type ToolCommand struct {
 }
 
 const worktreePromptSentinel = "CCX_WORKTREE_MODE"
+const workspacePromptSentinel = "CCX_WORKSPACE_MODE"
 
 func effectivePromptForTask(task tasks.Task) string {
 	prompt := task.Prompt
-	if strings.ToLower(strings.TrimSpace(task.WorkDirStrategy)) != "worktree" {
+	strategy := strings.ToLower(strings.TrimSpace(task.WorkDirStrategy))
+	if strategy != "worktree" && strategy != "workspace" {
 		return prompt
 	}
 	if strings.TrimSpace(prompt) == "" {
 		return prompt
 	}
-	if strings.Contains(prompt, worktreePromptSentinel) {
+	if strings.Contains(prompt, worktreePromptSentinel) || strings.Contains(prompt, workspacePromptSentinel) {
 		return prompt
 	}
 
 	base := strings.TrimSpace(task.BaseWorkDir)
-	wt := strings.TrimSpace(task.WorktreeDir)
+	run := strings.TrimSpace(task.WorktreeDir)
 	branch := strings.TrimSpace(task.WorktreeBranch)
 
-	header := strings.TrimSpace(fmt.Sprintf(
-		`[%s]
+	header := ""
+	switch strategy {
+	case "worktree":
+		header = strings.TrimSpace(fmt.Sprintf(
+			`[%s]
 你正在一个 Git worktree 中执行（并发开发模式）。
 
 BaseWorkDir（不要直接改这里）: %s
@@ -55,11 +60,39 @@ WorktreeBranch: %s
 - `+"`git status`"+`（worktree）
 - 关键改动摘要
 - 合并回 base repo 的建议步骤（如需）`,
-		worktreePromptSentinel,
-		base,
-		wt,
-		branch,
-	))
+			worktreePromptSentinel,
+			base,
+			run,
+			branch,
+		))
+	case "workspace":
+		kind := strings.TrimSpace(task.RunWorkspaceKind)
+		baseBranch := strings.TrimSpace(task.RunWorkspaceBaseBranch)
+		workBranch := strings.TrimSpace(task.RunWorkspaceWorkBranch)
+		lines := []string{
+			fmt.Sprintf("[%s]", workspacePromptSentinel),
+			"你正在一个隔离的 run workspace 中执行（会话隔离模式）。",
+			"",
+			fmt.Sprintf("BaseWorkDir（不要直接改这里）: %s", base),
+			fmt.Sprintf("RunWorkDir（当前工作目录）: %s", run),
+		}
+		if kind != "" {
+			lines = append(lines, fmt.Sprintf("WorkspaceKind: %s", kind))
+		}
+		if baseBranch != "" {
+			lines = append(lines, fmt.Sprintf("BaseBranch: %s", baseBranch))
+		}
+		if workBranch != "" {
+			lines = append(lines, fmt.Sprintf("WorkBranch: %s", workBranch))
+		}
+		lines = append(lines,
+			"",
+			"硬性规则（必须遵守）：",
+			"1) 只修改 RunWorkDir 下的文件；禁止修改 BaseWorkDir 下的文件。",
+			"2) 不要删除/移动 run workspace 目录（.ccx/workspaces/...）。",
+		)
+		header = strings.TrimSpace(strings.Join(lines, "\n"))
+	}
 	if header == "" {
 		return prompt
 	}

@@ -140,6 +140,39 @@ func TestService_EnsureForTask_GitWorktreeModeCopiesUncommitted(t *testing.T) {
 	}
 }
 
+func TestService_EnsureForTask_GitInitWithoutCommits_FallsBackToCopyWorkspace(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not found on PATH")
+	}
+
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "controlccx.db")
+	conn, err := db.Open(ctx, db.Options{Path: dbPath})
+	if err != nil {
+		t.Fatalf("db open: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+
+	store := tasks.NewStore(conn)
+
+	repo := t.TempDir()
+	runGit(t, repo, "init")
+
+	svc := NewService(store, Options{Retain: 5})
+	task := tasks.Task{
+		ID:             "t-3",
+		ConversationID: uuid.NewString(),
+		WorkDir:        repo,
+	}
+	ens, err := svc.EnsureForTask(ctx, task)
+	if err != nil {
+		t.Fatalf("EnsureForTask: %v", err)
+	}
+	if ens.Workspace.Kind != "copy" {
+		t.Fatalf("kind=%q, want %q", ens.Workspace.Kind, "copy")
+	}
+}
+
 func runGit(t *testing.T, dir string, args ...string) {
 	t.Helper()
 	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
