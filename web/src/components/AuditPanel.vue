@@ -252,7 +252,7 @@ onMounted(() => {
 </template>
 
 <style scoped>
-.auditPanel {
+.panel.auditPanel {
   display: flex;
   min-height: 0;
   flex-direction: column;
@@ -440,7 +440,7 @@ onMounted(() => {
 }
 
 @media (max-width: 1100px) {
-  .auditPanel {
+  .panel.auditPanel {
     padding: 12px;
   }
 
