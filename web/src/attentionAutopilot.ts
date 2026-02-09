@@ -54,7 +54,14 @@ export function attentionAutopilotShouldAttempt(
   if (input.deleted) return false;
   if (!input.hasSessionID) return false;
   if (input.sessionStatus !== "interrupted") return false;
-  if (input.latestStatus === "running" || input.latestStatus === "queued" || input.latestStatus === "waiting") return false;
+  if (
+    input.latestStatus === "running" ||
+    input.latestStatus === "queued" ||
+    input.latestStatus === "waiting" ||
+    input.latestStatus === "awaiting_approval" ||
+    input.latestStatus === "blocked"
+  )
+    return false;
   if (input.lastAttemptMs === Number.POSITIVE_INFINITY) return false;
   if (
     input.lastAttemptMs > 0 &&

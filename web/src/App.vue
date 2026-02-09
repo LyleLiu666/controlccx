@@ -1061,6 +1061,15 @@ const blockedPromptTask = computed<Task | null>(() => {
   return tasks.value.get(id) ?? null;
 });
 
+const blockedPromptSafeRetryEnabled = computed(() => {
+  const t = blockedPromptTask.value;
+  if (!t) return false;
+  const warning = String(t.warning ?? "").trim();
+  if (warning.startsWith("CCX_WORKSPACE_REQUIRED:")) return false;
+  const driver = toolDriverForWorkerType(t.worker_type);
+  return driver === "claude-code";
+});
+
 const approvalPromptTask = computed<Task | null>(() => {
   const id = approvalPromptRunID.value.trim();
   if (!id) return null;
@@ -3187,6 +3196,58 @@ async function confirmBlockedPromptUnsafe() {
   }
 }
 
+async function confirmBlockedPromptSafeRetry() {
+  const runID = blockedPromptRunID.value.trim();
+  const t = blockedPromptTask.value;
+  if (!runID || !t) {
+    closeBlockedPrompt();
+    return;
+  }
+  if (blockedPromptBusy.value) return;
+
+  blockedPromptError.value = "";
+  if (!ensureTaskPlaneAvailable()) return;
+
+  const warning = String(t.warning ?? "").trim();
+  const isWorkspaceRequired = warning.startsWith("CCX_WORKSPACE_REQUIRED:");
+  if (isWorkspaceRequired) {
+    blockedPromptError.value = "该阻塞是 workspace 写入保护：请使用「创建 worktree/workspace 并继续」。";
+    return;
+  }
+
+  const driver = toolDriverForWorkerType(t.worker_type);
+  if (driver !== "claude-code") {
+    blockedPromptError.value = "当前仅支持对 Claude Code 的 blocked 运行进行安全重试。";
+    return;
+  }
+
+  blockedPromptBusy.value = true;
+  try {
+    const intent = normalizeTaskIntent(t.task_intent ?? "code");
+    const preset = effectiveSafetyPresetForTask(driver, t);
+    const safety = buildRunSafetyPayload(driver, intent, preset);
+    openRunLaunchMask({ title: "重试中…", detail: "正在以当前安全设置重试…" });
+    const nt = await resumeTaskWithOptions(runID, { prompt: "continue", ...safety });
+    trackRunLaunchMaskForTask(nt);
+    resumeOriginByRunID.set(nt.id, "manual");
+    upsertTask(nt);
+    selectedTaskId.value = nt.id;
+    await loadLogs(nt.id);
+    outputTab.value = "logs";
+    closeBlockedPrompt();
+  } catch (e: any) {
+    closeRunLaunchMask();
+    if (maybePromptInstanceToken(e)) return;
+    if (await maybeAttachSessionInFlightTask(e)) {
+      closeBlockedPrompt();
+      return;
+    }
+    blockedPromptError.value = e?.message ?? String(e);
+  } finally {
+    blockedPromptBusy.value = false;
+  }
+}
+
 async function confirmRehydratePrompt() {
   const runID = rehydratePromptRunID.value.trim();
   if (!runID) {
@@ -3365,7 +3426,14 @@ async function runAttentionAutopilotLoop() {
       if (sess.deleted_at) continue;
       if (!sess.session_id) continue;
       if (sess.status !== "interrupted") continue;
-      if (sess.latest.status === "running" || sess.latest.status === "queued" || sess.latest.status === "waiting" || sess.latest.status === "awaiting_approval") continue;
+      if (
+        sess.latest.status === "running" ||
+        sess.latest.status === "queued" ||
+        sess.latest.status === "waiting" ||
+        sess.latest.status === "awaiting_approval" ||
+        sess.latest.status === "blocked"
+      )
+        continue;
 
       const now = Date.now();
       const last = attentionAutopilotSeenAtMs(attentionAutopilotSeen.value, key);
@@ -6912,9 +6980,11 @@ watch(
           :error="blockedPromptError"
           :warning="blockedPromptTask?.warning ?? ''"
           :confirmOpen="highRiskConfirmOpen"
+          :safeRetryEnabled="blockedPromptSafeRetryEnabled"
           @close="closeBlockedPrompt"
           @copyConfigSnippet="copyText('workers:\\n  unsafe_automation: true\\n')"
           @proceed="confirmBlockedPromptUnsafe"
+          @safeRetry="confirmBlockedPromptSafeRetry"
         />
 
         <RehydratePromptModal

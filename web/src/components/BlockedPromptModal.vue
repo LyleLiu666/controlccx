@@ -7,6 +7,7 @@ const props = defineProps<{
   error: string;
   warning: string;
   confirmOpen: boolean;
+  safeRetryEnabled: boolean;
 }>();
 
 const WORKSPACE_REQUIRED_WARNING_PREFIX = "CCX_WORKSPACE_REQUIRED:";
@@ -24,6 +25,7 @@ const emit = defineEmits<{
   (e: "close"): void;
   (e: "copyConfigSnippet"): void;
   (e: "proceed"): void;
+  (e: "safeRetry"): void;
 }>();
 </script>
 
@@ -57,7 +59,7 @@ const emit = defineEmits<{
             这个 run 在执行过程中触发了需要人工确认的权限/操作，但当前运行是非交互模式，无法点击批准。
           </div>
           <div class="tinyHint">
-            如果你确认需要开放权限，可以选择「高权限继续」跳过权限确认（权限更大）。
+            你可以先选择「保持当前安全设置重试」，用审批弹窗逐项批准；如果你确认需要开放更高权限，再选择「高权限继续」跳过权限确认（权限更大）。
           </div>
         </template>
         <div v-if="warningText" class="tinyHint warn mono">
@@ -85,6 +87,15 @@ const emit = defineEmits<{
             :disabled="props.busy"
           >
             复制配置片段
+          </button>
+          <button
+            v-if="props.safeRetryEnabled"
+            type="button"
+            class="primary"
+            @click="emit('safeRetry')"
+            :disabled="props.busy || props.confirmOpen"
+          >
+            {{ props.busy ? "处理中..." : "保持当前安全设置重试" }}
           </button>
           <button
             type="button"

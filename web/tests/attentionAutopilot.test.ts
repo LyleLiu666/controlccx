@@ -52,6 +52,14 @@ test("attentionAutopilotShouldAttempt respects gating and cooldown", () => {
     false,
   );
   assert.equal(
+    attentionAutopilotShouldAttempt({ ...base, latestStatus: "awaiting_approval" }),
+    false,
+  );
+  assert.equal(
+    attentionAutopilotShouldAttempt({ ...base, latestStatus: "blocked" }),
+    false,
+  );
+  assert.equal(
     attentionAutopilotShouldAttempt({ ...base, lastAttemptMs: 900 }),
     false,
   );
@@ -74,4 +82,3 @@ test("attentionAutopilotIsNoConversationFound detects resume-missing sessions", 
     true,
   );
 });
-

@@ -29,6 +29,10 @@ test("high-permission warnings explain granted permissions (not alarmist)", () =
     "Blocked-run recovery CTA should be framed as higher permissions",
   );
   assert.ok(
+    blockedPromptModal.includes("保持当前安全设置重试"),
+    "Blocked-run recovery should offer a safe retry CTA",
+  );
+  assert.ok(
     appVue.includes("需要开启下载/安装权限"),
     "Install unlock confirmation should be permission-focused",
   );
