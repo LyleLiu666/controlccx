@@ -356,11 +356,11 @@ watch(
                       "
                       class="tinyHint"
                     >
-                      启用 Claude Code WebFetch/WebSearch。默认禁止通过
+                      启用 Claude Code WebFetch/WebSearch，并允许在 bash 中使用
                       <span class="mono">curl</span>/<span class="mono"
                         >wget</span
                       >
-                      下载。
+                      进行下载/请求（仍受 Claude bash sandbox 限制）。
                     </div>
                     <div
                       v-else-if="

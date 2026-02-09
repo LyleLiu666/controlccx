@@ -207,6 +207,8 @@ func claudeSettingsForTask(task tasks.Task) (string, bool) {
 	preset := strings.ToLower(strings.TrimSpace(task.SafetyPreset))
 	noNetwork := strings.Contains(preset, "no-network")
 	unsafe := strings.Contains(preset, "unsafe") || task.UnsafeAutomation
+	taskIntent := strings.ToLower(strings.TrimSpace(task.TaskIntent))
+	allowCurlWget := !noNetwork && (taskIntent == "search-browse" || (taskIntent == "" && strings.Contains(preset, "search-browse")))
 
 	type permissions struct {
 		Allow []string `json:"allow,omitempty"`
@@ -220,7 +222,7 @@ func claudeSettingsForTask(task tasks.Task) (string, bool) {
 			"Read(./secrets/**)",
 		},
 	}
-	if !unsafe {
+	if !unsafe && !allowCurlWget {
 		p.Deny = append(p.Deny, "Bash(curl *)", "Bash(wget *)")
 	}
 	if noNetwork {

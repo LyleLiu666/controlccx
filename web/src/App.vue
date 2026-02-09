@@ -1981,7 +1981,7 @@ const workspaceSelect = ref<string>(loadString(LS_KEY_WORKSPACE_FILTER));
     };
   }
   // Migration: older versions defaulted Claude Code runs to "no-network". The intended
-  // default is "search-browse" (WebFetch enabled) while still denying curl/wget.
+  // default is "search-browse" (WebFetch enabled). curl/wget are denied for non-search-browse intents.
   if (!loadBool(LS_KEY_MIGRATE_CLAUDE_DEFAULT_SAFETY_PRESET, false)) {
     if (runSafetyPresetByTool.value["claude-code"] === "no-network") {
       runSafetyPresetByTool.value = {
@@ -6428,7 +6428,7 @@ watch(
 	                  v-if="resumeDriver === 'claude-code' && resumeSafetyPreset === 'search-browse'"
 	                  class="tinyHint"
 	                >
-	                  Enables Claude Code WebFetch/WebSearch. Downloads via <span class="mono">curl</span>/<span class="mono">wget</span> remain denied by default.
+	                  Enables Claude Code WebFetch/WebSearch and allows <span class="mono">curl</span>/<span class="mono">wget</span> in bash (still subject to Claude bash sandbox).
 	                </div>
 	                <div
 	                  v-else-if="resumeDriver === 'codex' && resumeSafetyPreset === 'search-browse'"

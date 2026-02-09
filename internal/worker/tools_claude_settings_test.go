@@ -64,7 +64,7 @@ func TestBuildToolCommand_Claude_NoNetwork_DeniesWebFetchAndCurl(t *testing.T) {
 	}
 }
 
-func TestBuildToolCommand_Claude_SearchBrowse_AllowsWebFetchAndDeniesCurlWget(t *testing.T) {
+func TestBuildToolCommand_Claude_SearchBrowse_AllowsWebFetchAndAllowsCurlWget(t *testing.T) {
 	cfg := config.Default()
 	task := tasks.Task{
 		WorkerType:            tasks.WorkerClaudeCode,
@@ -85,8 +85,8 @@ func TestBuildToolCommand_Claude_SearchBrowse_AllowsWebFetchAndDeniesCurlWget(t 
 	settings := mustExtractClaudeSettings(t, tool.Args)
 
 	deny := stringsFromAny(settings["permissions"], "deny")
-	if !contains(deny, "Bash(curl *)") || !contains(deny, "Bash(wget *)") {
-		t.Fatalf("settings.permissions.deny=%v, expected curl+wget denied", deny)
+	if contains(deny, "Bash(curl *)") || contains(deny, "Bash(wget *)") {
+		t.Fatalf("settings.permissions.deny=%v, expected curl+wget not denied", deny)
 	}
 	if contains(deny, "WebFetch") {
 		t.Fatalf("settings.permissions.deny=%v, expected WebFetch not denied", deny)
@@ -149,6 +149,40 @@ func TestBuildToolCommand_Claude_SearchBrowse_Default_AllowsWebFetchAndWebSearch
 		WorkDir:              ".",
 		SafetyPreset:         "search-browse",
 		TaskIntent:           "search-browse",
+		ClaudeSandbox:        true,
+		ClaudePermissionMode: "acceptEdits",
+	}
+
+	tool, err := BuildToolCommand(cfg, task)
+	if err != nil {
+		t.Fatalf("BuildToolCommand: %v", err)
+	}
+
+	settings := mustExtractClaudeSettings(t, tool.Args)
+
+	deny := stringsFromAny(settings["permissions"], "deny")
+	if contains(deny, "Bash(curl *)") || contains(deny, "Bash(wget *)") {
+		t.Fatalf("settings.permissions.deny=%v, expected curl+wget not denied", deny)
+	}
+
+	allow := stringsFromAny(settings["permissions"], "allow")
+	if !contains(allow, "WebFetch") {
+		t.Fatalf("settings.permissions.allow=%v, expected WebFetch allowed", allow)
+	}
+	if !contains(allow, "WebSearch") {
+		t.Fatalf("settings.permissions.allow=%v, expected WebSearch allowed", allow)
+	}
+}
+
+func TestBuildToolCommand_Claude_CodeIntentWithSearchBrowsePreset_DeniesCurlWget(t *testing.T) {
+	cfg := config.Default()
+	task := tasks.Task{
+		WorkerType:           tasks.WorkerClaudeCode,
+		Mode:                 tasks.ModeNew,
+		Prompt:               "hi",
+		WorkDir:              ".",
+		SafetyPreset:         "search-browse",
+		TaskIntent:           "code",
 		ClaudeSandbox:        true,
 		ClaudePermissionMode: "acceptEdits",
 	}
