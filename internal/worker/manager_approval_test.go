@@ -46,6 +46,7 @@ func runFakeClaudeProtocol() {
 		sessionID = "sess-1"
 		reqID     = "req-1"
 	)
+	waitForEOF := strings.TrimSpace(os.Getenv("CONTROLCCX_TEST_CLAUDE_HELPER_WAIT_EOF")) != ""
 
 	// Emit init early so the worker can persist session_id.
 	writeLine(`{"type":"system","subtype":"init","session_id":"` + sessionID + `"}`)
@@ -108,11 +109,19 @@ func runFakeClaudeProtocol() {
 		behavior := strings.ToLower(strings.TrimSpace(msg.Response.Response.Behavior))
 		switch behavior {
 		case "allow":
-			writeLine(`{"type":"assistant","session_id":"` + sessionID + `","result":"ok"}`)
+			writeLine(`{"type":"result","subtype":"success","session_id":"` + sessionID + `","result":"ok","is_error":false}`)
+			if waitForEOF {
+				for sc.Scan() {
+				}
+			}
 			return
 		default:
 			// Deny or unknown: return success so the worker can finish.
-			writeLine(`{"type":"assistant","session_id":"` + sessionID + `","result":"denied"}`)
+			writeLine(`{"type":"result","subtype":"success","session_id":"` + sessionID + `","result":"denied","is_error":false}`)
+			if waitForEOF {
+				for sc.Scan() {
+				}
+			}
 			return
 		}
 	}
@@ -152,6 +161,7 @@ func TestIsApprovalRequiredLine(t *testing.T) {
 
 func TestManager_run_ClaudeCode_ProtocolApproval_ApproveContinues(t *testing.T) {
 	t.Setenv("CONTROLCCX_TEST_CLAUDE_HELPER_PROCESS", "1")
+	t.Setenv("CONTROLCCX_TEST_CLAUDE_HELPER_WAIT_EOF", "1")
 
 	ctx := context.Background()
 	dbPath := filepath.Join(t.TempDir(), "controlccx.db")
@@ -225,6 +235,7 @@ func TestManager_run_ClaudeCode_ProtocolApproval_ApproveContinues(t *testing.T) 
 
 func TestManager_run_ClaudeCode_ProtocolApproval_TimeoutExpires(t *testing.T) {
 	t.Setenv("CONTROLCCX_TEST_CLAUDE_HELPER_PROCESS", "1")
+	t.Setenv("CONTROLCCX_TEST_CLAUDE_HELPER_WAIT_EOF", "1")
 
 	ctx := context.Background()
 	dbPath := filepath.Join(t.TempDir(), "controlccx.db")
@@ -298,6 +309,7 @@ func TestManager_run_ClaudeCode_ProtocolApproval_TimeoutExpires(t *testing.T) {
 
 func TestManager_run_ClaudeCode_ProtocolApproval_CancelExpiresApproval(t *testing.T) {
 	t.Setenv("CONTROLCCX_TEST_CLAUDE_HELPER_PROCESS", "1")
+	t.Setenv("CONTROLCCX_TEST_CLAUDE_HELPER_WAIT_EOF", "1")
 
 	runCtx, cancel := context.WithCancel(context.Background())
 	defer cancel()

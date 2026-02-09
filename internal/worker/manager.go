@@ -277,8 +277,8 @@ func (m *Manager) run(ctx context.Context, task tasks.Task) error {
 		}
 		return m.failTask(task.ID, fmt.Errorf("start: %w", err))
 	}
-	if claudeStdin != nil {
-		defer func() { _ = claudeStdin.Close() }()
+	if claudePeer != nil {
+		defer func() { _ = claudePeer.CloseStdin() }()
 	}
 	if codexPeer != nil {
 		defer func() { _ = codexPeer.CloseStdin() }()
@@ -797,6 +797,9 @@ func (m *Manager) consumeStdout(ctx context.Context, task tasks.Task, driver tas
 			}
 			if parsed.AssistantText != "" {
 				m.appendLog(task.ID, tasks.LogAssistant, parsed.AssistantText)
+			}
+			if driver == tasks.WorkerClaudeCode && parsed.IsResult && claudePeer != nil {
+				_ = claudePeer.CloseStdin()
 			}
 		}
 	}

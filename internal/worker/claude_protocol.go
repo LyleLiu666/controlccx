@@ -1,6 +1,7 @@
 package worker
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -69,18 +70,22 @@ type claudeUserMessage struct {
 
 type claudeProtocolPeer struct {
 	mu sync.Mutex
-	w  io.Writer
+	w  *bufio.Writer
+	in io.WriteCloser
 }
 
-func newClaudeProtocolPeer(w io.Writer) *claudeProtocolPeer {
-	if w == nil {
+func newClaudeProtocolPeer(stdin io.WriteCloser) *claudeProtocolPeer {
+	if stdin == nil {
 		return nil
 	}
-	return &claudeProtocolPeer{w: w}
+	return &claudeProtocolPeer{
+		w:  bufio.NewWriter(stdin),
+		in: stdin,
+	}
 }
 
 func (p *claudeProtocolPeer) sendLine(v any) error {
-	if p == nil || p.w == nil {
+	if p == nil {
 		return fmt.Errorf("claude protocol: stdin not configured")
 	}
 	raw, err := json.Marshal(v)
@@ -89,13 +94,34 @@ func (p *claudeProtocolPeer) sendLine(v any) error {
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	if p.w == nil || p.in == nil {
+		return fmt.Errorf("claude protocol: stdin not configured")
+	}
 	if _, err := p.w.Write(raw); err != nil {
 		return err
 	}
-	if _, err := p.w.Write([]byte("\n")); err != nil {
+	if err := p.w.WriteByte('\n'); err != nil {
 		return err
 	}
-	return nil
+	return p.w.Flush()
+}
+
+func (p *claudeProtocolPeer) CloseStdin() error {
+	if p == nil {
+		return nil
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.in == nil {
+		return nil
+	}
+	if p.w != nil {
+		_ = p.w.Flush()
+	}
+	err := p.in.Close()
+	p.in = nil
+	p.w = nil
+	return err
 }
 
 func (p *claudeProtocolPeer) SendInitialize(requestID string, hooks any) error {

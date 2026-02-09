@@ -9,6 +9,7 @@ import (
 type parsedLine struct {
 	SessionID     string
 	AssistantText string
+	IsResult      bool
 }
 
 func parseClaudeJSONLine(line []byte) (parsedLine, error) {
@@ -25,7 +26,10 @@ func parseClaudeJSONLine(line []byte) (parsedLine, error) {
 		return parsedLine{}, err
 	}
 
-	out := parsedLine{SessionID: strings.TrimSpace(evt.SessionID)}
+	out := parsedLine{
+		SessionID: strings.TrimSpace(evt.SessionID),
+		IsResult:  strings.TrimSpace(evt.Type) == "result",
+	}
 	// Claude stream-json often includes final answer in `result`.
 	if evt.Result != "" {
 		out.AssistantText = evt.Result

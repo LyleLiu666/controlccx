@@ -140,6 +140,75 @@ func TestBuildToolCommand_Claude_Unsafe_DoesNotDenyCurlWget(t *testing.T) {
 	}
 }
 
+func TestBuildToolCommand_Claude_SearchBrowse_Default_AllowsWebFetchAndWebSearch(t *testing.T) {
+	cfg := config.Default()
+	task := tasks.Task{
+		WorkerType:           tasks.WorkerClaudeCode,
+		Mode:                 tasks.ModeNew,
+		Prompt:               "hi",
+		WorkDir:              ".",
+		SafetyPreset:         "search-browse",
+		TaskIntent:           "search-browse",
+		ClaudeSandbox:        true,
+		ClaudePermissionMode: "acceptEdits",
+	}
+
+	tool, err := BuildToolCommand(cfg, task)
+	if err != nil {
+		t.Fatalf("BuildToolCommand: %v", err)
+	}
+
+	settings := mustExtractClaudeSettings(t, tool.Args)
+
+	deny := stringsFromAny(settings["permissions"], "deny")
+	if !contains(deny, "Bash(curl *)") || !contains(deny, "Bash(wget *)") {
+		t.Fatalf("settings.permissions.deny=%v, expected curl+wget denied", deny)
+	}
+
+	allow := stringsFromAny(settings["permissions"], "allow")
+	if !contains(allow, "WebFetch") {
+		t.Fatalf("settings.permissions.allow=%v, expected WebFetch allowed", allow)
+	}
+	if !contains(allow, "WebSearch") {
+		t.Fatalf("settings.permissions.allow=%v, expected WebSearch allowed", allow)
+	}
+}
+
+func TestBuildToolCommand_Claude_StreamJSONProtocolFlags_ArePresent(t *testing.T) {
+	cfg := config.Default()
+	task := tasks.Task{
+		WorkerType:           tasks.WorkerClaudeCode,
+		Mode:                 tasks.ModeNew,
+		Prompt:               "hi",
+		WorkDir:              ".",
+		ClaudePermissionMode: "acceptEdits",
+		SafetyPreset:         "search-browse",
+		TaskIntent:           "search-browse",
+		ClaudeSandbox:        true,
+	}
+
+	tool, err := BuildToolCommand(cfg, task)
+	if err != nil {
+		t.Fatalf("BuildToolCommand: %v", err)
+	}
+
+	// Ensure non-interactive JSON protocol is configured; otherwise Claude permission prompts
+	// may block runs with no way to approve.
+	for _, want := range []string{
+		"-p",
+		"--permission-prompt-tool=stdio",
+		"--verbose",
+		"--output-format=stream-json",
+		"--input-format=stream-json",
+		"--include-partial-messages",
+		"--disallowedTools=AskUserQuestion",
+	} {
+		if !hasArg(tool.Args, want) {
+			t.Fatalf("args=%v, expected %q", tool.Args, want)
+		}
+	}
+}
+
 func mustExtractClaudeSettings(t *testing.T, args []string) map[string]any {
 	t.Helper()
 	i := indexOf(args, "--settings")
