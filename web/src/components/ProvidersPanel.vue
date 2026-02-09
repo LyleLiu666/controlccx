@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, nextTick, ref, watch } from "vue";
 import type {
   AuthStatus,
   ProviderActiveSelection,
@@ -157,6 +157,8 @@ const secretarySimpleHTTPModelModel = computed({
   set: (value: string) => emit("update:secretarySimpleHTTPModel", value),
 });
 
+const nameInputRef = ref<HTMLInputElement | null>(null);
+
 const page = ref<ProvidersPage>("overview");
 
 function targetLabel(t: ProviderTarget): string {
@@ -177,6 +179,56 @@ function profileLabel(p: ProviderProfile | null | undefined): string {
   if (name) return name;
   const id = String(p?.id ?? "").trim();
   return id || "未命名";
+}
+
+function defaultBaseURLFor(t: ProviderTarget): string {
+  switch (t) {
+    case "claude":
+      return "https://api.anthropic.com";
+    case "codex":
+      return "https://api.openai.com";
+    case "secretary":
+      return "https://api.anthropic.com";
+    default:
+      return "";
+  }
+}
+
+function rawProfileBaseURL(p: ProviderProfile | null | undefined, t: ProviderTarget): string {
+  if (!p) return "";
+  if (t === "claude") return String(p.targets?.claude?.base_url ?? "").trim();
+  if (t === "codex") return String(p.targets?.codex?.base_url ?? "").trim();
+  return String(p.targets?.secretary?.simple_http?.base_url ?? "").trim();
+}
+
+function profileBaseURL(p: ProviderProfile | null | undefined, t: ProviderTarget): string {
+  const raw = rawProfileBaseURL(p, t);
+  return raw || defaultBaseURLFor(t);
+}
+
+function profileBaseURLIsDefault(p: ProviderProfile | null | undefined, t: ProviderTarget): boolean {
+  return rawProfileBaseURL(p, t) === "";
+}
+
+function profileModel(p: ProviderProfile | null | undefined, t: ProviderTarget): string {
+  if (!p) return "";
+  if (t === "claude") return String(p.targets?.claude?.model ?? "").trim();
+  if (t === "codex") return String(p.targets?.codex?.model ?? "").trim();
+  return String(p.targets?.secretary?.simple_http?.model ?? "").trim();
+}
+
+function formatLocalDateTime(value: unknown): string {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "";
+  const d = new Date(raw);
+  if (Number.isNaN(d.getTime())) return raw;
+  return d.toLocaleString(undefined, {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 function profileForID(id: string): ProviderProfile | null {
@@ -305,13 +357,16 @@ function startNewForTarget(t: ProviderTarget) {
   editNameModel.value = `${targetLabel(t)} Provider`;
   if (t === "claude") {
     claudeBaseURLModel.value = "https://api.anthropic.com";
+    void nextTick(() => nameInputRef.value?.focus());
     return;
   }
   if (t === "codex") {
     codexBaseURLModel.value = "https://api.openai.com";
+    void nextTick(() => nameInputRef.value?.focus());
     return;
   }
   secretarySimpleHTTPBaseURLModel.value = "https://api.anthropic.com";
+  void nextTick(() => nameInputRef.value?.focus());
 }
 
 function onSelectEditProfile(id: string) {
@@ -327,6 +382,16 @@ function onSelectActiveProfile(id: string) {
   if (!p || !profileMatchesTarget(p, page.value)) return;
   emit("selectProfile", p);
   emit("activate", page.value);
+}
+
+function onSelectEditProfileFromCard(id: string) {
+  if (props.saving) return;
+  onSelectEditProfile(id);
+}
+
+function onSelectActiveProfileFromCard(id: string) {
+  if (props.saving) return;
+  onSelectActiveProfile(id);
 }
 
 function onSaveProfile() {
@@ -506,18 +571,66 @@ watch(
 
               <div class="toolsEditorGrid providersEditorGrid">
                 <div class="providersSubsection providersSubsectionSaved">
-                  <div class="providersSubsectionTitle">已保存配置（点击切换编辑）</div>
+                  <div class="providersSubsectionTitle">已保存配置（点卡片编辑；右侧按钮可一键启用）</div>
                   <div class="providersProfilesList">
-                    <button
+                    <div
                       v-for="p in pageProfiles"
                       :key="p.id"
+                      class="providersProfileCard"
+                      :class="{ active: p.id === activeIDFor(page), editing: p.id === editID.trim() }"
+                      role="button"
+                      tabindex="0"
+                      :aria-disabled="saving"
+                      @click="onSelectEditProfileFromCard(p.id)"
+                      @keydown.enter.prevent="onSelectEditProfileFromCard(p.id)"
+                      @keydown.space.prevent="onSelectEditProfileFromCard(p.id)"
+                    >
+                      <div class="providersProfileCardTop">
+                        <div class="providersProfileCardTitle">
+                          {{ profileLabel(p) }}
+                        </div>
+                        <div class="providersProfileBadges">
+                          <span v-if="p.id === activeIDFor(page)" class="providersBadge active">当前启用</span>
+                          <span v-if="p.id === editID.trim()" class="providersBadge editing">编辑中</span>
+                        </div>
+                      </div>
+
+                      <div class="providersProfileCardMeta tinyHint">
+                        <div class="providersProfileMetaRow">
+                          <span class="providersProfileMetaLabel">Base URL</span>
+                          <span class="mono">{{ profileBaseURL(p, page) }}</span>
+                          <span v-if="profileBaseURLIsDefault(p, page)" class="providersBadge subtle">默认</span>
+                        </div>
+                        <div v-if="profileModel(p, page)" class="providersProfileMetaRow">
+                          <span class="providersProfileMetaLabel">Model</span>
+                          <span class="mono">{{ profileModel(p, page) }}</span>
+                        </div>
+                        <div v-if="p.updated_at" class="providersProfileMetaRow">
+                          <span class="providersProfileMetaLabel">更新</span>
+                          <span class="mono" :title="p.updated_at">{{ formatLocalDateTime(p.updated_at) }}</span>
+                        </div>
+                      </div>
+
+                      <div class="providersProfileCardActions">
+                        <button
+                          type="button"
+                          class="providersCardActionBtn"
+                          :disabled="saving || p.id === activeIDFor(page)"
+                          @click.stop="onSelectActiveProfileFromCard(p.id)"
+                        >
+                          {{ p.id === activeIDFor(page) ? "已启用" : "启用" }}
+                        </button>
+                      </div>
+                    </div>
+
+                    <button
                       type="button"
-                      class="providersProfileBtn"
-                      :class="{ active: p.id === editID.trim() }"
-                      @click="onSelectEditProfile(p.id)"
+                      class="providersProfileCard providersProfileCardAdd"
+                      @click="startNewForTarget(page)"
                       :disabled="saving"
                     >
-                      {{ profileLabel(p) }}
+                      <div class="providersProfileCardAddTitle">新建配置</div>
+                      <div class="tinyHint">用官方默认 Base URL 起步，只需填 Key / Token 和模型。</div>
                     </button>
                     <div v-if="!pageProfiles.length" class="tinyHint">暂无已保存配置，请先填写并保存。</div>
                   </div>
@@ -525,7 +638,7 @@ watch(
 
                 <label class="full">
                   配置名称
-                  <input v-model="editNameModel" placeholder="例如：Anthropic / OpenAI / My Provider" autocomplete="off" />
+                  <input ref="nameInputRef" v-model="editNameModel" placeholder="例如：Anthropic / OpenAI / My Provider" autocomplete="off" />
                 </label>
 
                 <div class="providersSubsection providersSubsectionAuth">
@@ -940,19 +1053,192 @@ watch(
 }
 
 .providersProfilesList {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  align-items: start;
+}
+
+.providersProfileCard {
+  border: 1px solid var(--glass-border-strong);
+  background: var(--glass-item);
+  border-radius: 14px;
+  padding: 10px 12px;
+  display: grid;
+  gap: 10px;
+  cursor: pointer;
+  position: relative;
+  box-shadow: var(--shadow-sm);
+  transition:
+    border-color 0.18s ease,
+    background-color 0.18s ease,
+    box-shadow 0.18s ease;
+}
+
+.providersProfileCard[aria-disabled="true"] {
+  opacity: 0.6;
+  cursor: default;
+  pointer-events: none;
+}
+
+.providersProfileCard::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 10px;
+  bottom: 10px;
+  width: 3px;
+  border-top-right-radius: 999px;
+  border-bottom-right-radius: 999px;
+  background: transparent;
+}
+
+.providersProfileCard:hover {
+  border-color: rgba(20, 184, 166, 0.35);
+  background: var(--glass-item-hover);
+  box-shadow: var(--shadow-md);
+}
+
+.providersProfileCard:hover::before {
+  background: linear-gradient(180deg, #0d9488 0%, #0891b2 100%);
+}
+
+.providersProfileCard:focus-visible {
+  outline: 2px solid rgba(20, 184, 166, 0.7);
+  outline-offset: 2px;
+}
+
+.providersProfileCard.editing {
+  border-color: rgba(14, 165, 233, 0.4);
+  box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.12);
+}
+
+.providersProfileCard.active {
+  border-color: rgba(13, 148, 136, 0.55);
+  background: linear-gradient(135deg, var(--bg-card-active-a) 0%, var(--bg-card-active-b) 100%);
+  box-shadow: 0 0 0 3px rgba(13, 148, 136, 0.14);
+}
+
+.providersProfileCard.active::before {
+  background: linear-gradient(180deg, #0d9488 0%, #0891b2 100%);
+}
+
+.providersProfileCardTop {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.providersProfileCardTitle {
+  font-weight: 900;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.providersProfileBadges {
   display: flex;
   flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+  flex: 0 0 auto;
+}
+
+.providersBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.01em;
+  color: var(--text-sub);
+  background: rgba(148, 163, 184, 0.1);
+}
+
+.providersBadge.active {
+  border-color: rgba(13, 148, 136, 0.45);
+  background: rgba(13, 148, 136, 0.12);
+  color: var(--color-primary);
+}
+
+.providersBadge.editing {
+  border-color: rgba(14, 165, 233, 0.35);
+  background: rgba(14, 165, 233, 0.12);
+  color: #0ea5e9;
+}
+
+.providersBadge.subtle {
+  border-color: rgba(148, 163, 184, 0.22);
+  background: rgba(148, 163, 184, 0.08);
+  color: var(--text-sub);
+}
+
+.providersProfileCardMeta {
+  display: grid;
+  gap: 6px;
+}
+
+.providersProfileMetaRow {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.providersProfileMetaLabel {
+  color: var(--text-sub);
+  font-weight: 700;
+  min-width: 64px;
+}
+
+.providersProfileMetaRow .mono {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.providersProfileCardActions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
   gap: 8px;
 }
 
-.providersProfileBtn {
+.providersCardActionBtn {
   border-radius: 999px;
   padding: 8px 12px;
+  font-weight: 900;
+  border: 1px solid rgba(13, 148, 136, 0.35);
+  background: rgba(13, 148, 136, 0.1);
+  color: var(--color-primary);
 }
 
-.providersProfileBtn.active {
-  border-color: rgba(20, 184, 166, 0.35);
-  background: rgba(20, 184, 166, 0.08);
+.providersCardActionBtn:hover:not(:disabled) {
+  border-color: rgba(13, 148, 136, 0.5);
+  background: rgba(13, 148, 136, 0.14);
+}
+
+.providersCardActionBtn:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.providersProfileCardAdd {
+  border-style: dashed;
+  background: var(--glass-well);
+  text-align: left;
+  cursor: pointer;
+}
+
+.providersProfileCardAddTitle {
+  font-weight: 900;
 }
 
 .providersOverview {

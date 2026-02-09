@@ -11,5 +11,8 @@ test("Audit panel shows raw content by default in detail pane", () => {
 
   assert.match(panel, /<template v-else-if="detail">/);
   assert.match(panel, /<pre class="auditDetailRaw">\{\{ detail\.raw \}\}<\/pre>/);
-  assert.match(panel, /<pre v-if="detail\.meta" class="auditDetailMeta">\{\{ JSON\.stringify\(detail\.meta, null, 2\) \}\}<\/pre>/);
+  assert.match(
+    panel,
+    /<pre v-if="detail\.meta" class="auditDetailMeta">\{\{[\s\S]*JSON\.stringify\(detail\.meta, null, 2\)[\s\S]*\}\}<\/pre>/,
+  );
 });

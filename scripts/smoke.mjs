@@ -122,20 +122,6 @@ function captureEnv(tool) {
   }
   fs.writeFileSync(path.join(process.cwd(), ".ccx-capture.json"), JSON.stringify(payload, null, 2) + "\\n", "utf8");
 }
-
-async function maybeSleepFromStdin() {
-  let stdin = "";
-  try {
-    stdin = fs.readFileSync(0, "utf8");
-  } catch {
-    stdin = "";
-  }
-  const m = /CCX_SMOKE_SLEEP_MS=(\\d+)/.exec(stdin);
-  if (!m) return;
-  const ms = Math.max(0, Math.min(Number(m[1]), 5_000));
-  if (!Number.isFinite(ms) || ms <= 0) return;
-  await new Promise((r) => setTimeout(r, ms));
-}
 `.trim();
 
   writeFileSync(
@@ -143,9 +129,8 @@ async function maybeSleepFromStdin() {
     `
 ${common}
 captureEnv("claude");
-await maybeSleepFromStdin();
 process.stdout.write('{"type":"system","subtype":"init","session_id":"sess-smoke-claude"}\\n');
-process.stdout.write('{"type":"assistant","session_id":"sess-smoke-claude","result":"ok"}\\n');
+process.stdout.write('{"type":"result","session_id":"sess-smoke-claude","result":"ok"}\\n');
 `.trimStart(),
     "utf8",
   );
@@ -155,9 +140,57 @@ process.stdout.write('{"type":"assistant","session_id":"sess-smoke-claude","resu
     `
 ${common}
 captureEnv("codex");
-await maybeSleepFromStdin();
-process.stdout.write('{"type":"noop","thread_id":"thr-smoke-codex"}\\n');
-process.stdout.write('{"type":"item.completed","thread_id":"thr-smoke-codex","item":{"type":"agent_message","text":"ok"}}\\n');
+import readline from "node:readline";
+
+const threadId = "thr-smoke-codex";
+
+function write(obj) {
+  process.stdout.write(JSON.stringify(obj) + "\\n");
+}
+
+function respond(id, result) {
+  write({ jsonrpc: "2.0", id, result });
+}
+
+function notify(method, params) {
+  write({ jsonrpc: "2.0", method, params });
+}
+
+const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
+
+for await (const line of rl) {
+  let msg;
+  try {
+    msg = JSON.parse(String(line ?? ""));
+  } catch {
+    continue;
+  }
+
+  const method = String(msg?.method ?? "").trim();
+  const id = msg?.id;
+  if (!method) continue;
+
+  if (id != null) {
+    if (method === "initialize") {
+      respond(id, { ok: true });
+      continue;
+    }
+    if (method === "thread/start" || method === "thread/resume") {
+      respond(id, { thread: { id: threadId } });
+      notify("thread/started", { thread: { id: threadId } });
+      continue;
+    }
+    if (method === "turn/start") {
+      respond(id, { ok: true });
+      notify("item/completed", { threadId, item: { type: "agentMessage", text: "ok" } });
+      notify("turn/completed", { thread: { id: threadId } });
+      break;
+    }
+    respond(id, { ok: true });
+  }
+}
+
+rl.close();
 `.trimStart(),
     "utf8",
   );

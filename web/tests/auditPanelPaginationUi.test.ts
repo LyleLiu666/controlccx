@@ -26,8 +26,8 @@ test("Audit panel exposes previous/next controls and has explicit content paddin
   const panel = readText("../src/components/AuditPanel.vue");
 
   assert.match(panel, /class="auditPager full"/);
-  assert.match(panel, />上一页<\/button>/);
-  assert.match(panel, />下一页<\/button>/);
+  assert.match(panel, />\s*上一页\s*<\/button>/);
+  assert.match(panel, />\s*下一页\s*<\/button>/);
   assert.ok(!panel.includes(">更多</button>"), "legacy load-more control should be removed");
 
   assert.match(panel, /\.auditPanel\s*\{[\s\S]*padding:\s*16px;/);
