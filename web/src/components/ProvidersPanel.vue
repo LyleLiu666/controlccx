@@ -586,7 +586,7 @@ watch(
                       @keydown.space.prevent="onSelectEditProfileFromCard(p.id)"
                     >
                       <div class="providersProfileCardTop">
-                        <div class="providersProfileCardTitle">
+                        <div class="providersProfileCardTitle" :title="profileLabel(p)">
                           {{ profileLabel(p) }}
                         </div>
                         <div class="providersProfileBadges">
@@ -1124,18 +1124,16 @@ watch(
 }
 
 .providersProfileCardTop {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 10px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 6px;
 }
 
 .providersProfileCardTitle {
   font-weight: 900;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .providersProfileBadges {
@@ -1143,6 +1141,7 @@ watch(
   flex-wrap: wrap;
   gap: 6px;
   justify-content: flex-end;
+  justify-self: end;
   flex: 0 0 auto;
 }
 
