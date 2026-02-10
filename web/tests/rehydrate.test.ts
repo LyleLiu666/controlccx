@@ -13,7 +13,6 @@ test("shouldOfferRehydrateForTask offers rehydrate for manual/unknown claude res
 
   assert.equal(shouldOfferRehydrateForTask(base, "manual"), true);
   assert.equal(shouldOfferRehydrateForTask(base, ""), true);
-  assert.equal(shouldOfferRehydrateForTask(base, "autopilot"), false);
   assert.equal(shouldOfferRehydrateForTask({ ...base, status: "succeeded" }, "manual"), false);
   assert.equal(shouldOfferRehydrateForTask({ ...base, mode: "new" }, "manual"), false);
   assert.equal(shouldOfferRehydrateForTask({ ...base, worker_type: "codex" }, "manual"), false);

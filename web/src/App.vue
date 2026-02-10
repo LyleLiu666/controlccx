@@ -73,13 +73,7 @@ import {
   sessionTaskInFlightFromError,
   setInstanceToken,
 } from "./api";
-import {
-  attentionAutopilotIsNoConversationFound,
-  attentionAutopilotMarkSeen,
-  attentionAutopilotSeenAtMs,
-  attentionAutopilotShouldAttempt,
-  attentionAutopilotStopForSession,
-} from "./attentionAutopilot";
+import { isNoConversationFound } from "./noConversationFound";
 import { shouldOfferRehydrateForTask, type ResumeOrigin } from "./rehydrate";
 import { computePopupPosition } from "./menuPosition";
 import { prettifyLogMessage } from "./logPretty";
@@ -1033,18 +1027,10 @@ const LS_KEY_MIGRATE_CLAUDE_DEFAULT_SAFETY_PRESET = "controlccx.migrate.claude_d
 const LS_KEY_RUN_SAFETY_PRESET_BY_TOOL = "controlccx.run_safety.preset_by_tool.v1";
 const LS_KEY_RUN_SAFETY_AUTOPILOT = "controlccx.run_safety.autopilot.v1";
 const LS_KEY_RUN_SAFETY_INSTALL_UNLOCK = "controlccx.run_safety.install_unlock.v1";
-const LS_KEY_ATTENTION_AUTOPILOT = "controlccx.attention_autopilot.v1";
-const LS_KEY_ATTENTION_AUTOPILOT_SEEN = "controlccx.attention_autopilot.seen.v1";
 const LS_KEY_ATTENTION_DISMISSED = "controlccx.attention_dismissed.v1";
 const LS_KEY_REHYDRATE_PROMPT_SEEN = "controlccx.rehydrate_prompt_seen.v1";
 const LS_KEY_BLOCKED_PROMPT_SEEN = "controlccx.blocked_prompt_seen.v1";
 
-const attentionAutopilotEnabled = ref<boolean>(true);
-const attentionAutopilotRunning = ref(false);
-const attentionAutopilotQueue = ref<string[]>([]);
-const attentionAutopilotQueued = new Set<string>();
-const attentionAutopilotSeen = ref<Record<string, string>>({});
-const attentionAutopilotNote = ref("");
 const attentionDismissed = ref<Record<string, string>>({});
 
 const resumeOriginByRunID = new Map<string, ResumeOrigin>();
@@ -1519,8 +1505,7 @@ async function replaySelectedRun() {
       return;
     }
     const msg = e?.message ?? String(e);
-    if (attentionAutopilotIsNoConversationFound(msg)) {
-      stopAttentionAutopilotForSession(sessionKeyForTask(t));
+    if (isNoConversationFound(msg)) {
       errorBanner.value =
         "继续失败：Claude 找不到该会话（No conversation found）。建议：直接新建 Run 重新开始；或检查 Claude Code 会话是否被清理/禁用持久化。原始错误：" +
         msg;
@@ -2010,8 +1995,6 @@ const workspaceSelect = ref<string>(loadString(LS_KEY_WORKSPACE_FILTER));
     saveBool(LS_KEY_MIGRATE_CLAUDE_DEFAULT_SAFETY_PRESET, true);
   }
 
-  attentionAutopilotEnabled.value = loadBool(LS_KEY_ATTENTION_AUTOPILOT, true);
-  attentionAutopilotSeen.value = loadStringMap(LS_KEY_ATTENTION_AUTOPILOT_SEEN);
   attentionDismissed.value = loadStringMap(LS_KEY_ATTENTION_DISMISSED);
 
   const fs = loadString(LS_KEY_FEED_SCOPE).trim();
@@ -2119,7 +2102,6 @@ watch(
 );
 watch(runSafetyAutopilotEnabled, (v) => saveBool(LS_KEY_RUN_SAFETY_AUTOPILOT, Boolean(v)));
 watch(runSafetyInstallUnlock, (v) => saveBool(LS_KEY_RUN_SAFETY_INSTALL_UNLOCK, Boolean(v)));
-watch(attentionAutopilotEnabled, (v) => saveBool(LS_KEY_ATTENTION_AUTOPILOT, Boolean(v)));
 watch(theme, (v) => saveString(LS_KEY_THEME, v));
 watch(fxReduced, (v) => saveBool(LS_KEY_FX_REDUCED, Boolean(v)));
 watch(liveScope, (v) => saveString(LS_KEY_FEED_SCOPE, v));
@@ -3382,131 +3364,6 @@ async function refreshAcceptance() {
   }
 }
 
-const ATTENTION_AUTOPILOT_COOLDOWN_MS = 5 * 60 * 1000;
-
-function persistAttentionAutopilotSeen() {
-  saveStringMap(LS_KEY_ATTENTION_AUTOPILOT_SEEN, attentionAutopilotSeen.value);
-}
-
-function markAttentionAutopilotSeen(sessionKey: string) {
-  attentionAutopilotSeen.value = attentionAutopilotMarkSeen(
-    attentionAutopilotSeen.value,
-    sessionKey,
-    Date.now(),
-  );
-  persistAttentionAutopilotSeen();
-}
-
-function stopAttentionAutopilotForSession(sessionKey: string) {
-  attentionAutopilotSeen.value = attentionAutopilotStopForSession(
-    attentionAutopilotSeen.value,
-    sessionKey,
-  );
-  persistAttentionAutopilotSeen();
-}
-
-function enqueueAttentionAutopilot(sessionKey: string) {
-  const k = String(sessionKey ?? "").trim();
-  if (!k) return;
-  if (attentionAutopilotQueued.has(k)) return;
-  attentionAutopilotQueued.add(k);
-  attentionAutopilotQueue.value = [...attentionAutopilotQueue.value, k].slice(0, 20);
-  void runAttentionAutopilotLoop();
-}
-
-async function runAttentionAutopilotLoop() {
-  if (attentionAutopilotRunning.value) return;
-  if (!attentionAutopilotEnabled.value) return;
-  if (taskPlaneDegraded.value) {
-    attentionAutopilotNote.value = "Autopilot：Runner daemon 不可用，已暂停。";
-    return;
-  }
-  attentionAutopilotRunning.value = true;
-  try {
-    while (attentionAutopilotQueue.value.length) {
-      if (!attentionAutopilotEnabled.value) return;
-      const [key, ...rest] = attentionAutopilotQueue.value;
-      attentionAutopilotQueue.value = rest;
-      attentionAutopilotQueued.delete(key);
-
-      const sess = sessionsAll.value.find((s) => s.key === key) ?? null;
-      if (!sess) continue;
-
-      if (sess.deleted_at) continue;
-      if (!sess.session_id) continue;
-      if (sess.status !== "interrupted") continue;
-      if (
-        sess.latest.status === "running" ||
-        sess.latest.status === "queued" ||
-        sess.latest.status === "waiting" ||
-        sess.latest.status === "awaiting_approval" ||
-        sess.latest.status === "blocked"
-      )
-        continue;
-
-      const now = Date.now();
-      const last = attentionAutopilotSeenAtMs(attentionAutopilotSeen.value, key);
-      const should = attentionAutopilotShouldAttempt({
-        enabled: attentionAutopilotEnabled.value,
-        deleted: Boolean(sess.deleted_at),
-        hasSessionID: Boolean(sess.session_id?.trim()),
-        sessionStatus: sess.status,
-        latestStatus: sess.latest.status,
-        nowMs: now,
-        lastAttemptMs: last,
-        cooldownMs: ATTENTION_AUTOPILOT_COOLDOWN_MS,
-      });
-      if (!should) continue;
-
-      markAttentionAutopilotSeen(key);
-
-      const short = (sess.session_id || sess.latest.id).slice(0, 8);
-      attentionAutopilotNote.value = `Autopilot：正在继续 ${short}…`;
-      try {
-        const driver = toolDriverForWorkerType(sess.worker_type);
-        const intent = normalizeTaskIntent(sess.latest.task_intent ?? "code");
-        const preset = effectiveSafetyPresetForTask(driver, sess.latest);
-        if (isHighRiskPreset(driver, preset)) {
-          attentionAutopilotNote.value = `Autopilot 已跳过 ${short}：更高权限设置需要手动确认。`;
-          continue;
-        }
-        const safety = buildRunSafetyPayload(driver, intent, preset);
-        const nt = await continueSessionWithOptions(sess.key, { prompt: "continue", ...safety });
-        if (isQueueAck(nt)) {
-          const pos = typeof nt.position === "number" && nt.position > 0 ? nt.position : 1;
-          attentionAutopilotNote.value = `Autopilot：${short} 已入队（第 ${pos} 位）。`;
-          continue;
-        }
-        resumeOriginByRunID.set(nt.id, "autopilot");
-        upsertTask(nt);
-        attentionAutopilotNote.value = `Autopilot：已开始继续 ${short}。`;
-      } catch (e: any) {
-        const msg = e?.message ?? String(e);
-        if (attentionAutopilotIsNoConversationFound(msg)) {
-          stopAttentionAutopilotForSession(key);
-          attentionAutopilotNote.value = `Autopilot 已停止：${short} 在 Claude 侧已不存在。建议：新建会话继续。`;
-        } else {
-          attentionAutopilotNote.value = `Autopilot：继续失败 ${short}：${msg}`;
-        }
-      }
-    }
-  } finally {
-    attentionAutopilotRunning.value = false;
-  }
-}
-
-function maybeTriggerAttentionAutopilot(prev: Task | undefined, next: Task) {
-  if (!attentionAutopilotEnabled.value) return;
-  if (!next?.id) return;
-  if (!prev) return;
-  if (prev.status === next.status) return;
-  if (next.status !== "interrupted") return;
-
-  // Non-disruptive: enqueue and run in background; do not steal focus.
-  const key = sessionKeyForTask(next);
-  enqueueAttentionAutopilot(key);
-}
-
 async function onCancelTask() {
   if (!selectedTaskId.value) return;
   if (!ensureTaskPlaneAvailable()) return;
@@ -3515,9 +3372,7 @@ async function onCancelTask() {
     await cancelTask(selectedTaskId.value);
   } catch (e: any) {
     const msg = e?.message ?? String(e);
-    if (attentionAutopilotIsNoConversationFound(msg)) {
-      const t = selectedTask.value;
-      if (t) stopAttentionAutopilotForSession(sessionKeyForTask(t));
+    if (isNoConversationFound(msg)) {
       errorBanner.value =
         "继续失败：Claude 找不到该会话（No conversation found）。建议：直接新建 Run 重新开始；或检查 Claude Code 会话是否被清理/禁用持久化。原始错误：" +
         msg;
