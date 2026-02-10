@@ -38,6 +38,9 @@ import type {
   PromptTemplate,
   PromptTemplateKind,
   RestoreSkillVersionResult,
+  QueueAck,
+  ContinueResponse,
+  SessionContinueQueueItem,
   SkillVersion,
   SkillVersionsListResponse,
   ControlPlaneStatus,
@@ -466,8 +469,36 @@ export async function continueSessionWithOptions(
     claude_sandbox?: boolean;
     claude_webfetch_domains?: string[];
   },
-): Promise<Task> {
-  return postJSON<Task>(`/api/sessions/${encodeURIComponent(key)}/continue`, input);
+): Promise<ContinueResponse> {
+  return postJSON<ContinueResponse>(`/api/sessions/${encodeURIComponent(key)}/continue`, input);
+}
+
+export async function preemptSessionContinueWithOptions(
+  key: string,
+  input: {
+    prompt: string;
+    unsafe_automation?: boolean;
+    safety_envelope?: string;
+    safety_preset?: string;
+    task_intent?: string;
+    codex_sandbox?: string;
+    codex_approval_policy?: string;
+    codex_search?: boolean;
+    claude_permission_mode?: string;
+    claude_sandbox?: boolean;
+    claude_webfetch_domains?: string[];
+  },
+): Promise<ContinueResponse> {
+  return postJSON<ContinueResponse>(`/api/sessions/${encodeURIComponent(key)}/preempt-continue`, input);
+}
+
+export async function fetchSessionContinueQueue(key: string): Promise<SessionContinueQueueItem[]> {
+  const res = await getJSON<{ items: SessionContinueQueueItem[] }>(`/api/sessions/${encodeURIComponent(key)}/queue`);
+  return Array.isArray(res.items) ? res.items : [];
+}
+
+export function isQueueAck(v: unknown): v is QueueAck {
+  return !!v && typeof v === "object" && (v as any).queued === true && typeof (v as any).queue_id === "string";
 }
 
 export async function rehydrateTaskWithOptions(

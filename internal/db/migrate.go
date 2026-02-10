@@ -175,6 +175,19 @@ func Migrate(ctx context.Context, conn *sql.DB) error {
 			backend TEXT NOT NULL DEFAULT '',
 			error TEXT NOT NULL DEFAULT ''
 		);`,
+		`CREATE TABLE IF NOT EXISTS session_continue_queue (
+			id TEXT PRIMARY KEY,
+			conversation_id TEXT NOT NULL,
+			prompt TEXT NOT NULL DEFAULT '',
+			run_options_json TEXT NOT NULL DEFAULT '',
+			priority INTEGER NOT NULL DEFAULT 0,
+			state TEXT NOT NULL DEFAULT 'pending',
+			source TEXT NOT NULL DEFAULT 'continue',
+			created_at INTEGER NOT NULL DEFAULT 0,
+			updated_at INTEGER NOT NULL DEFAULT 0
+		);`,
+		`CREATE INDEX IF NOT EXISTS idx_session_continue_queue_dispatch
+			ON session_continue_queue(conversation_id, state, priority DESC, created_at ASC, id ASC);`,
 	)
 
 	for _, stmt := range stmts {

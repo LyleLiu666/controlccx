@@ -124,3 +124,33 @@ type FinishTaskInput struct {
 	SessionID  string
 	FinishedAt time.Time
 }
+
+type SessionContinueQueueState string
+
+const (
+	SessionContinueQueueStatePending     SessionContinueQueueState = "pending"
+	SessionContinueQueueStateDispatching SessionContinueQueueState = "dispatching"
+	SessionContinueQueueStateDone        SessionContinueQueueState = "done"
+	SessionContinueQueueStateCanceled    SessionContinueQueueState = "canceled"
+	SessionContinueQueueStateFailed      SessionContinueQueueState = "failed"
+)
+
+type SessionContinueQueueItem struct {
+	ID             string                    `json:"id"`
+	ConversationID string                    `json:"conversation_id"`
+	Prompt         string                    `json:"prompt"`
+	RunOptionsJSON string                    `json:"run_options_json"`
+	Priority       int                       `json:"priority"`
+	State          SessionContinueQueueState `json:"state"`
+	Source         string                    `json:"source"`
+	CreatedAt      time.Time                 `json:"created_at"`
+	UpdatedAt      time.Time                 `json:"updated_at"`
+}
+
+type EnqueueSessionContinueInput struct {
+	ConversationID string `json:"conversation_id"`
+	Prompt         string `json:"prompt"`
+	RunOptionsJSON string `json:"run_options_json"`
+	Priority       int    `json:"priority"`
+	Source         string `json:"source"`
+}

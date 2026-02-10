@@ -162,7 +162,7 @@ func TestAPI_SessionContinue_FallsBackToRehydrateOnNoConversationFound(t *testin
 	}
 }
 
-func TestAPI_SessionContinue_ConflictsWhenHasQueuedOrRunning(t *testing.T) {
+func TestAPI_SessionContinue_QueuesWhenHasQueuedOrRunning(t *testing.T) {
 	ctx := context.Background()
 	conn, err := db.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "controlccx.db")})
 	if err != nil {
@@ -196,29 +196,37 @@ func TestAPI_SessionContinue_ConflictsWhenHasQueuedOrRunning(t *testing.T) {
 		t.Fatalf("post continue: %v", err)
 	}
 	t.Cleanup(func() { _ = res.Body.Close() })
-	if res.StatusCode != http.StatusConflict {
-		t.Fatalf("status=%d, want 409", res.StatusCode)
+	if res.StatusCode != http.StatusAccepted {
+		t.Fatalf("status=%d, want 202", res.StatusCode)
 	}
-	var conflict struct {
-		Error          string `json:"error"`
+	var queued struct {
+		Queued         bool   `json:"queued"`
+		QueueID        string `json:"queue_id"`
+		Position       int    `json:"position"`
 		ExistingTaskID string `json:"existing_task_id"`
 		ExistingStatus string `json:"existing_status"`
 	}
-	if err := json.NewDecoder(res.Body).Decode(&conflict); err != nil {
-		t.Fatalf("decode conflict: %v", err)
+	if err := json.NewDecoder(res.Body).Decode(&queued); err != nil {
+		t.Fatalf("decode queued: %v", err)
 	}
-	if conflict.Error != "session_task_in_flight" {
-		t.Fatalf("error=%q, want %q", conflict.Error, "session_task_in_flight")
+	if !queued.Queued {
+		t.Fatalf("queued=%v, want true", queued.Queued)
 	}
-	if conflict.ExistingTaskID != task.ID {
-		t.Fatalf("existing_task_id=%q, want %q", conflict.ExistingTaskID, task.ID)
+	if strings.TrimSpace(queued.QueueID) == "" {
+		t.Fatalf("queue_id is empty")
 	}
-	if conflict.ExistingStatus != string(tasks.StatusQueued) {
-		t.Fatalf("existing_status=%q, want %q", conflict.ExistingStatus, tasks.StatusQueued)
+	if queued.Position != 1 {
+		t.Fatalf("position=%d, want 1", queued.Position)
+	}
+	if queued.ExistingTaskID != task.ID {
+		t.Fatalf("existing_task_id=%q, want %q", queued.ExistingTaskID, task.ID)
+	}
+	if queued.ExistingStatus != string(tasks.StatusQueued) {
+		t.Fatalf("existing_status=%q, want %q", queued.ExistingStatus, tasks.StatusQueued)
 	}
 }
 
-func TestAPI_SessionContinue_ConflictsWhenAwaitingApproval(t *testing.T) {
+func TestAPI_SessionContinue_QueuesWhenAwaitingApproval(t *testing.T) {
 	ctx := context.Background()
 	conn, err := db.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "controlccx.db")})
 	if err != nil {
@@ -258,25 +266,30 @@ func TestAPI_SessionContinue_ConflictsWhenAwaitingApproval(t *testing.T) {
 		t.Fatalf("post continue: %v", err)
 	}
 	t.Cleanup(func() { _ = res.Body.Close() })
-	if res.StatusCode != http.StatusConflict {
-		t.Fatalf("status=%d, want 409", res.StatusCode)
+	if res.StatusCode != http.StatusAccepted {
+		t.Fatalf("status=%d, want 202", res.StatusCode)
 	}
-	var conflict struct {
-		Error          string `json:"error"`
+	var queued struct {
+		Queued         bool   `json:"queued"`
+		QueueID        string `json:"queue_id"`
+		Position       int    `json:"position"`
 		ExistingTaskID string `json:"existing_task_id"`
 		ExistingStatus string `json:"existing_status"`
 	}
-	if err := json.NewDecoder(res.Body).Decode(&conflict); err != nil {
-		t.Fatalf("decode conflict: %v", err)
+	if err := json.NewDecoder(res.Body).Decode(&queued); err != nil {
+		t.Fatalf("decode queued: %v", err)
 	}
-	if conflict.Error != "session_task_in_flight" {
-		t.Fatalf("error=%q, want %q", conflict.Error, "session_task_in_flight")
+	if !queued.Queued {
+		t.Fatalf("queued=%v, want true", queued.Queued)
 	}
-	if conflict.ExistingTaskID != task.ID {
-		t.Fatalf("existing_task_id=%q, want %q", conflict.ExistingTaskID, task.ID)
+	if strings.TrimSpace(queued.QueueID) == "" {
+		t.Fatalf("queue_id is empty")
 	}
-	if conflict.ExistingStatus != string(tasks.StatusAwaitingApproval) {
-		t.Fatalf("existing_status=%q, want %q", conflict.ExistingStatus, tasks.StatusAwaitingApproval)
+	if queued.ExistingTaskID != task.ID {
+		t.Fatalf("existing_task_id=%q, want %q", queued.ExistingTaskID, task.ID)
+	}
+	if queued.ExistingStatus != string(tasks.StatusAwaitingApproval) {
+		t.Fatalf("existing_status=%q, want %q", queued.ExistingStatus, tasks.StatusAwaitingApproval)
 	}
 }
 

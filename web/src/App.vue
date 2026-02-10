@@ -24,6 +24,7 @@ import type {
   ProvidersListResponse,
   ProviderPingTestResult,
   ProviderSpeedTestResult,
+  SessionContinueQueueItem,
   WorkerType,
 } from "./types";
 import { highlightCodeForPreview } from "./highlight";
@@ -57,6 +58,8 @@ import {
   linkSkill,
   renameSession,
   continueSessionWithOptions,
+  preemptSessionContinueWithOptions,
+  fetchSessionContinueQueue,
   resumeTaskWithOptions,
   rehydrateTaskWithOptions,
   upsertTool,
@@ -64,6 +67,7 @@ import {
   importAuthFromEnv,
   fetchAcceptance,
   getInstanceToken,
+  isQueueAck,
   isAPIError,
   isInstanceTokenRequiredError,
   sessionTaskInFlightFromError,
@@ -186,6 +190,8 @@ const resumePromptInputEl = ref<HTMLInputElement | null>(null);
 const resumePromptTextEl = ref<HTMLTextAreaElement | null>(null);
 const resumeSafetyOverride = ref(false);
 const resumeHighRiskOptIn = ref(false);
+const sessionContinueQueue = ref<SessionContinueQueueItem[]>([]);
+const sessionContinueQueueLoading = ref(false);
 const errorBanner = ref<string>("");
 
 const {
@@ -865,6 +871,9 @@ const {
     void maybePromptBlocked(prev, next);
     void maybePromptApproval(prev, next);
     void maybePromptRehydrate(prev, next);
+    if (sessionKeyForTask(next) === selectedSessionKey.value) {
+      void loadSelectedSessionContinueQueue();
+    }
   },
 });
 
@@ -3463,6 +3472,11 @@ async function runAttentionAutopilotLoop() {
         }
         const safety = buildRunSafetyPayload(driver, intent, preset);
         const nt = await continueSessionWithOptions(sess.key, { prompt: "continue", ...safety });
+        if (isQueueAck(nt)) {
+          const pos = typeof nt.position === "number" && nt.position > 0 ? nt.position : 1;
+          attentionAutopilotNote.value = `Autopilot：${short} 已入队（第 ${pos} 位）。`;
+          continue;
+        }
         resumeOriginByRunID.set(nt.id, "autopilot");
         upsertTask(nt);
         attentionAutopilotNote.value = `Autopilot：已开始继续 ${short}。`;
@@ -3526,61 +3540,144 @@ async function onResumeTask() {
   }
   if (!resumePrompt.value.trim()) return;
   if (!ensureTaskPlaneAvailable()) return;
+  const payload = await buildResumeSafetyPayload(sess);
+  if (!payload) return;
+
   errorBanner.value = "";
   try {
-    const driver = resumeDriver.value;
-    const useAutopilot = runSafetyAutopilotEnabled.value && !resumeSafetyOverride.value;
-
-    let payload: RunSafetyPayload = {};
-    if (useAutopilot) {
-      const preset = effectiveSafetyPresetForTask(driver, sess.latest);
-      if (isHighRiskPreset(driver, preset) && !isHighRiskAllowedByInstallUnlock(driver, preset)) {
-        const ok = await requestHighRiskConfirm({
-          title: "需要开启下载/安装权限",
-          message: "这个任务需要开启下载/安装权限：允许 agent 下载/安装依赖并运行安装命令。点一次「继续」即可启用并运行。",
-          detail: highRiskPresetSummary(driver, preset),
-          confirmLabel: "继续（启用并运行）",
-        });
-        if (!ok) return;
-        runSafetyInstallUnlock.value = true;
-      }
-      payload = buildSafetyEnvelopePayload();
-    } else {
-      const preset = resumeSafetyPreset.value;
-      const intent = inferTaskIntentFromSafetyPreset(driver, preset);
-      if (
-        (driver === "claude-code" || driver === "codex") &&
-        isHighRiskPreset(driver, preset) &&
-        !resumeHighRiskOptIn.value
-      ) {
-        const ok = await requestHighRiskConfirm({
-          title: "高权限确认",
-          message: "该继续操作需要更高权限设置。继续吗？",
-          detail: highRiskPresetSummary(driver, preset),
-          confirmLabel: "继续（已知晓权限）",
-        });
-        if (!ok) return;
-        resumeHighRiskOptIn.value = true;
-      }
-
-      setStringMapKey(runSafetyPresetByTool, sess.worker_type, preset);
-
-      const envelope = buildSafetyEnvelopePayload();
-      payload = { ...envelope, ...buildRunSafetyPayload(driver, intent, preset) };
+    openRunLaunchMask({ title: "继续中…", detail: "正在继续会话…" });
+    const out = await continueSessionWithOptions(sess.key, { prompt: resumePrompt.value, ...payload });
+    resumePrompt.value = "";
+    if (isQueueAck(out)) {
+      closeRunLaunchMask();
+      await onContinueQueuedAck(out, "continue");
+      return;
     }
 
-    openRunLaunchMask({ title: "继续中…", detail: "正在继续会话…" });
-    const nt = await continueSessionWithOptions(sess.key, { prompt: resumePrompt.value, ...payload });
-    trackRunLaunchMaskForTask(nt);
-    resumeOriginByRunID.set(nt.id, "manual");
-    upsertTask(nt);
-    selectedTaskId.value = nt.id;
-    resumePrompt.value = "";
-    await loadLogs(nt.id);
+    trackRunLaunchMaskForTask(out);
+    resumeOriginByRunID.set(out.id, "manual");
+    upsertTask(out);
+    selectedTaskId.value = out.id;
+    await loadLogs(out.id);
+    await loadSelectedSessionContinueQueue();
   } catch (e: any) {
     closeRunLaunchMask();
     errorBanner.value = e?.message ?? String(e);
   }
+}
+
+async function onPreemptResumeTask() {
+  const sess = selectedSession.value;
+  if (!sess) return;
+  if (sess.deleted_at) {
+    errorBanner.value = "该会话已删除（软删除），无法继续。";
+    return;
+  }
+  if (!sess.session_id) {
+    errorBanner.value = "该会话还没有 session_id，无法继续。";
+    return;
+  }
+  if (!resumePrompt.value.trim()) return;
+  if (!selectedSessionInFlightTask.value) return;
+  if (!ensureTaskPlaneAvailable()) return;
+  const payload = await buildResumeSafetyPayload(sess);
+  if (!payload) return;
+
+  errorBanner.value = "";
+  try {
+    openRunLaunchMask({ title: "抢占中…", detail: "正在抢占并排入队列…" });
+    const out = await preemptSessionContinueWithOptions(sess.key, { prompt: resumePrompt.value, ...payload });
+    resumePrompt.value = "";
+    if (isQueueAck(out)) {
+      closeRunLaunchMask();
+      await onContinueQueuedAck(out, "preempt");
+      return;
+    }
+
+    trackRunLaunchMaskForTask(out);
+    resumeOriginByRunID.set(out.id, "manual");
+    upsertTask(out);
+    selectedTaskId.value = out.id;
+    await loadLogs(out.id);
+    await loadSelectedSessionContinueQueue();
+  } catch (e: any) {
+    closeRunLaunchMask();
+    errorBanner.value = e?.message ?? String(e);
+  }
+}
+
+async function buildResumeSafetyPayload(sess: SessionGroup): Promise<RunSafetyPayload | null> {
+  errorBanner.value = "";
+  const driver = resumeDriver.value;
+  const useAutopilot = runSafetyAutopilotEnabled.value && !resumeSafetyOverride.value;
+
+  let payload: RunSafetyPayload = {};
+  if (useAutopilot) {
+    const preset = effectiveSafetyPresetForTask(driver, sess.latest);
+    if (isHighRiskPreset(driver, preset) && !isHighRiskAllowedByInstallUnlock(driver, preset)) {
+      const ok = await requestHighRiskConfirm({
+        title: "需要开启下载/安装权限",
+        message: "这个任务需要开启下载/安装权限：允许 agent 下载/安装依赖并运行安装命令。点一次「继续」即可启用并运行。",
+        detail: highRiskPresetSummary(driver, preset),
+        confirmLabel: "继续（启用并运行）",
+      });
+      if (!ok) return null;
+      runSafetyInstallUnlock.value = true;
+    }
+    payload = buildSafetyEnvelopePayload();
+  } else {
+    const preset = resumeSafetyPreset.value;
+    const intent = inferTaskIntentFromSafetyPreset(driver, preset);
+    if (
+      (driver === "claude-code" || driver === "codex") &&
+      isHighRiskPreset(driver, preset) &&
+      !resumeHighRiskOptIn.value
+    ) {
+      const ok = await requestHighRiskConfirm({
+        title: "高权限确认",
+        message: "该继续操作需要更高权限设置。继续吗？",
+        detail: highRiskPresetSummary(driver, preset),
+        confirmLabel: "继续（已知晓权限）",
+      });
+      if (!ok) return null;
+      resumeHighRiskOptIn.value = true;
+    }
+
+    setStringMapKey(runSafetyPresetByTool, sess.worker_type, preset);
+
+    const envelope = buildSafetyEnvelopePayload();
+    payload = { ...envelope, ...buildRunSafetyPayload(driver, intent, preset) };
+  }
+  return payload;
+}
+
+async function onContinueQueuedAck(
+  ack: { position?: number; existing_task_id?: string; preempted_task_id?: string },
+  mode: "continue" | "preempt",
+) {
+  const pos = typeof ack.position === "number" && ack.position > 0 ? ack.position : 1;
+  if (mode === "preempt") {
+    const preempted = String(ack.preempted_task_id ?? "").trim();
+    if (preempted) {
+      errorBanner.value = `已抢占 ${preempted.slice(0, 8)} 并入队（第 ${pos} 位）。`;
+    } else {
+      errorBanner.value = `已抢占并入队（第 ${pos} 位）。`;
+    }
+  } else {
+    errorBanner.value = `当前会话正在执行，已入队（第 ${pos} 位）。`;
+  }
+
+  const existingID = String(ack.existing_task_id ?? "").trim();
+  if (existingID) {
+    selectedTaskId.value = existingID;
+    try {
+      await loadLogs(existingID);
+    } catch {
+      // ignore
+    }
+    outputTab.value = "logs";
+  }
+  await loadSelectedSessionContinueQueue();
 }
 
 function isImeComposing(e: KeyboardEvent): boolean {
@@ -5099,6 +5196,34 @@ const selectedSession = computed(() => {
   return sessionsAll.value.find((s) => s.key === key) ?? null;
 });
 
+const selectedSessionInFlightTask = computed<Task | null>(() => {
+  const sess = selectedSession.value;
+  if (!sess) return null;
+  for (let i = sess.runs.length - 1; i >= 0; i -= 1) {
+    const r = sess.runs[i];
+    if (r.status === "running" || r.status === "queued" || r.status === "waiting" || r.status === "awaiting_approval") {
+      return r;
+    }
+  }
+  return null;
+});
+
+async function loadSelectedSessionContinueQueue() {
+  const key = String(selectedSessionKey.value ?? "").trim();
+  if (!key) {
+    sessionContinueQueue.value = [];
+    return;
+  }
+  sessionContinueQueueLoading.value = true;
+  try {
+    sessionContinueQueue.value = await fetchSessionContinueQueue(key);
+  } catch {
+    // keep queue panel non-disruptive
+  } finally {
+    sessionContinueQueueLoading.value = false;
+  }
+}
+
 const resumeDriver = computed<ToolDriver>(() =>
   toolDriverForWorkerType(selectedSession.value?.worker_type ?? ""),
 );
@@ -5246,6 +5371,7 @@ watch(
     resumeSafetyOverride.value = false;
     resumeHighRiskOptIn.value = false;
     void refreshAcceptance();
+    void loadSelectedSessionContinueQueue();
   },
   { immediate: true },
 );
@@ -6516,12 +6642,44 @@ watch(
               </button>
               <button
                 type="button"
+                class="secondary"
+                @click="onPreemptResumeTask"
+                :disabled="
+                  !resumePrompt.trim() ||
+                  !selectedSession.session_id ||
+                  !!selectedSession.deleted_at ||
+                  highRiskConfirmOpen ||
+                  !selectedSessionInFlightTask
+                "
+              >
+                抢占当前并继续
+              </button>
+              <button
+                type="button"
                 class="resumeToggle"
                 @click="resumeExpanded = !resumeExpanded"
                 :title="resumeExpanded ? 'Collapse' : 'Expand'"
               >
                 {{ resumeExpanded ? "▴" : "⋯" }}
               </button>
+            </div>
+            <div v-if="selectedSessionInFlightTask || sessionContinueQueueLoading || sessionContinueQueue.length > 0" class="tinyHint">
+              <span v-if="selectedSessionInFlightTask">
+                运行中：{{ selectedSessionInFlightTask.id.slice(0, 8) }}（{{ selectedSessionInFlightTask.status }}）
+              </span>
+              <span v-if="sessionContinueQueueLoading">
+                {{ selectedSessionInFlightTask ? " · " : "" }}队列加载中…
+              </span>
+              <span v-else-if="sessionContinueQueue.length > 0">
+                {{ selectedSessionInFlightTask ? " · " : "" }}队列 {{ sessionContinueQueue.length }}
+              </span>
+            </div>
+            <div v-if="resumeExpanded && sessionContinueQueue.length > 0" class="resumeQueue">
+              <div v-for="(q, idx) in sessionContinueQueue" :key="q.id" class="resumeQueueItem">
+                <span class="mono">#{{ idx + 1 }}</span>
+                <span>{{ promptSummary(q.prompt) || "(empty prompt)" }}</span>
+                <span class="pill small">{{ q.source }}</span>
+              </div>
             </div>
 	            <div
 	              v-if="resumeExpanded && (resumeDriver === 'codex' || resumeDriver === 'claude-code')"

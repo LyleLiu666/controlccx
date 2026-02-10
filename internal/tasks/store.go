@@ -688,21 +688,29 @@ func (s *Store) FinishTask(ctx context.Context, id string, in FinishTaskInput) e
 	defer func() { _ = tx.Rollback() }()
 
 	var (
+		prevStatus         string
 		stderrCount        int
 		keywordCount       int
 		prevSessionID      string
 		prevConversationID string
 	)
 	err = tx.QueryRowContext(ctx, `
-		SELECT stderr_count, keyword_count, session_id, conversation_id
+		SELECT status, stderr_count, keyword_count, session_id, conversation_id
 		FROM tasks
 		WHERE id = ?;
-	`, id).Scan(&stderrCount, &keywordCount, &prevSessionID, &prevConversationID)
+	`, id).Scan(&prevStatus, &stderrCount, &keywordCount, &prevSessionID, &prevConversationID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return fmt.Errorf("tasks: not found")
 		}
 		return fmt.Errorf("tasks: read for finish: %w", err)
+	}
+
+	existing := Status(strings.TrimSpace(prevStatus))
+	if isTerminalStatus(existing) && existing != in.Status {
+		// Preserve terminal status chosen by other actors (e.g. watchdog interrupt).
+		// If callers want a different outcome, they should create a new run instead.
+		return nil
 	}
 
 	score := ComputeScore(in.Status, stderrCount, keywordCount, in.ExitCode)

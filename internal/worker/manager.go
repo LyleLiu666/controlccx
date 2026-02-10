@@ -269,6 +269,25 @@ func (m *Manager) run(ctx context.Context, task tasks.Task) error {
 	}
 	m.publishTaskUpdated(task.ID)
 
+	heartbeatStop := make(chan struct{})
+	defer close(heartbeatStop)
+	if m != nil && m.store != nil {
+		go func() {
+			ticker := time.NewTicker(30 * time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-heartbeatStop:
+					return
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					_ = m.store.TouchTask(context.Background(), task.ID)
+				}
+			}
+		}()
+	}
+
 	// Run workspace: execute inside a session-scoped isolated directory (run_workdir).
 	effective := task
 	initProject := false

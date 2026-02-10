@@ -76,6 +76,31 @@ export type Task = {
   finished_at?: string;
 };
 
+export type SessionContinueQueueState = "pending" | "dispatching" | "done" | "canceled" | "failed";
+
+export type SessionContinueQueueItem = {
+  id: string;
+  conversation_id: string;
+  prompt: string;
+  run_options_json: string;
+  priority: number;
+  state: SessionContinueQueueState;
+  source: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type QueueAck = {
+  queued: true;
+  queue_id: string;
+  position: number;
+  existing_task_id?: string;
+  existing_status?: TaskStatus;
+  preempted_task_id?: string;
+};
+
+export type ContinueResponse = Task | QueueAck;
+
 export type ApprovalStatus = "pending" | "approved" | "denied" | "expired";
 
 export type RiskLevel = "low" | "medium" | "high";

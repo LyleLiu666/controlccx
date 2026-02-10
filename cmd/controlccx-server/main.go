@@ -207,6 +207,7 @@ func main() {
 		Tools:                toolsSvc,
 		Workspaces:           workspacesSvc,
 	}
+	stopBackgroundLoops := apiSvc.StartBackgroundLoops(context.Background())
 
 	mux := http.NewServeMux()
 	mux.Handle("/api/control-plane", withInstanceTokenGate(cfg.Server.Addr, instanceToken, http.HandlerFunc(controlPlaneHandler(runnerBaseURL, instanceToken))))
@@ -226,6 +227,7 @@ func main() {
 	bridgeCtx, cancelBridge := context.WithCancel(context.Background())
 	srv.RegisterOnShutdown(cancelBridge)
 	srv.RegisterOnShutdown(audit.StartGCLoop(auditSvc, log.Printf))
+	srv.RegisterOnShutdown(stopBackgroundLoops)
 	go func() {
 		if err := daemon.BridgeSSEToHub(bridgeCtx, runnerBaseURL+"/api/events", hub, daemon.SSEBridgeOptions{
 			Logf:  log.Printf,
