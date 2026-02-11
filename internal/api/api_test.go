@@ -180,6 +180,145 @@ func TestAPI_TasksAndChat(t *testing.T) {
 		}
 	})
 
+	t.Run("mission contract", func(t *testing.T) {
+		baseDir := t.TempDir()
+		task, err := taskStore.CreateTask(ctx, tasks.CreateTaskInput{
+			WorkerType: tasks.WorkerExec,
+			Mode:       tasks.ModeNew,
+			Prompt:     "draft mission contract",
+			WorkDir:    baseDir,
+			SessionID:  "sess-contract-1",
+		})
+		if err != nil {
+			t.Fatalf("create task: %v", err)
+		}
+
+		missingRes, err := http.Get(srv.URL + "/api/mission-contract?key=" + url.QueryEscape("c:missing-contract"))
+		if err != nil {
+			t.Fatalf("get missing mission contract: %v", err)
+		}
+		defer missingRes.Body.Close()
+		if missingRes.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(missingRes.Body)
+			t.Fatalf("missing status=%d, want 200; body=%s", missingRes.StatusCode, string(body))
+		}
+		var missingBody struct {
+			OK       bool                   `json:"ok"`
+			Contract *tasks.MissionContract `json:"contract"`
+		}
+		if err := json.NewDecoder(missingRes.Body).Decode(&missingBody); err != nil {
+			t.Fatalf("decode missing body: %v", err)
+		}
+		if missingBody.OK || missingBody.Contract != nil {
+			t.Fatalf("unexpected missing response: %+v", missingBody)
+		}
+
+		createPayload := map[string]any{
+			"task_id": task.ID,
+			"goal":    "Deliver autonomous execution loop safely",
+			"constraints": []string{
+				"always run tests before commit",
+				"no destructive commands",
+			},
+			"acceptance_criteria": []string{
+				"all required tests pass",
+				"openspec validation passes",
+			},
+			"non_goals": []string{
+				"rewrite entire frontend",
+			},
+		}
+		createBuf, _ := json.Marshal(createPayload)
+		createRes, err := http.Post(srv.URL+"/api/mission-contract", "application/json", bytes.NewReader(createBuf))
+		if err != nil {
+			t.Fatalf("create mission contract: %v", err)
+		}
+		defer createRes.Body.Close()
+		if createRes.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(createRes.Body)
+			t.Fatalf("create status=%d, want 200; body=%s", createRes.StatusCode, string(body))
+		}
+		var createBody struct {
+			OK       bool                   `json:"ok"`
+			Contract *tasks.MissionContract `json:"contract"`
+		}
+		if err := json.NewDecoder(createRes.Body).Decode(&createBody); err != nil {
+			t.Fatalf("decode create body: %v", err)
+		}
+		if !createBody.OK || createBody.Contract == nil {
+			t.Fatalf("unexpected create response: %+v", createBody)
+		}
+		if createBody.Contract.Revision != 1 {
+			t.Fatalf("create revision=%d, want 1", createBody.Contract.Revision)
+		}
+
+		getRes, err := http.Get(srv.URL + "/api/mission-contract?task_id=" + url.QueryEscape(task.ID))
+		if err != nil {
+			t.Fatalf("get mission contract: %v", err)
+		}
+		defer getRes.Body.Close()
+		if getRes.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(getRes.Body)
+			t.Fatalf("get status=%d, want 200; body=%s", getRes.StatusCode, string(body))
+		}
+		var getBody struct {
+			OK       bool                   `json:"ok"`
+			Contract *tasks.MissionContract `json:"contract"`
+		}
+		if err := json.NewDecoder(getRes.Body).Decode(&getBody); err != nil {
+			t.Fatalf("decode get body: %v", err)
+		}
+		if !getBody.OK || getBody.Contract == nil {
+			t.Fatalf("unexpected get response: %+v", getBody)
+		}
+		if getBody.Contract.Goal != "Deliver autonomous execution loop safely" {
+			t.Fatalf("get goal=%q", getBody.Contract.Goal)
+		}
+
+		updatePayload := map[string]any{
+			"key":  tasks.SessionKeyForTask(task),
+			"goal": "Deliver autonomous execution loop safely at scale",
+			"constraints": []string{
+				"always run tests before commit",
+			},
+			"acceptance_criteria": []string{
+				"all required tests pass",
+				"no cross-project contamination",
+			},
+			"non_goals": []string{
+				"replace language runtime",
+			},
+		}
+		updateBuf, _ := json.Marshal(updatePayload)
+		updateReq, err := http.NewRequest(http.MethodPost, srv.URL+"/api/mission-contract", bytes.NewReader(updateBuf))
+		if err != nil {
+			t.Fatalf("new request: %v", err)
+		}
+		updateReq.Header.Set("Content-Type", "application/json")
+		updateRes, err := http.DefaultClient.Do(updateReq)
+		if err != nil {
+			t.Fatalf("update mission contract: %v", err)
+		}
+		defer updateRes.Body.Close()
+		if updateRes.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(updateRes.Body)
+			t.Fatalf("update status=%d, want 200; body=%s", updateRes.StatusCode, string(body))
+		}
+		var updateBody struct {
+			OK       bool                   `json:"ok"`
+			Contract *tasks.MissionContract `json:"contract"`
+		}
+		if err := json.NewDecoder(updateRes.Body).Decode(&updateBody); err != nil {
+			t.Fatalf("decode update body: %v", err)
+		}
+		if !updateBody.OK || updateBody.Contract == nil {
+			t.Fatalf("unexpected update response: %+v", updateBody)
+		}
+		if updateBody.Contract.Revision != 2 {
+			t.Fatalf("update revision=%d, want 2", updateBody.Contract.Revision)
+		}
+	})
+
 	t.Run("fs", func(t *testing.T) {
 		root := filepath.Join(t.TempDir(), "root")
 		if err := os.MkdirAll(filepath.Join(root, "a"), 0o755); err != nil {

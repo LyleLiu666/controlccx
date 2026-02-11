@@ -59,6 +59,7 @@ func (a *API) Handler() http.Handler {
 	mux.HandleFunc("/api/tasks/", a.handleTaskByID)
 	mux.HandleFunc("/api/sessions/", a.handleSessionByKey)
 	mux.HandleFunc("/api/acceptance", a.handleAcceptance)
+	mux.HandleFunc("/api/mission-contract", a.handleMissionContract)
 	mux.HandleFunc("/api/context", a.handleProjectContext)
 	mux.HandleFunc("/api/secretary/messages", a.handleSecretaryMessages)
 	mux.HandleFunc("/api/secretary/messages/stream", a.handleSecretaryMessagesStream)
@@ -269,6 +270,96 @@ func (a *API) handleAcceptance(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, map[string]any{"ok": true, "state": state})
+}
+
+func (a *API) handleMissionContract(w http.ResponseWriter, r *http.Request) {
+	if a.Tasks == nil {
+		http.Error(w, "tasks store not configured", http.StatusServiceUnavailable)
+		return
+	}
+
+	resolveKey := func(rawKey, rawTaskID, rawID string) (string, error) {
+		key := strings.TrimSpace(rawKey)
+		if key != "" {
+			return key, nil
+		}
+		taskID := strings.TrimSpace(rawTaskID)
+		if taskID == "" {
+			taskID = strings.TrimSpace(rawID)
+		}
+		if taskID == "" {
+			return "", nil
+		}
+		t, err := a.Tasks.GetTask(r.Context(), taskID)
+		if err != nil {
+			return "", err
+		}
+		return tasks.SessionKeyForTask(t), nil
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		key, err := resolveKey(
+			r.URL.Query().Get("key"),
+			r.URL.Query().Get("task_id"),
+			r.URL.Query().Get("id"),
+		)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+		if key == "" {
+			http.Error(w, "key or task_id is required", http.StatusBadRequest)
+			return
+		}
+		contract, ok, err := a.Tasks.GetMissionContract(r.Context(), key)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if !ok {
+			writeJSON(w, map[string]any{"ok": false, "contract": nil})
+			return
+		}
+		writeJSON(w, map[string]any{"ok": true, "contract": contract})
+	case http.MethodPost:
+		var body struct {
+			Key                string   `json:"key"`
+			TaskID             string   `json:"task_id,omitempty"`
+			ID                 string   `json:"id,omitempty"`
+			Goal               string   `json:"goal"`
+			Constraints        []string `json:"constraints"`
+			AcceptanceCriteria []string `json:"acceptance_criteria"`
+			NonGoals           []string `json:"non_goals"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, "invalid json", http.StatusBadRequest)
+			return
+		}
+		key, err := resolveKey(body.Key, body.TaskID, body.ID)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+		if key == "" {
+			http.Error(w, "key or task_id is required", http.StatusBadRequest)
+			return
+		}
+		contract, err := a.Tasks.UpsertMissionContract(r.Context(), tasks.UpsertMissionContractInput{
+			Key:                key,
+			Goal:               body.Goal,
+			Constraints:        body.Constraints,
+			AcceptanceCriteria: body.AcceptanceCriteria,
+			NonGoals:           body.NonGoals,
+		})
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		writeJSON(w, map[string]any{"ok": true, "contract": contract})
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
 }
 
 func (a *API) handleSystem(w http.ResponseWriter, r *http.Request) {
