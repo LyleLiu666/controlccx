@@ -204,7 +204,7 @@ func buildCodex(cfg config.Config, task tasks.Task) (ToolCommand, error) {
 	unsafe := cfg.Workers.UnsafeAutomation || task.UnsafeAutomation
 
 	args := []string{}
-	if task.CodexSearch {
+	if codexSearchEnabledForTask(task) {
 		// Codex feature flags are opt-in; search is disabled by default.
 		args = append(args, "--enable", "web_search_request")
 	}

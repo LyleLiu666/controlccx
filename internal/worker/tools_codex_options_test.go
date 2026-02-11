@@ -63,6 +63,58 @@ func TestBuildToolCommand_CodexSearch_EnablesFeatureBeforeAppServer(t *testing.T
 	}
 }
 
+func TestBuildToolCommand_CodexTierOnlyWebReadonly_EnablesSearchBeforeAppServer(t *testing.T) {
+	cfg := config.Default()
+	task := tasks.Task{
+		WorkerType:  tasks.WorkerCodex,
+		Mode:        tasks.ModeNew,
+		Prompt:      "hi",
+		WorkDir:     ".",
+		NetworkTier: tasks.NetworkTierWebReadonly,
+	}
+
+	tool, err := BuildToolCommand(cfg, task)
+	if err != nil {
+		t.Fatalf("BuildToolCommand: %v", err)
+	}
+
+	appIdx := indexOf(tool.Args, "app-server")
+	if appIdx < 0 {
+		t.Fatalf("args=%v, expected app-server subcommand", tool.Args)
+	}
+	enableIdx := indexOf(tool.Args, "--enable")
+	if enableIdx < 0 {
+		t.Fatalf("args=%v, expected --enable web_search_request", tool.Args)
+	}
+	if enableIdx > appIdx {
+		t.Fatalf("args=%v, expected --enable before app-server", tool.Args)
+	}
+	if enableIdx+1 >= len(tool.Args) || tool.Args[enableIdx+1] != "web_search_request" {
+		t.Fatalf("args=%v, expected --enable web_search_request", tool.Args)
+	}
+}
+
+func TestBuildToolCommand_CodexLegacyReadOnly_DoesNotEnableSearch(t *testing.T) {
+	cfg := config.Default()
+	task := tasks.Task{
+		WorkerType:   tasks.WorkerCodex,
+		Mode:         tasks.ModeNew,
+		Prompt:       "hi",
+		WorkDir:      ".",
+		NetworkTier:  tasks.NetworkTierWebReadonly,
+		CodexSandbox: "read-only",
+		CodexSearch:  false,
+	}
+
+	tool, err := BuildToolCommand(cfg, task)
+	if err != nil {
+		t.Fatalf("BuildToolCommand: %v", err)
+	}
+	if hasArg(tool.Args, "--enable") {
+		t.Fatalf("args=%v, expected no --enable for legacy read-only config", tool.Args)
+	}
+}
+
 func indexOf(items []string, value string) int {
 	for i, it := range items {
 		if it == value {

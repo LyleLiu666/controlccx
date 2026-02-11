@@ -63,7 +63,7 @@ func (m *Manager) runCodexAppServer(ctx context.Context, task tasks.Task, peer *
 
 	unsafe := task.UnsafeAutomation || m.cfg.Workers.UnsafeAutomation
 	approvalPolicy := normalizeCodexApprovalPolicy(task.CodexApprovalPolicy, unsafe)
-	sandbox := normalizeCodexSandbox(task.CodexSandbox, unsafe)
+	sandbox := normalizeCodexSandbox(codexSandboxInputForTask(task), unsafe)
 	model, effort := m.codexModelAndEffort()
 
 	failOnce := func(err error, prefix string) {
