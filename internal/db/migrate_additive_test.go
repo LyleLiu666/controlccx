@@ -86,6 +86,13 @@ func TestMigrate_AdditiveTables_AllowedAtSchemaVersion(t *testing.T) {
 
 	if err := conn.QueryRowContext(ctx, `
 		SELECT name FROM sqlite_master
+		WHERE type='table' AND name='risk_decisions';
+	`).Scan(&name); err != nil {
+		t.Fatalf("expected risk_decisions table: %v", err)
+	}
+
+	if err := conn.QueryRowContext(ctx, `
+		SELECT name FROM sqlite_master
 		WHERE type='table' AND name='acceptance_states';
 	`).Scan(&name); err != nil {
 		t.Fatalf("expected acceptance_states table: %v", err)
