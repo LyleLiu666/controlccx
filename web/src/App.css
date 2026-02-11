@@ -1848,6 +1848,7 @@ h2 {
 
 :deep(.skillsToolbar) {
   display: flex;
+  flex-wrap: wrap;
   gap: 10px;
   align-items: center;
   margin: 10px 0 14px;
@@ -1861,6 +1862,24 @@ h2 {
 
 :deep(.skillsLimit) {
   display: flex;
+  gap: 8px;
+  align-items: center;
+  white-space: nowrap;
+}
+
+:deep(.skillsRepoFilter) {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  white-space: nowrap;
+}
+
+:deep(.skillsRepoFilter select) {
+  max-width: 280px;
+}
+
+:deep(.skillsGroupToggle) {
+  display: inline-flex;
   gap: 8px;
   align-items: center;
   white-space: nowrap;
@@ -1903,6 +1922,18 @@ h2 {
   padding: 12px;
   border-top: 1px solid var(--border-color);
   align-items: center;
+}
+
+:deep(.skillsRepoGroupHead) {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-top: 1px solid var(--border-color);
+  background: color-mix(in oklab, var(--bg-subtle) 86%, transparent);
 }
 
 :deep(.skillsName) {

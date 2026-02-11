@@ -5,11 +5,69 @@ import { fetchSkills, linkSkill, syncSkill, unlinkSkill } from "../api";
 import type { SkillTarget } from "../skillsSummary";
 import { summarizeSkillTarget } from "../skillsSummary";
 
+const LS_KEY_SKILLS_REPO_FILTER = "controlccx.skills.repo_filter.v1";
+const LS_KEY_SKILLS_GROUP_BY_REPO = "controlccx.skills.group_by_repo.v1";
+
+function getLocalStorageSafe(): Storage | null {
+  try {
+    return window?.localStorage ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function loadString(key: string): string {
+  const st = getLocalStorageSafe();
+  if (!st) return "";
+  try {
+    return String(st.getItem(key) ?? "").trim();
+  } catch {
+    return "";
+  }
+}
+
+function saveString(key: string, value: string) {
+  const st = getLocalStorageSafe();
+  if (!st) return;
+  try {
+    const v = String(value ?? "").trim();
+    if (!v) st.removeItem(key);
+    else st.setItem(key, v);
+  } catch {
+    // ignore
+  }
+}
+
+function loadBool(key: string, fallback = false): boolean {
+  const st = getLocalStorageSafe();
+  if (!st) return fallback;
+  try {
+    const raw = String(st.getItem(key) ?? "").trim().toLowerCase();
+    if (raw === "1" || raw === "true") return true;
+    if (raw === "0" || raw === "false") return false;
+  } catch {
+    // ignore
+  }
+  return fallback;
+}
+
+function saveBool(key: string, value: boolean) {
+  const st = getLocalStorageSafe();
+  if (!st) return;
+  try {
+    st.setItem(key, value ? "1" : "0");
+  } catch {
+    // ignore
+  }
+}
+
 export function useSkills() {
   const skillsOpen = ref(false);
   const skillsLoading = ref(false);
   const skillsError = ref("");
   const skillsFilter = ref("");
+  const skillsRepoFilter = ref(loadString(LS_KEY_SKILLS_REPO_FILTER));
+  const skillsGroupByRepo = ref(loadBool(LS_KEY_SKILLS_GROUP_BY_REPO, false));
   const skillsLimit = ref(200);
   const skillsOffset = ref(0);
   const skillsData = ref<SkillsListResponse | null>(null);
@@ -40,6 +98,7 @@ export function useSkills() {
     try {
       skillsData.value = await fetchSkills({
         q: skillsFilter.value,
+        repo: skillsRepoFilter.value,
         limit: skillsLimit.value,
         offset: skillsOffset.value,
       });
@@ -57,12 +116,14 @@ export function useSkills() {
   }
 
   let skillsRefreshTimer: number | null = null;
-  watch([skillsFilter, skillsLimit], () => {
+  watch([skillsFilter, skillsRepoFilter, skillsLimit], () => {
     skillsOffset.value = 0;
     if (!skillsOpen.value) return;
     if (skillsRefreshTimer) window.clearTimeout(skillsRefreshTimer);
     skillsRefreshTimer = window.setTimeout(() => void refreshSkills(), 250);
   });
+  watch(skillsRepoFilter, (value) => saveString(LS_KEY_SKILLS_REPO_FILTER, value));
+  watch(skillsGroupByRepo, (value) => saveBool(LS_KEY_SKILLS_GROUP_BY_REPO, value));
   watch(skillsOpen, (open) => {
     if (!open && skillsRefreshTimer) {
       window.clearTimeout(skillsRefreshTimer);
@@ -161,6 +222,8 @@ export function useSkills() {
     skillsLoading,
     skillsError,
     skillsFilter,
+    skillsRepoFilter,
+    skillsGroupByRepo,
     skillsLimit,
     skillsOffset,
     skillsData,

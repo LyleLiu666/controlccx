@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import type { Skill, SkillsListResponse } from "../types";
+import type { Skill, SkillRepoFacet, SkillsListResponse } from "../types";
+import { buildSkillsRepoView } from "../skillsRepoGrouping";
 
 type SkillTarget = "cursor" | "claude_code" | "codex" | "antigravity" | "opencode";
 type SkillsSummary = {
@@ -25,6 +26,8 @@ const props = defineProps<{
   error: string;
   data: SkillsListResponse | null;
   filter: string;
+  repoFilter: string;
+  groupByRepo: boolean;
   limit: number;
   rangeLabel: string;
   canPrev: boolean;
@@ -44,6 +47,8 @@ const emit = defineEmits<{
   (e: "takeover", name: string, target: SkillTarget): void;
   (e: "openVersions", name: string, hasSource: boolean): void;
   (e: "update:filter", value: string): void;
+  (e: "update:repoFilter", value: string): void;
+  (e: "update:groupByRepo", value: boolean): void;
   (e: "update:limit", value: number): void;
 }>();
 
@@ -51,11 +56,27 @@ const filterModel = computed({
   get: () => props.filter,
   set: (value: string) => emit("update:filter", value),
 });
+const repoFilterModel = computed({
+  get: () => props.repoFilter,
+  set: (value: string) => emit("update:repoFilter", value),
+});
+const groupByRepoModel = computed({
+  get: () => props.groupByRepo,
+  set: (value: boolean) => emit("update:groupByRepo", value),
+});
 const limitModel = computed({
   get: () => props.limit,
   set: (value: number) => emit("update:limit", value),
 });
-const skillsVisible = computed(() => props.data?.skills ?? []);
+const repoOptions = computed<SkillRepoFacet[]>(() => props.data?.repos ?? []);
+const repoView = computed(() =>
+  buildSkillsRepoView({
+    skills: props.data?.skills ?? [],
+    q: props.filter,
+    repo: props.repoFilter,
+    groupByRepo: props.groupByRepo,
+  }),
+);
 const targetsOrdered = computed(() => {
   const seen = new Set<SkillTarget>();
   for (const t of props.data?.targets ?? []) {
@@ -179,6 +200,19 @@ function newVersionTitle(skill: Skill): string {
 
       <div class="skillsToolbar">
         <input v-model="filterModel" placeholder="搜索技能（名称/路径）…" />
+        <label class="skillsRepoFilter">
+          <span class="tinyHint">Repo</span>
+          <select v-model="repoFilterModel" :disabled="loading">
+            <option value="">All repos</option>
+            <option v-for="repo in repoOptions" :key="repo.key" :value="repo.key" :title="repo.ref ?? ''">
+              {{ repo.label }} ({{ repo.count }})
+            </option>
+          </select>
+        </label>
+        <label class="skillsGroupToggle" title="按仓库分组展示（仅显示 Git 来源技能）">
+          <input type="checkbox" v-model="groupByRepoModel" />
+          <span class="tinyHint">按 repo 分组</span>
+        </label>
         <label class="skillsLimit">
           <span class="tinyHint">每页</span>
           <select v-model.number="limitModel" :disabled="loading">
@@ -233,98 +267,202 @@ function newVersionTitle(skill: Skill): string {
         </div>
 
         <div class="skillsRows">
-          <div v-for="s in skillsVisible" :key="s.name" class="skillsRow">
-            <div class="skillsName">
-              <div class="skillsNameTop">
-                <div class="mono">{{ s.name }}</div>
-                <span
-                  v-if="s.new_version"
-                  class="pill warn mono newVersionPill"
-                  :title="newVersionTitle(s)"
-                  >新版本</span
-                >
-                <button
-                  type="button"
-                  class="skillActionBtn"
-                  @click="emit('openVersions', s.name, !!(s.source && s.source.trim()))"
-                  title="管理该技能的版本快照"
-                >
-                  版本
-                </button>
+          <template v-if="groupByRepoModel">
+            <template v-for="group in repoView.groups" :key="group.key">
+              <div class="skillsRepoGroupHead" :title="group.ref || group.label">
+                <span class="mono">{{ group.label }}</span>
+                <span class="tinyHint">({{ group.skills.length }})</span>
               </div>
-              <div class="tinyHint mono" v-if="s.source" :title="s.source">
-                {{ s.source }}
-              </div>
-              <div class="tinyHint warn" v-else>
-                缺少来源（可直接在目标里点“启用”自动接管；或先添加/导入/接管）
-                <button
-                  type="button"
-                  class="skillActionBtn"
-                  @click="emit('openGovernance', { name: s.name })"
-                  title="为该技能添加来源（本地/Git/接管）"
-                >
-                  添加来源
-                </button>
-              </div>
-            </div>
 
-            <div class="skillsCell">
-              <template v-for="target in targetsOrdered" :key="target">
-                <template v-for="t in [summarizeTarget(s, target)]" :key="t.target">
-                  <div class="skillsTargetBlock">
-                    <span class="tinyHint mono skillsTargetLabel">{{ targetLabel(target) }}</span>
+              <div v-for="s in group.skills" :key="`${group.key}:${s.name}`" class="skillsRow">
+                <div class="skillsName">
+                  <div class="skillsNameTop">
+                    <div class="mono">{{ s.name }}</div>
                     <span
-                      class="pill mono skillStatus"
-                      :class="badgeClass(t.status)"
-                      :title="t.detail"
-                      >{{ statusLabel(t.status) }}</span
+                      v-if="s.new_version"
+                      class="pill warn mono newVersionPill"
+                      :title="newVersionTitle(s)"
+                      >新版本</span
                     >
                     <button
                       type="button"
                       class="skillActionBtn"
-                      v-if="!t.enabled && t.canEnable"
-                      @click="emit('toggle', s.name, target, true)"
-                      :disabled="!!actionBusy.get(makeKey(s.name, target))"
-                      :title="enableTitle(s, target, true)"
+                      @click="emit('openVersions', s.name, !!(s.source && s.source.trim()))"
+                      title="管理该技能的版本快照"
                     >
-                      {{ actionBusy.get(makeKey(s.name, target)) ? "…" : "启用" }}
-                    </button>
-                    <button
-                      v-else-if="!t.enabled && canTakeover(s, t)"
-                      type="button"
-                      class="skillActionBtn"
-                      @click="emit('takeover', s.name, target)"
-                      :disabled="!!actionBusy.get(makeKey(s.name, target))"
-                      :title="takeoverTitle(target)"
-                    >
-                      {{ actionBusy.get(makeKey(s.name, target)) ? "…" : "接管" }}
-                    </button>
-                    <button
-                      v-else-if="!t.enabled"
-                      type="button"
-                      class="skillActionBtn"
-                      :disabled="true"
-                      :title="enableTitle(s, target, t.canEnable)"
-                    >
-                      启用
-                    </button>
-                    <button
-                      type="button"
-                      class="skillActionBtn"
-                      v-else
-                      @click="emit('toggle', s.name, target, false)"
-                      :disabled="!t.canDisable || !!actionBusy.get(makeKey(s.name, target))"
-                      :title="disableTitle(target, t.canDisable)"
-                    >
-                      {{ actionBusy.get(makeKey(s.name, target)) ? "…" : "禁用" }}
+                      版本
                     </button>
                   </div>
-                </template>
-              </template>
-            </div>
-          </div>
+                  <div class="tinyHint mono" v-if="s.source" :title="s.source">
+                    {{ s.source }}
+                  </div>
+                  <div class="tinyHint warn" v-else>
+                    缺少来源（可直接在目标里点“启用”自动接管；或先添加/导入/接管）
+                    <button
+                      type="button"
+                      class="skillActionBtn"
+                      @click="emit('openGovernance', { name: s.name })"
+                      title="为该技能添加来源（本地/Git/接管）"
+                    >
+                      添加来源
+                    </button>
+                  </div>
+                </div>
 
-          <div v-if="!skillsVisible.length" class="empty">暂无技能</div>
+                <div class="skillsCell">
+                  <template v-for="target in targetsOrdered" :key="target">
+                    <template v-for="t in [summarizeTarget(s, target)]" :key="t.target">
+                      <div class="skillsTargetBlock">
+                        <span class="tinyHint mono skillsTargetLabel">{{ targetLabel(target) }}</span>
+                        <span
+                          class="pill mono skillStatus"
+                          :class="badgeClass(t.status)"
+                          :title="t.detail"
+                          >{{ statusLabel(t.status) }}</span
+                        >
+                        <button
+                          type="button"
+                          class="skillActionBtn"
+                          v-if="!t.enabled && t.canEnable"
+                          @click="emit('toggle', s.name, target, true)"
+                          :disabled="!!actionBusy.get(makeKey(s.name, target))"
+                          :title="enableTitle(s, target, true)"
+                        >
+                          {{ actionBusy.get(makeKey(s.name, target)) ? "…" : "启用" }}
+                        </button>
+                        <button
+                          v-else-if="!t.enabled && canTakeover(s, t)"
+                          type="button"
+                          class="skillActionBtn"
+                          @click="emit('takeover', s.name, target)"
+                          :disabled="!!actionBusy.get(makeKey(s.name, target))"
+                          :title="takeoverTitle(target)"
+                        >
+                          {{ actionBusy.get(makeKey(s.name, target)) ? "…" : "接管" }}
+                        </button>
+                        <button
+                          v-else-if="!t.enabled"
+                          type="button"
+                          class="skillActionBtn"
+                          :disabled="true"
+                          :title="enableTitle(s, target, t.canEnable)"
+                        >
+                          启用
+                        </button>
+                        <button
+                          type="button"
+                          class="skillActionBtn"
+                          v-else
+                          @click="emit('toggle', s.name, target, false)"
+                          :disabled="!t.canDisable || !!actionBusy.get(makeKey(s.name, target))"
+                          :title="disableTitle(target, t.canDisable)"
+                        >
+                          {{ actionBusy.get(makeKey(s.name, target)) ? "…" : "禁用" }}
+                        </button>
+                      </div>
+                    </template>
+                  </template>
+                </div>
+              </div>
+            </template>
+          </template>
+
+          <template v-else>
+            <div v-for="s in repoView.items" :key="s.name" class="skillsRow">
+              <div class="skillsName">
+                <div class="skillsNameTop">
+                  <div class="mono">{{ s.name }}</div>
+                  <span
+                    v-if="s.new_version"
+                    class="pill warn mono newVersionPill"
+                    :title="newVersionTitle(s)"
+                    >新版本</span
+                  >
+                  <button
+                    type="button"
+                    class="skillActionBtn"
+                    @click="emit('openVersions', s.name, !!(s.source && s.source.trim()))"
+                    title="管理该技能的版本快照"
+                  >
+                    版本
+                  </button>
+                </div>
+                <div class="tinyHint mono" v-if="s.source" :title="s.source">
+                  {{ s.source }}
+                </div>
+                <div class="tinyHint warn" v-else>
+                  缺少来源（可直接在目标里点“启用”自动接管；或先添加/导入/接管）
+                  <button
+                    type="button"
+                    class="skillActionBtn"
+                    @click="emit('openGovernance', { name: s.name })"
+                    title="为该技能添加来源（本地/Git/接管）"
+                  >
+                    添加来源
+                  </button>
+                </div>
+              </div>
+
+              <div class="skillsCell">
+                <template v-for="target in targetsOrdered" :key="target">
+                  <template v-for="t in [summarizeTarget(s, target)]" :key="t.target">
+                    <div class="skillsTargetBlock">
+                      <span class="tinyHint mono skillsTargetLabel">{{ targetLabel(target) }}</span>
+                      <span
+                        class="pill mono skillStatus"
+                        :class="badgeClass(t.status)"
+                        :title="t.detail"
+                        >{{ statusLabel(t.status) }}</span
+                      >
+                      <button
+                        type="button"
+                        class="skillActionBtn"
+                        v-if="!t.enabled && t.canEnable"
+                        @click="emit('toggle', s.name, target, true)"
+                        :disabled="!!actionBusy.get(makeKey(s.name, target))"
+                        :title="enableTitle(s, target, true)"
+                      >
+                        {{ actionBusy.get(makeKey(s.name, target)) ? "…" : "启用" }}
+                      </button>
+                      <button
+                        v-else-if="!t.enabled && canTakeover(s, t)"
+                        type="button"
+                        class="skillActionBtn"
+                        @click="emit('takeover', s.name, target)"
+                        :disabled="!!actionBusy.get(makeKey(s.name, target))"
+                        :title="takeoverTitle(target)"
+                      >
+                        {{ actionBusy.get(makeKey(s.name, target)) ? "…" : "接管" }}
+                      </button>
+                      <button
+                        v-else-if="!t.enabled"
+                        type="button"
+                        class="skillActionBtn"
+                        :disabled="true"
+                        :title="enableTitle(s, target, t.canEnable)"
+                      >
+                        启用
+                      </button>
+                      <button
+                        type="button"
+                        class="skillActionBtn"
+                        v-else
+                        @click="emit('toggle', s.name, target, false)"
+                        :disabled="!t.canDisable || !!actionBusy.get(makeKey(s.name, target))"
+                        :title="disableTitle(target, t.canDisable)"
+                      >
+                        {{ actionBusy.get(makeKey(s.name, target)) ? "…" : "禁用" }}
+                      </button>
+                    </div>
+                  </template>
+                </template>
+              </div>
+            </div>
+          </template>
+
+          <div v-if="!repoView.items.length" class="empty">
+            {{ groupByRepoModel ? "分组模式下暂无 Git 来源技能，可关闭“按 repo 分组”查看全部。" : "暂无技能" }}
+          </div>
         </div>
       </div>
     </template>

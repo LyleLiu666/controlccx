@@ -237,6 +237,111 @@ func TestService_SyncOverwrite_BacksUpUnmanagedEntry(t *testing.T) {
 	}
 }
 
+func TestService_ListDerivesRepoMetadataAndFacetForGitSource(t *testing.T) {
+	ctx := context.Background()
+	home := t.TempDir()
+	sourceRoot := filepath.Join(home, ".agent", "skills")
+
+	gitA := filepath.Join(sourceRoot, "git-a")
+	gitB := filepath.Join(sourceRoot, "git-b")
+	gitC := filepath.Join(sourceRoot, "git-c")
+	gitD := filepath.Join(sourceRoot, "git-d")
+	localA := filepath.Join(sourceRoot, "local-a")
+	mustMkdir(t, gitA)
+	mustMkdir(t, gitB)
+	mustMkdir(t, gitC)
+	mustMkdir(t, gitD)
+	mustMkdir(t, localA)
+
+	if err := writeManagedManifest(gitA, ManagedSkillManifest{
+		Name:       "git-a",
+		SourceType: sourceTypeGit,
+		SourceRef:  "https://github.com/Acme/Repo.git",
+	}); err != nil {
+		t.Fatalf("manifest git-a: %v", err)
+	}
+	if err := writeManagedManifest(gitB, ManagedSkillManifest{
+		Name:       "git-b",
+		SourceType: sourceTypeGit,
+		SourceRef:  "acme/repo",
+	}); err != nil {
+		t.Fatalf("manifest git-b: %v", err)
+	}
+	if err := writeManagedManifest(gitC, ManagedSkillManifest{
+		Name:       "git-c",
+		SourceType: sourceTypeGit,
+		SourceRef:  "git@gitlab.com:Team/Repo.git",
+	}); err != nil {
+		t.Fatalf("manifest git-c: %v", err)
+	}
+	if err := writeManagedManifest(gitD, ManagedSkillManifest{
+		Name:       "git-d",
+		SourceType: sourceTypeGit,
+		SourceRef:  "https://gitlab.com/team/repo.git",
+	}); err != nil {
+		t.Fatalf("manifest git-d: %v", err)
+	}
+	if err := writeManagedManifest(localA, ManagedSkillManifest{
+		Name:       "local-a",
+		SourceType: sourceTypeLocal,
+		SourceRef:  filepath.Join(home, "src-local-a"),
+	}); err != nil {
+		t.Fatalf("manifest local-a: %v", err)
+	}
+
+	svc, err := NewService(Options{HomeDir: home, SourceRoots: []string{sourceRoot}})
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+
+	out, err := svc.List(ctx)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	byName := make(map[string]Skill, len(out.Skills))
+	for _, s := range out.Skills {
+		byName[s.Name] = s
+	}
+
+	a := byName["git-a"]
+	b := byName["git-b"]
+	cg := byName["git-c"]
+	dg := byName["git-d"]
+	c := byName["local-a"]
+	if a.RepoKey == "" || a.RepoLabel == "" || a.RepoRef == "" {
+		t.Fatalf("git-a repo metadata missing: %+v", a)
+	}
+	if b.RepoKey == "" || b.RepoLabel == "" || b.RepoRef == "" {
+		t.Fatalf("git-b repo metadata missing: %+v", b)
+	}
+	if a.RepoKey != b.RepoKey {
+		t.Fatalf("expected same repo key for git-a/git-b, got %q vs %q", a.RepoKey, b.RepoKey)
+	}
+	if cg.RepoKey == "" || dg.RepoKey == "" {
+		t.Fatalf("expected git-c/git-d repo metadata, got %+v %+v", cg, dg)
+	}
+	if cg.RepoKey != dg.RepoKey {
+		t.Fatalf("expected same repo key for git-c/git-d, got %q vs %q", cg.RepoKey, dg.RepoKey)
+	}
+	if c.RepoKey != "" || c.RepoLabel != "" || c.RepoRef != "" {
+		t.Fatalf("expected local-a no repo metadata, got %+v", c)
+	}
+
+	if len(out.Repos) != 2 {
+		t.Fatalf("repos=%d, want 2 (%+v)", len(out.Repos), out.Repos)
+	}
+	found := map[string]int{}
+	for _, r := range out.Repos {
+		found[r.Key] = r.Count
+	}
+	if found[a.RepoKey] != 2 {
+		t.Fatalf("facet count for %q=%d, want 2", a.RepoKey, found[a.RepoKey])
+	}
+	if found[cg.RepoKey] != 2 {
+		t.Fatalf("facet count for %q=%d, want 2", cg.RepoKey, found[cg.RepoKey])
+	}
+}
+
 func mustMkdir(t *testing.T, path string) {
 	t.Helper()
 	if err := os.MkdirAll(path, 0o755); err != nil {

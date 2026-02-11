@@ -30,6 +30,7 @@ func (a *API) handleSkills(w http.ResponseWriter, r *http.Request) {
 	}
 
 	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	repo := strings.TrimSpace(r.URL.Query().Get("repo"))
 	limit := parseInt(strings.TrimSpace(r.URL.Query().Get("limit")), 0)
 	offset := parseInt(strings.TrimSpace(r.URL.Query().Get("offset")), 0)
 	if limit < 0 {
@@ -43,6 +44,16 @@ func (a *API) handleSkills(w http.ResponseWriter, r *http.Request) {
 	}
 
 	items := out.Skills
+	if repo != "" {
+		filtered := make([]skills.Skill, 0, len(items))
+		for _, s := range items {
+			if strings.TrimSpace(s.RepoKey) != repo {
+				continue
+			}
+			filtered = append(filtered, s)
+		}
+		items = filtered
+	}
 	if q != "" {
 		needle := strings.ToLower(q)
 		filtered := make([]skills.Skill, 0, len(items))
@@ -83,6 +94,7 @@ func (a *API) handleSkills(w http.ResponseWriter, r *http.Request) {
 		SourceRoots []string            `json:"source_roots"`
 		Targets     []skills.TargetRoot `json:"targets"`
 		Skills      []skills.Skill      `json:"skills"`
+		Repos       []skills.RepoFacet  `json:"repos,omitempty"`
 		Total       int                 `json:"total"`
 		Offset      int                 `json:"offset"`
 		Limit       int                 `json:"limit"`
@@ -92,6 +104,7 @@ func (a *API) handleSkills(w http.ResponseWriter, r *http.Request) {
 		SourceRoots: out.SourceRoots,
 		Targets:     out.Targets,
 		Skills:      items,
+		Repos:       out.Repos,
 		Total:       total,
 		Offset:      offset,
 		Limit:       limit,

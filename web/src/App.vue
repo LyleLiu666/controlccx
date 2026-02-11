@@ -771,6 +771,8 @@ const {
   skillsLoading,
   skillsError,
   skillsFilter,
+  skillsRepoFilter,
+  skillsGroupByRepo,
   skillsLimit,
   skillsData,
   skillsRangeLabel,
@@ -5568,6 +5570,8 @@ watch(
               :error="skillsError"
               :data="skillsData"
               v-model:filter="skillsFilter"
+              v-model:repo-filter="skillsRepoFilter"
+              v-model:group-by-repo="skillsGroupByRepo"
               v-model:limit="skillsLimit"
               :range-label="skillsRangeLabel"
               :can-prev="skillsCanPrev"

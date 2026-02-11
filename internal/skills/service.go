@@ -53,6 +53,9 @@ type Skill struct {
 	Name            string        `json:"name"`
 	Sources         []string      `json:"sources,omitempty"`
 	PreferredSource string        `json:"source,omitempty"`
+	RepoKey         string        `json:"repo_key,omitempty"`
+	RepoLabel       string        `json:"repo_label,omitempty"`
+	RepoRef         string        `json:"repo_ref,omitempty"`
 	Targets         []TargetState `json:"targets,omitempty"`
 
 	// Optional per-skill snapshot status (filled by API layer when enabled).
@@ -62,10 +65,18 @@ type Skill struct {
 	NewVersionAt    string `json:"new_version_at,omitempty"`
 }
 
+type RepoFacet struct {
+	Key   string `json:"key"`
+	Label string `json:"label"`
+	Ref   string `json:"ref,omitempty"`
+	Count int    `json:"count"`
+}
+
 type ListResponse struct {
 	SourceRoots []string     `json:"source_roots"`
 	Targets     []TargetRoot `json:"targets"`
 	Skills      []Skill      `json:"skills"`
+	Repos       []RepoFacet  `json:"repos,omitempty"`
 }
 
 type Options struct {
@@ -202,11 +213,22 @@ func (s *Service) List(ctx context.Context) (ListResponse, error) {
 	sort.Strings(names)
 
 	var skills []Skill
+	repoFacets := make(map[string]*RepoFacet)
 	for _, name := range names {
 		srcs := dedupePaths(sourceByName[name])
 		preferred := ""
 		if len(srcs) > 0 {
 			preferred = srcs[0]
+		}
+		repoKey, repoLabel, repoRef := "", "", ""
+		if preferred != "" {
+			if m, err := readManagedManifest(preferred); err == nil {
+				if md := deriveRepoMetadataFromManifest(m); md.Valid {
+					repoKey = md.Key
+					repoLabel = md.Label
+					repoRef = md.Ref
+				}
+			}
 		}
 		var states []TargetState
 		for tgt, roots := range s.targetRoots {
@@ -226,8 +248,25 @@ func (s *Service) List(ctx context.Context) (ListResponse, error) {
 			Name:            name,
 			Sources:         srcs,
 			PreferredSource: preferred,
+			RepoKey:         repoKey,
+			RepoLabel:       repoLabel,
+			RepoRef:         repoRef,
 			Targets:         states,
 		})
+		if repoKey != "" {
+			f, ok := repoFacets[repoKey]
+			if !ok {
+				f = &RepoFacet{Key: repoKey, Label: repoLabel, Ref: repoRef}
+				repoFacets[repoKey] = f
+			}
+			if f.Label == "" {
+				f.Label = repoLabel
+			}
+			if f.Ref == "" {
+				f.Ref = repoRef
+			}
+			f.Count++
+		}
 	}
 
 	var targets []TargetRoot
@@ -243,10 +282,24 @@ func (s *Service) List(ctx context.Context) (ListResponse, error) {
 		return targets[i].Target < targets[j].Target
 	})
 
+	repos := make([]RepoFacet, 0, len(repoFacets))
+	for _, f := range repoFacets {
+		repos = append(repos, *f)
+	}
+	sort.Slice(repos, func(i, j int) bool {
+		li := strings.ToLower(strings.TrimSpace(repos[i].Label))
+		lj := strings.ToLower(strings.TrimSpace(repos[j].Label))
+		if li == lj {
+			return repos[i].Key < repos[j].Key
+		}
+		return li < lj
+	})
+
 	return ListResponse{
 		SourceRoots: s.sourceRoots,
 		Targets:     targets,
 		Skills:      skills,
+		Repos:       repos,
 	}, nil
 }
 

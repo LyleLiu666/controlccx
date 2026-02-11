@@ -209,6 +209,9 @@ export type Skill = {
   name: string;
   sources?: string[];
   source?: string;
+  repo_key?: string;
+  repo_label?: string;
+  repo_ref?: string;
   targets?: SkillTargetState[];
   versions_count?: number;
   latest_version_id?: string;
@@ -216,10 +219,18 @@ export type Skill = {
   new_version_at?: string;
 };
 
+export type SkillRepoFacet = {
+  key: string;
+  label: string;
+  ref?: string;
+  count: number;
+};
+
 export type SkillsListResponse = {
   source_roots: string[];
   targets: SkillTargetRoot[];
   skills: Skill[];
+  repos?: SkillRepoFacet[];
   total?: number;
   offset?: number;
   limit?: number;

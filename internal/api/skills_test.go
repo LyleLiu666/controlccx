@@ -285,9 +285,154 @@ func TestAPI_Skills_LinkAutoImportRefusesMultiVariants(t *testing.T) {
 	}
 }
 
+func TestAPI_Skills_ListRepoFilterAndFacet(t *testing.T) {
+	home := t.TempDir()
+	sourceRoot := filepath.Join(home, ".agent", "skills")
+	mustMkdirAll(t, filepath.Join(sourceRoot, "alpha-one"))
+	mustMkdirAll(t, filepath.Join(sourceRoot, "alpha-two"))
+	mustMkdirAll(t, filepath.Join(sourceRoot, "beta"))
+	mustMkdirAll(t, filepath.Join(sourceRoot, "local"))
+
+	mustWriteManagedManifestJSON(t, filepath.Join(sourceRoot, "alpha-one"), map[string]any{
+		"schema_version": 1,
+		"name":           "alpha-one",
+		"source_type":    "git",
+		"source_ref":     "https://github.com/acme/repo-a.git",
+	})
+	mustWriteManagedManifestJSON(t, filepath.Join(sourceRoot, "alpha-two"), map[string]any{
+		"schema_version": 1,
+		"name":           "alpha-two",
+		"source_type":    "git",
+		"source_ref":     "acme/repo-a",
+	})
+	mustWriteManagedManifestJSON(t, filepath.Join(sourceRoot, "beta"), map[string]any{
+		"schema_version": 1,
+		"name":           "beta",
+		"source_type":    "git",
+		"source_ref":     "https://github.com/acme/repo-b",
+	})
+	mustWriteManagedManifestJSON(t, filepath.Join(sourceRoot, "local"), map[string]any{
+		"schema_version": 1,
+		"name":           "local",
+		"source_type":    "local",
+		"source_ref":     filepath.Join(home, "src-local"),
+	})
+
+	svc, err := skills.NewService(skills.Options{
+		HomeDir:     home,
+		SourceRoots: []string{sourceRoot},
+	})
+	if err != nil {
+		t.Fatalf("new skills: %v", err)
+	}
+
+	apiSvc := &API{Skills: svc}
+	srv := httptest.NewServer(apiSvc.Handler())
+	t.Cleanup(srv.Close)
+
+	type page struct {
+		Skills []skills.Skill     `json:"skills"`
+		Repos  []skills.RepoFacet `json:"repos"`
+		Total  int                `json:"total"`
+		Offset int                `json:"offset"`
+		Limit  int                `json:"limit"`
+	}
+
+	all := page{}
+	{
+		res, err := http.Get(srv.URL + "/api/skills")
+		if err != nil {
+			t.Fatalf("get all: %v", err)
+		}
+		defer res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("status=%d, want 200", res.StatusCode)
+		}
+		if err := json.NewDecoder(res.Body).Decode(&all); err != nil {
+			t.Fatalf("decode all: %v", err)
+		}
+	}
+	if all.Total != 4 {
+		t.Fatalf("total=%d, want 4", all.Total)
+	}
+	if len(all.Repos) != 2 {
+		t.Fatalf("repos=%d, want 2 (%+v)", len(all.Repos), all.Repos)
+	}
+
+	repoA := ""
+	for _, r := range all.Repos {
+		if r.Count == 2 {
+			repoA = r.Key
+		}
+	}
+	if repoA == "" {
+		t.Fatalf("repoA key not found in facets: %+v", all.Repos)
+	}
+
+	{
+		res, err := http.Get(srv.URL + "/api/skills?repo=" + repoA)
+		if err != nil {
+			t.Fatalf("get repo: %v", err)
+		}
+		defer res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("status=%d, want 200", res.StatusCode)
+		}
+		var got page
+		if err := json.NewDecoder(res.Body).Decode(&got); err != nil {
+			t.Fatalf("decode repo: %v", err)
+		}
+		if got.Total != 2 || len(got.Skills) != 2 {
+			t.Fatalf("repo filter total=%d skills=%d, want 2/2", got.Total, len(got.Skills))
+		}
+		for _, s := range got.Skills {
+			if s.RepoKey != repoA {
+				t.Fatalf("skill %s repo_key=%q, want %q", s.Name, s.RepoKey, repoA)
+			}
+		}
+		if len(got.Repos) != 2 {
+			t.Fatalf("facet should keep all repos, got=%d", len(got.Repos))
+		}
+	}
+
+	{
+		res, err := http.Get(srv.URL + "/api/skills?repo=" + repoA + "&q=two")
+		if err != nil {
+			t.Fatalf("get repo+q: %v", err)
+		}
+		defer res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("status=%d, want 200", res.StatusCode)
+		}
+		var got page
+		if err := json.NewDecoder(res.Body).Decode(&got); err != nil {
+			t.Fatalf("decode repo+q: %v", err)
+		}
+		if got.Total != 1 || len(got.Skills) != 1 {
+			t.Fatalf("repo+q total=%d skills=%d, want 1/1", got.Total, len(got.Skills))
+		}
+		if got.Skills[0].Name != "alpha-two" {
+			t.Fatalf("skill=%q, want alpha-two", got.Skills[0].Name)
+		}
+	}
+}
+
 func mustMkdirAll(t *testing.T, path string) {
 	t.Helper()
 	if err := os.MkdirAll(path, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
+	}
+}
+
+func mustWriteManagedManifestJSON(t *testing.T, skillDir string, payload map[string]any) {
+	t.Helper()
+	b, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal manifest: %v", err)
+	}
+	b = append(b, '\n')
+	path := filepath.Join(skillDir, ".controlccx_skill.json")
+	if err := os.WriteFile(path, b, 0o644); err != nil {
+		t.Fatalf("write manifest %s: %v", path, err)
 	}
 }
