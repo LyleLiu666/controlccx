@@ -46,6 +46,7 @@ func (taskNewSubmitTool) Execute(ctx context.Context, call agentsdk.ToolCall, de
 		SafetyEnvelope:        strings.TrimSpace(call.Fields["safety_envelope"]),
 		SafetyPreset:          strings.TrimSpace(call.Fields["safety_preset"]),
 		TaskIntent:            strings.TrimSpace(call.Fields["task_intent"]),
+		NetworkTier:           tasks.NetworkTier(strings.TrimSpace(call.Fields["network_tier"])),
 		CodexSandbox:          strings.TrimSpace(call.Fields["codex_sandbox"]),
 		CodexApprovalPolicy:   strings.TrimSpace(call.Fields["codex_approval_policy"]),
 		CodexSearch:           parseBool(call.Fields["codex_search"]),

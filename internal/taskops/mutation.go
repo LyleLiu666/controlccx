@@ -271,6 +271,9 @@ func isMutationInvalidArgumentMessage(msg string) bool {
 	if strings.HasPrefix(msg, "invalid ") {
 		return true
 	}
+	if strings.HasPrefix(msg, "tasks: invalid ") || strings.HasPrefix(msg, "taskops: invalid ") {
+		return true
+	}
 	if strings.Contains(msg, "workdir_strategy=worktree") ||
 		strings.Contains(msg, "worktree_untracked must be one of") ||
 		strings.Contains(msg, "conversation_id must be a UUID") ||

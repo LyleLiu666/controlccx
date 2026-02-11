@@ -49,6 +49,7 @@ export type Task = {
   workdir_strategy?: string;
   safety_preset?: string;
   task_intent?: string;
+  network_tier?: string;
   codex_sandbox?: string;
   codex_approval_policy?: string;
   codex_search?: boolean;

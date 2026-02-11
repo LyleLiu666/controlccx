@@ -184,6 +184,10 @@ func (s *Store) CreateTask(ctx context.Context, in CreateTaskInput) (Task, error
 
 	safetyPreset := strings.TrimSpace(in.SafetyPreset)
 	taskIntent := strings.TrimSpace(in.TaskIntent)
+	networkTier, err := resolveCreateNetworkTier(in)
+	if err != nil {
+		return Task{}, err
+	}
 	persistedWorkdirStrategy := workdirStrategy
 	if persistedWorkdirStrategy == "" || persistedWorkdirStrategy == "exclusive" {
 		persistedWorkdirStrategy = ""
@@ -224,13 +228,13 @@ func (s *Store) CreateTask(ctx context.Context, in CreateTaskInput) (Task, error
 	_, err = tx.ExecContext(ctx, `
 		INSERT OR REPLACE INTO task_run_options (
 			task_id, unsafe_automation,
-			safety_preset, task_intent,
+			safety_preset, task_intent, network_tier,
 			workdir_strategy, base_workdir, worktree_dir, worktree_branch,
 			codex_sandbox, codex_approval_policy, codex_search,
 			claude_permission_mode, claude_sandbox, claude_webfetch_domains_json
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 	`, id, unsafeInt,
-		safetyPreset, taskIntent,
+		safetyPreset, taskIntent, networkTier,
 		persistedWorkdirStrategy, baseWorkDir, worktreeDir, worktreeBranch,
 		codexSandbox, codexApproval, codexSearch,
 		claudePermissionMode, claudeSandbox, claudeDomainsJSON,
@@ -281,6 +285,7 @@ func (s *Store) GetTask(ctx context.Context, id string) (Task, error) {
 			t.id, t.conversation_id, t.worker_type, t.mode, t.status,
 			COALESCE(o.unsafe_automation, 0),
 			COALESCE(o.safety_preset, ''), COALESCE(o.task_intent, ''),
+			COALESCE(o.network_tier, ''),
 			COALESCE(o.workdir_strategy, ''), COALESCE(o.base_workdir, ''), COALESCE(o.worktree_dir, ''), COALESCE(o.worktree_branch, ''),
 			COALESCE(o.codex_sandbox, ''), COALESCE(o.codex_approval_policy, ''), COALESCE(o.codex_search, 0),
 			COALESCE(o.claude_permission_mode, ''), COALESCE(o.claude_sandbox, 0), COALESCE(o.claude_webfetch_domains_json, ''),
@@ -370,6 +375,7 @@ func (s *Store) ListTasksWithOptions(ctx context.Context, limit int, opts ListTa
 			t.id, t.conversation_id, t.worker_type, t.mode, t.status,
 			COALESCE(o.unsafe_automation, 0),
 			COALESCE(o.safety_preset, ''), COALESCE(o.task_intent, ''),
+			COALESCE(o.network_tier, ''),
 			COALESCE(o.workdir_strategy, ''), COALESCE(o.base_workdir, ''), COALESCE(o.worktree_dir, ''), COALESCE(o.worktree_branch, ''),
 			COALESCE(o.codex_sandbox, ''), COALESCE(o.codex_approval_policy, ''), COALESCE(o.codex_search, 0),
 			COALESCE(o.claude_permission_mode, ''), COALESCE(o.claude_sandbox, 0), COALESCE(o.claude_webfetch_domains_json, ''),
@@ -468,6 +474,7 @@ func (s *Store) ListTasksByConversationID(ctx context.Context, conversationID st
 			t.id, t.conversation_id, t.worker_type, t.mode, t.status,
 			COALESCE(o.unsafe_automation, 0),
 			COALESCE(o.safety_preset, ''), COALESCE(o.task_intent, ''),
+			COALESCE(o.network_tier, ''),
 			COALESCE(o.workdir_strategy, ''), COALESCE(o.base_workdir, ''), COALESCE(o.worktree_dir, ''), COALESCE(o.worktree_branch, ''),
 			COALESCE(o.codex_sandbox, ''), COALESCE(o.codex_approval_policy, ''), COALESCE(o.codex_search, 0),
 			COALESCE(o.claude_permission_mode, ''), COALESCE(o.claude_sandbox, 0), COALESCE(o.claude_webfetch_domains_json, ''),
@@ -1111,6 +1118,7 @@ func scanTask(row rowScanner) (Task, error) {
 		unsafeAutomation          int
 		safetyPreset              string
 		taskIntent                string
+		networkTier               string
 		workdirStrategy           string
 		baseWorkDir               string
 		worktreeDir               string
@@ -1131,6 +1139,7 @@ func scanTask(row rowScanner) (Task, error) {
 		&t.ID, &t.ConversationID, &workerType, &mode, &status,
 		&unsafeAutomation,
 		&safetyPreset, &taskIntent,
+		&networkTier,
 		&workdirStrategy, &baseWorkDir, &worktreeDir, &worktreeBranch,
 		&codexSandbox, &codexApproval, &codexSearch,
 		&claudePermissionMode, &claudeSandbox, &claudeWebFetchDomainsJSON,
@@ -1155,6 +1164,7 @@ func scanTask(row rowScanner) (Task, error) {
 	t.WorkDirStrategy = strings.TrimSpace(workdirStrategy)
 	t.SafetyPreset = strings.TrimSpace(safetyPreset)
 	t.TaskIntent = strings.TrimSpace(taskIntent)
+	t.NetworkTier = resolveTaskNetworkTier(networkTier, t)
 	t.CodexSandbox = strings.TrimSpace(codexSandbox)
 	t.CodexApprovalPolicy = strings.TrimSpace(codexApproval)
 	t.CodexSearch = codexSearch != 0

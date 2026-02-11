@@ -417,6 +417,7 @@ export async function createTask(input: {
   safety_envelope?: string;
   safety_preset?: string;
   task_intent?: string;
+  network_tier?: string;
   codex_sandbox?: string;
   codex_approval_policy?: string;
   codex_search?: boolean;
@@ -446,6 +447,7 @@ export async function resumeTaskWithOptions(
     safety_envelope?: string;
     safety_preset?: string;
     task_intent?: string;
+    network_tier?: string;
     codex_sandbox?: string;
     codex_approval_policy?: string;
     codex_search?: boolean;
@@ -465,6 +467,7 @@ export async function continueSessionWithOptions(
     safety_envelope?: string;
     safety_preset?: string;
     task_intent?: string;
+    network_tier?: string;
     codex_sandbox?: string;
     codex_approval_policy?: string;
     codex_search?: boolean;
@@ -484,6 +487,7 @@ export async function preemptSessionContinueWithOptions(
     safety_envelope?: string;
     safety_preset?: string;
     task_intent?: string;
+    network_tier?: string;
     codex_sandbox?: string;
     codex_approval_policy?: string;
     codex_search?: boolean;
@@ -512,6 +516,7 @@ export async function rehydrateTaskWithOptions(
     safety_envelope?: string;
     safety_preset?: string;
     task_intent?: string;
+    network_tier?: string;
     codex_sandbox?: string;
     codex_approval_policy?: string;
     codex_search?: boolean;

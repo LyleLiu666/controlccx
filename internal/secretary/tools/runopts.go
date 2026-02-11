@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"controlccx/internal/taskops"
+	"controlccx/internal/tasks"
 )
 
 func runOptionsFromFields(fields map[string]string) taskops.RunOptions {
@@ -16,6 +17,7 @@ func runOptionsFromFields(fields map[string]string) taskops.RunOptions {
 		SafetyEnvelope:        strings.TrimSpace(fields["safety_envelope"]),
 		SafetyPreset:          strings.TrimSpace(fields["safety_preset"]),
 		TaskIntent:            strings.TrimSpace(fields["task_intent"]),
+		NetworkTier:           tasks.NetworkTier(strings.TrimSpace(fields["network_tier"])),
 		CodexSandbox:          strings.TrimSpace(fields["codex_sandbox"]),
 		CodexApprovalPolicy:   strings.TrimSpace(fields["codex_approval_policy"]),
 		CodexSearch:           parseBool(fields["codex_search"]),

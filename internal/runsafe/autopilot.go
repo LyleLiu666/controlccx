@@ -52,6 +52,9 @@ func hasExplicitSafetyOptions(in tasks.CreateTaskInput) bool {
 	if strings.TrimSpace(in.SafetyPreset) != "" || strings.TrimSpace(in.TaskIntent) != "" {
 		return true
 	}
+	if strings.TrimSpace(string(in.NetworkTier)) != "" {
+		return true
+	}
 	if strings.TrimSpace(in.CodexSandbox) != "" || strings.TrimSpace(in.CodexApprovalPolicy) != "" || in.CodexSearch {
 		return true
 	}

@@ -39,12 +39,13 @@ func (s *Store) ListStaleInFlightTasks(ctx context.Context, before time.Time, li
 	beforeMs := toMillis(before.UTC())
 
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT
-			t.id, t.conversation_id, t.worker_type, t.mode, t.status,
-			COALESCE(o.unsafe_automation, 0),
-			COALESCE(o.safety_preset, ''), COALESCE(o.task_intent, ''),
-			COALESCE(o.workdir_strategy, ''), COALESCE(o.base_workdir, ''), COALESCE(o.worktree_dir, ''), COALESCE(o.worktree_branch, ''),
-			COALESCE(o.codex_sandbox, ''), COALESCE(o.codex_approval_policy, ''), COALESCE(o.codex_search, 0),
+			SELECT
+				t.id, t.conversation_id, t.worker_type, t.mode, t.status,
+				COALESCE(o.unsafe_automation, 0),
+				COALESCE(o.safety_preset, ''), COALESCE(o.task_intent, ''),
+				COALESCE(o.network_tier, ''),
+				COALESCE(o.workdir_strategy, ''), COALESCE(o.base_workdir, ''), COALESCE(o.worktree_dir, ''), COALESCE(o.worktree_branch, ''),
+				COALESCE(o.codex_sandbox, ''), COALESCE(o.codex_approval_policy, ''), COALESCE(o.codex_search, 0),
 			COALESCE(o.claude_permission_mode, ''), COALESCE(o.claude_sandbox, 0), COALESCE(o.claude_webfetch_domains_json, ''),
 			t.prompt, t.workdir, t.session_id, COALESCE(sm.title, ''), sm.deleted_at,
 			t.warning, t.error, t.exit_code,

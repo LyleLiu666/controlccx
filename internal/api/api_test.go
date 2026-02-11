@@ -64,6 +64,9 @@ func TestAPI_TasksAndChat(t *testing.T) {
 		if created.ID == "" {
 			t.Fatalf("expected id")
 		}
+		if created.NetworkTier != tasks.NetworkTierWebReadonly {
+			t.Fatalf("created network_tier=%q, want %q", created.NetworkTier, tasks.NetworkTierWebReadonly)
+		}
 
 		_, _ = taskStore.AppendLog(ctx, created.ID, tasks.LogStdout, "hello")
 		logRes, err := http.Get(srv.URL + "/api/tasks/" + created.ID + "/logs?after=0&limit=10")
@@ -110,6 +113,9 @@ func TestAPI_TasksAndChat(t *testing.T) {
 		resumed := requireMutationTask(t, resumeOut)
 		if resumed.Mode != tasks.ModeResume || resumed.SessionID != "sess-1" {
 			t.Fatalf("resumed mode=%q session=%q", resumed.Mode, resumed.SessionID)
+		}
+		if resumed.NetworkTier != created.NetworkTier {
+			t.Fatalf("resumed network_tier=%q, want %q", resumed.NetworkTier, created.NetworkTier)
 		}
 
 		getRes, err := http.Get(srv.URL + "/api/tasks/" + created.ID)

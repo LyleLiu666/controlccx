@@ -92,6 +92,7 @@ func TestMigrate_TaskRunOptions_AddColumnsIfMissing(t *testing.T) {
 	for _, want := range []string{
 		"safety_preset",
 		"task_intent",
+		"network_tier",
 		"codex_sandbox",
 		"codex_approval_policy",
 		"codex_search",
@@ -104,4 +105,3 @@ func TestMigrate_TaskRunOptions_AddColumnsIfMissing(t *testing.T) {
 		}
 	}
 }
-

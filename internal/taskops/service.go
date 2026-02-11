@@ -31,17 +31,18 @@ type Service struct {
 }
 
 type RunOptions struct {
-	Prompt                string   `json:"prompt"`
-	UnsafeAutomation      bool     `json:"unsafe_automation,omitempty"`
-	SafetyEnvelope        string   `json:"safety_envelope,omitempty"`
-	SafetyPreset          string   `json:"safety_preset,omitempty"`
-	TaskIntent            string   `json:"task_intent,omitempty"`
-	CodexSandbox          string   `json:"codex_sandbox,omitempty"`
-	CodexApprovalPolicy   string   `json:"codex_approval_policy,omitempty"`
-	CodexSearch           bool     `json:"codex_search,omitempty"`
-	ClaudePermissionMode  string   `json:"claude_permission_mode,omitempty"`
-	ClaudeSandbox         bool     `json:"claude_sandbox,omitempty"`
-	ClaudeWebFetchDomains []string `json:"claude_webfetch_domains,omitempty"`
+	Prompt                string            `json:"prompt"`
+	UnsafeAutomation      bool              `json:"unsafe_automation,omitempty"`
+	SafetyEnvelope        string            `json:"safety_envelope,omitempty"`
+	SafetyPreset          string            `json:"safety_preset,omitempty"`
+	TaskIntent            string            `json:"task_intent,omitempty"`
+	NetworkTier           tasks.NetworkTier `json:"network_tier,omitempty"`
+	CodexSandbox          string            `json:"codex_sandbox,omitempty"`
+	CodexApprovalPolicy   string            `json:"codex_approval_policy,omitempty"`
+	CodexSearch           bool              `json:"codex_search,omitempty"`
+	ClaudePermissionMode  string            `json:"claude_permission_mode,omitempty"`
+	ClaudeSandbox         bool              `json:"claude_sandbox,omitempty"`
+	ClaudeWebFetchDomains []string          `json:"claude_webfetch_domains,omitempty"`
 }
 
 type ContinueResult struct {
@@ -197,6 +198,7 @@ func (s *Service) ResumeTask(ctx context.Context, id string, body RunOptions) (t
 	explicitSafety := body.UnsafeAutomation ||
 		strings.TrimSpace(body.SafetyPreset) != "" ||
 		strings.TrimSpace(body.TaskIntent) != "" ||
+		strings.TrimSpace(string(body.NetworkTier)) != "" ||
 		strings.TrimSpace(body.CodexSandbox) != "" ||
 		strings.TrimSpace(body.CodexApprovalPolicy) != "" ||
 		body.CodexSearch ||
@@ -208,6 +210,7 @@ func (s *Service) ResumeTask(ctx context.Context, id string, body RunOptions) (t
 	safetyEnvelope := strings.TrimSpace(body.SafetyEnvelope)
 	safetyPreset := strings.TrimSpace(body.SafetyPreset)
 	taskIntent := strings.TrimSpace(body.TaskIntent)
+	networkTier := body.NetworkTier
 	codexSandbox := strings.TrimSpace(body.CodexSandbox)
 	codexApprovalPolicy := strings.TrimSpace(body.CodexApprovalPolicy)
 	codexSearch := body.CodexSearch
@@ -219,6 +222,7 @@ func (s *Service) ResumeTask(ctx context.Context, id string, body RunOptions) (t
 		unsafe = prev.UnsafeAutomation
 		safetyPreset = strings.TrimSpace(prev.SafetyPreset)
 		taskIntent = strings.TrimSpace(prev.TaskIntent)
+		networkTier = prev.NetworkTier
 		codexSandbox = strings.TrimSpace(prev.CodexSandbox)
 		codexApprovalPolicy = strings.TrimSpace(prev.CodexApprovalPolicy)
 		codexSearch = prev.CodexSearch
@@ -235,6 +239,7 @@ func (s *Service) ResumeTask(ctx context.Context, id string, body RunOptions) (t
 		SafetyEnvelope:        safetyEnvelope,
 		SafetyPreset:          safetyPreset,
 		TaskIntent:            taskIntent,
+		NetworkTier:           networkTier,
 		CodexSandbox:          codexSandbox,
 		CodexApprovalPolicy:   codexApprovalPolicy,
 		CodexSearch:           codexSearch,
@@ -317,6 +322,7 @@ func (s *Service) RehydrateTask(ctx context.Context, id string, body RunOptions)
 	explicitSafety := body.UnsafeAutomation ||
 		strings.TrimSpace(body.SafetyPreset) != "" ||
 		strings.TrimSpace(body.TaskIntent) != "" ||
+		strings.TrimSpace(string(body.NetworkTier)) != "" ||
 		strings.TrimSpace(body.CodexSandbox) != "" ||
 		strings.TrimSpace(body.CodexApprovalPolicy) != "" ||
 		body.CodexSearch ||
@@ -328,6 +334,7 @@ func (s *Service) RehydrateTask(ctx context.Context, id string, body RunOptions)
 	safetyEnvelope := strings.TrimSpace(body.SafetyEnvelope)
 	safetyPreset := strings.TrimSpace(body.SafetyPreset)
 	taskIntent := strings.TrimSpace(body.TaskIntent)
+	networkTier := body.NetworkTier
 	codexSandbox := strings.TrimSpace(body.CodexSandbox)
 	codexApprovalPolicy := strings.TrimSpace(body.CodexApprovalPolicy)
 	codexSearch := body.CodexSearch
@@ -339,6 +346,7 @@ func (s *Service) RehydrateTask(ctx context.Context, id string, body RunOptions)
 		unsafe = src.UnsafeAutomation
 		safetyPreset = strings.TrimSpace(src.SafetyPreset)
 		taskIntent = strings.TrimSpace(src.TaskIntent)
+		networkTier = src.NetworkTier
 		codexSandbox = strings.TrimSpace(src.CodexSandbox)
 		codexApprovalPolicy = strings.TrimSpace(src.CodexApprovalPolicy)
 		codexSearch = src.CodexSearch
@@ -355,6 +363,7 @@ func (s *Service) RehydrateTask(ctx context.Context, id string, body RunOptions)
 		SafetyEnvelope:        safetyEnvelope,
 		SafetyPreset:          safetyPreset,
 		TaskIntent:            taskIntent,
+		NetworkTier:           networkTier,
 		CodexSandbox:          codexSandbox,
 		CodexApprovalPolicy:   codexApprovalPolicy,
 		CodexSearch:           codexSearch,
@@ -442,6 +451,7 @@ func (s *Service) EnterUnsafeTask(ctx context.Context, id string, prompt string)
 		UnsafeAutomation: true,
 		SafetyPreset:     "unsafe",
 		TaskIntent:       "install",
+		NetworkTier:      tasks.NetworkTierExecNet,
 		Prompt:           ctxPrompt,
 		WorkDir:          src.WorkDir,
 		WorkDirStrategy:  "wait",
@@ -693,6 +703,7 @@ func (s *Service) createContinueTask(ctx context.Context, conversationID string,
 		explicitSafety := body.UnsafeAutomation ||
 			strings.TrimSpace(body.SafetyPreset) != "" ||
 			strings.TrimSpace(body.TaskIntent) != "" ||
+			strings.TrimSpace(string(body.NetworkTier)) != "" ||
 			strings.TrimSpace(body.CodexSandbox) != "" ||
 			strings.TrimSpace(body.CodexApprovalPolicy) != "" ||
 			body.CodexSearch ||
@@ -704,6 +715,7 @@ func (s *Service) createContinueTask(ctx context.Context, conversationID string,
 		safetyEnvelope := strings.TrimSpace(body.SafetyEnvelope)
 		safetyPreset := strings.TrimSpace(body.SafetyPreset)
 		taskIntent := strings.TrimSpace(body.TaskIntent)
+		networkTier := body.NetworkTier
 		codexSandbox := strings.TrimSpace(body.CodexSandbox)
 		codexApprovalPolicy := strings.TrimSpace(body.CodexApprovalPolicy)
 		codexSearch := body.CodexSearch
@@ -715,6 +727,7 @@ func (s *Service) createContinueTask(ctx context.Context, conversationID string,
 			unsafe = latest.UnsafeAutomation
 			safetyPreset = strings.TrimSpace(latest.SafetyPreset)
 			taskIntent = strings.TrimSpace(latest.TaskIntent)
+			networkTier = latest.NetworkTier
 			codexSandbox = strings.TrimSpace(latest.CodexSandbox)
 			codexApprovalPolicy = strings.TrimSpace(latest.CodexApprovalPolicy)
 			codexSearch = latest.CodexSearch
@@ -731,6 +744,7 @@ func (s *Service) createContinueTask(ctx context.Context, conversationID string,
 			SafetyEnvelope:        safetyEnvelope,
 			SafetyPreset:          safetyPreset,
 			TaskIntent:            taskIntent,
+			NetworkTier:           networkTier,
 			CodexSandbox:          codexSandbox,
 			CodexApprovalPolicy:   codexApprovalPolicy,
 			CodexSearch:           codexSearch,
@@ -770,6 +784,7 @@ func (s *Service) createContinueTask(ctx context.Context, conversationID string,
 	explicitSafety := body.UnsafeAutomation ||
 		strings.TrimSpace(body.SafetyPreset) != "" ||
 		strings.TrimSpace(body.TaskIntent) != "" ||
+		strings.TrimSpace(string(body.NetworkTier)) != "" ||
 		strings.TrimSpace(body.CodexSandbox) != "" ||
 		strings.TrimSpace(body.CodexApprovalPolicy) != "" ||
 		body.CodexSearch ||
@@ -781,6 +796,7 @@ func (s *Service) createContinueTask(ctx context.Context, conversationID string,
 	safetyEnvelope := strings.TrimSpace(body.SafetyEnvelope)
 	safetyPreset := strings.TrimSpace(body.SafetyPreset)
 	taskIntent := strings.TrimSpace(body.TaskIntent)
+	networkTier := body.NetworkTier
 	codexSandbox := strings.TrimSpace(body.CodexSandbox)
 	codexApprovalPolicy := strings.TrimSpace(body.CodexApprovalPolicy)
 	codexSearch := body.CodexSearch
@@ -792,6 +808,7 @@ func (s *Service) createContinueTask(ctx context.Context, conversationID string,
 		unsafe = latest.UnsafeAutomation
 		safetyPreset = strings.TrimSpace(latest.SafetyPreset)
 		taskIntent = strings.TrimSpace(latest.TaskIntent)
+		networkTier = latest.NetworkTier
 		codexSandbox = strings.TrimSpace(latest.CodexSandbox)
 		codexApprovalPolicy = strings.TrimSpace(latest.CodexApprovalPolicy)
 		codexSearch = latest.CodexSearch
@@ -813,6 +830,7 @@ func (s *Service) createContinueTask(ctx context.Context, conversationID string,
 		SafetyEnvelope:        safetyEnvelope,
 		SafetyPreset:          safetyPreset,
 		TaskIntent:            taskIntent,
+		NetworkTier:           networkTier,
 		CodexSandbox:          codexSandbox,
 		CodexApprovalPolicy:   codexApprovalPolicy,
 		CodexSearch:           codexSearch,

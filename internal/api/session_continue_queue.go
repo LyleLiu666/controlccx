@@ -19,17 +19,18 @@ import (
 const staleWatchdogTimeout = 15 * time.Minute
 
 type sessionContinueOptions struct {
-	Prompt                string   `json:"prompt"`
-	UnsafeAutomation      bool     `json:"unsafe_automation,omitempty"`
-	SafetyEnvelope        string   `json:"safety_envelope,omitempty"`
-	SafetyPreset          string   `json:"safety_preset,omitempty"`
-	TaskIntent            string   `json:"task_intent,omitempty"`
-	CodexSandbox          string   `json:"codex_sandbox,omitempty"`
-	CodexApprovalPolicy   string   `json:"codex_approval_policy,omitempty"`
-	CodexSearch           bool     `json:"codex_search,omitempty"`
-	ClaudePermissionMode  string   `json:"claude_permission_mode,omitempty"`
-	ClaudeSandbox         bool     `json:"claude_sandbox,omitempty"`
-	ClaudeWebFetchDomains []string `json:"claude_webfetch_domains,omitempty"`
+	Prompt                string            `json:"prompt"`
+	UnsafeAutomation      bool              `json:"unsafe_automation,omitempty"`
+	SafetyEnvelope        string            `json:"safety_envelope,omitempty"`
+	SafetyPreset          string            `json:"safety_preset,omitempty"`
+	TaskIntent            string            `json:"task_intent,omitempty"`
+	NetworkTier           tasks.NetworkTier `json:"network_tier,omitempty"`
+	CodexSandbox          string            `json:"codex_sandbox,omitempty"`
+	CodexApprovalPolicy   string            `json:"codex_approval_policy,omitempty"`
+	CodexSearch           bool              `json:"codex_search,omitempty"`
+	ClaudePermissionMode  string            `json:"claude_permission_mode,omitempty"`
+	ClaudeSandbox         bool              `json:"claude_sandbox,omitempty"`
+	ClaudeWebFetchDomains []string          `json:"claude_webfetch_domains,omitempty"`
 }
 
 func (a *API) handleSessionContinue(w http.ResponseWriter, r *http.Request, key string) {
@@ -148,6 +149,7 @@ func toTaskOpsRunOptions(in sessionContinueOptions) taskops.RunOptions {
 		SafetyEnvelope:        in.SafetyEnvelope,
 		SafetyPreset:          in.SafetyPreset,
 		TaskIntent:            in.TaskIntent,
+		NetworkTier:           in.NetworkTier,
 		CodexSandbox:          in.CodexSandbox,
 		CodexApprovalPolicy:   in.CodexApprovalPolicy,
 		CodexSearch:           in.CodexSearch,

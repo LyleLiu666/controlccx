@@ -93,6 +93,9 @@ func TestStore_CreateTask_PersistsSafetyOptions(t *testing.T) {
 	if task.TaskIntent != "search-browse" {
 		t.Fatalf("task_intent=%q, want %q", task.TaskIntent, "search-browse")
 	}
+	if task.NetworkTier != NetworkTierWebReadonly {
+		t.Fatalf("network_tier=%q, want %q", task.NetworkTier, NetworkTierWebReadonly)
+	}
 	if task.ClaudePermissionMode != "plan" {
 		t.Fatalf("claude_permission_mode=%q, want %q", task.ClaudePermissionMode, "plan")
 	}
@@ -112,6 +115,9 @@ func TestStore_CreateTask_PersistsSafetyOptions(t *testing.T) {
 	}
 	if loaded.TaskIntent != task.TaskIntent {
 		t.Fatalf("loaded task_intent=%q, want %q", loaded.TaskIntent, task.TaskIntent)
+	}
+	if loaded.NetworkTier != task.NetworkTier {
+		t.Fatalf("loaded network_tier=%q, want %q", loaded.NetworkTier, task.NetworkTier)
 	}
 	if loaded.ClaudePermissionMode != task.ClaudePermissionMode {
 		t.Fatalf("loaded claude_permission_mode=%q, want %q", loaded.ClaudePermissionMode, task.ClaudePermissionMode)
@@ -139,6 +145,9 @@ func TestStore_CreateTask_PersistsSafetyOptions(t *testing.T) {
 		if it.TaskIntent != task.TaskIntent {
 			t.Fatalf("listed task_intent=%q, want %q", it.TaskIntent, task.TaskIntent)
 		}
+		if it.NetworkTier != task.NetworkTier {
+			t.Fatalf("listed network_tier=%q, want %q", it.NetworkTier, task.NetworkTier)
+		}
 		if it.ClaudePermissionMode != task.ClaudePermissionMode {
 			t.Fatalf("listed claude_permission_mode=%q, want %q", it.ClaudePermissionMode, task.ClaudePermissionMode)
 		}
@@ -148,5 +157,32 @@ func TestStore_CreateTask_PersistsSafetyOptions(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("task not found in list")
+	}
+}
+
+func TestStore_CreateTask_PersistsExplicitNetworkTier(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "controlccx.db")
+
+	conn, err := db.Open(ctx, db.Options{Path: dbPath})
+	if err != nil {
+		t.Fatalf("db open: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+
+	store := NewStore(conn)
+
+	task, err := store.CreateTask(ctx, CreateTaskInput{
+		WorkerType:  WorkerCodex,
+		Mode:        ModeNew,
+		Prompt:      "hi",
+		WorkDir:     ".",
+		NetworkTier: NetworkTierOff,
+	})
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	if task.NetworkTier != NetworkTierOff {
+		t.Fatalf("network_tier=%q, want %q", task.NetworkTier, NetworkTierOff)
 	}
 }

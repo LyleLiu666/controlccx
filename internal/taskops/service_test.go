@@ -258,6 +258,16 @@ func TestParseMutationError_DoesNotUseBroadStringHeuristics(t *testing.T) {
 	}
 }
 
+func TestParseMutationError_TasksInvalidPrefixIsInvalidArgument(t *testing.T) {
+	problem := ParseMutationError(errors.New("tasks: invalid network_tier \"bad\""))
+	if problem.Error != MutationErrorInvalidArgument {
+		t.Fatalf("error code=%q want %q", problem.Error, MutationErrorInvalidArgument)
+	}
+	if problem.Status != 400 {
+		t.Fatalf("status=%d want %d", problem.Status, 400)
+	}
+}
+
 func TestCreateContinueTaskForConversation_UsesUnifiedSemantics(t *testing.T) {
 	ctx, svc := newServiceForTest(t)
 	first, err := svc.Tasks.CreateTask(ctx, tasks.CreateTaskInput{
