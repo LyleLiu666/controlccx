@@ -143,6 +143,22 @@ func Migrate(ctx context.Context, conn *sql.DB) error {
 			ON risk_decisions(task_id, created_at DESC, id DESC);`,
 		`CREATE INDEX IF NOT EXISTS idx_risk_decisions_session_created_at
 			ON risk_decisions(session_id, created_at DESC, id DESC);`,
+		`CREATE TABLE IF NOT EXISTS rollback_proofs (
+			id TEXT PRIMARY KEY,
+			task_id TEXT NOT NULL,
+			action_type TEXT NOT NULL DEFAULT '',
+			action_ref TEXT NOT NULL DEFAULT '',
+			proof_type TEXT NOT NULL DEFAULT '',
+			proof_ref TEXT NOT NULL DEFAULT '',
+			detail_json TEXT NOT NULL DEFAULT '{}',
+			created_at INTEGER NOT NULL DEFAULT 0,
+			updated_at INTEGER NOT NULL DEFAULT 0,
+			FOREIGN KEY(task_id) REFERENCES tasks(id) ON DELETE CASCADE
+		);`,
+		`CREATE INDEX IF NOT EXISTS idx_rollback_proofs_task_created_at
+			ON rollback_proofs(task_id, created_at DESC, id DESC);`,
+		`CREATE INDEX IF NOT EXISTS idx_rollback_proofs_task_action_created_at
+			ON rollback_proofs(task_id, action_type, action_ref, created_at DESC, id DESC);`,
 		`CREATE TABLE IF NOT EXISTS session_meta (
 			key TEXT PRIMARY KEY,
 			title TEXT NOT NULL DEFAULT '',
