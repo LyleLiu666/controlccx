@@ -47,3 +47,23 @@ func TestBuildSystemPrompt_TargetIncludesTaskCreation(t *testing.T) {
 		t.Fatalf("prompt missing task-creation goal: %q", want)
 	}
 }
+
+func TestBuildSystemPrompt_PrincipleDrivenGuidance(t *testing.T) {
+	prompt := buildSystemPrompt()
+
+	wants := []string{
+		"一次只问一个关键问题",
+		"多选引导 + 一句猜测",
+		"简单且追求速度 -> claude-code",
+		"严肃/生产级迭代 -> codex",
+		"不确定则先问再提",
+		"执行摘要（目标/worker/验收）",
+		"exec 仅可在用户明确要求 shell/脚本执行时使用",
+	}
+
+	for _, want := range wants {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("prompt missing principle guidance: %q", want)
+		}
+	}
+}

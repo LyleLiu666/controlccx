@@ -589,3 +589,39 @@ func TestSecretaryFailedMessage_DoesNotMentionCLIBackends(t *testing.T) {
 		t.Fatalf("expected failure message to not mention cli backends, got: %q", msg)
 	}
 }
+
+func TestService_Send_AllowsLongerToolLoopsBeyondLegacy60Steps(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "controlccx.db")
+
+	conn, err := db.Open(ctx, db.Options{Path: dbPath})
+	if err != nil {
+		t.Fatalf("db open: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+
+	taskStore := tasks.NewStore(conn)
+	chatStore := chat.NewStore(conn)
+
+	const toolSteps = 65
+	responses := make([]string, 0, toolSteps+1)
+	toolCall := "<tool_data><call><tool_name>system_info</tool_name></call></tool_data>"
+	for i := 0; i < toolSteps; i++ {
+		responses = append(responses, toolCall)
+	}
+	responses = append(responses, "done")
+
+	c := &scriptedClient{responses: responses}
+	svc := NewService(config.Default(), taskStore, chatStore, nil, nil, WithClient(c))
+
+	reply, err := svc.Send(ctx, "loop")
+	if err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	if strings.TrimSpace(reply) != "done" {
+		t.Fatalf("expected final reply %q, got %q", "done", reply)
+	}
+	if c.calls != toolSteps+1 {
+		t.Fatalf("llm calls=%d want %d", c.calls, toolSteps+1)
+	}
+}

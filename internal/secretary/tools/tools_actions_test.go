@@ -356,6 +356,22 @@ func TestTaskNewSubmit_CreatesTaskAndWritesAuditLog(t *testing.T) {
 	}
 }
 
+func TestTaskNewSubmit_DescriptionIncludesWorkerGuidance(t *testing.T) {
+	desc := taskNewSubmitTool{}.DescriptionZH()
+	wants := []string{
+		"worker_type 仅允许 claude-code | codex | exec",
+		"简单且追求速度 -> claude-code",
+		"严肃/生产级迭代 -> codex",
+		"不确定则先问",
+		"自动推荐不使用 exec",
+	}
+	for _, want := range wants {
+		if !strings.Contains(desc, want) {
+			t.Fatalf("description missing guidance: %q", want)
+		}
+	}
+}
+
 func strconvFormatInt(v int64) string {
 	return fmt.Sprintf("%d", v)
 }

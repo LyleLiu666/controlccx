@@ -180,7 +180,7 @@ func (s *Service) send(ctx context.Context, userText string, hooks *SendHooks) (
 		Messages:   messages,
 		LLMOptions: s.llmOptionsBestEffort(ctx),
 		Executor:   reg,
-		MaxSteps:   60,
+		MaxSteps:   500,
 		Callbacks:  callbacks,
 	})
 

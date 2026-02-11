@@ -86,6 +86,14 @@ Workers inherit environment variables from the ControlCCX server process. You ca
 
 写操作参数契约为显式模式：`worker_type`、`prompt`、`workdir` 为必填；缺参时秘书会先向用户索取，不做继承/猜测/自动补全。
 
+秘书交互默认遵循“先理解再执行”的原则：
+
+- 信息不足时一次只问一个关键问题，采用“多选引导 + 一句猜测”
+- `worker_type` 仅允许：`claude-code` / `codex` / `exec`
+- 选择建议：简单且追求速度优先 `claude-code`；严肃/生产级迭代优先 `codex`；不确定先问再提
+- `exec` 不作为自动推荐项，仅在用户明确要求 shell/脚本执行时使用
+- 写操作前先给一行执行摘要（目标/worker/验收），确认后再提交
+
 - UI：右上角 `⋯` 菜单 → `秘书`
 - API：
   - `GET  /api/secretary/messages?limit=200`

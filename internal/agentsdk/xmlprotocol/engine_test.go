@@ -29,6 +29,24 @@ func (c *scriptedClient) ChatCompletionStream(ctx context.Context, messages []ag
 	return callback(resp)
 }
 
+type scriptedCaptureClient struct {
+	responses []string
+	index     int
+	requests  [][]agentsdk.Message
+}
+
+func (c *scriptedCaptureClient) ChatCompletionStream(ctx context.Context, messages []agentsdk.Message, opts *agentsdk.ChatCompletionOptions, callback agentsdk.StreamCallback) error {
+	_ = ctx
+	_ = opts
+	c.requests = append(c.requests, append([]agentsdk.Message(nil), messages...))
+	if c.index >= len(c.responses) {
+		return errors.New("no scripted response")
+	}
+	resp := c.responses[c.index]
+	c.index++
+	return callback(resp)
+}
+
 type errorClient struct {
 	err error
 }
@@ -366,6 +384,50 @@ func TestRunLoop_ToolExecutorError_YieldsToolResultError_AndContinues(t *testing
 	}
 	if !strings.Contains(got.OutputJSON, "Tool execution failed") {
 		t.Fatalf("expected output json to contain execution failure, got %q", got.OutputJSON)
+	}
+}
+
+func TestRunLoop_ToolExecutorError_IsReturnedToAgentInToolResultAndCanSelfCorrect(t *testing.T) {
+	client := &scriptedCaptureClient{
+		responses: []string{
+			`<tool_data><call><tool_name>bash</tool_name><command>echo hi</command></call></tool_data>`,
+			`done`,
+		},
+	}
+
+	combined, err := RunLoop(context.Background(), RunLoopInput{
+		Client:   client,
+		Messages: []agentsdk.Message{{Role: "user", Content: "run"}},
+		Executor: funcExecutor(func(context.Context, agentsdk.ToolCall) (any, error) {
+			return nil, errors.New("boom")
+		}),
+	})
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if strings.TrimSpace(combined) != "done" {
+		t.Fatalf("expected final content %q, got %q", "done", combined)
+	}
+
+	if len(client.requests) < 2 {
+		t.Fatalf("expected at least 2 llm requests, got %d", len(client.requests))
+	}
+
+	var toolResultMsg string
+	for _, m := range client.requests[1] {
+		if m.Role == "user" && strings.Contains(m.Content, "<tool_result>") {
+			toolResultMsg = m.Content
+			break
+		}
+	}
+	if strings.TrimSpace(toolResultMsg) == "" {
+		t.Fatalf("expected tool_result message in second request")
+	}
+	if !strings.Contains(toolResultMsg, "<ok>false</ok>") {
+		t.Fatalf("expected tool_result to include ok=false, got %q", toolResultMsg)
+	}
+	if !strings.Contains(toolResultMsg, "<error>boom</error>") {
+		t.Fatalf("expected tool_result to include error details, got %q", toolResultMsg)
 	}
 }
 
