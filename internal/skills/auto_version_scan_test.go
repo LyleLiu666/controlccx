@@ -133,6 +133,73 @@ func TestAutoVersionScanner_EnsureSkill_RevisionChangeCreatesSnapshotAndMarker(t
 	}
 }
 
+func TestAutoVersionScanner_EnsureSkill_GitSameRevisionManifestTimestampDrift_NoNewSnapshot(t *testing.T) {
+	ctx := context.Background()
+	home := t.TempDir()
+	sourceRoot := filepath.Join(home, ".agent", "skills")
+	skillRoot := filepath.Join(sourceRoot, "skill-a")
+	mustMkdir(t, skillRoot)
+	mustWrite(t, filepath.Join(skillRoot, "README.md"), "v1\n")
+
+	t1 := time.Date(2026, 2, 4, 10, 0, 0, 0, time.UTC)
+	t2 := time.Date(2026, 2, 4, 11, 0, 0, 0, time.UTC)
+
+	mustWriteManagedManifestForTest(t, skillRoot, ManagedSkillManifest{
+		SchemaVersion:  1,
+		Name:           "skill-a",
+		SourceType:     sourceTypeGit,
+		SourceRef:      "https://github.com/acme/repo",
+		SourceSubpath:  "skills/skill-a",
+		SourceRevision: "rev-1",
+		UpdatedAt:      t1.Format(time.RFC3339),
+		CreatedAt:      t1.Format(time.RFC3339),
+	})
+
+	skillsSvc, err := NewService(Options{HomeDir: home, SourceRoots: []string{sourceRoot}})
+	if err != nil {
+		t.Fatalf("new skills service: %v", err)
+	}
+	perSkillVersions, err := NewPerSkillVersionsService(PerSkillVersionsOptions{HomeDir: home})
+	if err != nil {
+		t.Fatalf("new per-skill versions: %v", err)
+	}
+
+	now := t1
+	scanner := NewAutoVersionScanner(skillsSvc, perSkillVersions, AutoVersionScanOptions{
+		Now: func() time.Time { return now },
+	})
+
+	// Create baseline snapshot.
+	if err := scanner.EnsureSkill(ctx, "skill-a", false); err != nil {
+		t.Fatalf("ensure baseline: %v", err)
+	}
+
+	// Simulate "pull update" with no new commit: same revision, only manifest updated_at drifts.
+	mustWriteManagedManifestForTest(t, skillRoot, ManagedSkillManifest{
+		SchemaVersion:  1,
+		Name:           "skill-a",
+		SourceType:     sourceTypeGit,
+		SourceRef:      "https://github.com/acme/repo",
+		SourceSubpath:  "skills/skill-a",
+		SourceRevision: "rev-1",
+		UpdatedAt:      t2.Format(time.RFC3339),
+		CreatedAt:      t1.Format(time.RFC3339),
+	})
+	now = t2
+
+	if err := scanner.EnsureSkill(ctx, "skill-a", true); err != nil {
+		t.Fatalf("ensure same revision: %v", err)
+	}
+
+	st, err := scanner.Status("skill-a")
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
+	if st.VersionsCount != 1 {
+		t.Fatalf("versions_count=%d, want 1", st.VersionsCount)
+	}
+}
+
 func TestAutoVersionScanner_Status_ExpiresMarkerAfterBadgeTTL(t *testing.T) {
 	ctx := context.Background()
 	home := t.TempDir()

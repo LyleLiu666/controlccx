@@ -489,6 +489,30 @@ func snapshotChanged(ctx context.Context, src string, current snapshotMeta, prev
 		if curRev != prevRev {
 			return true, snapshotChangeRevision, nil
 		}
+		// Git revision is authoritative. When revision stays the same, ignore managed-manifest
+		// timestamp drift and compare only user-visible content.
+		curType := strings.ToLower(strings.TrimSpace(current.SourceType))
+		prevType := strings.ToLower(strings.TrimSpace(prev.SourceType))
+		if curType == sourceTypeGit || prevType == sourceTypeGit {
+			curHash, err := dirFingerprintFiltered(src, map[string]bool{managedManifestFile: true})
+			if err != nil {
+				return false, snapshotUnchanged, err
+			}
+			prevHash, err := dirFingerprintFiltered(prevPath, map[string]bool{
+				versionsManifestFile: true,
+				managedManifestFile:  true,
+			})
+			if err != nil {
+				return false, snapshotUnchanged, err
+			}
+			if curHash == "" || prevHash == "" {
+				return false, snapshotUnchanged, nil
+			}
+			if curHash != prevHash {
+				return true, snapshotChangeContent, nil
+			}
+			return false, snapshotUnchanged, nil
+		}
 	}
 
 	curHash := strings.TrimSpace(current.ContentHash)
