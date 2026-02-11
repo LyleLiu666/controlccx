@@ -232,17 +232,21 @@ func buildCodex(cfg config.Config, task tasks.Task) (ToolCommand, error) {
 }
 
 func claudeSettingsForTask(task tasks.Task) (string, bool) {
+	tierDefaults := shouldApplyClaudeTierDefaults(task)
 	// We only inject settings when explicitly requested. This avoids implicitly changing
 	// behavior for existing users/API clients that rely on their own Claude settings.
-	if !task.ClaudeSandbox && len(task.ClaudeWebFetchDomains) == 0 && strings.TrimSpace(task.SafetyPreset) == "" && strings.TrimSpace(task.TaskIntent) == "" {
+	if !task.ClaudeSandbox &&
+		len(task.ClaudeWebFetchDomains) == 0 &&
+		strings.TrimSpace(task.SafetyPreset) == "" &&
+		strings.TrimSpace(task.TaskIntent) == "" &&
+		!tierDefaults {
 		return "", false
 	}
 
 	preset := strings.ToLower(strings.TrimSpace(task.SafetyPreset))
-	noNetwork := strings.Contains(preset, "no-network")
+	noNetwork := claudeNoNetworkForTask(task, preset, tierDefaults)
 	unsafe := strings.Contains(preset, "unsafe") || task.UnsafeAutomation
-	taskIntent := strings.ToLower(strings.TrimSpace(task.TaskIntent))
-	allowCurlWget := !noNetwork && (taskIntent == "search-browse" || (taskIntent == "" && strings.Contains(preset, "search-browse")))
+	allowCurlWget := claudeAllowCurlWgetForTask(task, preset, tierDefaults, noNetwork)
 
 	type permissions struct {
 		Allow []string `json:"allow,omitempty"`
@@ -290,7 +294,7 @@ func claudeSettingsForTask(task tasks.Task) (string, bool) {
 			// Unsafe mode is an explicit opt-in to higher risk. Disable Claude's bash sandbox so
 			// networking (pip/python/curl) works as expected for installs and other automation.
 			sandbox = &sandboxSettings{Enabled: false}
-		} else if task.ClaudeSandbox {
+		} else if claudeSandboxEnabledForTask(task, tierDefaults) {
 			allowUnsandboxedCommands := false
 			sandbox = &sandboxSettings{
 				Enabled:                  true,
@@ -332,18 +336,27 @@ func buildExec(cfg config.Config, task tasks.Task) ToolCommand {
 // the given tool, meaning the manager should auto-approve the permission request
 // instead of waiting for human approval.
 func isToolAutoAllowed(task tasks.Task, toolName string, input json.RawMessage) bool {
+	tierDefaults := shouldApplyClaudeTierDefaults(task)
 	// Same guard as claudeSettingsForTask: no settings → no auto-allow.
-	if !task.ClaudeSandbox && len(task.ClaudeWebFetchDomains) == 0 && strings.TrimSpace(task.SafetyPreset) == "" && strings.TrimSpace(task.TaskIntent) == "" {
+	if !task.ClaudeSandbox &&
+		len(task.ClaudeWebFetchDomains) == 0 &&
+		strings.TrimSpace(task.SafetyPreset) == "" &&
+		strings.TrimSpace(task.TaskIntent) == "" &&
+		!tierDefaults {
 		return false
 	}
 
 	preset := strings.ToLower(strings.TrimSpace(task.SafetyPreset))
-	noNetwork := strings.Contains(preset, "no-network")
+	noNetwork := claudeNoNetworkForTask(task, preset, tierDefaults)
 
 	lowerTool := strings.ToLower(strings.TrimSpace(toolName))
 
 	// Explicitly denied tools are never auto-allowed.
 	if noNetwork && (lowerTool == "webfetch" || lowerTool == "websearch") {
+		return false
+	}
+	// Tier-only defaults keep approvals in the loop; web tools are available but not auto-approved.
+	if tierDefaults {
 		return false
 	}
 

@@ -109,6 +109,54 @@ func TestBuildToolCommand_Claude_SearchBrowse_AllowsWebFetchAndAllowsCurlWget(t 
 	}
 }
 
+func TestBuildToolCommand_Claude_TierOnlyWebReadonly_MapsToBrowseSafeDefaults(t *testing.T) {
+	cfg := config.Default()
+	task := tasks.Task{
+		WorkerType:  tasks.WorkerClaudeCode,
+		Mode:        tasks.ModeNew,
+		Prompt:      "hi",
+		WorkDir:     ".",
+		NetworkTier: tasks.NetworkTierWebReadonly,
+	}
+
+	tool, err := BuildToolCommand(cfg, task)
+	if err != nil {
+		t.Fatalf("BuildToolCommand: %v", err)
+	}
+
+	settings := mustExtractClaudeSettings(t, tool.Args)
+	deny := stringsFromAny(settings["permissions"], "deny")
+	if !contains(deny, "Bash(curl *)") || !contains(deny, "Bash(wget *)") {
+		t.Fatalf("settings.permissions.deny=%v, expected curl+wget denied for web_readonly", deny)
+	}
+	allow := stringsFromAny(settings["permissions"], "allow")
+	if !contains(allow, "WebFetch") || !contains(allow, "WebSearch") {
+		t.Fatalf("settings.permissions.allow=%v, expected WebFetch+WebSearch allowed", allow)
+	}
+}
+
+func TestBuildToolCommand_Claude_TierOnlyOff_DeniesWebTools(t *testing.T) {
+	cfg := config.Default()
+	task := tasks.Task{
+		WorkerType:  tasks.WorkerClaudeCode,
+		Mode:        tasks.ModeNew,
+		Prompt:      "hi",
+		WorkDir:     ".",
+		NetworkTier: tasks.NetworkTierOff,
+	}
+
+	tool, err := BuildToolCommand(cfg, task)
+	if err != nil {
+		t.Fatalf("BuildToolCommand: %v", err)
+	}
+
+	settings := mustExtractClaudeSettings(t, tool.Args)
+	deny := stringsFromAny(settings["permissions"], "deny")
+	if !contains(deny, "WebFetch") || !contains(deny, "WebSearch") {
+		t.Fatalf("settings.permissions.deny=%v, expected WebFetch+WebSearch denied", deny)
+	}
+}
+
 func TestBuildToolCommand_Claude_Unsafe_DoesNotDenyCurlWget(t *testing.T) {
 	cfg := config.Default()
 	task := tasks.Task{
@@ -304,6 +352,18 @@ func TestIsToolAutoAllowed_SearchBrowse_AllowsWebSearchAndWebFetch(t *testing.T)
 	}
 	if !isToolAutoAllowed(task, "websearch", nil) {
 		t.Fatal("websearch (lowercase) should be auto-allowed")
+	}
+}
+
+func TestIsToolAutoAllowed_TierOnlyWebReadonly_RequiresApproval(t *testing.T) {
+	task := tasks.Task{
+		NetworkTier: tasks.NetworkTierWebReadonly,
+	}
+	if isToolAutoAllowed(task, "WebSearch", nil) {
+		t.Fatal("WebSearch should require approval for tier-only web_readonly")
+	}
+	if isToolAutoAllowed(task, "WebFetch", nil) {
+		t.Fatal("WebFetch should require approval for tier-only web_readonly")
 	}
 }
 
