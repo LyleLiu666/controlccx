@@ -70,7 +70,8 @@ func (r *Registry) List() []string {
 }
 
 func (r *Registry) Send(ctx context.Context, msg OutboundMessage) (DeliveryResult, error) {
-	key := normalizeName(msg.Connector)
+	msg = normalizeOutboundMessage(msg)
+	key := msg.Connector
 	if key == "" {
 		return DeliveryResult{}, ErrInvalidConnector
 	}
@@ -78,6 +79,5 @@ func (r *Registry) Send(ctx context.Context, msg OutboundMessage) (DeliveryResul
 	if err != nil {
 		return DeliveryResult{}, err
 	}
-	msg.Connector = key
 	return c.Send(ctx, msg)
 }

@@ -27,9 +27,10 @@ type OutboundMessage struct {
 }
 
 type DeliveryResult struct {
-	Connector string    `json:"connector"`
-	MessageID string    `json:"message_id,omitempty"`
-	SentAt    time.Time `json:"sent_at,omitempty"`
+	Connector string          `json:"connector"`
+	MessageID string          `json:"message_id,omitempty"`
+	SentAt    time.Time       `json:"sent_at,omitempty"`
+	Echo      OutboundMessage `json:"echo,omitempty"`
 }
 
 type Connector interface {
@@ -63,4 +64,30 @@ type AuditHook interface {
 
 func normalizeName(raw string) string {
 	return strings.ToLower(strings.TrimSpace(raw))
+}
+
+func normalizeOutboundMessage(msg OutboundMessage) OutboundMessage {
+	msg.Connector = normalizeName(msg.Connector)
+	msg.ChannelID = strings.TrimSpace(msg.ChannelID)
+	msg.ConversationID = strings.TrimSpace(msg.ConversationID)
+	msg.ReplyToID = strings.TrimSpace(msg.ReplyToID)
+	msg.Text = strings.TrimSpace(msg.Text)
+	if len(msg.Metadata) == 0 {
+		msg.Metadata = nil
+		return msg
+	}
+	out := make(map[string]string, len(msg.Metadata))
+	for key, value := range msg.Metadata {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		out[key] = strings.TrimSpace(value)
+	}
+	if len(out) == 0 {
+		msg.Metadata = nil
+		return msg
+	}
+	msg.Metadata = out
+	return msg
 }
