@@ -955,6 +955,46 @@ func (s *Store) ListLogs(ctx context.Context, taskID string, afterID int64, limi
 	return s.ListLogsFiltered(ctx, taskID, afterID, limit, ListLogsFilter{})
 }
 
+func (s *Store) ListLogsTail(ctx context.Context, taskID string, limit int) ([]LogEntry, error) {
+	if limit <= 0 || limit > 2000 {
+		limit = 500
+	}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, task_id, ts, stream, message
+		FROM logs
+		WHERE task_id = ?
+		ORDER BY id DESC
+		LIMIT ?;
+	`, taskID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("tasks: list logs tail: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	out := make([]LogEntry, 0, limit)
+	for rows.Next() {
+		var (
+			e         LogEntry
+			tsMillis  int64
+			streamStr string
+		)
+		if err := rows.Scan(&e.ID, &e.TaskID, &tsMillis, &streamStr, &e.Message); err != nil {
+			return nil, fmt.Errorf("tasks: scan logs tail: %w", err)
+		}
+		e.Time = fromMillis(tsMillis)
+		e.Stream = LogStream(streamStr)
+		out = append(out, e)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("tasks: iterate logs tail: %w", err)
+	}
+	// Present in chronological order for callers.
+	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
+		out[i], out[j] = out[j], out[i]
+	}
+	return out, nil
+}
+
 func (s *Store) ListLogsFiltered(ctx context.Context, taskID string, afterID int64, limit int, filter ListLogsFilter) ([]LogEntry, error) {
 	if limit <= 0 || limit > 2000 {
 		limit = 500

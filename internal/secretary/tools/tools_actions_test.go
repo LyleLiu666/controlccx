@@ -1,0 +1,291 @@
+package tools
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"controlccx/internal/agentsdk"
+	"controlccx/internal/db"
+	"controlccx/internal/taskops"
+	"controlccx/internal/tasks"
+)
+
+func newDepsForToolsTest(t *testing.T) (context.Context, Deps) {
+	t.Helper()
+	ctx := context.Background()
+	conn, err := db.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "controlccx.db")})
+	if err != nil {
+		t.Fatalf("db open: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	store := tasks.NewStore(conn)
+	ops := &taskops.Service{Tasks: store}
+	return ctx, Deps{Tasks: store, Ops: ops}
+}
+
+func TestDescriptors_UniqueNonEmpty(t *testing.T) {
+	ds := Descriptors()
+	if len(ds) == 0 {
+		t.Fatalf("expected descriptors")
+	}
+	seen := map[string]bool{}
+	for _, d := range ds {
+		if strings.TrimSpace(d.Name) == "" {
+			t.Fatalf("empty tool name")
+		}
+		if seen[d.Name] {
+			t.Fatalf("duplicate tool name: %s", d.Name)
+		}
+		seen[d.Name] = true
+		if strings.TrimSpace(d.DescriptionZH) == "" {
+			t.Fatalf("empty description for %s", d.Name)
+		}
+	}
+}
+
+func TestTaskLogsTail_BoundedAndTruncated(t *testing.T) {
+	ctx, deps := newDepsForToolsTest(t)
+	task, err := deps.Tasks.CreateTask(ctx, tasks.CreateTaskInput{
+		WorkerType: tasks.WorkerExec,
+		Mode:       tasks.ModeNew,
+		Prompt:     "p",
+		WorkDir:    ".",
+	})
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	for i := 0; i < 30; i++ {
+		msg := strings.Repeat("中", 260)
+		if _, err := deps.Tasks.AppendLog(ctx, task.ID, tasks.LogSystem, msg); err != nil {
+			t.Fatalf("append log: %v", err)
+		}
+	}
+
+	reg := NewRegistry(deps)
+	outAny, err := reg.Execute(ctx, agentsdk.ToolCall{
+		Name: "task_logs_tail",
+		Fields: map[string]string{
+			"task_id": task.ID,
+			"count":   "100",
+		},
+	})
+	if err != nil {
+		t.Fatalf("execute tool: %v", err)
+	}
+	var out struct {
+		Count int `json:"count"`
+		Logs  []struct {
+			Message string `json:"message"`
+		} `json:"logs"`
+	}
+	raw, err := json.Marshal(outAny)
+	if err != nil {
+		t.Fatalf("marshal output: %v", err)
+	}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatalf("unmarshal output: %v raw=%s", err, string(raw))
+	}
+	if out.Count != 20 {
+		t.Fatalf("count=%d want 20", out.Count)
+	}
+	if len(out.Logs) != 20 {
+		t.Fatalf("logs len=%d want 20", len(out.Logs))
+	}
+	for _, l := range out.Logs {
+		msg := strings.TrimSpace(l.Message)
+		if len([]rune(msg)) > 200 {
+			t.Fatalf("line too long: %d", len([]rune(msg)))
+		}
+	}
+}
+
+func TestTaskLogsTail_UsesLatestLogsWhenManyEntries(t *testing.T) {
+	ctx, deps := newDepsForToolsTest(t)
+	task, err := deps.Tasks.CreateTask(ctx, tasks.CreateTaskInput{
+		WorkerType: tasks.WorkerExec,
+		Mode:       tasks.ModeNew,
+		Prompt:     "p",
+		WorkDir:    ".",
+	})
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	for i := 1; i <= 2105; i++ {
+		if _, err := deps.Tasks.AppendLog(ctx, task.ID, tasks.LogSystem, fmt.Sprintf("line-%04d", i)); err != nil {
+			t.Fatalf("append log %d: %v", i, err)
+		}
+	}
+
+	reg := NewRegistry(deps)
+	outAny, err := reg.Execute(ctx, agentsdk.ToolCall{
+		Name: "task_logs_tail",
+		Fields: map[string]string{
+			"task_id": task.ID,
+			"count":   "20",
+		},
+	})
+	if err != nil {
+		t.Fatalf("execute tool: %v", err)
+	}
+	var out struct {
+		Count int `json:"count"`
+		Logs  []struct {
+			Message string `json:"message"`
+		} `json:"logs"`
+	}
+	raw, err := json.Marshal(outAny)
+	if err != nil {
+		t.Fatalf("marshal output: %v", err)
+	}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatalf("unmarshal output: %v raw=%s", err, string(raw))
+	}
+	if out.Count != 20 || len(out.Logs) != 20 {
+		t.Fatalf("count/logs mismatch: count=%d len=%d", out.Count, len(out.Logs))
+	}
+	if out.Logs[0].Message != "line-2086" {
+		t.Fatalf("first tail log=%q want %q", out.Logs[0].Message, "line-2086")
+	}
+	if out.Logs[19].Message != "line-2105" {
+		t.Fatalf("last tail log=%q want %q", out.Logs[19].Message, "line-2105")
+	}
+}
+
+func TestTaskLogGet_CapsAt4000(t *testing.T) {
+	ctx, deps := newDepsForToolsTest(t)
+	task, err := deps.Tasks.CreateTask(ctx, tasks.CreateTaskInput{
+		WorkerType: tasks.WorkerExec,
+		Mode:       tasks.ModeNew,
+		Prompt:     "p",
+		WorkDir:    ".",
+	})
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	entry, err := deps.Tasks.AppendLog(ctx, task.ID, tasks.LogSystem, strings.Repeat("A", 5000))
+	if err != nil {
+		t.Fatalf("append log: %v", err)
+	}
+
+	reg := NewRegistry(deps)
+	outAny, err := reg.Execute(ctx, agentsdk.ToolCall{
+		Name: "task_log_get",
+		Fields: map[string]string{
+			"task_id": task.ID,
+			"log_id":  "" + strings.TrimSpace(""),
+		},
+	})
+	if err == nil {
+		t.Fatalf("expected log_id required error")
+	}
+	outAny, err = reg.Execute(ctx, agentsdk.ToolCall{
+		Name: "task_log_get",
+		Fields: map[string]string{
+			"task_id": task.ID,
+			"log_id":  strconvFormatInt(entry.ID),
+		},
+	})
+	if err != nil {
+		t.Fatalf("execute tool: %v", err)
+	}
+	out := outAny.(map[string]any)
+	msg := out["message"].(string)
+	if len([]rune(msg)) != 4000 {
+		t.Fatalf("message len=%d want 4000", len([]rune(msg)))
+	}
+	if out["truncated"] != true {
+		t.Fatalf("truncated=%v want true", out["truncated"])
+	}
+}
+
+func TestTaskApprovalDecide_AutoResolvePending(t *testing.T) {
+	ctx, deps := newDepsForToolsTest(t)
+	task, err := deps.Tasks.CreateTask(ctx, tasks.CreateTaskInput{
+		WorkerType: tasks.WorkerClaudeCode,
+		Mode:       tasks.ModeNew,
+		Prompt:     "p",
+		WorkDir:    ".",
+	})
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	ar, err := deps.Tasks.CreateApprovalRequest(ctx, tasks.CreateApprovalRequestInput{
+		TaskID:     task.ID,
+		WorkerType: task.WorkerType,
+		WorkDir:    task.WorkDir,
+		ActionType: "shell.exec",
+		RiskLevel:  tasks.RiskMedium,
+		Summary:    "s",
+	})
+	if err != nil {
+		t.Fatalf("create approval: %v", err)
+	}
+
+	reg := NewRegistry(deps)
+	outAny, err := reg.Execute(ctx, agentsdk.ToolCall{
+		Name: "task_approval_decide",
+		Fields: map[string]string{
+			"task_id":  task.ID,
+			"decision": "approve",
+		},
+	})
+	if err != nil {
+		t.Fatalf("execute tool: %v", err)
+	}
+	out := outAny.(map[string]any)
+	if strings.TrimSpace(fmt.Sprint(out["approval_id"])) != ar.ID {
+		t.Fatalf("approval_id=%v want %s", out["approval_id"], ar.ID)
+	}
+	if strings.TrimSpace(fmt.Sprint(out["status"])) != string(tasks.ApprovalStatusApproved) {
+		t.Fatalf("status=%v", out["status"])
+	}
+}
+
+func TestTaskEnterUnsafe_RequiresConfirm(t *testing.T) {
+	ctx, deps := newDepsForToolsTest(t)
+	task, err := deps.Tasks.CreateTask(ctx, tasks.CreateTaskInput{
+		WorkerType: tasks.WorkerClaudeCode,
+		Mode:       tasks.ModeNew,
+		Prompt:     "p",
+		WorkDir:    ".",
+	})
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	reg := NewRegistry(deps)
+	_, err = reg.Execute(ctx, agentsdk.ToolCall{
+		Name: "task_enter_unsafe_submit",
+		Fields: map[string]string{
+			"task_id": task.ID,
+		},
+	})
+	if err == nil {
+		t.Fatalf("expected confirm error")
+	}
+	if !strings.Contains(strings.ToLower(err.Error()), "confirm=true") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	logs, err := deps.Tasks.ListLogs(ctx, task.ID, 0, 200)
+	if err != nil {
+		t.Fatalf("list logs: %v", err)
+	}
+	found := false
+	for _, l := range logs {
+		if l.Stream == tasks.LogSystem && strings.Contains(l.Message, "task_enter_unsafe_submit") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected audit log after denied unsafe action")
+	}
+}
+
+func strconvFormatInt(v int64) string {
+	return fmt.Sprintf("%d", v)
+}

@@ -29,6 +29,7 @@ import (
 	"controlccx/internal/runworkspace"
 	"controlccx/internal/secretary"
 	"controlccx/internal/skills"
+	"controlccx/internal/taskops"
 	"controlccx/internal/tasks"
 	"controlccx/internal/tooling"
 )
@@ -164,6 +165,14 @@ func main() {
 		log.Fatal(err)
 	}
 
+	hub := events.NewHub()
+	opsSvc := &taskops.Service{
+		Tasks:   taskStore,
+		Workers: runnerClient,
+		Hub:     hub,
+		Tools:   toolsSvc,
+	}
+
 	secretarySvc := secretary.NewService(
 		cfg,
 		taskStore,
@@ -172,9 +181,8 @@ func main() {
 		providersStore,
 		secretary.WithEventStore(secretaryEvents),
 		secretary.WithCompressionStore(secretaryCompressions),
+		secretary.WithTaskOps(opsSvc),
 	)
-
-	hub := events.NewHub()
 
 	skillsSvc, err := skills.NewService(skills.Options{})
 	if err != nil {
@@ -206,6 +214,7 @@ func main() {
 		SkillAutoVersionScan: autoScan,
 		Tools:                toolsSvc,
 		Workspaces:           workspacesSvc,
+		TaskOps:              opsSvc,
 	}
 	stopBackgroundLoops := apiSvc.StartBackgroundLoops(context.Background())
 

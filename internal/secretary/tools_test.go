@@ -2,6 +2,7 @@ package secretary
 
 import (
 	"context"
+	"encoding/json"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -70,9 +71,18 @@ func TestTools_TasksList_TruncatesUTF8Safely(t *testing.T) {
 	if !ok {
 		t.Fatalf("unexpected output type %T", outAny)
 	}
-	list, ok := out["tasks"].([]taskSummary)
-	if !ok || len(list) != 1 {
-		t.Fatalf("unexpected tasks payload: %#v", out["tasks"])
+	var list []struct {
+		Prompt string `json:"prompt"`
+	}
+	raw, err := json.Marshal(out["tasks"])
+	if err != nil {
+		t.Fatalf("marshal tasks payload: %v", err)
+	}
+	if err := json.Unmarshal(raw, &list); err != nil {
+		t.Fatalf("unmarshal tasks payload: %v", err)
+	}
+	if len(list) != 1 {
+		t.Fatalf("unexpected tasks payload len=%d raw=%s", len(list), string(raw))
 	}
 
 	got := list[0].Prompt

@@ -13,6 +13,7 @@ import (
 
 	"controlccx/internal/events"
 	"controlccx/internal/runsafe"
+	"controlccx/internal/taskops"
 	"controlccx/internal/tasks"
 )
 
@@ -58,6 +59,23 @@ func (a *API) handleSessionContinue(w http.ResponseWriter, r *http.Request, key 
 		http.Error(w, "invalid json", http.StatusBadRequest)
 		return
 	}
+	if a.TaskOps != nil {
+		out, err := a.TaskOps.ContinueSession(r.Context(), key, toTaskOpsRunOptions(body))
+		if err != nil {
+			writeSessionContinueContextError(w, err)
+			return
+		}
+		if out.Queue != nil {
+			writeJSONStatus(w, http.StatusAccepted, out.Queue)
+			return
+		}
+		if out.Task != nil {
+			writeJSON(w, out.Task)
+			return
+		}
+		writeJSON(w, map[string]any{"ok": true})
+		return
+	}
 
 	conversationID, runs, latest, err := a.resolveContinueContext(r.Context(), key)
 	if err != nil {
@@ -99,6 +117,28 @@ func (a *API) handleSessionPreemptContinue(w http.ResponseWriter, r *http.Reques
 	body, err := decodeSessionContinueOptions(r.Body)
 	if err != nil {
 		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+	if a.TaskOps != nil {
+		ack, err := a.TaskOps.PreemptContinueSession(r.Context(), key, toTaskOpsRunOptions(body))
+		if err != nil {
+			var runnerErr *taskops.RunnerUnavailableError
+			if errors.As(err, &runnerErr) {
+				writeJSONStatus(w, http.StatusServiceUnavailable, map[string]any{
+					"error":   "runner_unavailable",
+					"message": err.Error(),
+					"hint":    "restart the runner daemon (controlccx-runnerd)",
+					"task_id": strings.TrimSpace(runnerErr.TaskID),
+				})
+				return
+			}
+			writeSessionContinueContextError(w, err)
+			return
+		}
+		writeJSONStatus(w, http.StatusAccepted, ack)
+		go func() {
+			_ = a.drainContinueQueuesOnce(context.Background())
+		}()
 		return
 	}
 
@@ -156,6 +196,15 @@ func (a *API) handleSessionContinueQueue(w http.ResponseWriter, r *http.Request,
 	}
 	if a.Tasks == nil {
 		http.Error(w, "tasks store not configured", http.StatusServiceUnavailable)
+		return
+	}
+	if a.TaskOps != nil {
+		items, err := a.TaskOps.SessionContinueQueue(r.Context(), key, 200)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		writeJSON(w, map[string]any{"items": items})
 		return
 	}
 	conversationID, err := resolveConversationIDForSessionKey(r.Context(), a.Tasks, key)
@@ -219,12 +268,38 @@ func writeContinueTaskError(w http.ResponseWriter, err error) {
 		})
 		return
 	}
+	var runnerErr2 *taskops.RunnerUnavailableError
+	if errors.As(err, &runnerErr2) {
+		writeJSONStatus(w, http.StatusServiceUnavailable, map[string]any{
+			"error":   "runner_unavailable",
+			"message": err.Error(),
+			"hint":    "restart the runner daemon (controlccx-runnerd)",
+			"task_id": strings.TrimSpace(runnerErr2.TaskID),
+		})
+		return
+	}
 	msg := strings.TrimSpace(err.Error())
 	if strings.Contains(msg, "session_id") || strings.Contains(msg, "rehydrate") || strings.Contains(msg, "session") {
 		http.Error(w, msg, http.StatusBadRequest)
 		return
 	}
 	http.Error(w, msg, http.StatusInternalServerError)
+}
+
+func toTaskOpsRunOptions(in sessionContinueOptions) taskops.RunOptions {
+	return taskops.RunOptions{
+		Prompt:                in.Prompt,
+		UnsafeAutomation:      in.UnsafeAutomation,
+		SafetyEnvelope:        in.SafetyEnvelope,
+		SafetyPreset:          in.SafetyPreset,
+		TaskIntent:            in.TaskIntent,
+		CodexSandbox:          in.CodexSandbox,
+		CodexApprovalPolicy:   in.CodexApprovalPolicy,
+		CodexSearch:           in.CodexSearch,
+		ClaudePermissionMode:  in.ClaudePermissionMode,
+		ClaudeSandbox:         in.ClaudeSandbox,
+		ClaudeWebFetchDomains: in.ClaudeWebFetchDomains,
+	}
 }
 
 func (a *API) resolveContinueContext(ctx context.Context, key string) (string, []tasks.Task, tasks.Task, error) {

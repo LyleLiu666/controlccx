@@ -23,6 +23,7 @@ import (
 	"controlccx/internal/secretary"
 	"controlccx/internal/skills"
 	"controlccx/internal/systeminfo"
+	"controlccx/internal/taskops"
 	"controlccx/internal/tasks"
 	"controlccx/internal/tooling"
 	"controlccx/internal/worktree"
@@ -47,6 +48,7 @@ type API struct {
 	SkillAutoVersionScan *skills.AutoVersionScanner
 	Tools                *tooling.Service
 	Workspaces           *runworkspace.Service
+	TaskOps              *taskops.Service
 }
 
 type TaskRunner interface {
@@ -951,6 +953,24 @@ func (a *API) handleTaskByID(w http.ResponseWriter, r *http.Request) {
 				http.Error(w, "invalid decision", http.StatusBadRequest)
 				return
 			}
+			if a.TaskOps != nil {
+				if !supportsApprovalDecisionForwarder(a.TaskOps.Workers) {
+					writeJSONStatus(w, http.StatusServiceUnavailable, map[string]any{
+						"error":   "runner_unavailable",
+						"message": "runner does not support approvals",
+						"hint":    "restart the runner daemon (controlccx-runnerd)",
+						"task_id": id,
+					})
+					return
+				}
+				_, err := a.TaskOps.DecideApproval(r.Context(), id, approvalID, decision, strings.TrimSpace(body.Reason))
+				if err != nil {
+					writeApprovalDecisionError(w, id, approvalID, err)
+					return
+				}
+				writeJSON(w, map[string]any{"ok": true})
+				return
+			}
 			ar, ok, err := a.Tasks.GetApprovalRequest(r.Context(), approvalID)
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -1076,6 +1096,27 @@ func (a *API) handleTaskByID(w http.ResponseWriter, r *http.Request) {
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			http.Error(w, "invalid json", http.StatusBadRequest)
+			return
+		}
+		if a.TaskOps != nil {
+			t, err := a.TaskOps.ResumeTask(r.Context(), id, taskops.RunOptions{
+				Prompt:                body.Prompt,
+				UnsafeAutomation:      body.UnsafeAutomation,
+				SafetyEnvelope:        body.SafetyEnvelope,
+				SafetyPreset:          body.SafetyPreset,
+				TaskIntent:            body.TaskIntent,
+				CodexSandbox:          body.CodexSandbox,
+				CodexApprovalPolicy:   body.CodexApprovalPolicy,
+				CodexSearch:           body.CodexSearch,
+				ClaudePermissionMode:  body.ClaudePermissionMode,
+				ClaudeSandbox:         body.ClaudeSandbox,
+				ClaudeWebFetchDomains: body.ClaudeWebFetchDomains,
+			})
+			if err != nil {
+				writeTaskMutationError(w, err)
+				return
+			}
+			writeJSON(w, t)
 			return
 		}
 		prev, err := a.Tasks.GetTask(r.Context(), id)
@@ -1254,6 +1295,15 @@ func (a *API) handleTaskByID(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "invalid json", http.StatusBadRequest)
 			return
 		}
+		if a.TaskOps != nil {
+			t, err := a.TaskOps.EnterUnsafeTask(r.Context(), id, strings.TrimSpace(body.Prompt))
+			if err != nil {
+				writeTaskMutationError(w, err)
+				return
+			}
+			writeJSON(w, map[string]any{"task": t})
+			return
+		}
 
 		src, err := a.Tasks.GetTask(r.Context(), id)
 		if err != nil {
@@ -1369,6 +1419,27 @@ func (a *API) handleTaskByID(w http.ResponseWriter, r *http.Request) {
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			http.Error(w, "invalid json", http.StatusBadRequest)
+			return
+		}
+		if a.TaskOps != nil {
+			t, err := a.TaskOps.RehydrateTask(r.Context(), id, taskops.RunOptions{
+				Prompt:                body.Prompt,
+				UnsafeAutomation:      body.UnsafeAutomation,
+				SafetyEnvelope:        body.SafetyEnvelope,
+				SafetyPreset:          body.SafetyPreset,
+				TaskIntent:            body.TaskIntent,
+				CodexSandbox:          body.CodexSandbox,
+				CodexApprovalPolicy:   body.CodexApprovalPolicy,
+				CodexSearch:           body.CodexSearch,
+				ClaudePermissionMode:  body.ClaudePermissionMode,
+				ClaudeSandbox:         body.ClaudeSandbox,
+				ClaudeWebFetchDomains: body.ClaudeWebFetchDomains,
+			})
+			if err != nil {
+				writeTaskMutationError(w, err)
+				return
+			}
+			writeJSON(w, t)
 			return
 		}
 		src, err := a.Tasks.GetTask(r.Context(), id)
@@ -1589,6 +1660,111 @@ func parseStreams(raw string) []tasks.LogStream {
 		out = append(out, st)
 	}
 	return out
+}
+
+func supportsApprovalDecisionForwarder(runner any) bool {
+	if runner == nil {
+		return false
+	}
+	fw, ok := runner.(interface {
+		SubmitApprovalDecision(ctx context.Context, taskID string, approvalID string, decision string, reason string) error
+	})
+	return ok && fw != nil
+}
+
+func writeApprovalDecisionError(w http.ResponseWriter, taskID string, approvalID string, err error) {
+	var notPending *tasks.ApprovalNotPendingError
+	if errors.As(err, &notPending) {
+		writeJSONStatus(w, http.StatusConflict, map[string]any{
+			"error":       "approval_not_pending",
+			"message":     notPending.Error(),
+			"approval_id": strings.TrimSpace(approvalID),
+			"status":      strings.TrimSpace(string(notPending.Status)),
+		})
+		return
+	}
+	var runnerErr *taskops.RunnerUnavailableError
+	if errors.As(err, &runnerErr) {
+		writeJSONStatus(w, http.StatusServiceUnavailable, map[string]any{
+			"error":   "runner_unavailable",
+			"message": err.Error(),
+			"hint":    "restart the runner daemon (controlccx-runnerd)",
+			"task_id": taskID,
+		})
+		return
+	}
+	msg := strings.TrimSpace(err.Error())
+	switch msg {
+	case "approval not found":
+		http.Error(w, msg, http.StatusNotFound)
+	case "no pending approval found":
+		writeJSONStatus(w, http.StatusConflict, map[string]any{
+			"error":   "approval_not_pending",
+			"message": msg,
+			"task_id": taskID,
+		})
+	default:
+		http.Error(w, msg, http.StatusInternalServerError)
+	}
+}
+
+func writeTaskMutationError(w http.ResponseWriter, err error) {
+	var busy *tasks.WorkDirBusyError
+	if errors.As(err, &busy) {
+		writeJSONStatus(w, http.StatusConflict, map[string]any{
+			"error":            "workdir_busy",
+			"message":          err.Error(),
+			"workdir":          strings.TrimSpace(busy.WorkDir),
+			"existing_task_id": strings.TrimSpace(busy.ExistingTaskID),
+			"existing_status":  busy.ExistingStatus,
+		})
+		return
+	}
+	var runnerErr *taskops.RunnerUnavailableError
+	if errors.As(err, &runnerErr) {
+		writeJSONStatus(w, http.StatusServiceUnavailable, map[string]any{
+			"error":   "runner_unavailable",
+			"message": err.Error(),
+			"hint":    "restart the runner daemon (controlccx-runnerd)",
+			"task_id": strings.TrimSpace(runnerErr.TaskID),
+		})
+		return
+	}
+
+	msg := strings.TrimSpace(err.Error())
+	if strings.HasPrefix(msg, "session_task_in_flight:") {
+		existingID := ""
+		existingStatus := ""
+		for _, part := range strings.Fields(msg) {
+			switch {
+			case strings.HasPrefix(part, "existing_task_id="):
+				existingID = strings.TrimPrefix(part, "existing_task_id=")
+			case strings.HasPrefix(part, "existing_status="):
+				existingStatus = strings.TrimPrefix(part, "existing_status=")
+			}
+		}
+		writeJSONStatus(w, http.StatusConflict, map[string]any{
+			"error":            "session_task_in_flight",
+			"message":          "session already has an in-flight task",
+			"existing_task_id": strings.TrimSpace(existingID),
+			"existing_status":  strings.TrimSpace(existingStatus),
+		})
+		return
+	}
+
+	if strings.Contains(msg, "not found") {
+		http.Error(w, msg, http.StatusNotFound)
+		return
+	}
+	if strings.Contains(msg, "required") ||
+		strings.Contains(msg, "invalid") ||
+		strings.Contains(msg, "unknown tool id") ||
+		strings.Contains(msg, "session") ||
+		strings.Contains(msg, "rehydrate") {
+		http.Error(w, msg, http.StatusBadRequest)
+		return
+	}
+	http.Error(w, msg, http.StatusInternalServerError)
 }
 
 func (a *API) validate() error {

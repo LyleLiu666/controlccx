@@ -17,6 +17,8 @@ import (
 	"controlccx/internal/config"
 	"controlccx/internal/providers"
 	"controlccx/internal/secretary/llm"
+	sectools "controlccx/internal/secretary/tools"
+	"controlccx/internal/taskops"
 	"controlccx/internal/tasks"
 )
 
@@ -28,6 +30,7 @@ type Service struct {
 	compress  *CompressionStore
 	auth      *auth.Store
 	providers *providers.Store
+	taskOps   *taskops.Service
 
 	client agentsdk.Client
 
@@ -82,6 +85,12 @@ func WithCompressionOptions(opts CompressionOptions) Option {
 	}
 }
 
+func WithTaskOps(ops *taskops.Service) Option {
+	return func(s *Service) {
+		s.taskOps = ops
+	}
+}
+
 func NewService(cfg config.Config, taskStore *tasks.Store, chatStore *chat.Store, authStore *auth.Store, providersStore *providers.Store, opts ...Option) *Service {
 	s := &Service{
 		cfg:          cfg,
@@ -125,7 +134,10 @@ func (s *Service) send(ctx context.Context, userText string, hooks *SendHooks) (
 	s.sendMu.Lock()
 	defer s.sendMu.Unlock()
 
-	reg := newToolRegistry(s.tasks)
+	reg := sectools.NewRegistry(sectools.Deps{
+		Tasks: s.tasks,
+		Ops:   s.taskOps,
+	})
 
 	client := s.client
 	if client == nil {
@@ -152,7 +164,7 @@ func (s *Service) send(ctx context.Context, userText string, hooks *SendHooks) (
 	}
 
 	messages := make([]agentsdk.Message, 0, 1+len(promptHistory)+1)
-	messages = append(messages, agentsdk.Message{Role: "system", Content: systemPrompt})
+	messages = append(messages, agentsdk.Message{Role: "system", Content: buildSystemPrompt()})
 	messages = append(messages, promptHistory...)
 	messages = append(messages, agentsdk.Message{Role: "user", Content: msg})
 
