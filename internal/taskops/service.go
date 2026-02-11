@@ -459,11 +459,19 @@ func (s *Service) EnterUnsafeTask(ctx context.Context, id string, prompt string)
 		Warning:          src.Warning,
 	}
 
+	restoreCreated, restoreRef, err := s.ensureAutoRestorePoint(ctx, src)
+	if err != nil {
+		return tasks.Task{}, err
+	}
+
 	newTask, err := s.Tasks.CreateTask(ctx, in)
 	if err != nil {
 		return tasks.Task{}, err
 	}
 	_, _ = s.Tasks.AppendLog(ctx, newTask.ID, tasks.LogSystem, fmt.Sprintf("enter-unsafe: from run=%s", src.ID))
+	if restoreCreated {
+		_, _ = s.Tasks.AppendLog(ctx, newTask.ID, tasks.LogSystem, fmt.Sprintf("restore-point: %s", strings.TrimSpace(restoreRef)))
+	}
 	if newTask.Status != tasks.StatusQueued {
 		if s.Hub != nil {
 			s.Hub.Publish(events.Event{Type: "task.created", Time: time.Now().UTC(), Payload: newTask})
@@ -471,6 +479,43 @@ func (s *Service) EnterUnsafeTask(ctx context.Context, id string, prompt string)
 		return newTask, nil
 	}
 	return s.startTask(ctx, newTask)
+}
+
+func (s *Service) ensureAutoRestorePoint(ctx context.Context, src tasks.Task) (bool, string, error) {
+	if s == nil || s.Tasks == nil {
+		return false, "", errors.New("tasks store not configured")
+	}
+	actionType := "task.enter_unsafe"
+	actionRef := strings.TrimSpace(src.ID)
+	existing, err := s.Tasks.ListRollbackProofsByAction(ctx, src.ID, actionType, actionRef, tasks.ListRollbackProofsOptions{
+		ProofType: "restore_point",
+		Limit:     1,
+	})
+	if err != nil {
+		return false, "", err
+	}
+	if len(existing) > 0 {
+		return false, strings.TrimSpace(existing[0].ProofRef), nil
+	}
+
+	ref := fmt.Sprintf("auto:%d", time.Now().UTC().UnixMilli())
+	detail, _ := json.Marshal(map[string]any{
+		"task_id":  strings.TrimSpace(src.ID),
+		"workdir":  strings.TrimSpace(src.WorkDir),
+		"strategy": strings.TrimSpace(src.WorkDirStrategy),
+		"source":   "enter_unsafe",
+	})
+	if _, err := s.Tasks.CreateRollbackProof(ctx, tasks.CreateRollbackProofInput{
+		TaskID:     src.ID,
+		ActionType: actionType,
+		ActionRef:  actionRef,
+		ProofType:  "restore_point",
+		ProofRef:   ref,
+		Detail:     detail,
+	}); err != nil {
+		return false, "", err
+	}
+	return true, ref, nil
 }
 
 func (s *Service) DecideApproval(ctx context.Context, taskID string, approvalID string, decision string, reason string) (tasks.ApprovalRequest, error) {

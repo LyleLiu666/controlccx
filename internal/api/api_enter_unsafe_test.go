@@ -102,6 +102,20 @@ func TestAPI_TaskEnterUnsafe_CancelsAndCreatesFollowup(t *testing.T) {
 		t.Fatalf("status=%q, want %q", outTask.Status, tasks.StatusWaiting)
 	}
 
+	proofs, err := taskStore.ListRollbackProofsByAction(ctx, src.ID, "task.enter_unsafe", src.ID, tasks.ListRollbackProofsOptions{
+		ProofType: "restore_point",
+		Limit:     10,
+	})
+	if err != nil {
+		t.Fatalf("ListRollbackProofsByAction: %v", err)
+	}
+	if len(proofs) == 0 {
+		t.Fatalf("expected restore_point proof for task %s", src.ID)
+	}
+	if proofs[0].ProofType != "restore_point" {
+		t.Fatalf("proof_type=%q, want %q", proofs[0].ProofType, "restore_point")
+	}
+
 	if len(runner.cancelCalls) != 1 || runner.cancelCalls[0] != src.ID {
 		t.Fatalf("cancelCalls=%v, want [%s]", runner.cancelCalls, src.ID)
 	}
