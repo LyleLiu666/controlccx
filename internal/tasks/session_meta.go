@@ -28,8 +28,8 @@ func ConversationKey(conversationID string) string {
 }
 
 func SessionKeyForTask(t Task) string {
-	if cid := strings.TrimSpace(t.ConversationID); cid != "" {
-		return ConversationKey(cid)
+	if anchor := ConversationAnchorForTask(t); anchor != "" {
+		return anchor
 	}
 	return SessionKey(t.ID, t.SessionID)
 }

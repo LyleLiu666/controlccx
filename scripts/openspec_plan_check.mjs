@@ -10,6 +10,22 @@ export function loadManifest(manifestPath) {
   return data;
 }
 
+export function findChangeDir(repoRoot, changeID) {
+  const activeDir = path.join(repoRoot, "openspec", "changes", changeID);
+  if (fs.existsSync(activeDir)) return { dir: activeDir, archived: false };
+
+  const archiveRoot = path.join(repoRoot, "openspec", "changes", "archive");
+  if (!fs.existsSync(archiveRoot)) return null;
+  const suffix = `-${changeID}`;
+  const candidates = fs
+    .readdirSync(archiveRoot, { withFileTypes: true })
+    .filter((ent) => ent.isDirectory() && ent.name.endsWith(suffix))
+    .map((ent) => path.join(archiveRoot, ent.name))
+    .sort();
+  if (candidates.length === 0) return null;
+  return { dir: candidates[candidates.length - 1], archived: true };
+}
+
 export function isChangeCompleted(tasksPath) {
   if (!fs.existsSync(tasksPath)) return false;
   const raw = fs.readFileSync(tasksPath, "utf8");
@@ -58,7 +74,12 @@ export function validateManifest(manifest, repoRoot) {
       }
     }
 
-    const dir = path.join(repoRoot, "openspec", "changes", id);
+    const found = findChangeDir(repoRoot, id);
+    if (!found) {
+      errors.push(`change ${id}: missing change directory (active or archived)`);
+      continue;
+    }
+    const dir = found.dir;
     const proposal = path.join(dir, "proposal.md");
     const tasks = path.join(dir, "tasks.md");
     if (!fs.existsSync(proposal)) errors.push(`change ${id}: missing proposal.md`);
@@ -101,7 +122,13 @@ export function computeReadySet(manifest, repoRoot) {
 
   const completed = new Set();
   for (const id of byID.keys()) {
-    const tasksPath = path.join(repoRoot, "openspec", "changes", id, "tasks.md");
+    const found = findChangeDir(repoRoot, id);
+    if (!found) continue;
+    if (found.archived) {
+      completed.add(id);
+      continue;
+    }
+    const tasksPath = path.join(found.dir, "tasks.md");
     if (isChangeCompleted(tasksPath)) completed.add(id);
   }
 

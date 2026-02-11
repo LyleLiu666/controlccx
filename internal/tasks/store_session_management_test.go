@@ -37,6 +37,9 @@ func TestStore_SessionRenameDeleteAndMigration(t *testing.T) {
 	if strings.TrimSpace(task.ConversationID) == "" {
 		t.Fatalf("conversation_id is required")
 	}
+	if task.ConversationAnchor != "c:"+task.ConversationID {
+		t.Fatalf("conversation_anchor=%q, want %q", task.ConversationAnchor, "c:"+task.ConversationID)
+	}
 
 	// Session key is conversation-scoped and stable (not tied to provider session_id).
 	key := SessionKeyForTask(task)
@@ -66,6 +69,9 @@ func TestStore_SessionRenameDeleteAndMigration(t *testing.T) {
 	}
 	if SessionKeyForTask(got) != key {
 		t.Fatalf("session key changed: got=%q want=%q", SessionKeyForTask(got), key)
+	}
+	if got.ConversationAnchor != "c:"+got.ConversationID {
+		t.Fatalf("conversation_anchor=%q, want %q", got.ConversationAnchor, "c:"+got.ConversationID)
 	}
 	if got.SessionTitle != "My Session" {
 		t.Fatalf("session_title=%q, want %q", got.SessionTitle, "My Session")

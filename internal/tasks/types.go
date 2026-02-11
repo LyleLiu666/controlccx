@@ -34,6 +34,7 @@ const (
 type Task struct {
 	ID                     string     `json:"id"`
 	ConversationID         string     `json:"conversation_id"`
+	ConversationAnchor     string     `json:"conversation_anchor,omitempty"`
 	WorkerType             WorkerType `json:"worker_type"`
 	Mode                   Mode       `json:"mode"`
 	Status                 Status     `json:"status"`

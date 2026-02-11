@@ -41,6 +41,7 @@ export type ToolsStatusResponse = {
 export type Task = {
   id: string;
   conversation_id: string;
+  conversation_anchor?: string;
   worker_type: WorkerType;
   mode: "new" | "resume";
   status: TaskStatus;

@@ -1150,6 +1150,7 @@ func scanTask(row rowScanner) (Task, error) {
 	t.Mode = Mode(mode)
 	t.Status = Status(status)
 	t.ConversationID = strings.TrimSpace(t.ConversationID)
+	t.ConversationAnchor = ConversationAnchorForTask(t)
 	t.UnsafeAutomation = unsafeAutomation != 0
 	t.WorkDirStrategy = strings.TrimSpace(workdirStrategy)
 	t.SafetyPreset = strings.TrimSpace(safetyPreset)

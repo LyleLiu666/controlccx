@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { computeReadySet, isChangeCompleted, validateManifest } from "./openspec_plan_check.mjs";
+import { computeReadySet, findChangeDir, isChangeCompleted, validateManifest } from "./openspec_plan_check.mjs";
 
 test("validateManifest accepts acyclic ordered dependency graph", () => {
   const manifest = {
@@ -75,4 +75,17 @@ test("computeReadySet returns only nodes whose hard deps are completed", () => {
   assert.deepEqual(out.completed, ["a"]);
   assert.equal(out.ready.some((x) => x.id === "b"), true);
   assert.equal(out.ready.some((x) => x.id === "c"), false);
+});
+
+test("findChangeDir resolves archived changes", () => {
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), "ccx-open-spec-archive-"));
+  const archived = path.join(repo, "openspec", "changes", "archive", "2026-02-11-add-x");
+  fs.mkdirSync(archived, { recursive: true });
+  fs.writeFileSync(path.join(archived, "proposal.md"), "p\n");
+  fs.writeFileSync(path.join(archived, "tasks.md"), "## 1\n- [x] done\n");
+
+  const out = findChangeDir(repo, "add-x");
+  assert.equal(Boolean(out), true);
+  assert.equal(out?.archived, true);
+  assert.equal(out?.dir, archived);
 });
