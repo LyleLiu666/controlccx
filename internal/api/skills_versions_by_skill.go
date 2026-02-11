@@ -147,7 +147,9 @@ func (a *API) handleSkillVersionsBySkill(w http.ResponseWriter, r *http.Request,
 		}
 		prevRevision := ""
 		prevHash := ""
+		prevSourceType := ""
 		if before.Manifest != nil {
+			prevSourceType = strings.TrimSpace(before.Manifest.SourceType)
 			prevRevision = strings.TrimSpace(before.Manifest.SourceRevision)
 			prevHash = strings.TrimSpace(before.Manifest.ContentHash)
 		}
@@ -160,7 +162,15 @@ func (a *API) handleSkillVersionsBySkill(w http.ResponseWriter, r *http.Request,
 
 		nextRevision := strings.TrimSpace(updated.SourceRevision)
 		nextHash := strings.TrimSpace(updated.ContentHash)
+		sourceType := strings.TrimSpace(updated.SourceType)
+		if sourceType == "" {
+			sourceType = prevSourceType
+		}
 		changed := prevRevision != nextRevision || prevHash != nextHash
+		// Git source updates are commit-driven: only create a snapshot when revision changes.
+		if sourceType == "git" {
+			changed = prevRevision != nextRevision
+		}
 
 		out := struct {
 			OK      bool                `json:"ok"`

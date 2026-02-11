@@ -328,6 +328,115 @@ func TestAPI_SkillVersionsBySkill_UpdateFromSource_NoChange_NoVersionCreated(t *
 	}
 }
 
+func TestAPI_SkillVersionsBySkill_UpdateFromSource_GitHashOnlyChange_NoVersionCreated(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	ctx := context.Background()
+	home := t.TempDir()
+	sourceRoot := filepath.Join(home, ".agent", "skills")
+
+	repo := filepath.Join(home, "repo")
+	mustMkdirAll(t, repo)
+	mustGit(t, repo, "init")
+	mustGit(t, repo, "config", "user.email", "test@example.com")
+	mustGit(t, repo, "config", "user.name", "Test")
+	mustMkdirAll(t, filepath.Join(repo, "skills", "skill-a"))
+	mustWriteFile(t, filepath.Join(repo, "skills", "skill-a", "SKILL.md"), "v1\n")
+	mustGit(t, repo, "add", ".")
+	mustGit(t, repo, "commit", "-m", "init")
+
+	skillsSvc, err := skills.NewService(skills.Options{HomeDir: home, SourceRoots: []string{sourceRoot}})
+	if err != nil {
+		t.Fatalf("new skills service: %v", err)
+	}
+	if _, err := skillsSvc.InstallGit(ctx, skills.InstallGitInput{
+		RepoURL: repo,
+		Subpath: "skills/skill-a",
+		Name:    "skill-a",
+	}); err != nil {
+		t.Fatalf("install git skill: %v", err)
+	}
+
+	vers, err := skills.NewPerSkillVersionsService(skills.PerSkillVersionsOptions{
+		HomeDir: home,
+		Now: func() time.Time {
+			return time.Date(2026, 2, 11, 12, 0, 0, 0, time.Local)
+		},
+	})
+	if err != nil {
+		t.Fatalf("new versions service: %v", err)
+	}
+
+	// Corrupt manifest hash only (same revision) to ensure update is revision-driven for git.
+	manifestPath := filepath.Join(sourceRoot, "skill-a", ".controlccx_skill.json")
+	raw, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	var manifest map[string]any
+	if err := json.Unmarshal(raw, &manifest); err != nil {
+		t.Fatalf("decode manifest: %v", err)
+	}
+	revBeforeRaw, _ := manifest["source_revision"].(string)
+	revBefore := strings.TrimSpace(revBeforeRaw)
+	if revBefore == "" {
+		t.Fatalf("missing source_revision in manifest")
+	}
+	manifest["content_hash"] = "manual-hash-drift"
+	rewritten, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		t.Fatalf("encode manifest: %v", err)
+	}
+	rewritten = append(rewritten, '\n')
+	if err := os.WriteFile(manifestPath, rewritten, 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	apiSvc := &API{Skills: skillsSvc, SkillVersionsBySkill: vers}
+	srv := httptest.NewServer(apiSvc.Handler())
+	t.Cleanup(srv.Close)
+
+	res, err := http.Post(srv.URL+"/api/skills/skill-a/versions/update", "application/json", bytes.NewReader([]byte(`{}`)))
+	if err != nil {
+		t.Fatalf("post update: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d", res.StatusCode)
+	}
+
+	var out struct {
+		OK      bool                `json:"ok"`
+		Updated bool                `json:"updated"`
+		Skill   skills.ManagedSkill `json:"skill"`
+		Version *skills.Version     `json:"version,omitempty"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !out.OK {
+		t.Fatalf("ok=false")
+	}
+	if out.Updated {
+		t.Fatalf("updated=true want false")
+	}
+	if out.Version != nil {
+		t.Fatalf("expected no version, got=%+v", out.Version)
+	}
+	if strings.TrimSpace(out.Skill.SourceRevision) != revBefore {
+		t.Fatalf("source revision changed without commit: %q -> %q", revBefore, out.Skill.SourceRevision)
+	}
+
+	list, err := vers.List(ctx, "skill-a")
+	if err != nil {
+		t.Fatalf("list versions: %v", err)
+	}
+	if len(list.Versions) != 0 {
+		t.Fatalf("versions=%v", list.Versions)
+	}
+}
+
 func mustGit(t *testing.T, dir string, args ...string) {
 	t.Helper()
 	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
