@@ -99,7 +99,38 @@ export type QueueAck = {
   preempted_task_id?: string;
 };
 
-export type ContinueResponse = Task | QueueAck;
+export type TaskMutationAction =
+  | "task.create"
+  | "task.resume"
+  | "task.rehydrate"
+  | "task.enter_unsafe"
+  | "session.continue"
+  | "session.preempt_continue";
+
+export type TaskMutationSuccess = {
+  ok: true;
+  action: TaskMutationAction;
+  task?: Task;
+  queue?: QueueAck;
+  meta?: Record<string, any>;
+};
+
+export type TaskMutationProblem = {
+  ok: false;
+  error:
+    | "invalid_argument"
+    | "not_found"
+    | "workdir_busy"
+    | "session_task_in_flight"
+    | "runner_unavailable"
+    | "unsupported"
+    | "internal";
+  message: string;
+  hint?: string;
+  details?: Record<string, any>;
+};
+
+export type ContinueResponse = TaskMutationSuccess;
 
 export type ApprovalStatus = "pending" | "approved" | "denied" | "expired";
 

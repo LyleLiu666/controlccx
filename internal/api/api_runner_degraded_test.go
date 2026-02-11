@@ -68,19 +68,14 @@ func TestAPI_TasksCreate_DegradesExplicitlyWhenRunnerUnavailable(t *testing.T) {
 		t.Fatalf("status=%d want %d", res.StatusCode, http.StatusServiceUnavailable)
 	}
 
-	var out map[string]any
-	if err := json.NewDecoder(res.Body).Decode(&out); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if out["error"] != "runner_unavailable" {
-		t.Fatalf("error=%v want %v", out["error"], "runner_unavailable")
-	}
-	taskID, _ := out["task_id"].(string)
+	out := decodeMutationResponse(t, res)
+	requireMutationProblemCode(t, out, "runner_unavailable")
+	taskID := anyString(out.Details["task_id"])
 	if strings.TrimSpace(taskID) == "" {
-		t.Fatalf("expected task_id in response: %v", out)
+		t.Fatalf("expected task_id in response details: %+v", out)
 	}
-	if hint, _ := out["hint"].(string); !strings.Contains(hint, "runner") {
-		t.Fatalf("expected hint mentioning runner, got: %q", hint)
+	if !strings.Contains(out.Hint, "runner") {
+		t.Fatalf("expected hint mentioning runner, got: %q", out.Hint)
 	}
 
 	task, err := taskStore.GetTask(ctx, taskID)
@@ -142,16 +137,11 @@ func TestAPI_SessionContinue_DegradesExplicitlyWhenRunnerUnavailable(t *testing.
 	if res.StatusCode != http.StatusServiceUnavailable {
 		t.Fatalf("status=%d want %d", res.StatusCode, http.StatusServiceUnavailable)
 	}
-	var out map[string]any
-	if err := json.NewDecoder(res.Body).Decode(&out); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if out["error"] != "runner_unavailable" {
-		t.Fatalf("error=%v want %v", out["error"], "runner_unavailable")
-	}
-	taskID, _ := out["task_id"].(string)
+	out := decodeMutationResponse(t, res)
+	requireMutationProblemCode(t, out, "runner_unavailable")
+	taskID := anyString(out.Details["task_id"])
 	if strings.TrimSpace(taskID) == "" {
-		t.Fatalf("expected task_id in response: %v", out)
+		t.Fatalf("expected task_id in response details: %+v", out)
 	}
 }
 

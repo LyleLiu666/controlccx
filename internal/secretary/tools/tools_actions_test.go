@@ -286,6 +286,76 @@ func TestTaskEnterUnsafe_RequiresConfirm(t *testing.T) {
 	}
 }
 
+func TestTaskNewSubmit_RequiresExplicitFields(t *testing.T) {
+	ctx, deps := newDepsForToolsTest(t)
+	reg := NewRegistry(deps)
+	_, err := reg.Execute(ctx, agentsdk.ToolCall{
+		Name: "task_new_submit",
+		Fields: map[string]string{
+			"prompt":  "hello",
+			"workdir": ".",
+		},
+	})
+	if err == nil {
+		t.Fatalf("expected worker_type required error")
+	}
+	if !strings.Contains(strings.ToLower(err.Error()), "worker_type") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestTaskNewSubmit_CreatesTaskAndWritesAuditLog(t *testing.T) {
+	ctx, deps := newDepsForToolsTest(t)
+	reg := NewRegistry(deps)
+
+	outAny, err := reg.Execute(ctx, agentsdk.ToolCall{
+		Name: "task_new_submit",
+		Fields: map[string]string{
+			"worker_type": "exec",
+			"prompt":      "echo hi",
+			"workdir":     ".",
+		},
+	})
+	if err != nil {
+		t.Fatalf("execute tool: %v", err)
+	}
+
+	var out struct {
+		Task tasks.Task `json:"task"`
+	}
+	raw, err := json.Marshal(outAny)
+	if err != nil {
+		t.Fatalf("marshal output: %v", err)
+	}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatalf("unmarshal output: %v raw=%s", err, string(raw))
+	}
+	if strings.TrimSpace(out.Task.ID) == "" {
+		t.Fatalf("expected created task id")
+	}
+	if out.Task.Mode != tasks.ModeNew {
+		t.Fatalf("mode=%q want %q", out.Task.Mode, tasks.ModeNew)
+	}
+	if strings.TrimSpace(string(out.Task.WorkerType)) != "exec" {
+		t.Fatalf("worker_type=%q want %q", out.Task.WorkerType, "exec")
+	}
+
+	logs, err := deps.Tasks.ListLogs(ctx, out.Task.ID, 0, 200)
+	if err != nil {
+		t.Fatalf("list logs: %v", err)
+	}
+	found := false
+	for _, l := range logs {
+		if l.Stream == tasks.LogSystem && strings.Contains(l.Message, "task_new_submit") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected task_new_submit action audit log")
+	}
+}
+
 func strconvFormatInt(v int64) string {
 	return fmt.Sprintf("%d", v)
 }

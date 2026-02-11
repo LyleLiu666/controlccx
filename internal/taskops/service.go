@@ -72,14 +72,17 @@ func (e *RunnerUnavailableError) Error() string {
 
 func (s *Service) ContinueSession(ctx context.Context, key string, body RunOptions) (ContinueResult, error) {
 	if s == nil || s.Tasks == nil {
-		return ContinueResult{}, errors.New("tasks store not configured")
+		return ContinueResult{}, newMutationError(503, MutationErrorInternal, "tasks store not configured", "", nil, nil)
 	}
 	conversationID, runs, latest, err := s.resolveContinueContext(ctx, key)
 	if err != nil {
 		return ContinueResult{}, err
 	}
 	if latest.Status == tasks.StatusBlocked {
-		return ContinueResult{}, errors.New("当前会话存在被阻塞的 run（需要人工确认/放权）。请先处理阻塞或选择高风险继续。")
+		return ContinueResult{}, newMutationError(409, MutationErrorUnsupported, "当前会话存在被阻塞的 run（需要人工确认/放权）。请先处理阻塞或选择高风险继续。", "", map[string]any{
+			"existing_task_id": strings.TrimSpace(latest.ID),
+			"existing_status":  strings.TrimSpace(string(latest.Status)),
+		}, nil)
 	}
 
 	if inFlight, ok := findInFlightRun(runs); ok {
@@ -99,14 +102,17 @@ func (s *Service) ContinueSession(ctx context.Context, key string, body RunOptio
 
 func (s *Service) PreemptContinueSession(ctx context.Context, key string, body RunOptions) (QueueAck, error) {
 	if s == nil || s.Tasks == nil {
-		return QueueAck{}, errors.New("tasks store not configured")
+		return QueueAck{}, newMutationError(503, MutationErrorInternal, "tasks store not configured", "", nil, nil)
 	}
 	conversationID, runs, latest, err := s.resolveContinueContext(ctx, key)
 	if err != nil {
 		return QueueAck{}, err
 	}
 	if latest.Status == tasks.StatusBlocked {
-		return QueueAck{}, errors.New("当前会话存在被阻塞的 run（需要人工确认/放权）。请先处理阻塞或选择高风险继续。")
+		return QueueAck{}, newMutationError(409, MutationErrorUnsupported, "当前会话存在被阻塞的 run（需要人工确认/放权）。请先处理阻塞或选择高风险继续。", "", map[string]any{
+			"existing_task_id": strings.TrimSpace(latest.ID),
+			"existing_status":  strings.TrimSpace(string(latest.Status)),
+		}, nil)
 	}
 
 	preemptedTaskID := ""
@@ -137,7 +143,7 @@ func (s *Service) PreemptContinueSession(ctx context.Context, key string, body R
 
 func (s *Service) SessionContinueQueue(ctx context.Context, key string, limit int) ([]tasks.SessionContinueQueueItem, error) {
 	if s == nil || s.Tasks == nil {
-		return nil, errors.New("tasks store not configured")
+		return nil, newMutationError(503, MutationErrorInternal, "tasks store not configured", "", nil, nil)
 	}
 	conversationID, err := resolveConversationIDForSessionKey(ctx, s.Tasks, key)
 	if err != nil {
@@ -151,11 +157,11 @@ func (s *Service) SessionContinueQueue(ctx context.Context, key string, limit in
 
 func (s *Service) ResumeTask(ctx context.Context, id string, body RunOptions) (tasks.Task, error) {
 	if s == nil || s.Tasks == nil {
-		return tasks.Task{}, errors.New("tasks store not configured")
+		return tasks.Task{}, newMutationError(503, MutationErrorInternal, "tasks store not configured", "", nil, nil)
 	}
 	id = strings.TrimSpace(id)
 	if id == "" {
-		return tasks.Task{}, errors.New("task id is required")
+		return tasks.Task{}, newMutationError(400, MutationErrorInvalidArgument, "task id is required", "", nil, nil)
 	}
 
 	prev, err := s.Tasks.GetTask(ctx, id)
@@ -164,11 +170,11 @@ func (s *Service) ResumeTask(ctx context.Context, id string, body RunOptions) (t
 	}
 	if s.Tools != nil {
 		if _, ok := s.Tools.Resolve(string(prev.WorkerType)); !ok {
-			return tasks.Task{}, errors.New("unknown tool id: " + string(prev.WorkerType))
+			return tasks.Task{}, newMutationError(400, MutationErrorInvalidArgument, "unknown tool id: "+string(prev.WorkerType), "", nil, nil)
 		}
 	}
 	if strings.TrimSpace(prev.SessionID) == "" {
-		return tasks.Task{}, errors.New("task has no session_id to resume")
+		return tasks.Task{}, newMutationError(400, MutationErrorInvalidArgument, "task has no session_id to resume", "", nil, nil)
 	}
 
 	all, err := s.Tasks.ListTasksWithOptions(ctx, 500, tasks.ListTasksOptions{IncludeDeleted: true})
@@ -269,11 +275,11 @@ func (s *Service) ResumeTask(ctx context.Context, id string, body RunOptions) (t
 
 func (s *Service) RehydrateTask(ctx context.Context, id string, body RunOptions) (tasks.Task, error) {
 	if s == nil || s.Tasks == nil {
-		return tasks.Task{}, errors.New("tasks store not configured")
+		return tasks.Task{}, newMutationError(503, MutationErrorInternal, "tasks store not configured", "", nil, nil)
 	}
 	id = strings.TrimSpace(id)
 	if id == "" {
-		return tasks.Task{}, errors.New("task id is required")
+		return tasks.Task{}, newMutationError(400, MutationErrorInvalidArgument, "task id is required", "", nil, nil)
 	}
 
 	src, err := s.Tasks.GetTask(ctx, id)
@@ -282,11 +288,11 @@ func (s *Service) RehydrateTask(ctx context.Context, id string, body RunOptions)
 	}
 	if s.Tools != nil {
 		if _, ok := s.Tools.Resolve(string(src.WorkerType)); !ok {
-			return tasks.Task{}, errors.New("unknown tool id: " + string(src.WorkerType))
+			return tasks.Task{}, newMutationError(400, MutationErrorInvalidArgument, "unknown tool id: "+string(src.WorkerType), "", nil, nil)
 		}
 	}
 	if strings.TrimSpace(src.SessionID) == "" {
-		return tasks.Task{}, errors.New("task has no session_id to rehydrate")
+		return tasks.Task{}, newMutationError(400, MutationErrorInvalidArgument, "task has no session_id to rehydrate", "", nil, nil)
 	}
 
 	driver := src.WorkerType
@@ -296,7 +302,7 @@ func (s *Service) RehydrateTask(ctx context.Context, id string, body RunOptions)
 		}
 	}
 	if driver != tasks.WorkerClaudeCode {
-		return tasks.Task{}, errors.New("rehydrate is only supported for claude-code sessions")
+		return tasks.Task{}, newMutationError(400, MutationErrorUnsupported, "rehydrate is only supported for claude-code sessions", "", nil, nil)
 	}
 
 	prompt := strings.TrimSpace(body.Prompt)
@@ -383,11 +389,11 @@ func (s *Service) RehydrateTask(ctx context.Context, id string, body RunOptions)
 
 func (s *Service) EnterUnsafeTask(ctx context.Context, id string, prompt string) (tasks.Task, error) {
 	if s == nil || s.Tasks == nil {
-		return tasks.Task{}, errors.New("tasks store not configured")
+		return tasks.Task{}, newMutationError(503, MutationErrorInternal, "tasks store not configured", "", nil, nil)
 	}
 	id = strings.TrimSpace(id)
 	if id == "" {
-		return tasks.Task{}, errors.New("task id is required")
+		return tasks.Task{}, newMutationError(400, MutationErrorInvalidArgument, "task id is required", "", nil, nil)
 	}
 
 	src, err := s.Tasks.GetTask(ctx, id)
@@ -395,7 +401,7 @@ func (s *Service) EnterUnsafeTask(ctx context.Context, id string, prompt string)
 		return tasks.Task{}, err
 	}
 	if strings.TrimSpace(src.ConversationID) == "" {
-		return tasks.Task{}, errors.New("task has no conversation_id")
+		return tasks.Task{}, newMutationError(400, MutationErrorInvalidArgument, "task has no conversation_id", "", nil, nil)
 	}
 
 	if s.Workers != nil {
@@ -448,6 +454,12 @@ func (s *Service) EnterUnsafeTask(ctx context.Context, id string, prompt string)
 		return tasks.Task{}, err
 	}
 	_, _ = s.Tasks.AppendLog(ctx, newTask.ID, tasks.LogSystem, fmt.Sprintf("enter-unsafe: from run=%s", src.ID))
+	if newTask.Status != tasks.StatusQueued {
+		if s.Hub != nil {
+			s.Hub.Publish(events.Event{Type: "task.created", Time: time.Now().UTC(), Payload: newTask})
+		}
+		return newTask, nil
+	}
 	return s.startTask(ctx, newTask)
 }
 
@@ -588,11 +600,11 @@ func (s *Service) resolveContinueContext(ctx context.Context, key string) (strin
 		return "", nil, tasks.Task{}, err
 	}
 	if len(runs) == 0 {
-		return "", nil, tasks.Task{}, errors.New("session not found")
+		return "", nil, tasks.Task{}, newMutationError(404, MutationErrorNotFound, "session not found", "", nil, nil)
 	}
 	latest := runs[0]
 	if latest.SessionDeletedAt != nil {
-		return "", nil, tasks.Task{}, errors.New("session is deleted; cannot continue")
+		return "", nil, tasks.Task{}, newMutationError(400, MutationErrorInvalidArgument, "session is deleted; cannot continue", "", nil, nil)
 	}
 	return conversationID, runs, latest, nil
 }
@@ -836,6 +848,40 @@ func (s *Service) createContinueTask(ctx context.Context, conversationID string,
 		}
 	}
 	return s.startTask(ctx, newTask)
+}
+
+func (s *Service) CreateContinueTaskForConversation(ctx context.Context, conversationID string, body RunOptions) (tasks.Task, error) {
+	if s == nil || s.Tasks == nil {
+		return tasks.Task{}, newMutationError(503, MutationErrorInternal, "tasks store not configured", "", nil, nil)
+	}
+	conversationID = strings.TrimSpace(conversationID)
+	if conversationID == "" {
+		return tasks.Task{}, newMutationError(400, MutationErrorInvalidArgument, "conversation_id is required", "", nil, nil)
+	}
+	runs, err := s.Tasks.ListTasksByConversationID(ctx, conversationID, 500, tasks.ListTasksOptions{IncludeDeleted: true})
+	if err != nil {
+		return tasks.Task{}, err
+	}
+	if len(runs) == 0 {
+		return tasks.Task{}, newMutationError(404, MutationErrorNotFound, "session not found", "", nil, nil)
+	}
+	latest := runs[0]
+	if latest.SessionDeletedAt != nil {
+		return tasks.Task{}, newMutationError(400, MutationErrorInvalidArgument, "session is deleted; cannot continue", "", nil, nil)
+	}
+	if latest.Status == tasks.StatusBlocked {
+		return tasks.Task{}, newMutationError(409, MutationErrorUnsupported, "当前会话存在被阻塞的 run（需要人工确认/放权）。请先处理阻塞或选择高风险继续。", "", map[string]any{
+			"existing_task_id": strings.TrimSpace(latest.ID),
+			"existing_status":  strings.TrimSpace(string(latest.Status)),
+		}, nil)
+	}
+	if inFlight, ok := findInFlightRun(runs); ok {
+		return tasks.Task{}, newMutationError(409, MutationErrorSessionTaskInFlight, "session already has an in-flight task", "", map[string]any{
+			"existing_task_id": strings.TrimSpace(inFlight.ID),
+			"existing_status":  strings.TrimSpace(string(inFlight.Status)),
+		}, nil)
+	}
+	return s.createContinueTask(ctx, conversationID, latest, body)
 }
 
 func (s *Service) startTask(ctx context.Context, newTask tasks.Task) (tasks.Task, error) {

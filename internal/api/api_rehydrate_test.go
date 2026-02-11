@@ -122,10 +122,9 @@ func TestAPI_Rehydrate_CreatesNewRunWithExtractedContext(t *testing.T) {
 		t.Fatalf("status=%d, want 200; body=%s", res.StatusCode, strings.TrimSpace(string(b)))
 	}
 
-	var created tasks.Task
-	if err := json.NewDecoder(res.Body).Decode(&created); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
+	bodyOut := decodeMutationResponse(t, res)
+	requireMutationAction(t, bodyOut, "task.rehydrate")
+	created := requireMutationTask(t, bodyOut)
 	if created.Mode != tasks.ModeNew {
 		t.Fatalf("mode=%q, want %q", created.Mode, tasks.ModeNew)
 	}

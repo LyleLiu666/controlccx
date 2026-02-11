@@ -13,6 +13,7 @@ func DefaultTools() []Tool {
 		systemInfoTool{},
 		tasksCountTool{},
 		tasksListTool{},
+		taskNewSubmitTool{},
 		taskContinueSubmitTool{},
 		taskPreemptContinueSubmitTool{},
 		taskResumeSubmitTool{},

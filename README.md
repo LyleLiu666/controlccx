@@ -1,6 +1,6 @@
 # ControlCCX
 
-Go + Vue “control center” for running multiple agent workers (Claude Code / Codex) asynchronously, with a built-in secretary agent (“系统级秘书”) for read-only questions about task/system state.
+Go + Vue “control center” for running multiple agent workers (Claude Code / Codex) asynchronously, with a built-in secretary agent (“系统级秘书”) for task/system state query and task mutation.
 
 ## Vision（愿景）
 
@@ -79,7 +79,12 @@ Workers inherit environment variables from the ControlCCX server process. You ca
 
 ## Secretary（系统级秘书）
 
-用自然语言查询系统信息（只读），例如：任务总数 / 已完成 / 失败等。
+秘书支持两类能力：
+
+- 查询（只读）：任务总数 / 已完成 / 失败 / 当前会话状态等
+- 写操作：可通过秘书工具直接新建任务（`task_new_submit`）
+
+写操作参数契约为显式模式：`worker_type`、`prompt`、`workdir` 为必填；缺参时秘书会先向用户索取，不做继承/猜测/自动补全。
 
 - UI：右上角 `⋯` 菜单 → `秘书`
 - API：
@@ -88,6 +93,20 @@ Workers inherit environment variables from the ControlCCX server process. You ca
   - `POST /api/secretary/clear` → `{ "ok": true }`
 - 历史：服务端持久化到 SQLite `chat_messages`（全局 1 条历史，自动保留最近 2000 条）
 - 旧接口：`/api/chat` 仍保持移除，统一使用 `/api/secretary/*`
+
+## Task Mutation Contract（Breaking Change）
+
+任务变更接口（create/resume/continue/preempt-continue/rehydrate/enter-unsafe）统一改为 envelope 结构。
+
+- Success:
+  - `{ "ok": true, "action": "...", "task": {...} }`
+  - 或 `{ "ok": true, "action": "...", "queue": {...} }`
+- Problem:
+  - `{ "ok": false, "error": "...", "message": "...", "hint": "...", "details": {...} }`
+
+`error` 稳定码包括：`invalid_argument`、`not_found`、`workdir_busy`、`session_task_in_flight`、`runner_unavailable`、`unsupported`、`internal`。
+
+注意：旧的返回体格式（例如直接返回 `Task`、或冲突字段平铺在顶层）已移除。外部脚本调用者需迁移为读取 `ok + action + task/queue` 或 `ok=false + error + details`。
 
 ## Approvals
 

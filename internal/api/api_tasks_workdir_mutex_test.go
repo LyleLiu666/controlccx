@@ -55,15 +55,13 @@ func TestAPI_CreateTask_RejectsWhenWorkdirBusy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("do1: %v", err)
 	}
-	var created tasks.Task
-	if err := json.NewDecoder(res1.Body).Decode(&created); err != nil {
-		res1.Body.Close()
-		t.Fatalf("decode1: %v", err)
-	}
-	res1.Body.Close()
 	if res1.StatusCode != http.StatusOK {
 		t.Fatalf("status1=%d, want 200", res1.StatusCode)
 	}
+	body1 := decodeMutationResponse(t, res1)
+	requireMutationAction(t, body1, "task.create")
+	created := requireMutationTask(t, body1)
+	res1.Body.Close()
 	if created.ID == "" {
 		t.Fatalf("expected created id set")
 	}
@@ -82,29 +80,18 @@ func TestAPI_CreateTask_RejectsWhenWorkdirBusy(t *testing.T) {
 	if res2.StatusCode != http.StatusConflict {
 		t.Fatalf("status2=%d, want 409", res2.StatusCode)
 	}
-	var errBody struct {
-		Error          string `json:"error"`
-		Message        string `json:"message"`
-		WorkDir        string `json:"workdir"`
-		ExistingTaskID string `json:"existing_task_id"`
-		ExistingStatus string `json:"existing_status"`
-	}
-	if err := json.NewDecoder(res2.Body).Decode(&errBody); err != nil {
-		t.Fatalf("decode2: %v", err)
-	}
-	if errBody.Error != "workdir_busy" {
-		t.Fatalf("error=%q, want workdir_busy", errBody.Error)
-	}
+	errBody := decodeMutationResponse(t, res2)
+	requireMutationProblemCode(t, errBody, "workdir_busy")
 	if errBody.Message == "" {
 		t.Fatalf("expected message non-empty")
 	}
-	if errBody.WorkDir == "" {
+	if anyString(errBody.Details["workdir"]) == "" {
 		t.Fatalf("expected workdir non-empty")
 	}
-	if errBody.ExistingTaskID != created.ID {
-		t.Fatalf("existing_task_id=%q, want %q", errBody.ExistingTaskID, created.ID)
+	if got := anyString(errBody.Details["existing_task_id"]); got != created.ID {
+		t.Fatalf("existing_task_id=%q, want %q", got, created.ID)
 	}
-	if errBody.ExistingStatus == "" {
+	if anyString(errBody.Details["existing_status"]) == "" {
 		t.Fatalf("expected existing_status non-empty")
 	}
 }
@@ -199,10 +186,9 @@ func TestAPI_CreateTask_WorktreeStrategy_CreatesIsolatedWorkdir(t *testing.T) {
 		t.Fatalf("status2=%d, want 200; body=%s", res2.StatusCode, string(b))
 	}
 
-	var created tasks.Task
-	if err := json.NewDecoder(res2.Body).Decode(&created); err != nil {
-		t.Fatalf("decode2: %v", err)
-	}
+	out2 := decodeMutationResponse(t, res2)
+	requireMutationAction(t, out2, "task.create")
+	created := requireMutationTask(t, out2)
 
 	if strings.TrimSpace(created.ConversationID) == "" {
 		t.Fatalf("expected conversation_id set")

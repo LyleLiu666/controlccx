@@ -58,10 +58,9 @@ func TestAPI_TaskResume_UsesTaskOpsWhenConfigured(t *testing.T) {
 	if res.StatusCode != http.StatusOK {
 		t.Fatalf("status=%d want 200", res.StatusCode)
 	}
-	var out tasks.Task
-	if err := json.NewDecoder(res.Body).Decode(&out); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
+	bodyOut := decodeMutationResponse(t, res)
+	requireMutationAction(t, bodyOut, "task.resume")
+	out := requireMutationTask(t, bodyOut)
 	if out.Mode != tasks.ModeResume {
 		t.Fatalf("mode=%q want %q", out.Mode, tasks.ModeResume)
 	}

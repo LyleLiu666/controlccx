@@ -74,35 +74,32 @@ func TestAPI_TaskEnterUnsafe_CancelsAndCreatesFollowup(t *testing.T) {
 		t.Fatalf("status=%d, want 200", res.StatusCode)
 	}
 
-	var out struct {
-		Task tasks.Task `json:"task"`
+	bodyOut := decodeMutationResponse(t, res)
+	requireMutationAction(t, bodyOut, "task.enter_unsafe")
+	outTask := requireMutationTask(t, bodyOut)
+	if outTask.ID == "" || outTask.ID == src.ID {
+		t.Fatalf("task.id=%q, want new id", outTask.ID)
 	}
-	if err := json.NewDecoder(res.Body).Decode(&out); err != nil {
-		t.Fatalf("decode: %v", err)
+	if outTask.Mode != tasks.ModeResume {
+		t.Fatalf("mode=%q, want %q", outTask.Mode, tasks.ModeResume)
 	}
-	if out.Task.ID == "" || out.Task.ID == src.ID {
-		t.Fatalf("task.id=%q, want new id", out.Task.ID)
+	if outTask.ConversationID != src.ConversationID {
+		t.Fatalf("conversation_id=%q, want %q", outTask.ConversationID, src.ConversationID)
 	}
-	if out.Task.Mode != tasks.ModeResume {
-		t.Fatalf("mode=%q, want %q", out.Task.Mode, tasks.ModeResume)
+	if outTask.SessionID != "sess-1" {
+		t.Fatalf("session_id=%q, want %q", outTask.SessionID, "sess-1")
 	}
-	if out.Task.ConversationID != src.ConversationID {
-		t.Fatalf("conversation_id=%q, want %q", out.Task.ConversationID, src.ConversationID)
-	}
-	if out.Task.SessionID != "sess-1" {
-		t.Fatalf("session_id=%q, want %q", out.Task.SessionID, "sess-1")
-	}
-	if !out.Task.UnsafeAutomation {
+	if !outTask.UnsafeAutomation {
 		t.Fatalf("unsafe_automation=false, want true")
 	}
-	if out.Task.SafetyPreset != "unsafe" {
-		t.Fatalf("safety_preset=%q, want %q", out.Task.SafetyPreset, "unsafe")
+	if outTask.SafetyPreset != "unsafe" {
+		t.Fatalf("safety_preset=%q, want %q", outTask.SafetyPreset, "unsafe")
 	}
-	if out.Task.WorkDirStrategy != "wait" {
-		t.Fatalf("workdir_strategy=%q, want %q", out.Task.WorkDirStrategy, "wait")
+	if outTask.WorkDirStrategy != "wait" {
+		t.Fatalf("workdir_strategy=%q, want %q", outTask.WorkDirStrategy, "wait")
 	}
-	if out.Task.Status != tasks.StatusWaiting {
-		t.Fatalf("status=%q, want %q", out.Task.Status, tasks.StatusWaiting)
+	if outTask.Status != tasks.StatusWaiting {
+		t.Fatalf("status=%q, want %q", outTask.Status, tasks.StatusWaiting)
 	}
 
 	if len(runner.cancelCalls) != 1 || runner.cancelCalls[0] != src.ID {

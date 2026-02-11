@@ -103,14 +103,12 @@ func TestAPI_CreateTask_WorktreeUntrackedTooLargeRequiresConfirmThenSkipProceeds
 		t.Fatalf("status=%d want 422; body=%s", res.StatusCode, string(b))
 	}
 
-	var payload map[string]any
-	if err := json.NewDecoder(res.Body).Decode(&payload); err != nil {
-		t.Fatalf("decode: %v", err)
+	payload := decodeMutationResponse(t, res)
+	requireMutationProblemCode(t, payload, "invalid_argument")
+	if anyString(payload.Details["reason"]) != "worktree_untracked_too_large" {
+		t.Fatalf("unexpected reason=%v", payload.Details["reason"])
 	}
-	if payload["error"] != "worktree_untracked_too_large" {
-		t.Fatalf("unexpected error=%v", payload["error"])
-	}
-	cid := payload["conversation_id"]
+	cid := payload.Details["conversation_id"]
 	if _, err := uuid.Parse(anyString(cid)); err != nil {
 		t.Fatalf("expected conversation_id uuid, got %v (err=%v)", cid, err)
 	}
@@ -135,10 +133,9 @@ func TestAPI_CreateTask_WorktreeUntrackedTooLargeRequiresConfirmThenSkipProceeds
 		b, _ := io.ReadAll(res2.Body)
 		t.Fatalf("status=%d want 200; body=%s", res2.StatusCode, string(b))
 	}
-	var created tasks.Task
-	if err := json.NewDecoder(res2.Body).Decode(&created); err != nil {
-		t.Fatalf("decode created: %v", err)
-	}
+	createdOut := decodeMutationResponse(t, res2)
+	requireMutationAction(t, createdOut, "task.create")
+	created := requireMutationTask(t, createdOut)
 	if created.WorkDirStrategy != "worktree" || created.WorkDir == "" || created.WorktreeDir == "" || created.WorktreeBranch == "" {
 		t.Fatalf("unexpected created worktree meta: %+v", created)
 	}

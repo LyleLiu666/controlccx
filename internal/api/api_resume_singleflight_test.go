@@ -81,22 +81,13 @@ func TestAPI_ResumeTask_SingleFlightPerSession(t *testing.T) {
 	if res.StatusCode != http.StatusConflict {
 		t.Fatalf("status=%d, want %d", res.StatusCode, http.StatusConflict)
 	}
-	var conflict struct {
-		Error          string `json:"error"`
-		ExistingTaskID string `json:"existing_task_id"`
-		ExistingStatus string `json:"existing_status"`
+	out := decodeMutationResponse(t, res)
+	requireMutationProblemCode(t, out, "session_task_in_flight")
+	if got := anyString(out.Details["existing_task_id"]); got != running.ID {
+		t.Fatalf("existing_task_id=%q, want %q", got, running.ID)
 	}
-	if err := json.NewDecoder(res.Body).Decode(&conflict); err != nil {
-		t.Fatalf("decode conflict: %v", err)
-	}
-	if conflict.Error != "session_task_in_flight" {
-		t.Fatalf("error=%q, want %q", conflict.Error, "session_task_in_flight")
-	}
-	if conflict.ExistingTaskID != running.ID {
-		t.Fatalf("existing_task_id=%q, want %q", conflict.ExistingTaskID, running.ID)
-	}
-	if conflict.ExistingStatus != string(tasks.StatusRunning) {
-		t.Fatalf("existing_status=%q, want %q", conflict.ExistingStatus, tasks.StatusRunning)
+	if got := anyString(out.Details["existing_status"]); got != string(tasks.StatusRunning) {
+		t.Fatalf("existing_status=%q, want %q", got, tasks.StatusRunning)
 	}
 
 	list, err := taskStore.ListTasksWithOptions(ctx, 50, tasks.ListTasksOptions{IncludeDeleted: true})
@@ -177,22 +168,13 @@ func TestAPI_ResumeTask_SingleFlightPerSession_AwaitingApproval(t *testing.T) {
 	if res.StatusCode != http.StatusConflict {
 		t.Fatalf("status=%d, want %d", res.StatusCode, http.StatusConflict)
 	}
-	var conflict struct {
-		Error          string `json:"error"`
-		ExistingTaskID string `json:"existing_task_id"`
-		ExistingStatus string `json:"existing_status"`
+	out := decodeMutationResponse(t, res)
+	requireMutationProblemCode(t, out, "session_task_in_flight")
+	if got := anyString(out.Details["existing_task_id"]); got != inFlight.ID {
+		t.Fatalf("existing_task_id=%q, want %q", got, inFlight.ID)
 	}
-	if err := json.NewDecoder(res.Body).Decode(&conflict); err != nil {
-		t.Fatalf("decode conflict: %v", err)
-	}
-	if conflict.Error != "session_task_in_flight" {
-		t.Fatalf("error=%q, want %q", conflict.Error, "session_task_in_flight")
-	}
-	if conflict.ExistingTaskID != inFlight.ID {
-		t.Fatalf("existing_task_id=%q, want %q", conflict.ExistingTaskID, inFlight.ID)
-	}
-	if conflict.ExistingStatus != string(tasks.StatusAwaitingApproval) {
-		t.Fatalf("existing_status=%q, want %q", conflict.ExistingStatus, tasks.StatusAwaitingApproval)
+	if got := anyString(out.Details["existing_status"]); got != string(tasks.StatusAwaitingApproval) {
+		t.Fatalf("existing_status=%q, want %q", got, tasks.StatusAwaitingApproval)
 	}
 
 	list, err := taskStore.ListTasksWithOptions(ctx, 50, tasks.ListTasksOptions{IncludeDeleted: true})

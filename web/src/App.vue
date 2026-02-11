@@ -19,6 +19,7 @@ import type {
   ToolsListResponse,
   SystemInfo,
   Task,
+  TaskMutationSuccess,
   ProviderActiveSelection,
   ProviderProfile,
   ProvidersListResponse,
@@ -67,7 +68,6 @@ import {
   importAuthFromEnv,
   fetchAcceptance,
   getInstanceToken,
-  isQueueAck,
   isAPIError,
   isInstanceTokenRequiredError,
   sessionTaskInFlightFromError,
@@ -149,6 +149,13 @@ type CreateTaskPayload = {
   claude_sandbox?: boolean;
   claude_webfetch_domains?: string[];
 };
+
+function requireMutationTask(out: TaskMutationSuccess, fallbackAction: string): Task {
+  const task = out?.task;
+  if (task && typeof task.id === "string" && task.id.trim()) return task;
+  const action = String(out?.action ?? "").trim() || fallbackAction;
+  throw new Error(`mutation ${action} did not return task`);
+}
 
 type CreateTaskOptions = {
   idempotencyKey?: string;
@@ -325,12 +332,13 @@ function extractWorkdirBusyPayload(e: unknown): {
   const d = e.data;
   if (!d || typeof d !== "object") return null;
   if (String((d as any).error ?? "").trim() !== "workdir_busy") return null;
+  const details = (d as any).details && typeof (d as any).details === "object" ? (d as any).details : d;
 
   return {
     message: String((d as any).message ?? e.message ?? "").trim(),
-    workdir: String((d as any).workdir ?? "").trim(),
-    existingTaskID: String((d as any).existing_task_id ?? "").trim(),
-    existingStatus: String((d as any).existing_status ?? "").trim(),
+    workdir: String((details as any).workdir ?? "").trim(),
+    existingTaskID: String((details as any).existing_task_id ?? "").trim(),
+    existingStatus: String((details as any).existing_status ?? "").trim(),
   };
 }
 
@@ -338,12 +346,14 @@ function extractWorktreeUntrackedTooLargePayload(e: unknown): WorktreeUntrackedT
   if (!isAPIError(e) || e.status !== 422) return null;
   const d = e.data;
   if (!d || typeof d !== "object") return null;
-  if (String((d as any).error ?? "").trim() !== "worktree_untracked_too_large") return null;
+  if (String((d as any).error ?? "").trim() !== "invalid_argument") return null;
+  const details = (d as any).details && typeof (d as any).details === "object" ? (d as any).details : d;
+  if (String((details as any).reason ?? "").trim() !== "worktree_untracked_too_large") return null;
 
-  const conversationID = String((d as any).conversation_id ?? "").trim();
+  const conversationID = String((details as any).conversation_id ?? "").trim();
   if (!conversationID) return null;
 
-  const largestRaw = Array.isArray((d as any).largest) ? (d as any).largest : [];
+  const largestRaw = Array.isArray((details as any).largest) ? (details as any).largest : [];
   const largest = largestRaw
     .map((x: any) => ({
       path: String(x?.path ?? "").trim(),
@@ -354,10 +364,10 @@ function extractWorktreeUntrackedTooLargePayload(e: unknown): WorktreeUntrackedT
   return {
     message: String((d as any).message ?? e.message ?? "").trim(),
     conversationID,
-    files: Number((d as any).files ?? 0) || 0,
-    bytes: Number((d as any).bytes ?? 0) || 0,
-    maxFiles: Number((d as any).max_files ?? 0) || 0,
-    maxBytes: Number((d as any).max_bytes ?? 0) || 0,
+    files: Number((details as any).files ?? 0) || 0,
+    bytes: Number((details as any).bytes ?? 0) || 0,
+    maxFiles: Number((details as any).max_files ?? 0) || 0,
+    maxBytes: Number((details as any).max_bytes ?? 0) || 0,
     largest,
   };
 }
@@ -432,7 +442,7 @@ async function confirmWorktreeUntracked(mode: "skip" | "force") {
   worktreeUntrackedError.value = "";
   try {
     openRunLaunchMask({ title: "启动中…", detail: "正在创建任务…" });
-    const t = await createTask(
+    const out = await createTask(
       {
         ...pending,
         conversation_id: data.conversationID,
@@ -441,6 +451,7 @@ async function confirmWorktreeUntracked(mode: "skip" | "force") {
       },
       worktreeUntrackedPendingOpts.value,
     );
+    const t = requireMutationTask(out, "task.create");
     trackRunLaunchMaskForTask(t);
     upsertTask(t);
     selectedTaskId.value = t.id;
@@ -486,10 +497,11 @@ async function confirmWorkdirBusyStrategy(strategy: "wait" | "worktree") {
   const createdInput: CreateTaskPayload = { ...pending, workdir_strategy: strategy };
   try {
     openRunLaunchMask({ title: "启动中…", detail: "正在创建任务…" });
-    const t = await createTask(
+    const out = await createTask(
       createdInput,
       workdirBusyPendingOpts.value,
     );
+    const t = requireMutationTask(out, "task.create");
     trackRunLaunchMaskForTask(t);
     upsertTask(t);
     selectedTaskId.value = t.id;
@@ -1492,7 +1504,8 @@ async function replaySelectedRun() {
       workdir: t.workdir,
       unsafe_automation: t.unsafe_automation || undefined,
     };
-    const next = await createTask(createdInput);
+    const createOut = await createTask(createdInput);
+    const next = requireMutationTask(createOut, "task.create");
     trackRunLaunchMaskForTask(next);
     upsertTask(next);
     selectedTaskId.value = next.id;
@@ -1588,7 +1601,8 @@ async function mergeBackSelectedWorktree() {
       claude_sandbox: t.claude_sandbox,
       claude_webfetch_domains: t.claude_webfetch_domains,
     };
-    const next = await createTask(input);
+    const createOut = await createTask(input);
+    const next = requireMutationTask(createOut, "task.create");
     trackRunLaunchMaskForTask(next);
     upsertTask(next);
     selectedTaskId.value = next.id;
@@ -2353,7 +2367,8 @@ async function onCreateTask(opts?: { idempotencyKey?: string }): Promise<boolean
       ...envelope,
       ...safety,
     };
-    const t = await createTask(createdInput, opts);
+    const createOut = await createTask(createdInput, opts);
+    const t = requireMutationTask(createOut, "task.create");
     trackRunLaunchMaskForTask(t);
     upsertTask(t);
     selectedTaskId.value = t.id;
@@ -3125,7 +3140,8 @@ async function confirmBlockedPromptUnsafe() {
       const currentPreset = effectiveSafetyPresetForTask(driver, t);
       const safety = buildRunSafetyPayload(driver, "code", currentPreset);
       openRunLaunchMask({ title: "继续中…", detail: "正在创建 workspace 并继续运行…" });
-      const nt = await resumeTaskWithOptions(runID, { prompt: "continue", ...safety });
+      const resumeOut = await resumeTaskWithOptions(runID, { prompt: "continue", ...safety });
+      const nt = requireMutationTask(resumeOut, "task.resume");
       trackRunLaunchMaskForTask(nt);
       resumeOriginByRunID.set(nt.id, "manual");
       upsertTask(nt);
@@ -3166,7 +3182,8 @@ async function confirmBlockedPromptUnsafe() {
     const intent = normalizeTaskIntent(t.task_intent ?? "code");
     const safety = buildRunSafetyPayload(driver, intent, "unsafe");
     openRunLaunchMask({ title: "继续中…", detail: "正在继续运行…" });
-    const nt = await resumeTaskWithOptions(runID, { prompt: "continue", ...safety });
+    const resumeOut = await resumeTaskWithOptions(runID, { prompt: "continue", ...safety });
+    const nt = requireMutationTask(resumeOut, "task.resume");
     trackRunLaunchMaskForTask(nt);
     resumeOriginByRunID.set(nt.id, "manual");
     upsertTask(nt);
@@ -3218,7 +3235,8 @@ async function confirmBlockedPromptSafeRetry() {
     const preset = effectiveSafetyPresetForTask(driver, t);
     const safety = buildRunSafetyPayload(driver, intent, preset);
     openRunLaunchMask({ title: "重试中…", detail: "正在以当前安全设置重试…" });
-    const nt = await resumeTaskWithOptions(runID, { prompt: "continue", ...safety });
+    const resumeOut = await resumeTaskWithOptions(runID, { prompt: "continue", ...safety });
+    const nt = requireMutationTask(resumeOut, "task.resume");
     trackRunLaunchMaskForTask(nt);
     resumeOriginByRunID.set(nt.id, "manual");
     upsertTask(nt);
@@ -3256,7 +3274,8 @@ async function confirmRehydratePrompt() {
   rehydratePromptError.value = "";
   try {
     openRunLaunchMask({ title: "恢复中…", detail: "正在恢复会话…" });
-    const nt = await rehydrateTaskWithOptions(runID, { prompt: "continue" });
+    const rehydrateOut = await rehydrateTaskWithOptions(runID, { prompt: "continue" });
+    const nt = requireMutationTask(rehydrateOut, "task.rehydrate");
     trackRunLaunchMaskForTask(nt);
     upsertTask(nt);
     selectedTaskId.value = nt.id;
@@ -3403,17 +3422,17 @@ async function onResumeTask() {
     openRunLaunchMask({ title: "继续中…", detail: "正在继续会话…" });
     const out = await continueSessionWithOptions(sess.key, { prompt: resumePrompt.value, ...payload });
     resumePrompt.value = "";
-    if (isQueueAck(out)) {
+    if (out.queue) {
       closeRunLaunchMask();
-      await onContinueQueuedAck(out, "continue");
+      await onContinueQueuedAck(out.queue, "continue");
       return;
     }
-
-    trackRunLaunchMaskForTask(out);
-    resumeOriginByRunID.set(out.id, "manual");
-    upsertTask(out);
-    selectedTaskId.value = out.id;
-    await loadLogs(out.id);
+    const next = requireMutationTask(out, "session.continue");
+    trackRunLaunchMaskForTask(next);
+    resumeOriginByRunID.set(next.id, "manual");
+    upsertTask(next);
+    selectedTaskId.value = next.id;
+    await loadLogs(next.id);
     await loadSelectedSessionContinueQueue();
   } catch (e: any) {
     closeRunLaunchMask();
@@ -3443,17 +3462,17 @@ async function onPreemptResumeTask() {
     openRunLaunchMask({ title: "抢占中…", detail: "正在抢占并排入队列…" });
     const out = await preemptSessionContinueWithOptions(sess.key, { prompt: resumePrompt.value, ...payload });
     resumePrompt.value = "";
-    if (isQueueAck(out)) {
+    if (out.queue) {
       closeRunLaunchMask();
-      await onContinueQueuedAck(out, "preempt");
+      await onContinueQueuedAck(out.queue, "preempt");
       return;
     }
-
-    trackRunLaunchMaskForTask(out);
-    resumeOriginByRunID.set(out.id, "manual");
-    upsertTask(out);
-    selectedTaskId.value = out.id;
-    await loadLogs(out.id);
+    const next = requireMutationTask(out, "session.preempt_continue");
+    trackRunLaunchMaskForTask(next);
+    resumeOriginByRunID.set(next.id, "manual");
+    upsertTask(next);
+    selectedTaskId.value = next.id;
+    await loadLogs(next.id);
     await loadSelectedSessionContinueQueue();
   } catch (e: any) {
     closeRunLaunchMask();

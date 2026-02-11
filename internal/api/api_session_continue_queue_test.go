@@ -83,18 +83,14 @@ func TestAPI_SessionPreemptContinue_QueuesAheadOfNormalContinue(t *testing.T) {
 	if cRes.StatusCode != http.StatusAccepted {
 		t.Fatalf("preempt status=%d, want 202", cRes.StatusCode)
 	}
-	var cAck struct {
-		Queued          bool   `json:"queued"`
-		PreemptedTaskID string `json:"preempted_task_id"`
+	bodyOut := decodeMutationResponse(t, cRes)
+	requireMutationAction(t, bodyOut, "session.preempt_continue")
+	cAck := requireMutationQueue(t, bodyOut)
+	if ok, _ := cAck["queued"].(bool); !ok {
+		t.Fatalf("queued=%v, want true", cAck["queued"])
 	}
-	if err := json.NewDecoder(cRes.Body).Decode(&cAck); err != nil {
-		t.Fatalf("decode preempt ack: %v", err)
-	}
-	if !cAck.Queued {
-		t.Fatalf("queued=%v, want true", cAck.Queued)
-	}
-	if cAck.PreemptedTaskID != a.ID {
-		t.Fatalf("preempted_task_id=%q, want %q", cAck.PreemptedTaskID, a.ID)
+	if got := anyString(cAck["preempted_task_id"]); got != a.ID {
+		t.Fatalf("preempted_task_id=%q, want %q", got, a.ID)
 	}
 	if len(runner.cancelCalls) != 1 || runner.cancelCalls[0] != a.ID {
 		t.Fatalf("cancel calls=%v, want [%s]", runner.cancelCalls, a.ID)
@@ -320,5 +316,56 @@ func TestAPI_SessionContinue_CrossSessionSameWorkdirStillBlocked(t *testing.T) {
 	t.Cleanup(func() { _ = res.Body.Close() })
 	if res.StatusCode != http.StatusConflict {
 		t.Fatalf("status=%d, want 409 workdir_busy", res.StatusCode)
+	}
+}
+
+func TestAPI_DrainContinueQueue_BlockedSessionKeepsPending(t *testing.T) {
+	ctx := context.Background()
+	conn, err := db.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "controlccx.db")})
+	if err != nil {
+		t.Fatalf("db open: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+
+	taskStore := tasks.NewStore(conn)
+	hub := events.NewHub()
+	apiSvc := &API{Tasks: taskStore, Hub: hub}
+
+	run, err := taskStore.CreateTask(ctx, tasks.CreateTaskInput{
+		WorkerType: tasks.WorkerClaudeCode,
+		Mode:       tasks.ModeNew,
+		Prompt:     "A1",
+		WorkDir:    ".",
+		SessionID:  "sess-a",
+	})
+	if err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	if err := taskStore.SetBlocked(ctx, run.ID); err != nil {
+		t.Fatalf("set blocked: %v", err)
+	}
+
+	opts, _ := json.Marshal(sessionContinueOptions{Prompt: "continue"})
+	item, err := taskStore.EnqueueSessionContinue(ctx, tasks.EnqueueSessionContinueInput{
+		ConversationID: run.ConversationID,
+		Prompt:         "continue",
+		RunOptionsJSON: string(opts),
+		Priority:       0,
+		Source:         "continue",
+	})
+	if err != nil {
+		t.Fatalf("enqueue continue: %v", err)
+	}
+
+	if err := apiSvc.drainContinueQueuesOnce(ctx); err != nil {
+		t.Fatalf("drain queue: %v", err)
+	}
+
+	got, err := taskStore.GetSessionContinueQueueItem(ctx, item.ID)
+	if err != nil {
+		t.Fatalf("get queue item: %v", err)
+	}
+	if got.State != tasks.SessionContinueQueueStatePending {
+		t.Fatalf("queue state=%q, want %q", got.State, tasks.SessionContinueQueueStatePending)
 	}
 }

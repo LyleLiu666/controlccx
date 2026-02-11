@@ -56,10 +56,9 @@ func TestAPI_CreateTask_IdempotencyKey_ReturnsSameTask(t *testing.T) {
 		if res.StatusCode != http.StatusOK {
 			t.Fatalf("status=%d, want 200", res.StatusCode)
 		}
-		var created tasks.Task
-		if err := json.NewDecoder(res.Body).Decode(&created); err != nil {
-			t.Fatalf("decode: %v", err)
-		}
+		bodyOut := decodeMutationResponse(t, res)
+		requireMutationAction(t, bodyOut, "task.create")
+		created := requireMutationTask(t, bodyOut)
 		if created.ID == "" {
 			t.Fatalf("expected id")
 		}

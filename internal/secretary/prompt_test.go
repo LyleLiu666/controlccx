@@ -31,3 +31,19 @@ func TestBuildSystemPrompt_FinalAnswerMustBeChinesePlainText(t *testing.T) {
 		t.Fatalf("prompt missing final-answer constraint: %q", want)
 	}
 }
+
+func TestBuildSystemPrompt_WriteToolsMissingParamsMustAskUser(t *testing.T) {
+	prompt := buildSystemPrompt()
+	want := "对写操作工具（如创建任务）若必填参数缺失，必须先向用户索取，禁止猜测/自动补全。"
+	if !strings.Contains(prompt, want) {
+		t.Fatalf("prompt missing missing-params constraint: %q", want)
+	}
+}
+
+func TestBuildSystemPrompt_TargetIncludesTaskCreation(t *testing.T) {
+	prompt := buildSystemPrompt()
+	want := "任务相关操作（新建、恢复、审批、诊断）"
+	if !strings.Contains(prompt, want) {
+		t.Fatalf("prompt missing task-creation goal: %q", want)
+	}
+}

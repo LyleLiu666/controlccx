@@ -53,10 +53,9 @@ func TestAPI_CreateTask_AppliesRunSafetyAutopilot(t *testing.T) {
 		t.Fatalf("status=%d, want 200", res.StatusCode)
 	}
 
-	var created tasks.Task
-	if err := json.NewDecoder(res.Body).Decode(&created); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
+	bodyOut := decodeMutationResponse(t, res)
+	requireMutationAction(t, bodyOut, "task.create")
+	created := requireMutationTask(t, bodyOut)
 	if strings.TrimSpace(created.TaskIntent) == "" || strings.TrimSpace(created.SafetyPreset) == "" {
 		t.Fatalf("autopilot did not fill intent/preset: intent=%q preset=%q", created.TaskIntent, created.SafetyPreset)
 	}
@@ -121,10 +120,9 @@ func TestAPI_CreateTask_RespectsExplicitRunSafetyFields(t *testing.T) {
 		t.Fatalf("status=%d, want 200", res.StatusCode)
 	}
 
-	var created tasks.Task
-	if err := json.NewDecoder(res.Body).Decode(&created); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
+	bodyOut := decodeMutationResponse(t, res)
+	requireMutationAction(t, bodyOut, "task.create")
+	created := requireMutationTask(t, bodyOut)
 	if created.TaskIntent != "search-browse" || created.SafetyPreset != "search-browse" {
 		t.Fatalf("unexpected intent/preset: intent=%q preset=%q", created.TaskIntent, created.SafetyPreset)
 	}
@@ -172,10 +170,9 @@ func TestAPI_ResumeTask_SafetyEnvelopeDoesNotOverridePreviousSafety(t *testing.T
 		t.Fatalf("create status=%d, want 200", createRes.StatusCode)
 	}
 
-	var created tasks.Task
-	if err := json.NewDecoder(createRes.Body).Decode(&created); err != nil {
-		t.Fatalf("decode created: %v", err)
-	}
+	createOut := decodeMutationResponse(t, createRes)
+	requireMutationAction(t, createOut, "task.create")
+	created := requireMutationTask(t, createOut)
 	exitCode := 0
 	if err := taskStore.FinishTask(ctx, created.ID, tasks.FinishTaskInput{
 		Status:     tasks.StatusSucceeded,
@@ -202,10 +199,9 @@ func TestAPI_ResumeTask_SafetyEnvelopeDoesNotOverridePreviousSafety(t *testing.T
 		t.Fatalf("resume status=%d, want 200; body=%s", resumeRes.StatusCode, strings.TrimSpace(string(b)))
 	}
 
-	var resumed tasks.Task
-	if err := json.NewDecoder(resumeRes.Body).Decode(&resumed); err != nil {
-		t.Fatalf("decode resumed: %v", err)
-	}
+	resumeOut := decodeMutationResponse(t, resumeRes)
+	requireMutationAction(t, resumeOut, "task.resume")
+	resumed := requireMutationTask(t, resumeOut)
 
 	if resumed.Mode != tasks.ModeResume {
 		t.Fatalf("resumed mode=%q, want %q", resumed.Mode, tasks.ModeResume)

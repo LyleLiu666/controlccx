@@ -40,6 +40,7 @@ import type {
   RestoreSkillVersionResult,
   QueueAck,
   ContinueResponse,
+  TaskMutationSuccess,
   SessionContinueQueueItem,
   SkillVersion,
   SkillVersionsListResponse,
@@ -140,9 +141,10 @@ export function sessionTaskInFlightFromError(e: unknown): { taskId: string; stat
   const data = e.data;
   if (!data || typeof data !== "object") return null;
   if (String((data as any).error ?? "").trim() !== "session_task_in_flight") return null;
-  const taskId = String((data as any).existing_task_id ?? "").trim();
+  const details = (data as any).details && typeof (data as any).details === "object" ? (data as any).details : data;
+  const taskId = String((details as any).existing_task_id ?? (data as any).existing_task_id ?? "").trim();
   if (!taskId) return null;
-  const status = String((data as any).existing_status ?? "").trim();
+  const status = String((details as any).existing_status ?? (data as any).existing_status ?? "").trim();
   const message = String((data as any).message ?? e.message ?? "").trim();
   return { taskId, status, message };
 }
@@ -420,19 +422,19 @@ export async function createTask(input: {
   claude_permission_mode?: string;
   claude_sandbox?: boolean;
   claude_webfetch_domains?: string[];
-}, opts?: { idempotencyKey?: string }): Promise<Task> {
+}, opts?: { idempotencyKey?: string }): Promise<TaskMutationSuccess> {
   const idempotencyKey = String(opts?.idempotencyKey ?? "").trim();
   const headers: Record<string, string> = {};
   if (idempotencyKey) headers["Idempotency-Key"] = idempotencyKey;
-  return postJSON<Task>("/api/tasks", { ...input, mode: "new" }, { headers });
+  return postJSON<TaskMutationSuccess>("/api/tasks", { ...input, mode: "new" }, { headers });
 }
 
 export async function cancelTask(id: string): Promise<{ ok: boolean }> {
   return postJSON(`/api/tasks/${id}/cancel`, {});
 }
 
-export async function resumeTask(id: string, prompt: string): Promise<Task> {
-  return postJSON<Task>(`/api/tasks/${id}/resume`, { prompt });
+export async function resumeTask(id: string, prompt: string): Promise<TaskMutationSuccess> {
+  return postJSON<TaskMutationSuccess>(`/api/tasks/${id}/resume`, { prompt });
 }
 
 export async function resumeTaskWithOptions(
@@ -450,8 +452,8 @@ export async function resumeTaskWithOptions(
     claude_sandbox?: boolean;
     claude_webfetch_domains?: string[];
   },
-): Promise<Task> {
-  return postJSON<Task>(`/api/tasks/${id}/resume`, input);
+): Promise<TaskMutationSuccess> {
+  return postJSON<TaskMutationSuccess>(`/api/tasks/${id}/resume`, input);
 }
 
 export async function continueSessionWithOptions(
@@ -516,8 +518,8 @@ export async function rehydrateTaskWithOptions(
     claude_sandbox?: boolean;
     claude_webfetch_domains?: string[];
   } = {},
-): Promise<Task> {
-  return postJSON<Task>(`/api/tasks/${id}/rehydrate`, input);
+): Promise<TaskMutationSuccess> {
+  return postJSON<TaskMutationSuccess>(`/api/tasks/${id}/rehydrate`, input);
 }
 
 export async function renameSession(key: string, title: string): Promise<{ ok: boolean }> {
@@ -580,10 +582,9 @@ export async function decideTaskApproval(input: {
   });
 }
 
-export async function enterUnsafeTask(taskId: string, prompt?: string): Promise<Task> {
+export async function enterUnsafeTask(taskId: string, prompt?: string): Promise<TaskMutationSuccess> {
   const id = encodeURIComponent(String(taskId ?? "").trim());
-  const res = await postJSON<{ task: Task }>(`/api/tasks/${id}/enter-unsafe`, { prompt: String(prompt ?? "") });
-  return res.task;
+  return postJSON<TaskMutationSuccess>(`/api/tasks/${id}/enter-unsafe`, { prompt: String(prompt ?? "") });
 }
 
 export async function fetchFSRoots(): Promise<FSRoot[]> {

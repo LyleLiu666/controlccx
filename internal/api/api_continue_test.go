@@ -61,10 +61,9 @@ func TestAPI_SessionContinue_CreatesResumeRun(t *testing.T) {
 	if res.StatusCode != http.StatusOK {
 		t.Fatalf("status=%d, want 200", res.StatusCode)
 	}
-	var next tasks.Task
-	if err := json.NewDecoder(res.Body).Decode(&next); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
+	bodyOut := decodeMutationResponse(t, res)
+	requireMutationAction(t, bodyOut, "session.continue")
+	next := requireMutationTask(t, bodyOut)
 	if next.Mode != tasks.ModeResume {
 		t.Fatalf("mode=%q, want %q", next.Mode, tasks.ModeResume)
 	}
@@ -144,10 +143,9 @@ func TestAPI_SessionContinue_FallsBackToRehydrateOnNoConversationFound(t *testin
 	if res.StatusCode != http.StatusOK {
 		t.Fatalf("status=%d, want 200", res.StatusCode)
 	}
-	var next tasks.Task
-	if err := json.NewDecoder(res.Body).Decode(&next); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
+	bodyOut := decodeMutationResponse(t, res)
+	requireMutationAction(t, bodyOut, "session.continue")
+	next := requireMutationTask(t, bodyOut)
 	if next.Mode != tasks.ModeNew {
 		t.Fatalf("mode=%q, want %q", next.Mode, tasks.ModeNew)
 	}
@@ -199,30 +197,23 @@ func TestAPI_SessionContinue_QueuesWhenHasQueuedOrRunning(t *testing.T) {
 	if res.StatusCode != http.StatusAccepted {
 		t.Fatalf("status=%d, want 202", res.StatusCode)
 	}
-	var queued struct {
-		Queued         bool   `json:"queued"`
-		QueueID        string `json:"queue_id"`
-		Position       int    `json:"position"`
-		ExistingTaskID string `json:"existing_task_id"`
-		ExistingStatus string `json:"existing_status"`
+	bodyOut := decodeMutationResponse(t, res)
+	requireMutationAction(t, bodyOut, "session.continue")
+	queued := requireMutationQueue(t, bodyOut)
+	if ok, _ := queued["queued"].(bool); !ok {
+		t.Fatalf("queued=%v, want true", queued["queued"])
 	}
-	if err := json.NewDecoder(res.Body).Decode(&queued); err != nil {
-		t.Fatalf("decode queued: %v", err)
-	}
-	if !queued.Queued {
-		t.Fatalf("queued=%v, want true", queued.Queued)
-	}
-	if strings.TrimSpace(queued.QueueID) == "" {
+	if strings.TrimSpace(anyString(queued["queue_id"])) == "" {
 		t.Fatalf("queue_id is empty")
 	}
-	if queued.Position != 1 {
-		t.Fatalf("position=%d, want 1", queued.Position)
+	if pos, _ := queued["position"].(float64); int(pos) != 1 {
+		t.Fatalf("position=%v, want 1", queued["position"])
 	}
-	if queued.ExistingTaskID != task.ID {
-		t.Fatalf("existing_task_id=%q, want %q", queued.ExistingTaskID, task.ID)
+	if got := anyString(queued["existing_task_id"]); got != task.ID {
+		t.Fatalf("existing_task_id=%q, want %q", got, task.ID)
 	}
-	if queued.ExistingStatus != string(tasks.StatusQueued) {
-		t.Fatalf("existing_status=%q, want %q", queued.ExistingStatus, tasks.StatusQueued)
+	if got := anyString(queued["existing_status"]); got != string(tasks.StatusQueued) {
+		t.Fatalf("existing_status=%q, want %q", got, tasks.StatusQueued)
 	}
 }
 
@@ -269,27 +260,20 @@ func TestAPI_SessionContinue_QueuesWhenAwaitingApproval(t *testing.T) {
 	if res.StatusCode != http.StatusAccepted {
 		t.Fatalf("status=%d, want 202", res.StatusCode)
 	}
-	var queued struct {
-		Queued         bool   `json:"queued"`
-		QueueID        string `json:"queue_id"`
-		Position       int    `json:"position"`
-		ExistingTaskID string `json:"existing_task_id"`
-		ExistingStatus string `json:"existing_status"`
+	bodyOut := decodeMutationResponse(t, res)
+	requireMutationAction(t, bodyOut, "session.continue")
+	queued := requireMutationQueue(t, bodyOut)
+	if ok, _ := queued["queued"].(bool); !ok {
+		t.Fatalf("queued=%v, want true", queued["queued"])
 	}
-	if err := json.NewDecoder(res.Body).Decode(&queued); err != nil {
-		t.Fatalf("decode queued: %v", err)
-	}
-	if !queued.Queued {
-		t.Fatalf("queued=%v, want true", queued.Queued)
-	}
-	if strings.TrimSpace(queued.QueueID) == "" {
+	if strings.TrimSpace(anyString(queued["queue_id"])) == "" {
 		t.Fatalf("queue_id is empty")
 	}
-	if queued.ExistingTaskID != task.ID {
-		t.Fatalf("existing_task_id=%q, want %q", queued.ExistingTaskID, task.ID)
+	if got := anyString(queued["existing_task_id"]); got != task.ID {
+		t.Fatalf("existing_task_id=%q, want %q", got, task.ID)
 	}
-	if queued.ExistingStatus != string(tasks.StatusAwaitingApproval) {
-		t.Fatalf("existing_status=%q, want %q", queued.ExistingStatus, tasks.StatusAwaitingApproval)
+	if got := anyString(queued["existing_status"]); got != string(tasks.StatusAwaitingApproval) {
+		t.Fatalf("existing_status=%q, want %q", got, tasks.StatusAwaitingApproval)
 	}
 }
 
@@ -337,10 +321,9 @@ func TestAPI_SessionContinue_SupportsLegacySessionKey(t *testing.T) {
 	if res.StatusCode != http.StatusOK {
 		t.Fatalf("status=%d, want 200", res.StatusCode)
 	}
-	var next tasks.Task
-	if err := json.NewDecoder(res.Body).Decode(&next); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
+	bodyOut := decodeMutationResponse(t, res)
+	requireMutationAction(t, bodyOut, "session.continue")
+	next := requireMutationTask(t, bodyOut)
 	if next.Mode != tasks.ModeResume {
 		t.Fatalf("mode=%q, want %q", next.Mode, tasks.ModeResume)
 	}

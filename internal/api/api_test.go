@@ -58,10 +58,9 @@ func TestAPI_TasksAndChat(t *testing.T) {
 			t.Fatalf("status=%d, want 200", res.StatusCode)
 		}
 
-		var created tasks.Task
-		if err := json.NewDecoder(res.Body).Decode(&created); err != nil {
-			t.Fatalf("decode: %v", err)
-		}
+		createOut := decodeMutationResponse(t, res)
+		requireMutationAction(t, createOut, "task.create")
+		created := requireMutationTask(t, createOut)
 		if created.ID == "" {
 			t.Fatalf("expected id")
 		}
@@ -106,10 +105,9 @@ func TestAPI_TasksAndChat(t *testing.T) {
 		if resumeRes.StatusCode != http.StatusOK {
 			t.Fatalf("resume status=%d, want 200", resumeRes.StatusCode)
 		}
-		var resumed tasks.Task
-		if err := json.NewDecoder(resumeRes.Body).Decode(&resumed); err != nil {
-			t.Fatalf("decode resumed: %v", err)
-		}
+		resumeOut := decodeMutationResponse(t, resumeRes)
+		requireMutationAction(t, resumeOut, "task.resume")
+		resumed := requireMutationTask(t, resumeOut)
 		if resumed.Mode != tasks.ModeResume || resumed.SessionID != "sess-1" {
 			t.Fatalf("resumed mode=%q session=%q", resumed.Mode, resumed.SessionID)
 		}

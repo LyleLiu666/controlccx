@@ -18,7 +18,6 @@ import (
 	"controlccx/internal/chat"
 	"controlccx/internal/events"
 	"controlccx/internal/providers"
-	"controlccx/internal/runsafe"
 	"controlccx/internal/runworkspace"
 	"controlccx/internal/secretary"
 	"controlccx/internal/skills"
@@ -26,9 +25,6 @@ import (
 	"controlccx/internal/taskops"
 	"controlccx/internal/tasks"
 	"controlccx/internal/tooling"
-	"controlccx/internal/worktree"
-
-	"github.com/google/uuid"
 )
 
 type API struct {
@@ -433,185 +429,27 @@ func (a *API) handleTasks(w http.ResponseWriter, r *http.Request) {
 	case http.MethodPost:
 		var in tasks.CreateTaskInput
 		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
-			http.Error(w, "invalid json", http.StatusBadRequest)
+			writeTaskMutationInvalidJSON(w)
+			return
+		}
+		if a.Tasks == nil {
+			http.Error(w, "tasks store not configured", http.StatusServiceUnavailable)
 			return
 		}
 		if k := strings.TrimSpace(r.Header.Get("Idempotency-Key")); k != "" && strings.TrimSpace(in.IdempotencyKey) == "" {
 			in.IdempotencyKey = k
 		}
-		if a.Tools != nil {
-			if _, ok := a.Tools.Resolve(string(in.WorkerType)); !ok {
-				http.Error(w, "unknown tool id: "+string(in.WorkerType), http.StatusBadRequest)
-				return
-			}
-		}
-
-		// Run Safety Autopilot: fill safety options when the client did not explicitly set them.
-		driver := in.WorkerType
-		if a.Tools != nil {
-			if profile, ok := a.Tools.Resolve(string(in.WorkerType)); ok && strings.TrimSpace(string(profile.Driver)) != "" {
-				driver = tasks.WorkerType(strings.TrimSpace(string(profile.Driver)))
-			}
-		}
-		envelope := runsafe.SafetyEnvelope(strings.TrimSpace(in.SafetyEnvelope))
-		in, ap := runsafe.ApplyAutopilot(r.Context(), in, runsafe.ApplyOptions{
-			Driver:   driver,
-			Envelope: envelope,
-			Classify: runsafe.ClassifyOptions{},
-		})
-
-		// Workdir strategy: allow creating a parallel git worktree when the base workdir is busy.
-		var worktreePrepLogs []string
-		strategy := strings.ToLower(strings.TrimSpace(in.WorkDirStrategy))
-		if strategy == "worktree" {
-			if in.Mode != tasks.ModeNew {
-				http.Error(w, "workdir_strategy=worktree is only supported for mode=new", http.StatusBadRequest)
-				return
-			}
-
-			// Preserve idempotency semantics: do not create a new worktree for replays.
-			if a.Tasks != nil {
-				if k := strings.TrimSpace(in.IdempotencyKey); k != "" {
-					if existing, ok, err := a.Tasks.GetTaskByIdempotencyKey(r.Context(), k); err != nil {
-						http.Error(w, err.Error(), http.StatusBadRequest)
-						return
-					} else if ok {
-						writeJSON(w, existing)
-						return
-					}
-				}
-			}
-
-			cid := strings.TrimSpace(in.ConversationID)
-			if cid == "" {
-				cid = uuid.NewString()
-			} else {
-				parsed, err := uuid.Parse(cid)
-				if err != nil {
-					writeJSONStatus(w, http.StatusBadRequest, map[string]any{
-						"error":   "invalid_conversation_id",
-						"message": "conversation_id must be a UUID for workdir_strategy=worktree",
-					})
-					return
-				}
-				cid = parsed.String()
-			}
-			in.ConversationID = cid
-
-			base := strings.TrimSpace(in.WorkDir)
-			if base == "" {
-				base = "."
-			}
-			untracked := strings.ToLower(strings.TrimSpace(in.WorktreeUntracked))
-			var untrackedMode worktree.UntrackedMode
-			switch untracked {
-			case "":
-				untrackedMode = worktree.UntrackedModeDefault
-			case "skip":
-				untrackedMode = worktree.UntrackedModeSkip
-			case "force":
-				untrackedMode = worktree.UntrackedModeForce
-			default:
-				writeJSONStatus(w, http.StatusBadRequest, map[string]any{
-					"error":   "invalid_worktree_untracked",
-					"message": "worktree_untracked must be one of: skip, force",
-				})
-				return
-			}
-
-			wt, err := worktree.Create(r.Context(), worktree.CreateOptions{
-				BaseWorkDir:    base,
-				ConversationID: cid,
-				Untracked:      untrackedMode,
-				Logf: func(format string, args ...any) {
-					worktreePrepLogs = append(worktreePrepLogs, fmt.Sprintf(format, args...))
-				},
-			})
-			if err != nil {
-				var tooLarge *worktree.UntrackedTooLargeError
-				if errors.As(err, &tooLarge) {
-					writeJSONStatus(w, http.StatusUnprocessableEntity, map[string]any{
-						"error":           "worktree_untracked_too_large",
-						"message":         err.Error(),
-						"conversation_id": cid,
-						"files":           tooLarge.Files,
-						"bytes":           tooLarge.Bytes,
-						"max_files":       tooLarge.MaxFiles,
-						"max_bytes":       tooLarge.MaxBytes,
-						"largest":         tooLarge.Largest,
-					})
-					return
-				}
-
-				http.Error(w, err.Error(), http.StatusBadRequest)
-				return
-			}
-			in.WorkDirStrategy = "worktree"
-			in.BaseWorkDir = strings.TrimSpace(wt.RepoRoot)
-			in.WorktreeDir = strings.TrimSpace(wt.Dir)
-			in.WorktreeBranch = strings.TrimSpace(wt.Branch)
-			in.WorkDir = wt.Dir
-		}
-
-		task, err := a.Tasks.CreateTask(r.Context(), in)
-		if err != nil {
-			var busy *tasks.WorkDirBusyError
-			if errors.As(err, &busy) {
-				writeJSONStatus(w, http.StatusConflict, map[string]any{
-					"error":            "workdir_busy",
-					"message":          err.Error(),
-					"workdir":          strings.TrimSpace(busy.WorkDir),
-					"existing_task_id": strings.TrimSpace(busy.ExistingTaskID),
-					"existing_status":  busy.ExistingStatus,
-				})
-				return
-			}
-			http.Error(w, err.Error(), http.StatusBadRequest)
+		ops := a.taskOpsOrShim()
+		if ops == nil {
+			http.Error(w, "tasks store not configured", http.StatusServiceUnavailable)
 			return
 		}
-
-		for _, msg := range worktreePrepLogs {
-			msg = strings.TrimSpace(msg)
-			if msg == "" {
-				continue
-			}
-			_, _ = a.Tasks.AppendLog(r.Context(), task.ID, tasks.LogSystem, msg)
+		task, err := ops.CreateTask(r.Context(), in)
+		if err != nil {
+			writeTaskMutationProblem(w, err)
+			return
 		}
-
-		if ap.Applied {
-			if audit := runsafe.FormatAuditLog(driver, ap.Decision, in, true); strings.TrimSpace(audit) != "" {
-				_, _ = a.Tasks.AppendLog(r.Context(), task.ID, tasks.LogSystem, audit)
-			}
-		}
-
-		if a.Hub != nil {
-			a.Hub.Publish(events.Event{Type: "task.created", Time: time.Now().UTC(), Payload: task})
-		}
-		if a.Workers != nil {
-			if err := a.Workers.Start(r.Context(), task.ID); err != nil {
-				_, _ = a.Tasks.AppendLog(r.Context(), task.ID, tasks.LogSystem, fmt.Sprintf("runner start failed: %v", err))
-				_ = a.Tasks.FinishTask(r.Context(), task.ID, tasks.FinishTaskInput{
-					Status:     tasks.StatusFailed,
-					ExitCode:   nil,
-					Error:      err.Error(),
-					SessionID:  strings.TrimSpace(task.SessionID),
-					FinishedAt: time.Now().UTC(),
-				})
-				if a.Hub != nil {
-					if updated, err2 := a.Tasks.GetTask(r.Context(), task.ID); err2 == nil {
-						a.Hub.Publish(events.Event{Type: "task.updated", Time: time.Now().UTC(), Payload: updated})
-					}
-				}
-				writeJSONStatus(w, http.StatusServiceUnavailable, map[string]any{
-					"error":   "runner_unavailable",
-					"message": err.Error(),
-					"hint":    "restart the runner daemon (controlccx-runnerd)",
-					"task_id": task.ID,
-				})
-				return
-			}
-		}
-		writeJSON(w, task)
+		writeTaskMutationResult(w, http.StatusOK, taskops.NewTaskMutationResult(taskops.ActionTaskCreate, task))
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
@@ -1095,190 +933,32 @@ func (a *API) handleTaskByID(w http.ResponseWriter, r *http.Request) {
 			ClaudeWebFetchDomains []string `json:"claude_webfetch_domains,omitempty"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			http.Error(w, "invalid json", http.StatusBadRequest)
+			writeTaskMutationInvalidJSON(w)
 			return
 		}
-		if a.TaskOps != nil {
-			t, err := a.TaskOps.ResumeTask(r.Context(), id, taskops.RunOptions{
-				Prompt:                body.Prompt,
-				UnsafeAutomation:      body.UnsafeAutomation,
-				SafetyEnvelope:        body.SafetyEnvelope,
-				SafetyPreset:          body.SafetyPreset,
-				TaskIntent:            body.TaskIntent,
-				CodexSandbox:          body.CodexSandbox,
-				CodexApprovalPolicy:   body.CodexApprovalPolicy,
-				CodexSearch:           body.CodexSearch,
-				ClaudePermissionMode:  body.ClaudePermissionMode,
-				ClaudeSandbox:         body.ClaudeSandbox,
-				ClaudeWebFetchDomains: body.ClaudeWebFetchDomains,
-			})
-			if err != nil {
-				writeTaskMutationError(w, err)
-				return
-			}
-			writeJSON(w, t)
+		ops := a.taskOpsOrShim()
+		if ops == nil {
+			http.Error(w, "tasks store not configured", http.StatusServiceUnavailable)
 			return
 		}
-		prev, err := a.Tasks.GetTask(r.Context(), id)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusNotFound)
-			return
-		}
-		if a.Tools != nil {
-			if _, ok := a.Tools.Resolve(string(prev.WorkerType)); !ok {
-				http.Error(w, "unknown tool id: "+string(prev.WorkerType), http.StatusBadRequest)
-				return
-			}
-		}
-		if strings.TrimSpace(prev.SessionID) == "" {
-			http.Error(w, "task has no session_id to resume", http.StatusBadRequest)
-			return
-		}
-		// Single-flight: avoid creating multiple overlapping resume runs for the same session.
-		// This prevents "resume storms" (e.g. double-clicking Resume, autopilot+manual overlap).
-		if a.Tasks != nil {
-			sid := strings.TrimSpace(prev.SessionID)
-			all, err := a.Tasks.ListTasksWithOptions(r.Context(), 500, tasks.ListTasksOptions{IncludeDeleted: true})
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-			for _, t := range all {
-				if t.ID == prev.ID {
-					continue
-				}
-				if strings.TrimSpace(t.SessionID) != sid {
-					continue
-				}
-				if t.Status == tasks.StatusRunning || t.Status == tasks.StatusQueued || t.Status == tasks.StatusWaiting || t.Status == tasks.StatusAwaitingApproval {
-					writeJSONStatus(w, http.StatusConflict, map[string]any{
-						"error":            "session_task_in_flight",
-						"message":          "session already has an in-flight task",
-						"existing_task_id": t.ID,
-						"existing_status":  string(t.Status),
-					})
-					return
-				}
-			}
-		}
-
-		// SafetyEnvelope is an autopilot hint (UI-level “one-time unlock”); it does not count as an explicit safety override.
-		explicitSafety := body.UnsafeAutomation ||
-			strings.TrimSpace(body.SafetyPreset) != "" ||
-			strings.TrimSpace(body.TaskIntent) != "" ||
-			strings.TrimSpace(body.CodexSandbox) != "" ||
-			strings.TrimSpace(body.CodexApprovalPolicy) != "" ||
-			body.CodexSearch ||
-			strings.TrimSpace(body.ClaudePermissionMode) != "" ||
-			body.ClaudeSandbox ||
-			len(body.ClaudeWebFetchDomains) > 0
-
-		unsafe := body.UnsafeAutomation
-		safetyEnvelope := strings.TrimSpace(body.SafetyEnvelope)
-		safetyPreset := strings.TrimSpace(body.SafetyPreset)
-		taskIntent := strings.TrimSpace(body.TaskIntent)
-		codexSandbox := strings.TrimSpace(body.CodexSandbox)
-		codexApprovalPolicy := strings.TrimSpace(body.CodexApprovalPolicy)
-		codexSearch := body.CodexSearch
-		claudePermissionMode := strings.TrimSpace(body.ClaudePermissionMode)
-		claudeSandbox := body.ClaudeSandbox
-		claudeDomains := body.ClaudeWebFetchDomains
-
-		if !explicitSafety {
-			unsafe = prev.UnsafeAutomation
-			safetyPreset = strings.TrimSpace(prev.SafetyPreset)
-			taskIntent = strings.TrimSpace(prev.TaskIntent)
-			codexSandbox = strings.TrimSpace(prev.CodexSandbox)
-			codexApprovalPolicy = strings.TrimSpace(prev.CodexApprovalPolicy)
-			codexSearch = prev.CodexSearch
-			claudePermissionMode = strings.TrimSpace(prev.ClaudePermissionMode)
-			claudeSandbox = prev.ClaudeSandbox
-			claudeDomains = append([]string{}, prev.ClaudeWebFetchDomains...)
-		}
-
-		resumeIn := tasks.CreateTaskInput{
-			WorkerType:            prev.WorkerType,
-			Mode:                  tasks.ModeResume,
-			ConversationID:        prev.ConversationID,
-			UnsafeAutomation:      unsafe,
-			SafetyEnvelope:        safetyEnvelope,
-			SafetyPreset:          safetyPreset,
-			TaskIntent:            taskIntent,
-			CodexSandbox:          codexSandbox,
-			CodexApprovalPolicy:   codexApprovalPolicy,
-			CodexSearch:           codexSearch,
-			ClaudePermissionMode:  claudePermissionMode,
-			ClaudeSandbox:         claudeSandbox,
-			ClaudeWebFetchDomains: claudeDomains,
+		t, err := ops.ResumeTask(r.Context(), id, taskops.RunOptions{
 			Prompt:                body.Prompt,
-			WorkDir:               prev.WorkDir,
-			SessionID:             prev.SessionID,
-			Warning:               prev.Warning,
-		}
-
-		driver := prev.WorkerType
-		if a.Tools != nil {
-			if profile, ok := a.Tools.Resolve(string(prev.WorkerType)); ok && strings.TrimSpace(string(profile.Driver)) != "" {
-				driver = tasks.WorkerType(strings.TrimSpace(string(profile.Driver)))
-			}
-		}
-		envelope := runsafe.SafetyEnvelope(strings.TrimSpace(resumeIn.SafetyEnvelope))
-		resumeIn, ap := runsafe.ApplyAutopilot(r.Context(), resumeIn, runsafe.ApplyOptions{
-			Driver:   driver,
-			Envelope: envelope,
-			Classify: runsafe.ClassifyOptions{},
+			UnsafeAutomation:      body.UnsafeAutomation,
+			SafetyEnvelope:        body.SafetyEnvelope,
+			SafetyPreset:          body.SafetyPreset,
+			TaskIntent:            body.TaskIntent,
+			CodexSandbox:          body.CodexSandbox,
+			CodexApprovalPolicy:   body.CodexApprovalPolicy,
+			CodexSearch:           body.CodexSearch,
+			ClaudePermissionMode:  body.ClaudePermissionMode,
+			ClaudeSandbox:         body.ClaudeSandbox,
+			ClaudeWebFetchDomains: body.ClaudeWebFetchDomains,
 		})
-
-		newTask, err := a.Tasks.CreateTask(r.Context(), resumeIn)
 		if err != nil {
-			var busy *tasks.WorkDirBusyError
-			if errors.As(err, &busy) {
-				writeJSONStatus(w, http.StatusConflict, map[string]any{
-					"error":            "workdir_busy",
-					"message":          err.Error(),
-					"workdir":          strings.TrimSpace(busy.WorkDir),
-					"existing_task_id": strings.TrimSpace(busy.ExistingTaskID),
-					"existing_status":  busy.ExistingStatus,
-				})
-				return
-			}
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			writeTaskMutationProblem(w, err)
 			return
 		}
-
-		if ap.Applied {
-			if audit := runsafe.FormatAuditLog(driver, ap.Decision, resumeIn, true); strings.TrimSpace(audit) != "" {
-				_, _ = a.Tasks.AppendLog(r.Context(), newTask.ID, tasks.LogSystem, audit)
-			}
-		}
-		if a.Hub != nil {
-			a.Hub.Publish(events.Event{Type: "task.created", Time: time.Now().UTC(), Payload: newTask})
-		}
-		if a.Workers != nil {
-			if err := a.Workers.Start(r.Context(), newTask.ID); err != nil {
-				_, _ = a.Tasks.AppendLog(r.Context(), newTask.ID, tasks.LogSystem, fmt.Sprintf("runner start failed: %v", err))
-				_ = a.Tasks.FinishTask(r.Context(), newTask.ID, tasks.FinishTaskInput{
-					Status:     tasks.StatusFailed,
-					ExitCode:   nil,
-					Error:      err.Error(),
-					SessionID:  strings.TrimSpace(newTask.SessionID),
-					FinishedAt: time.Now().UTC(),
-				})
-				if a.Hub != nil {
-					if updated, err2 := a.Tasks.GetTask(r.Context(), newTask.ID); err2 == nil {
-						a.Hub.Publish(events.Event{Type: "task.updated", Time: time.Now().UTC(), Payload: updated})
-					}
-				}
-				writeJSONStatus(w, http.StatusServiceUnavailable, map[string]any{
-					"error":   "runner_unavailable",
-					"message": err.Error(),
-					"hint":    "restart the runner daemon (controlccx-runnerd)",
-					"task_id": newTask.ID,
-				})
-				return
-			}
-		}
-		writeJSON(w, newTask)
+		writeTaskMutationResult(w, http.StatusOK, taskops.NewTaskMutationResult(taskops.ActionTaskResume, t))
 	case "enter-unsafe":
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -1292,113 +972,20 @@ func (a *API) handleTaskByID(w http.ResponseWriter, r *http.Request) {
 			Prompt string `json:"prompt,omitempty"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil && !errors.Is(err, io.EOF) {
-			http.Error(w, "invalid json", http.StatusBadRequest)
+			writeTaskMutationInvalidJSON(w)
 			return
 		}
-		if a.TaskOps != nil {
-			t, err := a.TaskOps.EnterUnsafeTask(r.Context(), id, strings.TrimSpace(body.Prompt))
-			if err != nil {
-				writeTaskMutationError(w, err)
-				return
-			}
-			writeJSON(w, map[string]any{"task": t})
+		ops := a.taskOpsOrShim()
+		if ops == nil {
+			http.Error(w, "tasks store not configured", http.StatusServiceUnavailable)
 			return
 		}
-
-		src, err := a.Tasks.GetTask(r.Context(), id)
+		t, err := ops.EnterUnsafeTask(r.Context(), id, strings.TrimSpace(body.Prompt))
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusNotFound)
+			writeTaskMutationProblem(w, err)
 			return
 		}
-		if strings.TrimSpace(src.ConversationID) == "" {
-			http.Error(w, "task has no conversation_id", http.StatusBadRequest)
-			return
-		}
-
-		// Best-effort: cancel the current run so the follow-up can proceed.
-		if a.Workers != nil {
-			_, _ = a.Workers.Cancel(r.Context(), id)
-		}
-
-		prompt := strings.TrimSpace(body.Prompt)
-		if prompt == "" {
-			prompt = "continue"
-		}
-
-		mode := tasks.ModeNew
-		sessionID := ""
-		ctxPrompt := prompt
-		if strings.TrimSpace(src.SessionID) != "" {
-			mode = tasks.ModeResume
-			sessionID = strings.TrimSpace(src.SessionID)
-		} else {
-			// If we cannot resume (missing session_id), prefer rehydrate for claude-code so the new run can keep context.
-			driver := src.WorkerType
-			if a.Tools != nil {
-				if profile, ok := a.Tools.Resolve(string(src.WorkerType)); ok && strings.TrimSpace(string(profile.Driver)) != "" {
-					driver = tasks.WorkerType(strings.TrimSpace(string(profile.Driver)))
-				}
-			}
-			if driver == tasks.WorkerClaudeCode {
-				rehydrated, err := tasks.BuildRehydratePrompt(r.Context(), a.Tasks, strings.TrimSpace(src.ConversationID), prompt)
-				if err != nil {
-					http.Error(w, err.Error(), http.StatusInternalServerError)
-					return
-				}
-				ctxPrompt = rehydrated
-			}
-		}
-
-		in := tasks.CreateTaskInput{
-			WorkerType:       src.WorkerType,
-			Mode:             mode,
-			ConversationID:   src.ConversationID,
-			UnsafeAutomation: true,
-			SafetyPreset:     "unsafe",
-			TaskIntent:       "install",
-			Prompt:           ctxPrompt,
-			WorkDir:          src.WorkDir,
-			WorkDirStrategy:  "wait",
-			SessionID:        sessionID,
-			Warning:          src.Warning,
-		}
-
-		newTask, err := a.Tasks.CreateTask(r.Context(), in)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		_, _ = a.Tasks.AppendLog(r.Context(), newTask.ID, tasks.LogSystem, fmt.Sprintf("enter-unsafe: from run=%s", src.ID))
-
-		if a.Hub != nil {
-			a.Hub.Publish(events.Event{Type: "task.created", Time: time.Now().UTC(), Payload: newTask})
-		}
-		if a.Workers != nil && newTask.Status == tasks.StatusQueued {
-			if err := a.Workers.Start(r.Context(), newTask.ID); err != nil {
-				_, _ = a.Tasks.AppendLog(r.Context(), newTask.ID, tasks.LogSystem, fmt.Sprintf("runner start failed: %v", err))
-				_ = a.Tasks.FinishTask(r.Context(), newTask.ID, tasks.FinishTaskInput{
-					Status:     tasks.StatusFailed,
-					ExitCode:   nil,
-					Error:      err.Error(),
-					SessionID:  strings.TrimSpace(newTask.SessionID),
-					FinishedAt: time.Now().UTC(),
-				})
-				if a.Hub != nil {
-					if updated, err2 := a.Tasks.GetTask(r.Context(), newTask.ID); err2 == nil {
-						a.Hub.Publish(events.Event{Type: "task.updated", Time: time.Now().UTC(), Payload: updated})
-					}
-				}
-				writeJSONStatus(w, http.StatusServiceUnavailable, map[string]any{
-					"error":   "runner_unavailable",
-					"message": err.Error(),
-					"hint":    "restart the runner daemon (controlccx-runnerd)",
-					"task_id": newTask.ID,
-				})
-				return
-			}
-		}
-
-		writeJSON(w, map[string]any{"task": newTask})
+		writeTaskMutationResult(w, http.StatusOK, taskops.NewTaskMutationResult(taskops.ActionTaskEnterUnsafe, t))
 	case "rehydrate":
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -1418,180 +1005,32 @@ func (a *API) handleTaskByID(w http.ResponseWriter, r *http.Request) {
 			ClaudeWebFetchDomains []string `json:"claude_webfetch_domains,omitempty"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			http.Error(w, "invalid json", http.StatusBadRequest)
+			writeTaskMutationInvalidJSON(w)
 			return
 		}
-		if a.TaskOps != nil {
-			t, err := a.TaskOps.RehydrateTask(r.Context(), id, taskops.RunOptions{
-				Prompt:                body.Prompt,
-				UnsafeAutomation:      body.UnsafeAutomation,
-				SafetyEnvelope:        body.SafetyEnvelope,
-				SafetyPreset:          body.SafetyPreset,
-				TaskIntent:            body.TaskIntent,
-				CodexSandbox:          body.CodexSandbox,
-				CodexApprovalPolicy:   body.CodexApprovalPolicy,
-				CodexSearch:           body.CodexSearch,
-				ClaudePermissionMode:  body.ClaudePermissionMode,
-				ClaudeSandbox:         body.ClaudeSandbox,
-				ClaudeWebFetchDomains: body.ClaudeWebFetchDomains,
-			})
-			if err != nil {
-				writeTaskMutationError(w, err)
-				return
-			}
-			writeJSON(w, t)
+		ops := a.taskOpsOrShim()
+		if ops == nil {
+			http.Error(w, "tasks store not configured", http.StatusServiceUnavailable)
 			return
 		}
-		src, err := a.Tasks.GetTask(r.Context(), id)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusNotFound)
-			return
-		}
-		if a.Tools != nil {
-			if _, ok := a.Tools.Resolve(string(src.WorkerType)); !ok {
-				http.Error(w, "unknown tool id: "+string(src.WorkerType), http.StatusBadRequest)
-				return
-			}
-		}
-		if strings.TrimSpace(src.SessionID) == "" {
-			http.Error(w, "task has no session_id to rehydrate", http.StatusBadRequest)
-			return
-		}
-
-		// Currently, only Claude Code supports resume-missing-session recovery.
-		driver := src.WorkerType
-		if a.Tools != nil {
-			if profile, ok := a.Tools.Resolve(string(src.WorkerType)); ok && strings.TrimSpace(string(profile.Driver)) != "" {
-				driver = tasks.WorkerType(strings.TrimSpace(string(profile.Driver)))
-			}
-		}
-		if driver != tasks.WorkerClaudeCode {
-			http.Error(w, "rehydrate is only supported for claude-code sessions", http.StatusBadRequest)
-			return
-		}
-
-		prompt := strings.TrimSpace(body.Prompt)
-		if prompt == "" {
-			prompt = "continue"
-		}
-		ctxPrompt, err := tasks.BuildRehydratePrompt(r.Context(), a.Tasks, strings.TrimSpace(src.ConversationID), prompt)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		// SafetyEnvelope is an autopilot hint (UI-level “one-time unlock”); it does not count as an explicit safety override.
-		explicitSafety := body.UnsafeAutomation ||
-			strings.TrimSpace(body.SafetyPreset) != "" ||
-			strings.TrimSpace(body.TaskIntent) != "" ||
-			strings.TrimSpace(body.CodexSandbox) != "" ||
-			strings.TrimSpace(body.CodexApprovalPolicy) != "" ||
-			body.CodexSearch ||
-			strings.TrimSpace(body.ClaudePermissionMode) != "" ||
-			body.ClaudeSandbox ||
-			len(body.ClaudeWebFetchDomains) > 0
-
-		unsafe := body.UnsafeAutomation
-		safetyEnvelope := strings.TrimSpace(body.SafetyEnvelope)
-		safetyPreset := strings.TrimSpace(body.SafetyPreset)
-		taskIntent := strings.TrimSpace(body.TaskIntent)
-		codexSandbox := strings.TrimSpace(body.CodexSandbox)
-		codexApprovalPolicy := strings.TrimSpace(body.CodexApprovalPolicy)
-		codexSearch := body.CodexSearch
-		claudePermissionMode := strings.TrimSpace(body.ClaudePermissionMode)
-		claudeSandbox := body.ClaudeSandbox
-		claudeDomains := body.ClaudeWebFetchDomains
-
-		if !explicitSafety {
-			unsafe = src.UnsafeAutomation
-			safetyPreset = strings.TrimSpace(src.SafetyPreset)
-			taskIntent = strings.TrimSpace(src.TaskIntent)
-			codexSandbox = strings.TrimSpace(src.CodexSandbox)
-			codexApprovalPolicy = strings.TrimSpace(src.CodexApprovalPolicy)
-			codexSearch = src.CodexSearch
-			claudePermissionMode = strings.TrimSpace(src.ClaudePermissionMode)
-			claudeSandbox = src.ClaudeSandbox
-			claudeDomains = append([]string{}, src.ClaudeWebFetchDomains...)
-		}
-
-		in := tasks.CreateTaskInput{
-			WorkerType:            src.WorkerType,
-			Mode:                  tasks.ModeNew,
-			ConversationID:        src.ConversationID,
-			UnsafeAutomation:      unsafe,
-			SafetyEnvelope:        safetyEnvelope,
-			SafetyPreset:          safetyPreset,
-			TaskIntent:            taskIntent,
-			CodexSandbox:          codexSandbox,
-			CodexApprovalPolicy:   codexApprovalPolicy,
-			CodexSearch:           codexSearch,
-			ClaudePermissionMode:  claudePermissionMode,
-			ClaudeSandbox:         claudeSandbox,
-			ClaudeWebFetchDomains: claudeDomains,
-			Prompt:                ctxPrompt,
-			WorkDir:               src.WorkDir,
-			SessionID:             "",
-		}
-
-		envelope := runsafe.SafetyEnvelope(strings.TrimSpace(in.SafetyEnvelope))
-		in, ap := runsafe.ApplyAutopilot(r.Context(), in, runsafe.ApplyOptions{
-			Driver:   driver,
-			Envelope: envelope,
-			Classify: runsafe.ClassifyOptions{},
+		t, err := ops.RehydrateTask(r.Context(), id, taskops.RunOptions{
+			Prompt:                body.Prompt,
+			UnsafeAutomation:      body.UnsafeAutomation,
+			SafetyEnvelope:        body.SafetyEnvelope,
+			SafetyPreset:          body.SafetyPreset,
+			TaskIntent:            body.TaskIntent,
+			CodexSandbox:          body.CodexSandbox,
+			CodexApprovalPolicy:   body.CodexApprovalPolicy,
+			CodexSearch:           body.CodexSearch,
+			ClaudePermissionMode:  body.ClaudePermissionMode,
+			ClaudeSandbox:         body.ClaudeSandbox,
+			ClaudeWebFetchDomains: body.ClaudeWebFetchDomains,
 		})
-
-		newTask, err := a.Tasks.CreateTask(r.Context(), in)
 		if err != nil {
-			var busy *tasks.WorkDirBusyError
-			if errors.As(err, &busy) {
-				writeJSONStatus(w, http.StatusConflict, map[string]any{
-					"error":            "workdir_busy",
-					"message":          err.Error(),
-					"workdir":          strings.TrimSpace(busy.WorkDir),
-					"existing_task_id": strings.TrimSpace(busy.ExistingTaskID),
-					"existing_status":  busy.ExistingStatus,
-				})
-				return
-			}
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			writeTaskMutationProblem(w, err)
 			return
 		}
-		_, _ = a.Tasks.AppendLog(r.Context(), newTask.ID, tasks.LogSystem, fmt.Sprintf("rehydrate: from run=%s session=%s", src.ID, strings.TrimSpace(src.SessionID)))
-
-		if ap.Applied {
-			if audit := runsafe.FormatAuditLog(driver, ap.Decision, in, true); strings.TrimSpace(audit) != "" {
-				_, _ = a.Tasks.AppendLog(r.Context(), newTask.ID, tasks.LogSystem, audit)
-			}
-		}
-
-		if a.Hub != nil {
-			a.Hub.Publish(events.Event{Type: "task.created", Time: time.Now().UTC(), Payload: newTask})
-		}
-		if a.Workers != nil {
-			if err := a.Workers.Start(r.Context(), newTask.ID); err != nil {
-				_, _ = a.Tasks.AppendLog(r.Context(), newTask.ID, tasks.LogSystem, fmt.Sprintf("runner start failed: %v", err))
-				_ = a.Tasks.FinishTask(r.Context(), newTask.ID, tasks.FinishTaskInput{
-					Status:     tasks.StatusFailed,
-					ExitCode:   nil,
-					Error:      err.Error(),
-					SessionID:  strings.TrimSpace(newTask.SessionID),
-					FinishedAt: time.Now().UTC(),
-				})
-				if a.Hub != nil {
-					if updated, err2 := a.Tasks.GetTask(r.Context(), newTask.ID); err2 == nil {
-						a.Hub.Publish(events.Event{Type: "task.updated", Time: time.Now().UTC(), Payload: updated})
-					}
-				}
-				writeJSONStatus(w, http.StatusServiceUnavailable, map[string]any{
-					"error":   "runner_unavailable",
-					"message": err.Error(),
-					"hint":    "restart the runner daemon (controlccx-runnerd)",
-					"task_id": newTask.ID,
-				})
-				return
-			}
-		}
-		writeJSON(w, newTask)
+		writeTaskMutationResult(w, http.StatusOK, taskops.NewTaskMutationResult(taskops.ActionTaskRehydrate, t))
 	default:
 		http.NotFound(w, r)
 	}
@@ -1709,62 +1148,46 @@ func writeApprovalDecisionError(w http.ResponseWriter, taskID string, approvalID
 }
 
 func writeTaskMutationError(w http.ResponseWriter, err error) {
-	var busy *tasks.WorkDirBusyError
-	if errors.As(err, &busy) {
-		writeJSONStatus(w, http.StatusConflict, map[string]any{
-			"error":            "workdir_busy",
-			"message":          err.Error(),
-			"workdir":          strings.TrimSpace(busy.WorkDir),
-			"existing_task_id": strings.TrimSpace(busy.ExistingTaskID),
-			"existing_status":  busy.ExistingStatus,
-		})
-		return
-	}
-	var runnerErr *taskops.RunnerUnavailableError
-	if errors.As(err, &runnerErr) {
-		writeJSONStatus(w, http.StatusServiceUnavailable, map[string]any{
-			"error":   "runner_unavailable",
-			"message": err.Error(),
-			"hint":    "restart the runner daemon (controlccx-runnerd)",
-			"task_id": strings.TrimSpace(runnerErr.TaskID),
-		})
-		return
-	}
+	writeTaskMutationProblem(w, err)
+}
 
-	msg := strings.TrimSpace(err.Error())
-	if strings.HasPrefix(msg, "session_task_in_flight:") {
-		existingID := ""
-		existingStatus := ""
-		for _, part := range strings.Fields(msg) {
-			switch {
-			case strings.HasPrefix(part, "existing_task_id="):
-				existingID = strings.TrimPrefix(part, "existing_task_id=")
-			case strings.HasPrefix(part, "existing_status="):
-				existingStatus = strings.TrimPrefix(part, "existing_status=")
-			}
-		}
-		writeJSONStatus(w, http.StatusConflict, map[string]any{
-			"error":            "session_task_in_flight",
-			"message":          "session already has an in-flight task",
-			"existing_task_id": strings.TrimSpace(existingID),
-			"existing_status":  strings.TrimSpace(existingStatus),
-		})
-		return
-	}
+func writeTaskMutationInvalidJSON(w http.ResponseWriter) {
+	writeTaskMutationProblem(w, errors.New("invalid json"))
+}
 
-	if strings.Contains(msg, "not found") {
-		http.Error(w, msg, http.StatusNotFound)
-		return
+func writeTaskMutationResult(w http.ResponseWriter, status int, result taskops.MutationResult) {
+	if status <= 0 {
+		status = http.StatusOK
 	}
-	if strings.Contains(msg, "required") ||
-		strings.Contains(msg, "invalid") ||
-		strings.Contains(msg, "unknown tool id") ||
-		strings.Contains(msg, "session") ||
-		strings.Contains(msg, "rehydrate") {
-		http.Error(w, msg, http.StatusBadRequest)
-		return
+	result.OK = true
+	writeJSONStatus(w, status, result)
+}
+
+func writeTaskMutationProblem(w http.ResponseWriter, err error) {
+	problem := taskops.ParseMutationError(err)
+	status := problem.Status
+	if status <= 0 {
+		status = http.StatusInternalServerError
 	}
-	http.Error(w, msg, http.StatusInternalServerError)
+	writeJSONStatus(w, status, problem)
+}
+
+func (a *API) taskOpsOrShim() *taskops.Service {
+	if a == nil {
+		return nil
+	}
+	if a.TaskOps != nil {
+		return a.TaskOps
+	}
+	if a.Tasks == nil {
+		return nil
+	}
+	return &taskops.Service{
+		Tasks:   a.Tasks,
+		Workers: a.Workers,
+		Hub:     a.Hub,
+		Tools:   a.Tools,
+	}
 }
 
 func (a *API) validate() error {
