@@ -142,6 +142,7 @@ type CreateTaskPayload = {
   safety_envelope?: string;
   safety_preset?: string;
   task_intent?: string;
+  network_tier?: string;
   codex_sandbox?: string;
   codex_approval_policy?: string;
   codex_search?: boolean;
@@ -1505,6 +1506,7 @@ async function replaySelectedRun() {
       prompt: t.prompt,
       workdir: t.workdir,
       unsafe_automation: t.unsafe_automation || undefined,
+      network_tier: t.network_tier,
     };
     const createOut = await createTask(createdInput);
     const next = requireMutationTask(createOut, "task.create");
@@ -1596,6 +1598,7 @@ async function mergeBackSelectedWorktree() {
       unsafe_automation: t.unsafe_automation || undefined,
       safety_preset: t.safety_preset,
       task_intent: t.task_intent,
+      network_tier: t.network_tier,
       codex_sandbox: t.codex_sandbox,
       codex_approval_policy: t.codex_approval_policy,
       codex_search: t.codex_search,
@@ -2334,6 +2337,7 @@ async function onCreateTask(opts?: { idempotencyKey?: string }): Promise<boolean
     const useAutopilot = runSafetyAutopilotEnabled.value && !newRunSafetyOverride.value;
 
     let safety: RunSafetyPayload = {};
+    let defaultNetworkTier: string | undefined = undefined;
     if (!useAutopilot) {
       const preset = newRunSafetyPreset.value;
       const intent = inferTaskIntentFromSafetyPreset(driver, preset);
@@ -2357,6 +2361,8 @@ async function onCreateTask(opts?: { idempotencyKey?: string }): Promise<boolean
       setStringMapKey(runSafetyPresetByTool, newWorkerType.value, preset);
 
       safety = buildRunSafetyPayload(driver, intent, preset);
+    } else if (driver === "claude-code" || driver === "codex") {
+      defaultNetworkTier = "web_readonly";
     }
 
     const envelope = buildSafetyEnvelopePayload();
@@ -2368,6 +2374,7 @@ async function onCreateTask(opts?: { idempotencyKey?: string }): Promise<boolean
       workdir: newWorkdir.value,
       ...envelope,
       ...safety,
+      network_tier: safety.network_tier ?? defaultNetworkTier,
     };
     const createOut = await createTask(createdInput, opts);
     const t = requireMutationTask(createOut, "task.create");

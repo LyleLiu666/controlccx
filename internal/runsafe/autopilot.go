@@ -52,7 +52,7 @@ func hasExplicitSafetyOptions(in tasks.CreateTaskInput) bool {
 	if strings.TrimSpace(in.SafetyPreset) != "" || strings.TrimSpace(in.TaskIntent) != "" {
 		return true
 	}
-	if strings.TrimSpace(string(in.NetworkTier)) != "" {
+	if tier := tasks.NormalizeNetworkTier(strings.TrimSpace(string(in.NetworkTier))); tier != "" && tier != tasks.NetworkTierWebReadonly {
 		return true
 	}
 	if strings.TrimSpace(in.CodexSandbox) != "" || strings.TrimSpace(in.CodexApprovalPolicy) != "" || in.CodexSearch {
@@ -69,6 +69,7 @@ func applyCodexAutopilot(in *tasks.CreateTaskInput, decision Decision, env Safet
 	in.TaskIntent = intent
 	// Untrusted-by-default: require approvals for non-read-only actions, matching TUI behavior.
 	in.CodexApprovalPolicy = "untrusted"
+	in.NetworkTier = tasks.NetworkTierWebReadonly
 
 	switch decision.Intent {
 	case IntentAnalyze:
@@ -85,6 +86,7 @@ func applyCodexAutopilot(in *tasks.CreateTaskInput, decision Decision, env Safet
 			in.SafetyPreset = "danger-full-access"
 			in.CodexSandbox = "danger-full-access"
 			in.CodexSearch = false
+			in.NetworkTier = tasks.NetworkTierExecNet
 		} else {
 			in.SafetyPreset = "workspace-write"
 			in.CodexSandbox = "workspace-write"
@@ -100,6 +102,7 @@ func applyCodexAutopilot(in *tasks.CreateTaskInput, decision Decision, env Safet
 func applyClaudeAutopilot(in *tasks.CreateTaskInput, decision Decision, env SafetyEnvelope) {
 	intent := string(decision.Intent)
 	in.TaskIntent = intent
+	in.NetworkTier = tasks.NetworkTierWebReadonly
 	// Safe-by-default: enable Claude bash sandboxing unless the run explicitly opts into unsafe.
 	in.ClaudeSandbox = true
 
@@ -111,6 +114,7 @@ func applyClaudeAutopilot(in *tasks.CreateTaskInput, decision Decision, env Safe
 		if env == EnvelopeInstallEnabled {
 			in.SafetyPreset = "unsafe"
 			in.UnsafeAutomation = true
+			in.NetworkTier = tasks.NetworkTierExecNet
 			// Unsafe installs often require arbitrary network access; disable bash sandbox so tools like
 			// pip/curl can reach the public internet.
 			in.ClaudeSandbox = false

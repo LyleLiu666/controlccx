@@ -5,6 +5,7 @@ import {
   buildRunSafetyPayload,
   DEFAULT_RUN_SAFETY_INSTALL_UNLOCK,
   inferTaskIntentFromSafetyPreset,
+  networkTierForPreset,
   toolDriverForWorkerType,
 } from "../src/runSafety.ts";
 
@@ -12,12 +13,14 @@ test("claude-code safe preset sets acceptEdits permission mode", () => {
   const payload = buildRunSafetyPayload("claude-code", "code", "search-browse");
   assert.equal(payload.claude_permission_mode, "acceptEdits");
   assert.equal(payload.claude_sandbox, true);
+  assert.equal(payload.network_tier, "web_readonly");
   assert.equal(payload.unsafe_automation, undefined);
 });
 
 test("claude-code unsafe preset uses unsafe_automation", () => {
   const payload = buildRunSafetyPayload("claude-code", "code", "unsafe");
   assert.equal(payload.unsafe_automation, true);
+  assert.equal(payload.network_tier, "exec_net");
   assert.equal(payload.claude_sandbox, false);
 });
 
@@ -25,7 +28,16 @@ test("codex safe preset sets untrusted approvals", () => {
   const payload = buildRunSafetyPayload("codex", "code", "workspace-write");
   assert.equal(payload.codex_sandbox, "workspace-write");
   assert.equal(payload.codex_approval_policy, "untrusted");
+  assert.equal(payload.network_tier, "web_readonly");
   assert.equal(payload.unsafe_automation, undefined);
+});
+
+test("networkTierForPreset maps tiers consistently", () => {
+  assert.equal(networkTierForPreset("claude-code", "no-network"), "off");
+  assert.equal(networkTierForPreset("claude-code", "search-browse"), "web_readonly");
+  assert.equal(networkTierForPreset("claude-code", "unsafe"), "exec_net");
+  assert.equal(networkTierForPreset("codex", "workspace-write"), "web_readonly");
+  assert.equal(networkTierForPreset("codex", "danger-full-access"), "exec_net");
 });
 
 test("toolDriverForWorkerType falls back to exec", () => {

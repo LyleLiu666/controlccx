@@ -34,6 +34,9 @@ func TestApplyAutopilot_Codex(t *testing.T) {
 	if !out.CodexSearch {
 		t.Fatalf("codex_search=%v, want true", out.CodexSearch)
 	}
+	if out.NetworkTier != tasks.NetworkTierWebReadonly {
+		t.Fatalf("network_tier=%q, want %q", out.NetworkTier, tasks.NetworkTierWebReadonly)
+	}
 }
 
 func TestApplyAutopilot_Claude_Analyze(t *testing.T) {
@@ -61,6 +64,9 @@ func TestApplyAutopilot_Claude_Analyze(t *testing.T) {
 	}
 	if out.UnsafeAutomation {
 		t.Fatalf("unsafe_automation=%v, want false", out.UnsafeAutomation)
+	}
+	if out.NetworkTier != tasks.NetworkTierWebReadonly {
+		t.Fatalf("network_tier=%q, want %q", out.NetworkTier, tasks.NetworkTierWebReadonly)
 	}
 }
 
@@ -91,6 +97,9 @@ func TestApplyAutopilot_Claude_Install_RequiresUnlock(t *testing.T) {
 	if out.UnsafeAutomation {
 		t.Fatalf("unsafe_automation=%v, want false", out.UnsafeAutomation)
 	}
+	if out.NetworkTier != tasks.NetworkTierWebReadonly {
+		t.Fatalf("network_tier=%q, want %q", out.NetworkTier, tasks.NetworkTierWebReadonly)
+	}
 
 	unlocked, _ := ApplyAutopilot(context.Background(), in, ApplyOptions{
 		Driver:   tasks.WorkerClaudeCode,
@@ -99,11 +108,48 @@ func TestApplyAutopilot_Claude_Install_RequiresUnlock(t *testing.T) {
 	if unlocked.SafetyPreset != "unsafe" || !unlocked.UnsafeAutomation {
 		t.Fatalf("unlock preset/unsafe=%q/%v, want unsafe/true", unlocked.SafetyPreset, unlocked.UnsafeAutomation)
 	}
+	if unlocked.NetworkTier != tasks.NetworkTierExecNet {
+		t.Fatalf("unlock network_tier=%q, want %q", unlocked.NetworkTier, tasks.NetworkTierExecNet)
+	}
 	if unlocked.ClaudeSandbox {
 		t.Fatalf("unlock claude_sandbox=%v, want false", unlocked.ClaudeSandbox)
 	}
 	if unlocked.ClaudePermissionMode != "" {
 		t.Fatalf("unlock claude_permission_mode=%q, want empty", unlocked.ClaudePermissionMode)
+	}
+}
+
+func TestApplyAutopilot_WebReadonlyNetworkTierStillAppliesDefaults(t *testing.T) {
+	in := tasks.CreateTaskInput{
+		WorkerType:  tasks.WorkerClaudeCode,
+		Mode:        tasks.ModeNew,
+		Prompt:      "请总结这个模块",
+		WorkDir:     ".",
+		NetworkTier: tasks.NetworkTierWebReadonly,
+	}
+	out, res := ApplyAutopilot(context.Background(), in, ApplyOptions{Driver: tasks.WorkerClaudeCode})
+	if !res.Applied {
+		t.Fatalf("expected autopilot to apply when network_tier=web_readonly only")
+	}
+	if out.SafetyPreset == "" {
+		t.Fatalf("expected autopilot to set safety_preset")
+	}
+}
+
+func TestApplyAutopilot_OffNetworkTierSkipsAutopilot(t *testing.T) {
+	in := tasks.CreateTaskInput{
+		WorkerType:  tasks.WorkerClaudeCode,
+		Mode:        tasks.ModeNew,
+		Prompt:      "请总结这个模块",
+		WorkDir:     ".",
+		NetworkTier: tasks.NetworkTierOff,
+	}
+	out, res := ApplyAutopilot(context.Background(), in, ApplyOptions{Driver: tasks.WorkerClaudeCode})
+	if res.Applied {
+		t.Fatalf("expected autopilot not to apply for explicit off tier")
+	}
+	if out.NetworkTier != tasks.NetworkTierOff {
+		t.Fatalf("network_tier=%q, want %q", out.NetworkTier, tasks.NetworkTierOff)
 	}
 }
 

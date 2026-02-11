@@ -6,6 +6,7 @@ import type { PromptTemplate, Tool, ToolDriver } from "../types";
 import { fetchPromptTemplates } from "../api";
 import {
   isHighRiskPreset,
+  networkTierForPreset,
   safetyPresetsForDriver,
   toolDriverForWorkerType,
 } from "../runSafety";
@@ -63,6 +64,20 @@ const newRunUseAutopilot = computed<boolean>(
 const newRunShowManualSafety = computed<boolean>(
   () => !newRunUseAutopilot.value
 );
+
+const selectedNetworkTier = computed<string>(() => {
+  if (newRunDriver.value !== "codex" && newRunDriver.value !== "claude-code") return "";
+  if (newRunUseAutopilot.value) return "web_readonly";
+  return networkTierForPreset(newRunDriver.value, props.safetyPreset);
+});
+
+const selectedNetworkTierLabel = computed<string>(() => {
+  const tier = selectedNetworkTier.value;
+  if (tier === "off") return "无网络";
+  if (tier === "exec_net") return "执行网络";
+  if (tier === "web_readonly") return "只读网络";
+  return "未知";
+});
 
 const taskTemplates = ref<PromptTemplate[]>([]);
 const taskTemplatesLoading = ref(false);
@@ -328,6 +343,15 @@ watch(
                       />
                       <span>覆盖自动驾驶（手动设置预设）</span>
                     </label>
+                  </div>
+
+                  <div
+                    v-if="selectedNetworkTier"
+                    class="tinyHint"
+                  >
+                    网络档位：
+                    <span class="mono">{{ selectedNetworkTier }}</span>
+                    （{{ selectedNetworkTierLabel }}）
                   </div>
 
                   <template v-if="newRunShowManualSafety">

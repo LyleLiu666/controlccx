@@ -15,12 +15,27 @@ export type RunSafetyPayload = {
   safety_envelope?: string;
   safety_preset?: string;
   task_intent?: string;
+  network_tier?: string;
   codex_sandbox?: string;
   codex_approval_policy?: string;
   codex_search?: boolean;
   claude_permission_mode?: string;
   claude_sandbox?: boolean;
 };
+
+export function networkTierForPreset(driver: ToolDriver, preset: string): string {
+  const p = String(preset ?? "").trim();
+  if (driver === "codex") {
+    if (p === "unsafe" || p === "danger-full-access") return "exec_net";
+    return "web_readonly";
+  }
+  if (driver === "claude-code") {
+    if (p === "unsafe") return "exec_net";
+    if (p === "no-network") return "off";
+    return "web_readonly";
+  }
+  return "web_readonly";
+}
 
 export function normalizeTaskIntent(raw: string): TaskIntent {
   const v = String(raw ?? "").trim();
@@ -115,6 +130,7 @@ export function isHighRiskPreset(driver: ToolDriver, preset: string): boolean {
 export function buildRunSafetyPayload(driver: ToolDriver, intent: TaskIntent, preset: string): RunSafetyPayload {
   const sp = String(preset ?? "").trim();
   const ti = normalizeTaskIntent(intent);
+  const networkTier = networkTierForPreset(driver, sp);
 
   if (driver === "codex") {
     if (sp === "unsafe") {
@@ -122,6 +138,7 @@ export function buildRunSafetyPayload(driver: ToolDriver, intent: TaskIntent, pr
         unsafe_automation: true,
         safety_preset: sp,
         task_intent: ti,
+        network_tier: networkTier,
       };
     }
     const sandbox =
@@ -133,6 +150,7 @@ export function buildRunSafetyPayload(driver: ToolDriver, intent: TaskIntent, pr
     return {
       safety_preset: sp,
       task_intent: ti,
+      network_tier: networkTier,
       codex_sandbox: sandbox,
       codex_approval_policy: "untrusted",
       codex_search: sp === "search-browse" || undefined,
@@ -145,6 +163,7 @@ export function buildRunSafetyPayload(driver: ToolDriver, intent: TaskIntent, pr
         unsafe_automation: true,
         safety_preset: sp,
         task_intent: ti,
+        network_tier: networkTier,
         // Disable Claude bash sandbox in unsafe mode so the run can access system network
         // (e.g. pip/python/curl) when the user explicitly opts into high risk.
         claude_sandbox: false,
@@ -153,6 +172,7 @@ export function buildRunSafetyPayload(driver: ToolDriver, intent: TaskIntent, pr
     return {
       safety_preset: sp,
       task_intent: ti,
+      network_tier: networkTier,
       // Non-interactive runs cannot click approval prompts; accept file edits by default.
       claude_permission_mode: "acceptEdits",
       claude_sandbox: true,
