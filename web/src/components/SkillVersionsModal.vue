@@ -6,6 +6,7 @@ import {
   deleteSkillVersionBySkill,
   fetchSkillVersionsBySkill,
   restoreSkillVersionBySkill,
+  updateSkillVersionBySkill,
 } from "../api";
 
 const props = defineProps<{
@@ -27,6 +28,7 @@ const newNote = ref("");
 const creating = ref(false);
 const deleting = ref<Map<string, boolean>>(new Map());
 const restoring = ref<Map<string, boolean>>(new Map());
+const updatingFromSource = ref(false);
 const notice = ref("");
 
 const title = computed(() => {
@@ -48,6 +50,10 @@ const sourceRefLabel = computed(() => {
   if (t === "local") return "路径";
   if (t === "import") return "来源";
   return "source_ref";
+});
+const canUpdateFromSource = computed(() => {
+  const name = String(props.skill ?? "").trim();
+  return !!name && sourceType.value === "git";
 });
 const shortRevision = computed(() => {
   const r = sourceRevision.value;
@@ -158,6 +164,33 @@ async function restoreByID(id: string) {
     restoring.value = new Map(restoring.value);
   }
 }
+
+async function updateFromSource() {
+  const name = String(props.skill ?? "").trim();
+  if (!name) return;
+  if (!canUpdateFromSource.value) return;
+  if (updatingFromSource.value) return;
+  updatingFromSource.value = true;
+  error.value = "";
+  notice.value = "";
+  try {
+    const out = await updateSkillVersionBySkill(name);
+    if (out.updated) {
+      if (out.version?.id) {
+        notice.value = `已拉取更新并生成快照：${out.version.id}。`;
+      } else {
+        notice.value = "已拉取更新并生成快照。";
+      }
+    } else {
+      notice.value = "已是最新，无需生成新快照。";
+    }
+    await refresh();
+  } catch (e: any) {
+    error.value = e?.message ?? String(e);
+  } finally {
+    updatingFromSource.value = false;
+  }
+}
 </script>
 
 <template>
@@ -165,6 +198,16 @@ async function restoreByID(id: string) {
     <div class="modal skillVersionsModal" role="dialog" aria-modal="true">
       <div class="modalHeader">
         <div class="modalTitle">{{ title }}</div>
+        <button
+          v-if="sourceType === 'git'"
+          type="button"
+          class="headerMiniBtn"
+          @click="updateFromSource"
+          :disabled="loading || updatingFromSource || !canUpdateFromSource"
+          title="从 Git 来源拉取并按需自动生成快照"
+        >
+          {{ updatingFromSource ? "更新中…" : "拉取更新" }}
+        </button>
         <button
           type="button"
           class="headerMiniBtn"

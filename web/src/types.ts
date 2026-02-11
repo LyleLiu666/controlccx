@@ -334,6 +334,13 @@ export type PerSkillVersionsListResponse = {
   versions: SkillVersion[];
 };
 
+export type UpdateSkillVersionBySkillResult = {
+  ok: boolean;
+  updated: boolean;
+  skill: ManagedSkill;
+  version?: SkillVersion;
+};
+
 export type RestoreSkillVersionResult = {
   ok: boolean;
   skill?: string;

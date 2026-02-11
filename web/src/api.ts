@@ -38,6 +38,7 @@ import type {
   PromptTemplate,
   PromptTemplateKind,
   RestoreSkillVersionResult,
+  UpdateSkillVersionBySkillResult,
   QueueAck,
   ContinueResponse,
   TaskMutationSuccess,
@@ -856,4 +857,12 @@ export async function restoreSkillVersionBySkill(
 ): Promise<RestoreSkillVersionResult> {
   const n = String(name ?? "").trim();
   return postJSON<RestoreSkillVersionResult>(`/api/skills/${encodeURIComponent(n)}/versions/restore`, input);
+}
+
+export async function updateSkillVersionBySkill(
+  name: string,
+  input: { note?: string } = {},
+): Promise<UpdateSkillVersionBySkillResult> {
+  const n = String(name ?? "").trim();
+  return postJSON<UpdateSkillVersionBySkillResult>(`/api/skills/${encodeURIComponent(n)}/versions/update`, input);
 }

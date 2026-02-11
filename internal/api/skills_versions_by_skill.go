@@ -2,6 +2,8 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 	"strings"
 
@@ -120,6 +122,68 @@ func (a *API) handleSkillVersionsBySkill(w http.ResponseWriter, r *http.Request,
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
+		}
+		writeJSON(w, out)
+	case "update":
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if a.Skills == nil {
+			http.Error(w, "skills service not configured", http.StatusNotImplemented)
+			return
+		}
+		var body struct {
+			Note string `json:"note,omitempty"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil && !errors.Is(err, io.EOF) {
+			http.Error(w, "invalid json", http.StatusBadRequest)
+			return
+		}
+		before, err := a.SkillVersionsBySkill.List(r.Context(), name)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		prevRevision := ""
+		prevHash := ""
+		if before.Manifest != nil {
+			prevRevision = strings.TrimSpace(before.Manifest.SourceRevision)
+			prevHash = strings.TrimSpace(before.Manifest.ContentHash)
+		}
+
+		updated, err := a.Skills.UpdateManagedSkill(r.Context(), name)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		nextRevision := strings.TrimSpace(updated.SourceRevision)
+		nextHash := strings.TrimSpace(updated.ContentHash)
+		changed := prevRevision != nextRevision || prevHash != nextHash
+
+		out := struct {
+			OK      bool                `json:"ok"`
+			Updated bool                `json:"updated"`
+			Skill   skills.ManagedSkill `json:"skill"`
+			Version *skills.Version     `json:"version,omitempty"`
+		}{
+			OK:      true,
+			Updated: changed,
+			Skill:   updated,
+		}
+
+		if changed {
+			note := strings.TrimSpace(body.Note)
+			if note == "" {
+				note = "auto snapshot after source update"
+			}
+			v, err := a.SkillVersionsBySkill.Create(r.Context(), name, skills.CreateVersionInput{Note: note})
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			out.Version = &v
 		}
 		writeJSON(w, out)
 	default:
