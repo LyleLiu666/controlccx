@@ -100,6 +100,13 @@ func TestMigrate_AdditiveTables_AllowedAtSchemaVersion(t *testing.T) {
 
 	if err := conn.QueryRowContext(ctx, `
 		SELECT name FROM sqlite_master
+		WHERE type='table' AND name='mission_contracts';
+	`).Scan(&name); err != nil {
+		t.Fatalf("expected mission_contracts table: %v", err)
+	}
+
+	if err := conn.QueryRowContext(ctx, `
+		SELECT name FROM sqlite_master
 		WHERE type='index' AND name='idx_tasks_latest_execution_sort';
 	`).Scan(&name); err != nil {
 		t.Fatalf("expected idx_tasks_latest_execution_sort index: %v", err)

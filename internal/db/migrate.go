@@ -129,20 +129,30 @@ func Migrate(ctx context.Context, conn *sql.DB) error {
 			updated_at INTEGER NOT NULL DEFAULT 0
 		);`,
 		`CREATE TABLE IF NOT EXISTS acceptance_states (
-			session_key TEXT PRIMARY KEY,
-			status TEXT NOT NULL DEFAULT '',
-			iteration INTEGER NOT NULL DEFAULT 0,
-			max_iterations INTEGER NOT NULL DEFAULT 10,
-			current_gate TEXT NOT NULL DEFAULT '',
-			summary TEXT NOT NULL DEFAULT '',
-			plan_json TEXT NOT NULL DEFAULT '',
-			report TEXT NOT NULL DEFAULT '',
-			run_id TEXT NOT NULL DEFAULT '',
-			updated_at INTEGER NOT NULL DEFAULT 0
-		);`,
+				session_key TEXT PRIMARY KEY,
+				status TEXT NOT NULL DEFAULT '',
+				iteration INTEGER NOT NULL DEFAULT 0,
+				max_iterations INTEGER NOT NULL DEFAULT 10,
+				current_gate TEXT NOT NULL DEFAULT '',
+				summary TEXT NOT NULL DEFAULT '',
+				plan_json TEXT NOT NULL DEFAULT '',
+				report TEXT NOT NULL DEFAULT '',
+				run_id TEXT NOT NULL DEFAULT '',
+				updated_at INTEGER NOT NULL DEFAULT 0
+			);`,
+		`CREATE TABLE IF NOT EXISTS mission_contracts (
+				key TEXT PRIMARY KEY,
+				goal TEXT NOT NULL DEFAULT '',
+				constraints_json TEXT NOT NULL DEFAULT '',
+				acceptance_json TEXT NOT NULL DEFAULT '',
+				non_goals_json TEXT NOT NULL DEFAULT '',
+				revision INTEGER NOT NULL DEFAULT 1,
+				created_at INTEGER NOT NULL DEFAULT 0,
+				updated_at INTEGER NOT NULL DEFAULT 0
+			);`,
 		`CREATE TABLE IF NOT EXISTS session_workspaces (
-			key TEXT PRIMARY KEY,
-			kind TEXT NOT NULL DEFAULT '',
+				key TEXT PRIMARY KEY,
+				kind TEXT NOT NULL DEFAULT '',
 			base_workdir TEXT NOT NULL DEFAULT '',
 			repo_root TEXT NOT NULL DEFAULT '',
 			run_root TEXT NOT NULL DEFAULT '',
