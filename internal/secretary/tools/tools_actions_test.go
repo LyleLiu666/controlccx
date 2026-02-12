@@ -521,6 +521,71 @@ func TestMissionContractUpsert_RequiresGoal(t *testing.T) {
 	}
 }
 
+func TestExecutionPlanLoopSubmit_RunsAndPersistsProgress(t *testing.T) {
+	ctx, deps := newDepsForToolsTest(t)
+	reg := NewRegistry(deps)
+
+	task, err := deps.Tasks.CreateTask(ctx, tasks.CreateTaskInput{
+		WorkerType:     tasks.WorkerClaudeCode,
+		Mode:           tasks.ModeNew,
+		ConversationID: "conv-loop-tool",
+		Prompt:         "seed",
+		WorkDir:        ".",
+		SessionID:      "sess-loop-tool",
+	})
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	if err := deps.Tasks.FinishTask(ctx, task.ID, tasks.FinishTaskInput{
+		Status:     tasks.StatusFailed,
+		Error:      "boom",
+		SessionID:  task.SessionID,
+		FinishedAt: task.CreatedAt,
+	}); err != nil {
+		t.Fatalf("finish task: %v", err)
+	}
+
+	contractKey := tasks.ConversationKey(task.ConversationID)
+	if _, err := deps.Tasks.UpsertMissionContract(ctx, tasks.UpsertMissionContractInput{
+		Key:  contractKey,
+		Goal: "deliver autonomous loop",
+	}); err != nil {
+		t.Fatalf("upsert mission contract: %v", err)
+	}
+	if _, err := deps.Tasks.ConfirmMissionContract(ctx, contractKey); err != nil {
+		t.Fatalf("confirm mission contract: %v", err)
+	}
+
+	outAny, err := reg.Execute(ctx, agentsdk.ToolCall{
+		Name: "execution_plan_loop_submit",
+		Fields: map[string]string{
+			"task_id":          task.ID,
+			"max_iterations":   "1",
+			"iteration_prompt": "continue",
+		},
+	})
+	if err != nil {
+		t.Fatalf("run execution plan loop: %v", err)
+	}
+	var out struct {
+		IterationsExecuted int                      `json:"iterations_executed"`
+		State              tasks.ExecutionPlanState `json:"state"`
+	}
+	raw, _ := json.Marshal(outAny)
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatalf("decode output: %v raw=%s", err, string(raw))
+	}
+	if out.IterationsExecuted != 1 {
+		t.Fatalf("iterations_executed=%d, want 1", out.IterationsExecuted)
+	}
+	if out.State.Iteration != 1 {
+		t.Fatalf("state.iteration=%d, want 1", out.State.Iteration)
+	}
+	if strings.TrimSpace(out.State.PlanJSON) == "" {
+		t.Fatalf("expected non-empty plan_json")
+	}
+}
+
 func strconvFormatInt(v int64) string {
 	return fmt.Sprintf("%d", v)
 }

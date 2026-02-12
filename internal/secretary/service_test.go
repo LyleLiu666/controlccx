@@ -15,6 +15,7 @@ import (
 	"controlccx/internal/config"
 	"controlccx/internal/db"
 	"controlccx/internal/secretary/llm"
+	"controlccx/internal/taskops"
 	"controlccx/internal/tasks"
 )
 
@@ -253,6 +254,79 @@ func TestService_Send_BindsMissionContractViaChatTool(t *testing.T) {
 	}
 	if strings.TrimSpace(contract.Goal) == "" {
 		t.Fatalf("expected non-empty goal")
+	}
+}
+
+func TestService_Send_ExecutionPlanLoopViaChatToolPersistsProgress(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "controlccx.db")
+
+	conn, err := db.Open(ctx, db.Options{Path: dbPath})
+	if err != nil {
+		t.Fatalf("db open: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+
+	taskStore := tasks.NewStore(conn)
+	chatStore := chat.NewStore(conn)
+
+	task, err := taskStore.CreateTask(ctx, tasks.CreateTaskInput{
+		WorkerType:     tasks.WorkerClaudeCode,
+		Mode:           tasks.ModeNew,
+		ConversationID: "conv-loop-chat",
+		Prompt:         "seed",
+		WorkDir:        ".",
+		SessionID:      "sess-loop-chat",
+	})
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	if err := taskStore.FinishTask(ctx, task.ID, tasks.FinishTaskInput{
+		Status:     tasks.StatusFailed,
+		Error:      "boom",
+		SessionID:  task.SessionID,
+		FinishedAt: task.CreatedAt.Add(2 * time.Second),
+	}); err != nil {
+		t.Fatalf("finish task: %v", err)
+	}
+
+	contractKey := tasks.ConversationKey(task.ConversationID)
+	if _, err := taskStore.UpsertMissionContract(ctx, tasks.UpsertMissionContractInput{
+		Key:  contractKey,
+		Goal: "deliver autonomous loop",
+	}); err != nil {
+		t.Fatalf("upsert mission contract: %v", err)
+	}
+	if _, err := taskStore.ConfirmMissionContract(ctx, contractKey); err != nil {
+		t.Fatalf("confirm mission contract: %v", err)
+	}
+
+	c := &scriptedClient{
+		responses: []string{
+			"<tool_data><call><tool_name>execution_plan_loop_submit</tool_name><task_id>" + task.ID + "</task_id><max_iterations>1</max_iterations></call></tool_data>",
+			"我已按计划推进第 1 步，并记录进度。",
+		},
+	}
+
+	ops := &taskops.Service{Tasks: taskStore}
+	svc := NewService(config.Default(), taskStore, chatStore, nil, nil, WithClient(c), WithTaskOps(ops))
+	reply, err := svc.Send(ctx, "按契约开始自动推进")
+	if err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	if !strings.Contains(reply, "第 1 步") {
+		t.Fatalf("reply=%q, want mention step progress", reply)
+	}
+
+	state, ok, err := taskStore.GetExecutionPlanState(ctx, contractKey)
+	if err != nil {
+		t.Fatalf("get execution plan state: %v", err)
+	}
+	if !ok {
+		t.Fatalf("expected execution plan state")
+	}
+	if state.Iteration != 1 {
+		t.Fatalf("state.iteration=%d, want 1", state.Iteration)
 	}
 }
 

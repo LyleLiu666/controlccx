@@ -94,6 +94,127 @@ func TestContinueSession_QueuesWhenInFlight(t *testing.T) {
 	}
 }
 
+func TestRunExecutionPlanLoopV1_PersistsProgressAcrossIterations(t *testing.T) {
+	ctx, svc := newServiceForTest(t)
+	baseTask, err := svc.Tasks.CreateTask(ctx, tasks.CreateTaskInput{
+		WorkerType:     tasks.WorkerClaudeCode,
+		Mode:           tasks.ModeNew,
+		ConversationID: "conv-plan-loop",
+		Prompt:         "seed",
+		WorkDir:        ".",
+		SessionID:      "sess-plan-loop",
+	})
+	if err != nil {
+		t.Fatalf("create base task: %v", err)
+	}
+	if err := svc.Tasks.FinishTask(ctx, baseTask.ID, tasks.FinishTaskInput{
+		Status:     tasks.StatusFailed,
+		Error:      "boom",
+		SessionID:  baseTask.SessionID,
+		FinishedAt: baseTask.CreatedAt,
+	}); err != nil {
+		t.Fatalf("finish base task: %v", err)
+	}
+
+	contractKey := tasks.ConversationKey(baseTask.ConversationID)
+	if _, err := svc.Tasks.UpsertMissionContract(ctx, tasks.UpsertMissionContractInput{
+		Key:  contractKey,
+		Goal: "Deliver autonomous execution",
+		AcceptanceCriteria: []string{
+			"run required tests",
+			"document key behavior changes",
+		},
+	}); err != nil {
+		t.Fatalf("upsert mission contract: %v", err)
+	}
+	if _, err := svc.Tasks.ConfirmMissionContract(ctx, contractKey); err != nil {
+		t.Fatalf("confirm mission contract: %v", err)
+	}
+
+	key := tasks.SessionKeyForTask(baseTask)
+	first, err := svc.RunExecutionPlanLoopV1(ctx, key, RunExecutionPlanLoopInput{MaxIterations: 1})
+	if err != nil {
+		t.Fatalf("run loop first: %v", err)
+	}
+	if first.State.Iteration != 1 {
+		t.Fatalf("first iteration=%d, want 1", first.State.Iteration)
+	}
+	if strings.TrimSpace(first.State.PlanJSON) == "" {
+		t.Fatalf("expected non-empty plan_json")
+	}
+	if strings.TrimSpace(first.LastTaskID) == "" {
+		t.Fatalf("expected last_task_id after first iteration")
+	}
+
+	if err := svc.Tasks.FinishTask(ctx, first.LastTaskID, tasks.FinishTaskInput{
+		Status:     tasks.StatusFailed,
+		Error:      "step-1 done",
+		SessionID:  baseTask.SessionID,
+		FinishedAt: baseTask.CreatedAt,
+	}); err != nil {
+		t.Fatalf("finish first loop task: %v", err)
+	}
+
+	second, err := svc.RunExecutionPlanLoopV1(ctx, key, RunExecutionPlanLoopInput{MaxIterations: 1})
+	if err != nil {
+		t.Fatalf("run loop second: %v", err)
+	}
+	if second.State.Iteration != 2 {
+		t.Fatalf("second iteration=%d, want 2", second.State.Iteration)
+	}
+	if strings.TrimSpace(second.State.PlanJSON) != strings.TrimSpace(first.State.PlanJSON) {
+		t.Fatalf("plan_json changed unexpectedly")
+	}
+
+	stored, ok, err := svc.Tasks.GetExecutionPlanState(ctx, contractKey)
+	if err != nil {
+		t.Fatalf("get execution plan state: %v", err)
+	}
+	if !ok {
+		t.Fatalf("expected persisted execution plan state")
+	}
+	if stored.Iteration != 2 {
+		t.Fatalf("stored iteration=%d, want 2", stored.Iteration)
+	}
+}
+
+func TestRunExecutionPlanLoopV1_RequiresConfirmedMissionContract(t *testing.T) {
+	ctx, svc := newServiceForTest(t)
+	baseTask, err := svc.Tasks.CreateTask(ctx, tasks.CreateTaskInput{
+		WorkerType:     tasks.WorkerClaudeCode,
+		Mode:           tasks.ModeNew,
+		ConversationID: "conv-plan-loop-unconfirmed",
+		Prompt:         "seed",
+		WorkDir:        ".",
+		SessionID:      "sess-plan-loop-unconfirmed",
+	})
+	if err != nil {
+		t.Fatalf("create base task: %v", err)
+	}
+	if err := svc.Tasks.FinishTask(ctx, baseTask.ID, tasks.FinishTaskInput{
+		Status:     tasks.StatusFailed,
+		Error:      "boom",
+		SessionID:  baseTask.SessionID,
+		FinishedAt: baseTask.CreatedAt,
+	}); err != nil {
+		t.Fatalf("finish base task: %v", err)
+	}
+	if _, err := svc.Tasks.UpsertMissionContract(ctx, tasks.UpsertMissionContractInput{
+		Key:  tasks.ConversationKey(baseTask.ConversationID),
+		Goal: "Deliver autonomous execution",
+	}); err != nil {
+		t.Fatalf("upsert mission contract: %v", err)
+	}
+
+	_, err = svc.RunExecutionPlanLoopV1(ctx, tasks.SessionKeyForTask(baseTask), RunExecutionPlanLoopInput{MaxIterations: 1})
+	if err == nil {
+		t.Fatalf("expected unconfirmed mission contract error")
+	}
+	if !strings.Contains(strings.ToLower(err.Error()), "confirmed") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestDecideApproval_AutoResolvePending(t *testing.T) {
 	ctx, svc := newServiceForTest(t)
 	task, err := svc.Tasks.CreateTask(ctx, tasks.CreateTaskInput{
