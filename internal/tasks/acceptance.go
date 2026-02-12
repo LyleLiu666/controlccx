@@ -86,6 +86,16 @@ func (s *Store) UpsertAcceptanceState(ctx context.Context, in UpsertAcceptanceSt
 	if maxIterations <= 0 {
 		maxIterations = 10
 	}
+	planJSON := strings.TrimSpace(in.PlanJSON)
+	if planJSON == "" {
+		bridged, ok, err := s.bridgeAcceptancePlanFromMissionContract(ctx, key)
+		if err != nil {
+			return AcceptanceState{}, err
+		}
+		if ok {
+			planJSON = bridged
+		}
+	}
 
 	now := toMillis(s.now().UTC())
 	_, err := s.db.ExecContext(ctx, `
@@ -102,7 +112,7 @@ func (s *Store) UpsertAcceptanceState(ctx context.Context, in UpsertAcceptanceSt
 			report = excluded.report,
 			run_id = excluded.run_id,
 			updated_at = excluded.updated_at;
-	`, key, strings.TrimSpace(in.Status), in.Iteration, maxIterations, strings.TrimSpace(in.CurrentGate), strings.TrimSpace(in.Summary), strings.TrimSpace(in.PlanJSON), strings.TrimSpace(in.Report), strings.TrimSpace(in.RunID), now)
+	`, key, strings.TrimSpace(in.Status), in.Iteration, maxIterations, strings.TrimSpace(in.CurrentGate), strings.TrimSpace(in.Summary), planJSON, strings.TrimSpace(in.Report), strings.TrimSpace(in.RunID), now)
 	if err != nil {
 		return AcceptanceState{}, fmt.Errorf("tasks: upsert acceptance state: %w", err)
 	}
