@@ -10,6 +10,19 @@ type parsedLine struct {
 	SessionID     string
 	AssistantText string
 	IsResult      bool
+	ToolUses      []parsedToolUse
+	ToolResults   []parsedToolResult
+}
+
+type parsedToolUse struct {
+	ID   string
+	Name string
+}
+
+type parsedToolResult struct {
+	ToolUseID string
+	Content   string
+	IsError   bool
 }
 
 func parseClaudeJSONLine(line []byte) (parsedLine, error) {
@@ -21,6 +34,18 @@ func parseClaudeJSONLine(line []byte) (parsedLine, error) {
 		Content   string `json:"content,omitempty"`
 		Role      string `json:"role,omitempty"`
 		Delta     *bool  `json:"delta,omitempty"`
+		Message   *struct {
+			Role    string `json:"role,omitempty"`
+			Content []struct {
+				Type      string `json:"type,omitempty"`
+				Text      string `json:"text,omitempty"`
+				ID        string `json:"id,omitempty"`
+				Name      string `json:"name,omitempty"`
+				ToolUseID string `json:"tool_use_id,omitempty"`
+				Content   string `json:"content,omitempty"`
+				IsError   bool   `json:"is_error,omitempty"`
+			} `json:"content,omitempty"`
+		} `json:"message,omitempty"`
 	}
 	if err := json.Unmarshal(line, &evt); err != nil {
 		return parsedLine{}, err
@@ -35,6 +60,34 @@ func parseClaudeJSONLine(line []byte) (parsedLine, error) {
 		out.AssistantText = evt.Result
 	} else if evt.Role == "assistant" && evt.Content != "" {
 		out.AssistantText = evt.Content
+	}
+
+	if evt.Message != nil {
+		for _, c := range evt.Message.Content {
+			switch strings.TrimSpace(c.Type) {
+			case "tool_use":
+				id := strings.TrimSpace(c.ID)
+				if id == "" {
+					continue
+				}
+				out.ToolUses = append(out.ToolUses, parsedToolUse{
+					ID:   id,
+					Name: strings.TrimSpace(c.Name),
+				})
+			case "tool_result":
+				id := strings.TrimSpace(c.ToolUseID)
+				if id == "" {
+					continue
+				}
+				out.ToolResults = append(out.ToolResults, parsedToolResult{
+					ToolUseID: id,
+					Content:   strings.TrimSpace(c.Content),
+					IsError:   c.IsError,
+				})
+			default:
+				// Ignore other content blocks (text/images/etc).
+			}
+		}
 	}
 	return out, nil
 }

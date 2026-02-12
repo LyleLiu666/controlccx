@@ -55,6 +55,51 @@ func truncateUTF8Safe(s string, max int) (string, bool) {
 	return truncateRunes(s, max), true
 }
 
+func truncateUTF8SafeHeadTail(s string, head int, tail int) (string, bool) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return "", false
+	}
+	if head < 0 {
+		head = 0
+	}
+	if tail < 0 {
+		tail = 0
+	}
+	if head+tail <= 0 {
+		return "", true
+	}
+
+	n := utf8.RuneCountInString(s)
+	if n <= head+tail {
+		return s, false
+	}
+
+	r := []rune(s)
+	if head == 0 {
+		return string(r[len(r)-tail:]), true
+	}
+	if tail == 0 {
+		return truncateRunes(s, head), true
+	}
+	if head > len(r) {
+		head = len(r)
+	}
+	if tail > len(r)-head {
+		tail = len(r) - head
+	}
+	if tail < 0 {
+		tail = 0
+	}
+
+	out := make([]rune, 0, head+tail)
+	out = append(out, r[:head]...)
+	// Mark the head/tail cut boundary without increasing output size.
+	out[len(out)-1] = '…'
+	out = append(out, r[len(r)-tail:]...)
+	return string(out), true
+}
+
 func parseStringSliceCSV(s string) []string {
 	s = strings.TrimSpace(s)
 	if s == "" {

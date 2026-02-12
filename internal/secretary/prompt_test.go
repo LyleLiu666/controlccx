@@ -32,9 +32,9 @@ func TestBuildSystemPrompt_FinalAnswerMustBeChinesePlainText(t *testing.T) {
 	}
 }
 
-func TestBuildSystemPrompt_WriteToolsMissingParamsMustAskUser(t *testing.T) {
+func TestBuildSystemPrompt_WriteToolsMissingParamsShouldInfer(t *testing.T) {
 	prompt := buildSystemPrompt()
-	want := "对写操作工具（如创建任务）若必填参数缺失，必须先向用户索取，禁止猜测/自动补全。"
+	want := "写操作若缺参，优先调用工具推断并选择安全默认"
 	if !strings.Contains(prompt, want) {
 		t.Fatalf("prompt missing missing-params constraint: %q", want)
 	}
@@ -58,7 +58,7 @@ func TestBuildSystemPrompt_PrincipleDrivenGuidance(t *testing.T) {
 		"简单且追求速度 -> claude-code",
 		"严肃/生产级迭代 -> codex",
 		"不确定则先问再提",
-		"执行摘要（目标/worker/验收）",
+		"执行摘要（目标/worker/验收/关键假设）",
 		"exec 仅可在用户明确要求 shell/脚本执行时使用",
 	}
 

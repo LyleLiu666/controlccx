@@ -439,13 +439,14 @@ func (m *Manager) run(ctx context.Context, task tasks.Task) error {
 	)
 	resumeFailure := &resumeFailureState{}
 	blockedState := &blockedState{}
+	toolErrors := &toolErrorState{}
 
 	wg := sync.WaitGroup{}
 	wg.Add(2)
 
 	go func() {
 		defer wg.Done()
-		m.consumeStdout(ctx, task, driver, stdout, claudePeer, codexPeer, runWorkspaceActive, initProject, &lastSessionIDMu, &lastSessionID, cancel, resumeFailure, blockedState)
+		m.consumeStdout(ctx, task, driver, stdout, claudePeer, codexPeer, runWorkspaceActive, initProject, &lastSessionIDMu, &lastSessionID, cancel, resumeFailure, blockedState, toolErrors)
 	}()
 
 	go func() {
@@ -530,6 +531,16 @@ func (m *Manager) run(ctx context.Context, task tasks.Task) error {
 		SessionID:  sidToPersist,
 		FinishedAt: time.Now().UTC(),
 	})
+
+	if status == tasks.StatusSucceeded && toolErrors.seenAny() {
+		latest, err := m.store.GetTask(context.Background(), task.ID)
+		if err == nil && latest.Status == tasks.StatusSucceeded {
+			merged := mergeWarning(latest.Warning, succeededWithToolErrorsWarning)
+			if merged != strings.TrimSpace(latest.Warning) && merged != "" {
+				_ = m.store.SetWarning(context.Background(), task.ID, merged)
+			}
+		}
+	}
 	m.publishTaskUpdated(task.ID)
 
 	m.maybeStartNextWaitingForWorkdir(task.WorkDir)
@@ -887,8 +898,9 @@ func mergeEnvWithReport(base []string, additions map[string]string) ([]string, [
 	return out, applied
 }
 
-func (m *Manager) consumeStdout(ctx context.Context, task tasks.Task, driver tasks.WorkerType, stdout io.Reader, claudePeer *claudeProtocolPeer, codexPeer *codexAppServerPeer, runWorkspaceActive bool, initProject bool, sidMu *sync.Mutex, sid *string, cancel context.CancelFunc, resumeFailure *resumeFailureState, blocked *blockedState) {
+func (m *Manager) consumeStdout(ctx context.Context, task tasks.Task, driver tasks.WorkerType, stdout io.Reader, claudePeer *claudeProtocolPeer, codexPeer *codexAppServerPeer, runWorkspaceActive bool, initProject bool, sidMu *sync.Mutex, sid *string, cancel context.CancelFunc, resumeFailure *resumeFailureState, blocked *blockedState, toolErrors *toolErrorState) {
 	reader := newLineReader(stdout)
+	toolUseNames := map[string]string{}
 	for {
 		line, tooLong, err := readLineWithLimit(reader, defaultJSONLineMaxBytes)
 		if err != nil {
@@ -933,6 +945,39 @@ func (m *Manager) consumeStdout(ctx context.Context, task tasks.Task, driver tas
 		}
 
 		if err == nil {
+			if driver == tasks.WorkerClaudeCode {
+				for _, u := range parsed.ToolUses {
+					id := strings.TrimSpace(u.ID)
+					if id == "" {
+						continue
+					}
+					toolUseNames[id] = strings.TrimSpace(u.Name)
+				}
+				for _, r := range parsed.ToolResults {
+					if !r.IsError {
+						continue
+					}
+					toolErrors.mark()
+
+					id := strings.TrimSpace(r.ToolUseID)
+					toolName := strings.TrimSpace(toolUseNames[id])
+					if toolName == "" {
+						toolName = id
+					}
+					if toolName == "" {
+						toolName = "unknown"
+					}
+
+					exitPart := "exit=?"
+					if code, ok := parseToolResultExitCode(r.Content); ok {
+						exitPart = fmt.Sprintf("exit=%d", code)
+					}
+
+					summary := summarizeToolResultContent(r.Content, 500)
+					msg := strings.TrimSpace(fmt.Sprintf("tool_error: %s %s %s", toolName, exitPart, summary))
+					m.appendLog(task.ID, tasks.LogStderr, msg)
+				}
+			}
 			if parsed.SessionID != "" {
 				shouldPublish := false
 				sidMu.Lock()

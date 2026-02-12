@@ -97,7 +97,7 @@ func TestTaskLogsTail_BoundedAndTruncated(t *testing.T) {
 	}
 	for _, l := range out.Logs {
 		msg := strings.TrimSpace(l.Message)
-		if len([]rune(msg)) > 200 {
+		if len([]rune(msg)) > 800 {
 			t.Fatalf("line too long: %d", len([]rune(msg)))
 		}
 	}
@@ -277,7 +277,7 @@ func TestTasksList_ProjectScopeGuardByConversationID(t *testing.T) {
 	}
 }
 
-func TestTaskLogGet_CapsAt4000(t *testing.T) {
+func TestTaskLogGet_CapsAt12000(t *testing.T) {
 	ctx, deps := newDepsForToolsTest(t)
 	task, err := deps.Tasks.CreateTask(ctx, tasks.CreateTaskInput{
 		WorkerType: tasks.WorkerExec,
@@ -288,7 +288,7 @@ func TestTaskLogGet_CapsAt4000(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create task: %v", err)
 	}
-	entry, err := deps.Tasks.AppendLog(ctx, task.ID, tasks.LogSystem, strings.Repeat("A", 5000))
+	entry, err := deps.Tasks.AppendLog(ctx, task.ID, tasks.LogSystem, strings.Repeat("A", 15000))
 	if err != nil {
 		t.Fatalf("append log: %v", err)
 	}
@@ -316,8 +316,8 @@ func TestTaskLogGet_CapsAt4000(t *testing.T) {
 	}
 	out := outAny.(map[string]any)
 	msg := out["message"].(string)
-	if len([]rune(msg)) != 4000 {
-		t.Fatalf("message len=%d want 4000", len([]rune(msg)))
+	if len([]rune(msg)) != 12000 {
+		t.Fatalf("message len=%d want 12000", len([]rune(msg)))
 	}
 	if out["truncated"] != true {
 		t.Fatalf("truncated=%v want true", out["truncated"])

@@ -47,6 +47,7 @@ func runFakeClaudeProtocol() {
 		reqID     = "req-1"
 	)
 	waitForEOF := strings.TrimSpace(os.Getenv("CONTROLCCX_TEST_CLAUDE_HELPER_WAIT_EOF")) != ""
+	toolErrorMode := strings.TrimSpace(os.Getenv("CONTROLCCX_TEST_CLAUDE_HELPER_TOOL_ERROR")) != ""
 
 	// Emit init early so the worker can persist session_id.
 	writeLine(`{"type":"system","subtype":"init","session_id":"` + sessionID + `"}`)
@@ -75,6 +76,18 @@ func runFakeClaudeProtocol() {
 		return
 	}
 	if !seenUser {
+		return
+	}
+
+	if toolErrorMode {
+		const toolUseID = "call-1"
+		writeLine(`{"type":"assistant","session_id":"` + sessionID + `","message":{"role":"assistant","content":[{"type":"tool_use","id":"` + toolUseID + `","name":"Bash","input":{"cmd":"mkdir /root"}}]}}`)
+		writeLine(`{"type":"user","session_id":"` + sessionID + `","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"` + toolUseID + `","content":"Exit code 1\\nmkdir: Operation not permitted\\n","is_error":true}]}}`)
+		writeLine(`{"type":"result","subtype":"success","session_id":"` + sessionID + `","result":"ok","is_error":false}`)
+		if waitForEOF {
+			for sc.Scan() {
+			}
+		}
 		return
 	}
 
