@@ -586,6 +586,76 @@ func TestExecutionPlanLoopSubmit_RunsAndPersistsProgress(t *testing.T) {
 	}
 }
 
+func TestRollbackPlaybookGenerate_UsesProofReferences(t *testing.T) {
+	ctx, deps := newDepsForToolsTest(t)
+	reg := NewRegistry(deps)
+
+	task, err := deps.Tasks.CreateTask(ctx, tasks.CreateTaskInput{
+		WorkerType: tasks.WorkerClaudeCode,
+		Mode:       tasks.ModeNew,
+		Prompt:     "seed",
+		WorkDir:    ".",
+		SessionID:  "sess-rollback-playbook",
+	})
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	if _, err := deps.Tasks.CreateRollbackProof(ctx, tasks.CreateRollbackProofInput{
+		TaskID:     task.ID,
+		ActionType: "git.remote",
+		ActionRef:  "push-main",
+		ProofType:  "git_tag",
+		ProofRef:   "refs/tags/snapshot-20260212",
+		Detail:     json.RawMessage(`{"tag":"snapshot-20260212"}`),
+	}); err != nil {
+		t.Fatalf("create rollback proof #1: %v", err)
+	}
+	if _, err := deps.Tasks.CreateRollbackProof(ctx, tasks.CreateRollbackProofInput{
+		TaskID:     task.ID,
+		ActionType: "git.remote",
+		ActionRef:  "push-main",
+		ProofType:  "snapshot",
+		ProofRef:   "snapshot://rev-1",
+		Detail:     json.RawMessage(`{"workspace":"rev-1"}`),
+	}); err != nil {
+		t.Fatalf("create rollback proof #2: %v", err)
+	}
+
+	outAny, err := reg.Execute(ctx, agentsdk.ToolCall{
+		Name: "rollback_playbook_generate",
+		Fields: map[string]string{
+			"task_id": task.ID,
+		},
+	})
+	if err != nil {
+		t.Fatalf("generate rollback playbook: %v", err)
+	}
+	var out struct {
+		TaskID   string `json:"task_id"`
+		Playbook string `json:"playbook"`
+		Steps    []struct {
+			ProofRef  string `json:"proof_ref"`
+			ProofType string `json:"proof_type"`
+		} `json:"steps"`
+	}
+	raw, _ := json.Marshal(outAny)
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatalf("decode output: %v raw=%s", err, string(raw))
+	}
+	if strings.TrimSpace(out.TaskID) != task.ID {
+		t.Fatalf("task_id=%q, want %q", out.TaskID, task.ID)
+	}
+	if len(out.Steps) < 2 {
+		t.Fatalf("steps=%v, want at least 2", out.Steps)
+	}
+	if !strings.Contains(out.Playbook, "snapshot://rev-1") {
+		t.Fatalf("playbook missing proof ref: %q", out.Playbook)
+	}
+	if !strings.Contains(out.Playbook, "refs/tags/snapshot-20260212") {
+		t.Fatalf("playbook missing proof ref: %q", out.Playbook)
+	}
+}
+
 func strconvFormatInt(v int64) string {
 	return fmt.Sprintf("%d", v)
 }

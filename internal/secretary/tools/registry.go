@@ -19,6 +19,7 @@ func DefaultTools() []Tool {
 		taskResumeSubmitTool{},
 		taskRehydrateSubmitTool{},
 		missionContractUpsertTool{},
+		rollbackPlaybookGenerateTool{},
 		executionPlanLoopSubmitTool{},
 		taskApprovalDecideTool{},
 		taskEnterUnsafeSubmitTool{},

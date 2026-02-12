@@ -330,6 +330,57 @@ func TestService_Send_ExecutionPlanLoopViaChatToolPersistsProgress(t *testing.T)
 	}
 }
 
+func TestService_Send_GeneratesRollbackPlaybookViaChatTool(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "controlccx.db")
+
+	conn, err := db.Open(ctx, db.Options{Path: dbPath})
+	if err != nil {
+		t.Fatalf("db open: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+
+	taskStore := tasks.NewStore(conn)
+	chatStore := chat.NewStore(conn)
+
+	task, err := taskStore.CreateTask(ctx, tasks.CreateTaskInput{
+		WorkerType: tasks.WorkerClaudeCode,
+		Mode:       tasks.ModeNew,
+		Prompt:     "seed",
+		WorkDir:    ".",
+		SessionID:  "sess-playbook-chat",
+	})
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	if _, err := taskStore.CreateRollbackProof(ctx, tasks.CreateRollbackProofInput{
+		TaskID:     task.ID,
+		ActionType: "git.remote",
+		ActionRef:  "push-main",
+		ProofType:  "snapshot",
+		ProofRef:   "snapshot://rev-1",
+		Detail:     json.RawMessage(`{"workspace":"rev-1"}`),
+	}); err != nil {
+		t.Fatalf("create rollback proof: %v", err)
+	}
+
+	c := &scriptedClient{
+		responses: []string{
+			"<tool_data><call><tool_name>rollback_playbook_generate</tool_name><task_id>" + task.ID + "</task_id></call></tool_data>",
+			"回滚步骤如下：先使用 snapshot://rev-1 恢复，再验证关键测试。",
+		},
+	}
+
+	svc := NewService(config.Default(), taskStore, chatStore, nil, nil, WithClient(c))
+	reply, err := svc.Send(ctx, "给我回滚方案")
+	if err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	if !strings.Contains(reply, "snapshot://rev-1") {
+		t.Fatalf("reply=%q, want proof reference", reply)
+	}
+}
+
 func TestService_Send_PersistsEventSinkEvents(t *testing.T) {
 	ctx := context.Background()
 	dbPath := filepath.Join(t.TempDir(), "controlccx.db")
