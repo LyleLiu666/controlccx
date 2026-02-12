@@ -574,6 +574,9 @@ func (a *API) handleSessionByKey(w http.ResponseWriter, r *http.Request) {
 	case "queue":
 		a.handleSessionContinueQueue(w, r, key)
 		return
+	case "next-action":
+		a.handleSessionNextAction(w, r, key)
+		return
 	case "workspace":
 		if a.Tasks == nil {
 			http.Error(w, "tasks store not configured", http.StatusServiceUnavailable)

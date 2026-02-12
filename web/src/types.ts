@@ -92,6 +92,14 @@ export type SessionContinueQueueItem = {
   updated_at: string;
 };
 
+export type NextAction = {
+  conversation_id: string;
+  action: "resolve_approval" | "wait_in_flight" | "merge_workspace" | "resume_run" | "start_run";
+  reason: string;
+  task_id?: string;
+  approval_id?: string;
+};
+
 export type QueueAck = {
   queued: true;
   queue_id: string;

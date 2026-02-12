@@ -43,6 +43,7 @@ import type {
   ContinueResponse,
   TaskMutationSuccess,
   SessionContinueQueueItem,
+  NextAction,
   SkillVersion,
   SkillVersionsListResponse,
   ControlPlaneStatus,
@@ -502,6 +503,10 @@ export async function preemptSessionContinueWithOptions(
 export async function fetchSessionContinueQueue(key: string): Promise<SessionContinueQueueItem[]> {
   const res = await getJSON<{ items: SessionContinueQueueItem[] }>(`/api/sessions/${encodeURIComponent(key)}/queue`);
   return Array.isArray(res.items) ? res.items : [];
+}
+
+export async function fetchSessionNextAction(key: string): Promise<NextAction> {
+  return getJSON<NextAction>(`/api/sessions/${encodeURIComponent(key)}/next-action`);
 }
 
 export function isQueueAck(v: unknown): v is QueueAck {
