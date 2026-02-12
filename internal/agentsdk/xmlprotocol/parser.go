@@ -16,7 +16,8 @@ type Call struct {
 }
 
 var (
-	reCall = regexp.MustCompile(`(?is)<call\b[^>]*>.*?</call>`)
+	reCall          = regexp.MustCompile(`(?is)<call\b[^>]*>.*?</call>`)
+	reNamedParamTag = regexp.MustCompile(`(?is)<(parameter|param|arg)\b([^>]*)>(.*?)</(?:parameter|param|arg)>`)
 )
 
 // StripThinking removes <thinking>...</thinking> and <think>...</think> blocks.
@@ -229,6 +230,7 @@ func parseCall(callInner string, raw string) (Call, error) {
 		}
 	}
 
+	mergeNamedParameterFields(callInner, fields)
 	mergeNestedArgumentFields(fields)
 
 	// Normalize common aliases.
@@ -403,6 +405,65 @@ func mergeNestedArgumentFields(fields map[string]string) {
 	}
 }
 
+func mergeNamedParameterFields(callInner string, fields map[string]string) {
+	if strings.TrimSpace(callInner) == "" || len(fields) == 0 {
+		return
+	}
+	matches := reNamedParamTag.FindAllStringSubmatch(callInner, -1)
+	for _, m := range matches {
+		if len(m) < 4 {
+			continue
+		}
+		attrs := strings.TrimSpace(m[2])
+		name := namedParameterKey(attrs)
+		if name == "" {
+			continue
+		}
+		value := normalizeXMLValue(strings.TrimSpace(m[3]))
+		if strings.TrimSpace(value) == "" {
+			continue
+		}
+		if cur, exists := fields[name]; !exists || strings.TrimSpace(cur) == "" {
+			fields[name] = value
+		}
+	}
+}
+
+func namedParameterKey(attrs string) string {
+	attrs = strings.TrimSpace(attrs)
+	if attrs == "" {
+		return ""
+	}
+	nameAttrs := []string{"name", "key", "field"}
+	for _, attr := range nameAttrs {
+		if v, ok := findAttrValue(attrs, attr); ok {
+			return strings.TrimSpace(v)
+		}
+	}
+	return ""
+}
+
+func findAttrValue(attrs string, attr string) (string, bool) {
+	attr = strings.TrimSpace(attr)
+	if attr == "" {
+		return "", false
+	}
+	re, err := regexp.Compile(fmt.Sprintf(`(?is)\b%s\s*=\s*("([^"]*)"|'([^']*)'|([^\s>]+))`, regexp.QuoteMeta(attr)))
+	if err != nil {
+		return "", false
+	}
+	m := re.FindStringSubmatch(attrs)
+	if len(m) < 2 {
+		return "", false
+	}
+	for i := 2; i < len(m); i++ {
+		if strings.TrimSpace(m[i]) != "" {
+			return m[i], true
+		}
+	}
+	return strings.TrimSpace(m[1]), true
+}
+
 func lookupFieldCaseInsensitive(fields map[string]string, key string) (string, bool) {
 	if v, ok := fields[key]; ok {
 		return v, true
@@ -467,6 +528,24 @@ func jsonValueToString(value any) string {
 		}
 		return fmt.Sprint(v)
 	}
+}
+
+func normalizeXMLValue(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	// CDATA support.
+	if strings.HasPrefix(value, "<![CDATA[") {
+		if end := strings.Index(value, "]]>"); end != -1 {
+			value = value[len("<![CDATA["):end]
+		} else {
+			value = value[len("<![CDATA["):]
+		}
+	}
+	value = html.UnescapeString(value)
+	value = strings.ReplaceAll(value, "\r\n", "\n")
+	return value
 }
 
 func toolNameAndTag(callInner string) (name string, tag string, ok bool) {

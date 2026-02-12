@@ -254,3 +254,30 @@ func TestParseToolData_UnwrapsArgumentsJSONAndNormalizesAliases(t *testing.T) {
 		t.Fatalf("expected workdir %q, got %q", "/tmp", got)
 	}
 }
+
+func TestParseToolData_PromotesNamedParameterTagsToFields(t *testing.T) {
+	input := `<tool_data>
+  <call>
+    <tool_name>fs_entries</tool_name>
+    <parameter name="path">/Users/liu_y/code/goProject</parameter>
+    <parameter name="kind">dir</parameter>
+  </call>
+</tool_data>`
+
+	calls, err := ParseToolData(input)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if len(calls) != 1 {
+		t.Fatalf("expected 1 call, got %d", len(calls))
+	}
+	if calls[0].ToolName != "fs_entries" {
+		t.Fatalf("expected tool %q, got %q", "fs_entries", calls[0].ToolName)
+	}
+	if got := calls[0].Fields["path"]; got != "/Users/liu_y/code/goProject" {
+		t.Fatalf("expected path %q, got %q", "/Users/liu_y/code/goProject", got)
+	}
+	if got := calls[0].Fields["kind"]; got != "dir" {
+		t.Fatalf("expected kind %q, got %q", "dir", got)
+	}
+}
