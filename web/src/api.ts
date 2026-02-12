@@ -509,6 +509,16 @@ export async function fetchSessionNextAction(key: string): Promise<NextAction> {
   return getJSON<NextAction>(`/api/sessions/${encodeURIComponent(key)}/next-action`);
 }
 
+export async function executeSessionNextAction(
+  key: string,
+  body?: { action?: NextAction["action"]; prompt?: string },
+): Promise<TaskMutationSuccess> {
+  return postJSON<TaskMutationSuccess>(`/api/sessions/${encodeURIComponent(key)}/next-action/execute`, {
+    action: body?.action,
+    prompt: body?.prompt ?? "",
+  });
+}
+
 export function isQueueAck(v: unknown): v is QueueAck {
   return !!v && typeof v === "object" && (v as any).queued === true && typeof (v as any).queue_id === "string";
 }

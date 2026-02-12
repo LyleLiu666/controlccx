@@ -17,6 +17,7 @@ const (
 	ActionTaskEnterUnsafe        MutationAction = "task.enter_unsafe"
 	ActionSessionContinue        MutationAction = "session.continue"
 	ActionSessionPreemptContinue MutationAction = "session.preempt_continue"
+	ActionSessionNextActionExec  MutationAction = "session.next_action_execute"
 )
 
 type MutationResult struct {

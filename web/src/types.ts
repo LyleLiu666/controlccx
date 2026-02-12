@@ -115,7 +115,8 @@ export type TaskMutationAction =
   | "task.rehydrate"
   | "task.enter_unsafe"
   | "session.continue"
-  | "session.preempt_continue";
+  | "session.preempt_continue"
+  | "session.next_action_execute";
 
 export type TaskMutationSuccess = {
   ok: true;

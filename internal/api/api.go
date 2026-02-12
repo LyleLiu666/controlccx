@@ -575,7 +575,15 @@ func (a *API) handleSessionByKey(w http.ResponseWriter, r *http.Request) {
 		a.handleSessionContinueQueue(w, r, key)
 		return
 	case "next-action":
-		a.handleSessionNextAction(w, r, key)
+		if len(parts) == 2 {
+			a.handleSessionNextAction(w, r, key)
+			return
+		}
+		if len(parts) == 3 && strings.TrimSpace(parts[2]) == "execute" {
+			a.handleSessionNextActionExecute(w, r, key)
+			return
+		}
+		http.NotFound(w, r)
 		return
 	case "workspace":
 		if a.Tasks == nil {
