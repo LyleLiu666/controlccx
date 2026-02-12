@@ -324,6 +324,76 @@ func TestTaskLogGet_CapsAt4000(t *testing.T) {
 	}
 }
 
+func TestTaskContinueSubmit_RejectsCancelPrompt(t *testing.T) {
+	ctx, deps := newDepsForToolsTest(t)
+	task, err := deps.Tasks.CreateTask(ctx, tasks.CreateTaskInput{
+		WorkerType: tasks.WorkerExec,
+		Mode:       tasks.ModeNew,
+		Prompt:     "p",
+		WorkDir:    ".",
+	})
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	reg := NewRegistry(deps)
+	_, err = reg.Execute(ctx, agentsdk.ToolCall{
+		Name: "task_continue_submit",
+		Fields: map[string]string{
+			"task_id": task.ID,
+			"prompt":  "/cancel",
+		},
+	})
+	if err == nil {
+		t.Fatalf("expected error")
+	}
+	if !strings.Contains(strings.ToLower(err.Error()), "task_cancel_submit") {
+		t.Fatalf("err=%q want mention task_cancel_submit", err.Error())
+	}
+}
+
+func TestTaskCancelSubmit_CancelsQueued(t *testing.T) {
+	ctx, deps := newDepsForToolsTest(t)
+	task, err := deps.Tasks.CreateTask(ctx, tasks.CreateTaskInput{
+		WorkerType: tasks.WorkerExec,
+		Mode:       tasks.ModeNew,
+		Prompt:     "p",
+		WorkDir:    ".",
+	})
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	reg := NewRegistry(deps)
+	outAny, err := reg.Execute(ctx, agentsdk.ToolCall{
+		Name: "task_cancel_submit",
+		Fields: map[string]string{
+			"task_id": task.ID,
+		},
+	})
+	if err != nil {
+		t.Fatalf("execute tool: %v", err)
+	}
+	out := outAny.(map[string]any)
+	if out["requested"] != true {
+		t.Fatalf("requested=%v want true", out["requested"])
+	}
+	if strings.TrimSpace(out["status_before"].(string)) != string(tasks.StatusQueued) {
+		t.Fatalf("status_before=%v want %v", out["status_before"], tasks.StatusQueued)
+	}
+	if strings.TrimSpace(out["status_after"].(string)) != string(tasks.StatusCanceled) {
+		t.Fatalf("status_after=%v want %v", out["status_after"], tasks.StatusCanceled)
+	}
+
+	updated, err := deps.Tasks.GetTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if updated.Status != tasks.StatusCanceled {
+		t.Fatalf("status=%q want %q", updated.Status, tasks.StatusCanceled)
+	}
+}
+
 func TestTaskApprovalDecide_AutoResolvePending(t *testing.T) {
 	ctx, deps := newDepsForToolsTest(t)
 	task, err := deps.Tasks.CreateTask(ctx, tasks.CreateTaskInput{

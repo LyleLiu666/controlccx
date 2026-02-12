@@ -62,6 +62,18 @@ type QueueAck struct {
 	PreemptedTaskID string `json:"preempted_task_id,omitempty"`
 }
 
+type CancelResult struct {
+	TaskID               string      `json:"task_id"`
+	Requested            bool        `json:"requested"`
+	StatusBefore         tasks.Status `json:"status_before"`
+	StatusAfter          tasks.Status `json:"status_after"`
+	RunnerCancelAttempted bool       `json:"runner_cancel_attempted,omitempty"`
+	RunnerCancelOK       bool        `json:"runner_cancel_ok,omitempty"`
+	PromotedTaskID       string      `json:"promoted_task_id,omitempty"`
+	StartedTaskID        string      `json:"started_task_id,omitempty"`
+	NextStartError       string      `json:"next_start_error,omitempty"`
+}
+
 type RunnerUnavailableError struct {
 	TaskID string
 	Err    error
@@ -72,6 +84,132 @@ func (e *RunnerUnavailableError) Error() string {
 		return "runner unavailable"
 	}
 	return e.Err.Error()
+}
+
+func isTerminalTaskStatus(status tasks.Status) bool {
+	switch status {
+	case tasks.StatusSucceeded, tasks.StatusFailed, tasks.StatusCanceled, tasks.StatusInterrupted, tasks.StatusBlocked:
+		return true
+	default:
+		return false
+	}
+}
+
+func (s *Service) publishTaskUpdated(ctx context.Context, taskID string) {
+	if s == nil || s.Hub == nil || s.Tasks == nil {
+		return
+	}
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" {
+		return
+	}
+	updated, err := s.Tasks.GetTask(ctx, taskID)
+	if err != nil {
+		return
+	}
+	s.Hub.Publish(events.Event{Type: "task.updated", Time: time.Now().UTC(), Payload: updated})
+}
+
+func (s *Service) CancelTask(ctx context.Context, taskID string) (CancelResult, error) {
+	if s == nil || s.Tasks == nil {
+		return CancelResult{}, errors.New("tasks store not configured")
+	}
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" {
+		return CancelResult{}, errors.New("task_id is required")
+	}
+
+	t, err := s.Tasks.GetTask(ctx, taskID)
+	if err != nil {
+		return CancelResult{}, err
+	}
+
+	out := CancelResult{
+		TaskID:       taskID,
+		Requested:    false,
+		StatusBefore: t.Status,
+		StatusAfter:  t.Status,
+	}
+
+	if isTerminalTaskStatus(t.Status) {
+		return out, nil
+	}
+
+	switch t.Status {
+	case tasks.StatusWaiting:
+		if err := s.Tasks.SetCanceled(ctx, taskID); err != nil {
+			return out, err
+		}
+		out.Requested = true
+		out.StatusAfter = tasks.StatusCanceled
+		s.publishTaskUpdated(ctx, taskID)
+		return out, nil
+
+	case tasks.StatusQueued:
+		if err := s.Tasks.SetCanceled(ctx, taskID); err != nil {
+			return out, err
+		}
+		out.Requested = true
+		out.StatusAfter = tasks.StatusCanceled
+		s.publishTaskUpdated(ctx, taskID)
+
+		// Free up the workdir by immediately promoting the next waiting run (if any).
+		next, ok, err := s.Tasks.DequeueNextWaitingForWorkdir(ctx, t.WorkDir)
+		if err != nil {
+			return out, err
+		}
+		if !ok {
+			return out, nil
+		}
+
+		out.PromotedTaskID = strings.TrimSpace(next.ID)
+		if out.PromotedTaskID == "" {
+			return out, nil
+		}
+
+		_, _ = s.Tasks.AppendLog(ctx, out.PromotedTaskID, tasks.LogSystem, fmt.Sprintf("wait-queue: promoted after cancel (canceled_task_id=%s)", taskID))
+		s.publishTaskUpdated(ctx, out.PromotedTaskID)
+
+		if s.Workers == nil {
+			return out, nil
+		}
+		if err := s.Workers.Start(ctx, out.PromotedTaskID); err != nil {
+			out.NextStartError = strings.TrimSpace(err.Error())
+			_, _ = s.Tasks.AppendLog(ctx, out.PromotedTaskID, tasks.LogSystem, fmt.Sprintf("runner start failed: %v", err))
+			_ = s.Tasks.FinishTask(ctx, out.PromotedTaskID, tasks.FinishTaskInput{
+				Status:     tasks.StatusFailed,
+				ExitCode:   nil,
+				Error:      err.Error(),
+				SessionID:  strings.TrimSpace(next.SessionID),
+				FinishedAt: time.Now().UTC(),
+			})
+			s.publishTaskUpdated(ctx, out.PromotedTaskID)
+			return out, nil
+		}
+		out.StartedTaskID = out.PromotedTaskID
+		return out, nil
+
+	case tasks.StatusRunning, tasks.StatusAwaitingApproval:
+		if s.Workers == nil {
+			return out, errors.New("runner not configured")
+		}
+		out.RunnerCancelAttempted = true
+		ok, err := s.Workers.Cancel(ctx, taskID)
+		if err != nil {
+			return out, &RunnerUnavailableError{TaskID: taskID, Err: err}
+		}
+		out.RunnerCancelOK = ok
+		if ok {
+			out.Requested = true
+			_, _ = s.Tasks.AppendLog(ctx, taskID, tasks.LogSystem, "cancel requested")
+			s.publishTaskUpdated(ctx, taskID)
+		}
+		return out, nil
+
+	default:
+		// Preserve current status for any other non-terminal states.
+		return out, nil
+	}
 }
 
 func (s *Service) ContinueSession(ctx context.Context, key string, body RunOptions) (ContinueResult, error) {

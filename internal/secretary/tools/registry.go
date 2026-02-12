@@ -18,6 +18,7 @@ func DefaultTools() []Tool {
 		tasksCountTool{},
 		tasksListTool{},
 		taskNewSubmitTool{},
+		taskCancelSubmitTool{},
 		taskContinueSubmitTool{},
 		taskPreemptContinueSubmitTool{},
 		taskResumeSubmitTool{},

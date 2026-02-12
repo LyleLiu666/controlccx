@@ -165,7 +165,19 @@ func TestAPI_TaskCancel_DegradesExplicitlyWhenRunnerUnavailable(t *testing.T) {
 	srv := httptest.NewServer(apiSvc.Handler())
 	t.Cleanup(srv.Close)
 
-	taskID := "t-cancel"
+	task, err := taskStore.CreateTask(ctx, tasks.CreateTaskInput{
+		WorkerType: tasks.WorkerExec,
+		Mode:       tasks.ModeNew,
+		Prompt:     "echo hi",
+		WorkDir:    ".",
+	})
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	if err := taskStore.SetRunning(ctx, task.ID); err != nil {
+		t.Fatalf("set running: %v", err)
+	}
+	taskID := task.ID
 	req, err := http.NewRequest(http.MethodPost, srv.URL+"/api/tasks/"+url.PathEscape(taskID)+"/cancel", nil)
 	if err != nil {
 		t.Fatalf("new request: %v", err)

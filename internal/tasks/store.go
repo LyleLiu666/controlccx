@@ -541,13 +541,17 @@ func (s *Store) MarkInterrupted(ctx context.Context) (int64, error) {
 
 func (s *Store) SetRunning(ctx context.Context, id string) error {
 	now := toMillis(s.now().UTC())
-	_, err := s.db.ExecContext(ctx, `
+	res, err := s.db.ExecContext(ctx, `
 		UPDATE tasks
 		SET status = ?, started_at = ?, updated_at = ?
-		WHERE id = ?;
-	`, string(StatusRunning), now, now, id)
+		WHERE id = ? AND status = ?;
+	`, string(StatusRunning), now, now, id, string(StatusQueued))
 	if err != nil {
 		return fmt.Errorf("tasks: set running: %w", err)
+	}
+	if rows, _ := res.RowsAffected(); rows == 0 {
+		// Status changed concurrently (e.g. canceled); treat as a best-effort no-op for callers.
+		return fmt.Errorf("tasks: set running: task not queued")
 	}
 	return nil
 }

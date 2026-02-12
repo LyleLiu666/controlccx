@@ -789,11 +789,15 @@ func (a *API) handleTaskByID(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		ok := false
-		if a.Workers != nil {
-			var err error
-			ok, err = a.Workers.Cancel(r.Context(), id)
-			if err != nil {
+		ops := a.taskOpsOrShim()
+		if ops == nil {
+			http.Error(w, "task ops not configured", http.StatusServiceUnavailable)
+			return
+		}
+		res, err := ops.CancelTask(r.Context(), id)
+		if err != nil {
+			var runnerErr *taskops.RunnerUnavailableError
+			if errors.As(err, &runnerErr) {
 				writeJSONStatus(w, http.StatusServiceUnavailable, map[string]any{
 					"error":   "runner_unavailable",
 					"message": err.Error(),
@@ -802,8 +806,25 @@ func (a *API) handleTaskByID(w http.ResponseWriter, r *http.Request) {
 				})
 				return
 			}
+			if strings.TrimSpace(err.Error()) == "tasks: not found" {
+				http.Error(w, err.Error(), http.StatusNotFound)
+				return
+			}
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
 		}
-		writeJSON(w, map[string]any{"ok": ok})
+		writeJSON(w, map[string]any{
+			"ok":                    res.Requested,
+			"task_id":               res.TaskID,
+			"requested":             res.Requested,
+			"status_before":         string(res.StatusBefore),
+			"status_after":          string(res.StatusAfter),
+			"runner_cancel_attempted": res.RunnerCancelAttempted,
+			"runner_cancel_ok":      res.RunnerCancelOK,
+			"promoted_task_id":      res.PromotedTaskID,
+			"started_task_id":       res.StartedTaskID,
+			"next_start_error":      res.NextStartError,
+		})
 	case "approvals":
 		if a.Tasks == nil {
 			http.Error(w, "tasks store not configured", http.StatusServiceUnavailable)

@@ -2,6 +2,8 @@ package tools
 
 import (
 	"context"
+	"errors"
+	"strings"
 
 	"controlccx/internal/agentsdk"
 )
@@ -24,6 +26,16 @@ func (taskContinueSubmitTool) Execute(ctx context.Context, call agentsdk.ToolCal
 		return nil, err
 	}
 	body := runOptionsFromFields(call.Fields)
+	{
+		p := strings.TrimSpace(body.Prompt)
+		lp := strings.ToLower(p)
+		// Do not overload "continue" with "cancel" semantics: this created a severe UX bug.
+		if p == "/cancel" || lp == "cancel" || p == "取消" {
+			err := errors.New("cancel prompt is not supported; use task_cancel_submit instead")
+			ops.AppendActionAuditLog(ctx, taskID, "task_continue_submit", map[string]any{"task_id": taskID, "session_key": key, "prompt": body.Prompt}, err)
+			return nil, err
+		}
+	}
 	res, err := ops.ContinueSession(ctx, key, body)
 	ops.AppendActionAuditLog(ctx, taskID, "task_continue_submit", map[string]any{"task_id": taskID, "session_key": key, "prompt": body.Prompt}, err)
 	if err != nil {
