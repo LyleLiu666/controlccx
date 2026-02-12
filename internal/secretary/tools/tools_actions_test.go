@@ -155,6 +155,128 @@ func TestTaskLogsTail_UsesLatestLogsWhenManyEntries(t *testing.T) {
 	}
 }
 
+func TestTasksList_ProjectScopeGuardByTaskID(t *testing.T) {
+	ctx, deps := newDepsForToolsTest(t)
+	reg := NewRegistry(deps)
+
+	projA := filepath.Join(t.TempDir(), "proj-a")
+	projB := filepath.Join(t.TempDir(), "proj-b")
+	taskA, err := deps.Tasks.CreateTask(ctx, tasks.CreateTaskInput{
+		WorkerType:     tasks.WorkerExec,
+		Mode:           tasks.ModeNew,
+		ConversationID: "conv-scope-a",
+		Prompt:         "a",
+		WorkDir:        projA,
+	})
+	if err != nil {
+		t.Fatalf("create task A: %v", err)
+	}
+	if _, err := deps.Tasks.CreateTask(ctx, tasks.CreateTaskInput{
+		WorkerType:     tasks.WorkerExec,
+		Mode:           tasks.ModeNew,
+		ConversationID: "conv-scope-b",
+		Prompt:         "b",
+		WorkDir:        projB,
+	}); err != nil {
+		t.Fatalf("create task B: %v", err)
+	}
+
+	outAny, err := reg.Execute(ctx, agentsdk.ToolCall{
+		Name: "tasks_list",
+		Fields: map[string]string{
+			"task_id":         taskA.ID,
+			"limit":           "50",
+			"include_deleted": "1",
+		},
+	})
+	if err != nil {
+		t.Fatalf("tasks_list by task_id: %v", err)
+	}
+	var out struct {
+		ProjectScope string `json:"project_scope"`
+		Tasks        []struct {
+			ID      string `json:"id"`
+			WorkDir string `json:"workdir"`
+		} `json:"tasks"`
+	}
+	raw, _ := json.Marshal(outAny)
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatalf("decode output: %v raw=%s", err, string(raw))
+	}
+	wantScope := tasks.NormalizeProjectKey(projA)
+	if out.ProjectScope != wantScope {
+		t.Fatalf("project_scope=%q, want %q", out.ProjectScope, wantScope)
+	}
+	if len(out.Tasks) == 0 {
+		t.Fatalf("expected scoped tasks")
+	}
+	for _, item := range out.Tasks {
+		if tasks.NormalizeProjectKey(item.WorkDir) != wantScope {
+			t.Fatalf("unexpected cross-project workdir=%q want scope %q", item.WorkDir, wantScope)
+		}
+	}
+}
+
+func TestTasksList_ProjectScopeGuardByConversationID(t *testing.T) {
+	ctx, deps := newDepsForToolsTest(t)
+	reg := NewRegistry(deps)
+
+	projA := filepath.Join(t.TempDir(), "proj-a")
+	projB := filepath.Join(t.TempDir(), "proj-b")
+	if _, err := deps.Tasks.CreateTask(ctx, tasks.CreateTaskInput{
+		WorkerType:     tasks.WorkerExec,
+		Mode:           tasks.ModeNew,
+		ConversationID: "conv-scope2-a",
+		Prompt:         "a",
+		WorkDir:        projA,
+	}); err != nil {
+		t.Fatalf("create task A: %v", err)
+	}
+	if _, err := deps.Tasks.CreateTask(ctx, tasks.CreateTaskInput{
+		WorkerType:     tasks.WorkerExec,
+		Mode:           tasks.ModeNew,
+		ConversationID: "conv-scope2-b",
+		Prompt:         "b",
+		WorkDir:        projB,
+	}); err != nil {
+		t.Fatalf("create task B: %v", err)
+	}
+
+	outAny, err := reg.Execute(ctx, agentsdk.ToolCall{
+		Name: "tasks_list",
+		Fields: map[string]string{
+			"conversation_id": "conv-scope2-a",
+			"limit":           "50",
+			"include_deleted": "1",
+		},
+	})
+	if err != nil {
+		t.Fatalf("tasks_list by conversation_id: %v", err)
+	}
+	var out struct {
+		ProjectScope string `json:"project_scope"`
+		Tasks        []struct {
+			WorkDir string `json:"workdir"`
+		} `json:"tasks"`
+	}
+	raw, _ := json.Marshal(outAny)
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatalf("decode output: %v raw=%s", err, string(raw))
+	}
+	wantScope := tasks.NormalizeProjectKey(projA)
+	if out.ProjectScope != wantScope {
+		t.Fatalf("project_scope=%q, want %q", out.ProjectScope, wantScope)
+	}
+	if len(out.Tasks) == 0 {
+		t.Fatalf("expected scoped tasks")
+	}
+	for _, item := range out.Tasks {
+		if tasks.NormalizeProjectKey(item.WorkDir) != wantScope {
+			t.Fatalf("unexpected cross-project workdir=%q want scope %q", item.WorkDir, wantScope)
+		}
+	}
+}
+
 func TestTaskLogGet_CapsAt4000(t *testing.T) {
 	ctx, deps := newDepsForToolsTest(t)
 	task, err := deps.Tasks.CreateTask(ctx, tasks.CreateTaskInput{
