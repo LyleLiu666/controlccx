@@ -310,6 +310,8 @@ func (m *Manager) run(ctx context.Context, task tasks.Task) error {
 
 			useWorkspace, reason := shouldUseRunWorkspace(task, hasExistingWorkspace, initProject)
 			if useWorkspace {
+				ensureStart := time.Now()
+				m.appendLog(task.ID, tasks.LogSystem, fmt.Sprintf("workspace: ensure start base=%s", filepath.Clean(task.WorkDir)))
 				ens, err := m.ws.EnsureForTask(ctx, task)
 				if err != nil {
 					m.appendLog(task.ID, tasks.LogSystem, fmt.Sprintf("workspace setup error: %v", err))
@@ -324,6 +326,7 @@ func (m *Manager) run(ctx context.Context, task tasks.Task) error {
 					return err
 				}
 				ws := ens.Workspace
+				m.appendLog(task.ID, tasks.LogSystem, fmt.Sprintf("workspace: ensure done kind=%s duration_ms=%d", strings.TrimSpace(ws.Kind), time.Since(ensureStart).Milliseconds()))
 				if strings.TrimSpace(ws.RunWorkDir) != "" {
 					effective.WorkDir = strings.TrimSpace(ws.RunWorkDir)
 				}

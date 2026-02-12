@@ -74,6 +74,84 @@ func TestService_EnsureForTask_CopyModeAndApplyBackConflicts(t *testing.T) {
 	}
 }
 
+func TestService_EnsureForTask_CopyMode_ExcludesNestedDirs(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "controlccx.db")
+	conn, err := db.Open(ctx, db.Options{Path: dbPath})
+	if err != nil {
+		t.Fatalf("db open: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+
+	store := tasks.NewStore(conn)
+
+	base := t.TempDir()
+	mustWrite := func(rel string) {
+		t.Helper()
+		full := filepath.Join(base, rel)
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		if err := os.WriteFile(full, []byte("x\n"), 0o644); err != nil {
+			t.Fatalf("write %s: %v", rel, err)
+		}
+	}
+
+	// Any-depth excludes.
+	mustWrite(filepath.Join("a", "node_modules", "x.txt"))
+	mustWrite(filepath.Join("b", ".git", "config"))
+	mustWrite(filepath.Join("c", ".venv", "pyvenv.cfg"))
+
+	// Top-level excludes only.
+	mustWrite(filepath.Join("dist", "out.txt"))
+	mustWrite(filepath.Join("build", "out.txt"))
+
+	// Nested build should be kept.
+	mustWrite(filepath.Join("x", "build", "keep.txt"))
+
+	// Normal file should be kept.
+	mustWrite("keep.txt")
+
+	svc := NewService(store, Options{Retain: 5})
+	task := tasks.Task{
+		ID:             "t-excludes",
+		ConversationID: uuid.NewString(),
+		WorkDir:        base,
+	}
+	ens, err := svc.EnsureForTask(ctx, task)
+	if err != nil {
+		t.Fatalf("EnsureForTask: %v", err)
+	}
+	if ens.Workspace.Kind != "copy" {
+		t.Fatalf("kind=%q, want %q", ens.Workspace.Kind, "copy")
+	}
+
+	ws := ens.Workspace.RunRoot
+	if _, err := os.Stat(filepath.Join(ws, "keep.txt")); err != nil {
+		t.Fatalf("expected keep.txt: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(ws, "x", "build", "keep.txt")); err != nil {
+		t.Fatalf("expected nested x/build/keep.txt: %v", err)
+	}
+
+	// Excluded dirs should not exist in the workspace.
+	if _, err := os.Stat(filepath.Join(ws, "a", "node_modules")); err == nil {
+		t.Fatalf("expected a/node_modules excluded from workspace copy")
+	}
+	if _, err := os.Stat(filepath.Join(ws, "b", ".git")); err == nil {
+		t.Fatalf("expected b/.git excluded from workspace copy")
+	}
+	if _, err := os.Stat(filepath.Join(ws, "c", ".venv")); err == nil {
+		t.Fatalf("expected c/.venv excluded from workspace copy")
+	}
+	if _, err := os.Stat(filepath.Join(ws, "dist")); err == nil {
+		t.Fatalf("expected dist excluded from workspace copy")
+	}
+	if _, err := os.Stat(filepath.Join(ws, "build")); err == nil {
+		t.Fatalf("expected build excluded from workspace copy")
+	}
+}
+
 func TestService_EnsureForTask_GitWorktreeModeCopiesUncommitted(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not found on PATH")

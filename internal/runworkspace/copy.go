@@ -22,13 +22,37 @@ type copyManifest struct {
 
 const maxHashBytes = 1 << 20 // 1 MiB
 
-var defaultExcludedCopyDirs = map[string]bool{
+var excludedCopyDirsAnyDepth = map[string]bool{
 	".ccx":         true,
 	".git":         true,
 	".venv":        true,
 	"node_modules": true,
-	"dist":         true,
-	"build":        true,
+}
+
+var excludedCopyDirsTopLevel = map[string]bool{
+	"dist":  true,
+	"build": true,
+}
+
+func isExcludedCopyPath(relSlash string) bool {
+	relSlash = strings.TrimSpace(relSlash)
+	if relSlash == "" || relSlash == "." {
+		return false
+	}
+	relSlash = strings.Trim(relSlash, "/")
+	if relSlash == "" {
+		return false
+	}
+	parts := strings.Split(relSlash, "/")
+	for _, p := range parts {
+		if excludedCopyDirsAnyDepth[p] {
+			return true
+		}
+	}
+	if len(parts) > 0 && excludedCopyDirsTopLevel[parts[0]] {
+		return true
+	}
+	return false
 }
 
 func createCopyWorkspace(baseWorkDir, runRoot string) (tasks.SessionWorkspace, error) {
@@ -180,9 +204,7 @@ func applyBackCopyWorkspace(ws tasks.SessionWorkspace) ([]string, []string, erro
 			return nil
 		}
 
-		// Skip any nested workspace metadata.
-		first := strings.Split(relSlash, "/")[0]
-		if defaultExcludedCopyDirs[first] {
+		if isExcludedCopyPath(relSlash) {
 			if d.IsDir() {
 				return filepath.SkipDir
 			}
@@ -246,8 +268,7 @@ func copyDirWithManifest(srcRoot, dstRoot string) (copyManifest, error) {
 			return nil
 		}
 
-		first := strings.Split(relSlash, "/")[0]
-		if defaultExcludedCopyDirs[first] {
+		if isExcludedCopyPath(relSlash) {
 			if d.IsDir() {
 				return filepath.SkipDir
 			}
