@@ -55,6 +55,11 @@ func (a *API) handleSessionNextActionExecute(w http.ResponseWriter, r *http.Requ
 	if strings.TrimSpace(string(body.Action)) != "" {
 		execAction = tasks.NextActionType(strings.TrimSpace(string(body.Action)))
 	}
+	if next.Action == tasks.NextActionConfirmContract &&
+		(execAction == tasks.NextActionStartRun || execAction == tasks.NextActionResumeRun || execAction == tasks.NextActionConfirmContract) {
+		writeTaskMutationProblem(w, errors.New("cannot continue until mission contract is confirmed"))
+		return
+	}
 
 	switch execAction {
 	case tasks.NextActionResumeRun, tasks.NextActionStartRun:

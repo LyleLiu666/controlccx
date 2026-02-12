@@ -119,6 +119,119 @@ func TestAPI_SessionNextAction_MethodNotAllowed(t *testing.T) {
 	}
 }
 
+func TestAPI_SessionNextAction_ContractUnconfirmedReturnsGateAction(t *testing.T) {
+	ctx := context.Background()
+	conn, err := db.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "controlccx.db")})
+	if err != nil {
+		t.Fatalf("db open: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+
+	taskStore := tasks.NewStore(conn)
+	task, err := taskStore.CreateTask(ctx, tasks.CreateTaskInput{
+		WorkerType:     tasks.WorkerClaudeCode,
+		Mode:           tasks.ModeNew,
+		ConversationID: "conv-contract-api-gate",
+		Prompt:         "seed",
+		WorkDir:        filepath.Join(t.TempDir(), "proj"),
+	})
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	if err := taskStore.FinishTask(ctx, task.ID, tasks.FinishTaskInput{
+		Status:     tasks.StatusFailed,
+		Error:      "boom",
+		FinishedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("finish task: %v", err)
+	}
+	if _, err := taskStore.UpsertMissionContract(ctx, tasks.UpsertMissionContractInput{
+		Key:  tasks.ConversationKey(task.ConversationID),
+		Goal: "Deliver autonomous loop",
+	}); err != nil {
+		t.Fatalf("upsert mission contract: %v", err)
+	}
+
+	apiSvc := &API{Tasks: taskStore}
+	srv := httptest.NewServer(apiSvc.Handler())
+	t.Cleanup(srv.Close)
+
+	key := tasks.SessionKeyForTask(task)
+	res, err := http.Get(srv.URL + "/api/sessions/" + url.PathEscape(key) + "/next-action")
+	if err != nil {
+		t.Fatalf("get next action: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d, want 200", res.StatusCode)
+	}
+
+	var out tasks.NextAction
+	if err := json.NewDecoder(res.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if out.Action != tasks.NextActionConfirmContract {
+		t.Fatalf("action=%q, want %q", out.Action, tasks.NextActionConfirmContract)
+	}
+	if out.Reason != "contract_unconfirmed" {
+		t.Fatalf("reason=%q, want %q", out.Reason, "contract_unconfirmed")
+	}
+}
+
+func TestAPI_SessionNextActionExecute_ContractGateCannotBypassWithOverride(t *testing.T) {
+	ctx := context.Background()
+	conn, err := db.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "controlccx.db")})
+	if err != nil {
+		t.Fatalf("db open: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+
+	taskStore := tasks.NewStore(conn)
+	task, err := taskStore.CreateTask(ctx, tasks.CreateTaskInput{
+		WorkerType:     tasks.WorkerClaudeCode,
+		Mode:           tasks.ModeNew,
+		ConversationID: "conv-contract-exec-gate",
+		Prompt:         "seed",
+		WorkDir:        filepath.Join(t.TempDir(), "proj"),
+	})
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	if err := taskStore.FinishTask(ctx, task.ID, tasks.FinishTaskInput{
+		Status:     tasks.StatusFailed,
+		Error:      "boom",
+		FinishedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("finish task: %v", err)
+	}
+	if _, err := taskStore.UpsertMissionContract(ctx, tasks.UpsertMissionContractInput{
+		Key:  tasks.ConversationKey(task.ConversationID),
+		Goal: "Deliver autonomous loop",
+	}); err != nil {
+		t.Fatalf("upsert mission contract: %v", err)
+	}
+
+	apiSvc := &API{Tasks: taskStore}
+	srv := httptest.NewServer(apiSvc.Handler())
+	t.Cleanup(srv.Close)
+
+	key := tasks.SessionKeyForTask(task)
+	body, _ := json.Marshal(map[string]any{
+		"action": "resume_run",
+		"prompt": "continue",
+	})
+	res, err := http.Post(srv.URL+"/api/sessions/"+url.PathEscape(key)+"/next-action/execute", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("post next action execute: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status=%d, want 400", res.StatusCode)
+	}
+	out := decodeMutationResponse(t, res)
+	requireMutationProblemCode(t, out, "unsupported")
+}
+
 func TestAPI_SessionNextActionExecute_ContinuePathUsesUnifiedEnvelope(t *testing.T) {
 	ctx := context.Background()
 	conn, err := db.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "controlccx.db")})

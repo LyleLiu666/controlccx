@@ -443,6 +443,66 @@ func TestMissionContractUpsert_CreatesAndUpdatesByTaskID(t *testing.T) {
 	}
 }
 
+func TestMissionContractUpsert_ConfirmOnlyByTaskID(t *testing.T) {
+	ctx, deps := newDepsForToolsTest(t)
+	reg := NewRegistry(deps)
+
+	task, err := deps.Tasks.CreateTask(ctx, tasks.CreateTaskInput{
+		WorkerType: tasks.WorkerClaudeCode,
+		Mode:       tasks.ModeNew,
+		Prompt:     "seed",
+		WorkDir:    ".",
+		SessionID:  "sess-contract-confirm",
+	})
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	if _, err := reg.Execute(ctx, agentsdk.ToolCall{
+		Name: "mission_contract_upsert",
+		Fields: map[string]string{
+			"task_id": task.ID,
+			"goal":    "deliver autonomous loop",
+		},
+	}); err != nil {
+		t.Fatalf("create contract via tool: %v", err)
+	}
+
+	confirmAny, err := reg.Execute(ctx, agentsdk.ToolCall{
+		Name: "mission_contract_upsert",
+		Fields: map[string]string{
+			"task_id": task.ID,
+			"confirm": "true",
+		},
+	})
+	if err != nil {
+		t.Fatalf("confirm contract via tool: %v", err)
+	}
+	var confirmOut struct {
+		Contract  tasks.MissionContract `json:"contract"`
+		Confirmed bool                  `json:"confirmed"`
+	}
+	rawConfirm, _ := json.Marshal(confirmAny)
+	if err := json.Unmarshal(rawConfirm, &confirmOut); err != nil {
+		t.Fatalf("decode confirm output: %v raw=%s", err, string(rawConfirm))
+	}
+	if !confirmOut.Confirmed {
+		t.Fatalf("confirmed=%v, want true", confirmOut.Confirmed)
+	}
+
+	key := tasks.SessionKeyForTask(task)
+	confirmation, ok, err := deps.Tasks.GetMissionContractConfirmation(ctx, key)
+	if err != nil {
+		t.Fatalf("get mission contract confirmation: %v", err)
+	}
+	if !ok {
+		t.Fatalf("expected mission contract confirmation for key=%s", key)
+	}
+	if confirmation.ConfirmedRevision != confirmOut.Contract.Revision {
+		t.Fatalf("confirmed_revision=%d, want %d", confirmation.ConfirmedRevision, confirmOut.Contract.Revision)
+	}
+}
+
 func TestMissionContractUpsert_RequiresGoal(t *testing.T) {
 	ctx, deps := newDepsForToolsTest(t)
 	reg := NewRegistry(deps)

@@ -21,6 +21,13 @@ type MissionContract struct {
 	UpdatedAt          time.Time `json:"updated_at"`
 }
 
+type MissionContractConfirmation struct {
+	Key               string    `json:"key"`
+	ConfirmedRevision int       `json:"confirmed_revision"`
+	ConfirmedAt       time.Time `json:"confirmed_at"`
+	UpdatedAt         time.Time `json:"updated_at"`
+}
+
 type UpsertMissionContractInput struct {
 	Key                string
 	Goal               string
@@ -130,6 +137,91 @@ func (s *Store) UpsertMissionContract(ctx context.Context, in UpsertMissionContr
 		return MissionContract{}, err
 	}
 	return out, nil
+}
+
+func (s *Store) GetMissionContractConfirmation(ctx context.Context, key string) (MissionContractConfirmation, bool, error) {
+	if s == nil || s.db == nil {
+		return MissionContractConfirmation{}, false, errors.New("tasks: store not initialized")
+	}
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return MissionContractConfirmation{}, false, errors.New("tasks: mission contract key is required")
+	}
+
+	row := s.db.QueryRowContext(ctx, `
+		SELECT key, confirmed_revision, confirmed_at, updated_at
+		FROM mission_contract_confirmations
+		WHERE key = ?;
+	`, key)
+
+	var (
+		out                        MissionContractConfirmation
+		confirmedAtMs, updatedAtMs int64
+	)
+	if err := row.Scan(&out.Key, &out.ConfirmedRevision, &confirmedAtMs, &updatedAtMs); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return MissionContractConfirmation{}, false, nil
+		}
+		return MissionContractConfirmation{}, false, fmt.Errorf("tasks: get mission contract confirmation: %w", err)
+	}
+	out.ConfirmedAt = fromMillis(confirmedAtMs)
+	out.UpdatedAt = fromMillis(updatedAtMs)
+	return out, true, nil
+}
+
+func (s *Store) ConfirmMissionContract(ctx context.Context, key string) (MissionContractConfirmation, error) {
+	if s == nil || s.db == nil {
+		return MissionContractConfirmation{}, errors.New("tasks: store not initialized")
+	}
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return MissionContractConfirmation{}, errors.New("tasks: mission contract key is required")
+	}
+
+	contract, ok, err := s.GetMissionContract(ctx, key)
+	if err != nil {
+		return MissionContractConfirmation{}, err
+	}
+	if !ok {
+		return MissionContractConfirmation{}, errors.New("tasks: mission contract not found")
+	}
+
+	nowMs := toMillis(s.now().UTC())
+	_, err = s.db.ExecContext(ctx, `
+		INSERT INTO mission_contract_confirmations (
+			key, confirmed_revision, confirmed_at, updated_at
+		) VALUES (?, ?, ?, ?)
+		ON CONFLICT(key) DO UPDATE SET
+			confirmed_revision = excluded.confirmed_revision,
+			confirmed_at = excluded.confirmed_at,
+			updated_at = excluded.updated_at;
+	`, key, contract.Revision, nowMs, nowMs)
+	if err != nil {
+		return MissionContractConfirmation{}, fmt.Errorf("tasks: confirm mission contract: %w", err)
+	}
+	out, _, err := s.GetMissionContractConfirmation(ctx, key)
+	if err != nil {
+		return MissionContractConfirmation{}, err
+	}
+	return out, nil
+}
+
+func (s *Store) IsMissionContractRevisionConfirmed(ctx context.Context, key string, revision int) (bool, error) {
+	if s == nil || s.db == nil {
+		return false, errors.New("tasks: store not initialized")
+	}
+	key = strings.TrimSpace(key)
+	if key == "" || revision <= 0 {
+		return false, nil
+	}
+	confirmation, ok, err := s.GetMissionContractConfirmation(ctx, key)
+	if err != nil {
+		return false, err
+	}
+	if !ok {
+		return false, nil
+	}
+	return confirmation.ConfirmedRevision == revision, nil
 }
 
 func encodeMissionStringList(values []string) (string, error) {

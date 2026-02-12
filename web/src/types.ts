@@ -94,7 +94,13 @@ export type SessionContinueQueueItem = {
 
 export type NextAction = {
   conversation_id: string;
-  action: "resolve_approval" | "wait_in_flight" | "merge_workspace" | "resume_run" | "start_run";
+  action:
+    | "resolve_approval"
+    | "wait_in_flight"
+    | "merge_workspace"
+    | "resume_run"
+    | "start_run"
+    | "confirm_contract";
   reason: string;
   task_id?: string;
   approval_id?: string;

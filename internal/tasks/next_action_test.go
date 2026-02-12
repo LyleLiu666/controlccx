@@ -167,3 +167,66 @@ func TestStore_ComputeNextAction_WorkspaceMergeWhenNoInFlight(t *testing.T) {
 		t.Fatalf("reason=%q, want %q", next.Reason, "workspace_active")
 	}
 }
+
+func TestStore_ComputeNextAction_ContractConfirmationGate(t *testing.T) {
+	ctx := context.Background()
+	conn, err := db.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "controlccx.db")})
+	if err != nil {
+		t.Fatalf("db open: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+
+	store := NewStore(conn)
+	conversationID := "conv-contract-gate"
+
+	task, err := store.CreateTask(ctx, CreateTaskInput{
+		WorkerType:     WorkerClaudeCode,
+		Mode:           ModeNew,
+		ConversationID: conversationID,
+		Prompt:         "seed",
+		WorkDir:        filepath.Join(t.TempDir(), "proj-contract-gate"),
+	})
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	if err := store.FinishTask(ctx, task.ID, FinishTaskInput{
+		Status:     StatusFailed,
+		Error:      "boom",
+		FinishedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("finish task: %v", err)
+	}
+
+	if _, err := store.UpsertMissionContract(ctx, UpsertMissionContractInput{
+		Key:  ConversationKey(conversationID),
+		Goal: "Deliver autonomous loop",
+	}); err != nil {
+		t.Fatalf("upsert mission contract: %v", err)
+	}
+
+	next, err := store.ComputeNextAction(ctx, conversationID)
+	if err != nil {
+		t.Fatalf("compute next action: %v", err)
+	}
+	if next.Action != NextActionConfirmContract {
+		t.Fatalf("action=%q, want %q", next.Action, NextActionConfirmContract)
+	}
+	if next.Reason != "contract_unconfirmed" {
+		t.Fatalf("reason=%q, want %q", next.Reason, "contract_unconfirmed")
+	}
+
+	if _, err := store.ConfirmMissionContract(ctx, ConversationKey(conversationID)); err != nil {
+		t.Fatalf("confirm mission contract: %v", err)
+	}
+
+	nextAfterConfirm, err := store.ComputeNextAction(ctx, conversationID)
+	if err != nil {
+		t.Fatalf("compute next action after confirm: %v", err)
+	}
+	if nextAfterConfirm.Action != NextActionResumeRun {
+		t.Fatalf("action=%q, want %q", nextAfterConfirm.Action, NextActionResumeRun)
+	}
+	if nextAfterConfirm.Reason != "latest_failed" {
+		t.Fatalf("reason=%q, want %q", nextAfterConfirm.Reason, "latest_failed")
+	}
+}

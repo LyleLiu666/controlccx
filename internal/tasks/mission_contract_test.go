@@ -138,3 +138,64 @@ func TestStore_MissionContract_Validation(t *testing.T) {
 		t.Fatalf("expected goal validation error")
 	}
 }
+
+func TestStore_MissionContract_ConfirmTracksRevision(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "controlccx.db")
+
+	conn, err := db.Open(ctx, db.Options{Path: dbPath})
+	if err != nil {
+		t.Fatalf("db open: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+
+	store := NewStore(conn)
+	t0 := time.Date(2026, 2, 12, 11, 0, 0, 0, time.UTC)
+	store.now = func() time.Time { return t0 }
+
+	created, err := store.UpsertMissionContract(ctx, UpsertMissionContractInput{
+		Key:  "c:conv-confirm",
+		Goal: "Ship safely",
+	})
+	if err != nil {
+		t.Fatalf("upsert create: %v", err)
+	}
+	if created.Revision != 1 {
+		t.Fatalf("revision=%d, want 1", created.Revision)
+	}
+
+	confirmed, err := store.ConfirmMissionContract(ctx, "c:conv-confirm")
+	if err != nil {
+		t.Fatalf("confirm mission contract: %v", err)
+	}
+	if confirmed.ConfirmedRevision != 1 {
+		t.Fatalf("confirmed_revision=%d, want 1", confirmed.ConfirmedRevision)
+	}
+	if confirmed.ConfirmedAt != t0 {
+		t.Fatalf("confirmed_at=%s, want %s", confirmed.ConfirmedAt, t0)
+	}
+
+	t1 := t0.Add(5 * time.Minute)
+	store.now = func() time.Time { return t1 }
+	updated, err := store.UpsertMissionContract(ctx, UpsertMissionContractInput{
+		Key:  "c:conv-confirm",
+		Goal: "Ship safely and reproducibly",
+	})
+	if err != nil {
+		t.Fatalf("upsert update: %v", err)
+	}
+	if updated.Revision != 2 {
+		t.Fatalf("revision=%d, want 2", updated.Revision)
+	}
+
+	storedConfirmation, ok, err := store.GetMissionContractConfirmation(ctx, "c:conv-confirm")
+	if err != nil {
+		t.Fatalf("get mission contract confirmation: %v", err)
+	}
+	if !ok {
+		t.Fatalf("expected confirmation row")
+	}
+	if storedConfirmation.ConfirmedRevision != 1 {
+		t.Fatalf("confirmed_revision=%d, want 1", storedConfirmation.ConfirmedRevision)
+	}
+}

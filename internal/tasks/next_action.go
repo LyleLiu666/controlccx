@@ -15,6 +15,7 @@ const (
 	NextActionMergeWorkspace  NextActionType = "merge_workspace"
 	NextActionResumeRun       NextActionType = "resume_run"
 	NextActionStartRun        NextActionType = "start_run"
+	NextActionConfirmContract NextActionType = "confirm_contract"
 )
 
 type NextAction struct {
@@ -42,7 +43,7 @@ func (s *Store) ComputeNextAction(ctx context.Context, conversationID string) (N
 	if len(runs) == 0 {
 		out.Action = NextActionStartRun
 		out.Reason = "no_runs"
-		return out, nil
+		return s.applyContractConfirmationGate(ctx, out)
 	}
 
 	if task, ok := pickInFlightTask(runs); ok {
@@ -58,12 +59,12 @@ func (s *Store) ComputeNextAction(ctx context.Context, conversationID string) (N
 			out.Reason = "pending_approval"
 			out.TaskID = task.ID
 			out.ApprovalID = approvals[0].ID
-			return out, nil
+			return s.applyContractConfirmationGate(ctx, out)
 		}
 		out.Action = NextActionWaitInFlight
 		out.Reason = "in_flight_" + strings.TrimSpace(string(task.Status))
 		out.TaskID = task.ID
-		return out, nil
+		return s.applyContractConfirmationGate(ctx, out)
 	}
 
 	latest := runs[0]
@@ -76,7 +77,7 @@ func (s *Store) ComputeNextAction(ctx context.Context, conversationID string) (N
 			out.Action = NextActionMergeWorkspace
 			out.Reason = "workspace_active"
 			out.TaskID = latest.ID
-			return out, nil
+			return s.applyContractConfirmationGate(ctx, out)
 		}
 	}
 
@@ -90,7 +91,7 @@ func (s *Store) ComputeNextAction(ctx context.Context, conversationID string) (N
 		out.Reason = "no_blockers"
 		out.TaskID = latest.ID
 	}
-	return out, nil
+	return s.applyContractConfirmationGate(ctx, out)
 }
 
 func pickInFlightTask(runs []Task) (Task, bool) {
@@ -108,4 +109,32 @@ func pickInFlightTask(runs []Task) (Task, bool) {
 		}
 	}
 	return Task{}, false
+}
+
+func (s *Store) applyContractConfirmationGate(ctx context.Context, next NextAction) (NextAction, error) {
+	if next.Action != NextActionStartRun && next.Action != NextActionResumeRun {
+		return next, nil
+	}
+	key := ConversationKey(next.ConversationID)
+	if strings.TrimSpace(key) == "" {
+		return next, nil
+	}
+	contract, ok, err := s.GetMissionContract(ctx, key)
+	if err != nil {
+		return NextAction{}, fmt.Errorf("tasks: compute next action mission contract: %w", err)
+	}
+	if !ok {
+		return next, nil
+	}
+	confirmed, err := s.IsMissionContractRevisionConfirmed(ctx, key, contract.Revision)
+	if err != nil {
+		return NextAction{}, fmt.Errorf("tasks: compute next action mission contract confirmation: %w", err)
+	}
+	if confirmed {
+		return next, nil
+	}
+	next.Action = NextActionConfirmContract
+	next.Reason = "contract_unconfirmed"
+	next.ApprovalID = ""
+	return next, nil
 }

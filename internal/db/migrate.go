@@ -187,6 +187,12 @@ func Migrate(ctx context.Context, conn *sql.DB) error {
 				created_at INTEGER NOT NULL DEFAULT 0,
 				updated_at INTEGER NOT NULL DEFAULT 0
 			);`,
+		`CREATE TABLE IF NOT EXISTS mission_contract_confirmations (
+				key TEXT PRIMARY KEY,
+				confirmed_revision INTEGER NOT NULL DEFAULT 0,
+				confirmed_at INTEGER NOT NULL DEFAULT 0,
+				updated_at INTEGER NOT NULL DEFAULT 0
+			);`,
 		`CREATE TABLE IF NOT EXISTS session_workspaces (
 				key TEXT PRIMARY KEY,
 				kind TEXT NOT NULL DEFAULT '',
