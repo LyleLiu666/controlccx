@@ -19,6 +19,7 @@ import (
 	"controlccx/internal/providers"
 	"controlccx/internal/secretary/llm"
 	sectools "controlccx/internal/secretary/tools"
+	"controlccx/internal/skills"
 	"controlccx/internal/taskops"
 	"controlccx/internal/tasks"
 )
@@ -31,6 +32,7 @@ type Service struct {
 	compress  *CompressionStore
 	auth      *auth.Store
 	providers *providers.Store
+	skills    *skills.Service
 	taskOps   *taskops.Service
 	hub       *events.Hub
 	fsRoots   []string
@@ -107,6 +109,12 @@ func WithTaskOps(ops *taskops.Service) Option {
 	}
 }
 
+func WithSkills(svc *skills.Service) Option {
+	return func(s *Service) {
+		s.skills = svc
+	}
+}
+
 func WithFSRoots(roots []string) Option {
 	return func(s *Service) {
 		if len(roots) == 0 {
@@ -175,6 +183,7 @@ func (s *Service) send(ctx context.Context, userText string, hooks *SendHooks) (
 
 	reg := sectools.NewRegistry(sectools.Deps{
 		Tasks:     s.tasks,
+		Skills:    s.skills,
 		Ops:       s.taskOps,
 		Scheduler: s,
 		FSRoots:   s.fsRoots,

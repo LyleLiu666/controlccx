@@ -15,6 +15,7 @@ func DefaultTools() []Tool {
 		fsPWDTool{},
 		fsEntriesTool{},
 		fsReadTextTool{},
+		skillsListTool{},
 		tasksCountTool{},
 		tasksListTool{},
 		taskNewSubmitTool{},

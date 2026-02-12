@@ -47,5 +47,6 @@ func buildSystemPrompt() string {
 		b.WriteString(fmt.Sprintf("- %s：%s\n", name, desc))
 	}
 	b.WriteString("\n如果用户问“总共有多少任务/完成多少/失败多少”，优先调用 tasks_count，再用中文给出明确数字。")
+	b.WriteString("\n如果用户问“有哪些 skills 可调动/可用”，优先调用 skills_list（如需给出可用清单，建议 target=codex + only_enabled=true），再用中文列出技能名与状态摘要。")
 	return b.String()
 }

@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"controlccx/internal/agentsdk"
+	"controlccx/internal/skills"
 	"controlccx/internal/taskops"
 	"controlccx/internal/tasks"
 )
@@ -17,6 +18,7 @@ type Tool interface {
 
 type Deps struct {
 	Tasks     *tasks.Store
+	Skills    *skills.Service
 	Ops       *taskops.Service
 	Scheduler Scheduler
 	FSRoots   []string

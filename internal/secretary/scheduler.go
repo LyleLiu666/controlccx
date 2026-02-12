@@ -319,6 +319,7 @@ func (s *Service) executeScheduledTool(job *scheduleJob, tickNo int, runID strin
 
 	reg := sectools.NewRegistry(sectools.Deps{
 		Tasks:     s.tasks,
+		Skills:    s.skills,
 		Ops:       s.taskOps,
 		Scheduler: s,
 		FSRoots:   s.fsRoots,
@@ -450,6 +451,7 @@ func (s *Service) runScheduleCallback(job *scheduleJob, tickNo int, runID string
 		LLMOptions: s.llmOptionsBestEffort(callbackCtx),
 		Executor: sectools.NewRegistry(sectools.Deps{
 			Tasks:     s.tasks,
+			Skills:    s.skills,
 			Ops:       s.taskOps,
 			Scheduler: s,
 			FSRoots:   s.fsRoots,

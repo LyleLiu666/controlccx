@@ -174,6 +174,11 @@ func main() {
 	}
 	fsRoots := api.FSRootsFromPaths(cfg.FSRoots)
 
+	skillsSvc, err := skills.NewService(skills.Options{})
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	secretarySvc := secretary.NewService(
 		cfg,
 		taskStore,
@@ -184,13 +189,10 @@ func main() {
 		secretary.WithCompressionStore(secretaryCompressions),
 		secretary.WithEventHub(hub),
 		secretary.WithTaskOps(opsSvc),
+		secretary.WithSkills(skillsSvc),
 		secretary.WithFSRoots(cfg.FSRoots),
 	)
 
-	skillsSvc, err := skills.NewService(skills.Options{})
-	if err != nil {
-		log.Fatal(err)
-	}
 	skillVersionsSvc, err := skills.NewVersionsService(skills.VersionsOptions{})
 	if err != nil {
 		log.Fatal(err)
