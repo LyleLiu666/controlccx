@@ -372,6 +372,95 @@ func TestTaskNewSubmit_DescriptionIncludesWorkerGuidance(t *testing.T) {
 	}
 }
 
+func TestMissionContractUpsert_CreatesAndUpdatesByTaskID(t *testing.T) {
+	ctx, deps := newDepsForToolsTest(t)
+	reg := NewRegistry(deps)
+
+	task, err := deps.Tasks.CreateTask(ctx, tasks.CreateTaskInput{
+		WorkerType: tasks.WorkerClaudeCode,
+		Mode:       tasks.ModeNew,
+		Prompt:     "seed",
+		WorkDir:    ".",
+		SessionID:  "sess-contract-tool",
+	})
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	createAny, err := reg.Execute(ctx, agentsdk.ToolCall{
+		Name: "mission_contract_upsert",
+		Fields: map[string]string{
+			"task_id":             task.ID,
+			"goal":                "deliver autonomous loop",
+			"constraints":         "run tests before commit,no destructive git",
+			"acceptance_criteria": "go test ./... passes,pnpm test passes",
+			"non_goals":           "rewrite all frontend",
+		},
+	})
+	if err != nil {
+		t.Fatalf("create contract via tool: %v", err)
+	}
+	var createOut struct {
+		Contract tasks.MissionContract `json:"contract"`
+	}
+	rawCreate, _ := json.Marshal(createAny)
+	if err := json.Unmarshal(rawCreate, &createOut); err != nil {
+		t.Fatalf("decode create output: %v raw=%s", err, string(rawCreate))
+	}
+	if createOut.Contract.Revision != 1 {
+		t.Fatalf("revision=%d, want 1", createOut.Contract.Revision)
+	}
+	if createOut.Contract.Key == "" {
+		t.Fatalf("expected contract key")
+	}
+	if len(createOut.Contract.AcceptanceCriteria) != 2 {
+		t.Fatalf("acceptance_criteria=%v", createOut.Contract.AcceptanceCriteria)
+	}
+
+	updateAny, err := reg.Execute(ctx, agentsdk.ToolCall{
+		Name: "mission_contract_upsert",
+		Fields: map[string]string{
+			"task_id":             task.ID,
+			"goal":                "deliver autonomous loop safely",
+			"acceptance_criteria": "go test ./... passes",
+		},
+	})
+	if err != nil {
+		t.Fatalf("update contract via tool: %v", err)
+	}
+	var updateOut struct {
+		Contract tasks.MissionContract `json:"contract"`
+	}
+	rawUpdate, _ := json.Marshal(updateAny)
+	if err := json.Unmarshal(rawUpdate, &updateOut); err != nil {
+		t.Fatalf("decode update output: %v raw=%s", err, string(rawUpdate))
+	}
+	if updateOut.Contract.Revision != 2 {
+		t.Fatalf("revision=%d, want 2", updateOut.Contract.Revision)
+	}
+	if updateOut.Contract.Goal != "deliver autonomous loop safely" {
+		t.Fatalf("goal=%q", updateOut.Contract.Goal)
+	}
+}
+
+func TestMissionContractUpsert_RequiresGoal(t *testing.T) {
+	ctx, deps := newDepsForToolsTest(t)
+	reg := NewRegistry(deps)
+
+	_, err := reg.Execute(ctx, agentsdk.ToolCall{
+		Name: "mission_contract_upsert",
+		Fields: map[string]string{
+			"key": "c:conv-1",
+		},
+	})
+	if err == nil {
+		t.Fatalf("expected goal required error")
+	}
+	if !strings.Contains(strings.ToLower(err.Error()), "goal") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func strconvFormatInt(v int64) string {
 	return fmt.Sprintf("%d", v)
 }

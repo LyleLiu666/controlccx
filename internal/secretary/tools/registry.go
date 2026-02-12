@@ -18,6 +18,7 @@ func DefaultTools() []Tool {
 		taskPreemptContinueSubmitTool{},
 		taskResumeSubmitTool{},
 		taskRehydrateSubmitTool{},
+		missionContractUpsertTool{},
 		taskApprovalDecideTool{},
 		taskEnterUnsafeSubmitTool{},
 		taskLogsTailTool{},

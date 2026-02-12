@@ -42,7 +42,7 @@ func TestBuildSystemPrompt_WriteToolsMissingParamsMustAskUser(t *testing.T) {
 
 func TestBuildSystemPrompt_TargetIncludesTaskCreation(t *testing.T) {
 	prompt := buildSystemPrompt()
-	want := "任务相关操作（新建、恢复、审批、诊断）"
+	want := "任务相关操作（新建、恢复、审批、诊断、任务契约）"
 	if !strings.Contains(prompt, want) {
 		t.Fatalf("prompt missing task-creation goal: %q", want)
 	}

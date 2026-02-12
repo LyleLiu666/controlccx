@@ -200,6 +200,62 @@ func TestService_Send_ToolLoopAndPersistsVisibleMessages(t *testing.T) {
 	}
 }
 
+func TestService_Send_BindsMissionContractViaChatTool(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "controlccx.db")
+
+	conn, err := db.Open(ctx, db.Options{Path: dbPath})
+	if err != nil {
+		t.Fatalf("db open: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+
+	taskStore := tasks.NewStore(conn)
+	chatStore := chat.NewStore(conn)
+
+	task, err := taskStore.CreateTask(ctx, tasks.CreateTaskInput{
+		WorkerType: tasks.WorkerClaudeCode,
+		Mode:       tasks.ModeNew,
+		Prompt:     "seed",
+		WorkDir:    ".",
+		SessionID:  "sess-contract-chat",
+	})
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	key := tasks.SessionKeyForTask(task)
+
+	c := &scriptedClient{
+		responses: []string{
+			"<tool_data><call><tool_name>mission_contract_upsert</tool_name><task_id>" + task.ID + "</task_id><goal>交付可自主推进的任务闭环</goal><constraints>先对齐需求,必须可回滚</constraints><acceptance_criteria>go test ./... passes,关键路径可追踪</acceptance_criteria><non_goals>重写全部前端</non_goals></call></tool_data>",
+			"我已创建任务契约草案，请你确认后我再开始执行。",
+		},
+	}
+
+	svc := NewService(config.Default(), taskStore, chatStore, nil, nil, WithClient(c))
+	reply, err := svc.Send(ctx, "先帮我写个任务契约草案")
+	if err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	if !strings.Contains(reply, "任务契约草案") {
+		t.Fatalf("reply=%q, want mention contract draft", reply)
+	}
+
+	contract, ok, err := taskStore.GetMissionContract(ctx, key)
+	if err != nil {
+		t.Fatalf("get mission contract: %v", err)
+	}
+	if !ok {
+		t.Fatalf("expected mission contract created for key %s", key)
+	}
+	if contract.Revision != 1 {
+		t.Fatalf("revision=%d, want 1", contract.Revision)
+	}
+	if strings.TrimSpace(contract.Goal) == "" {
+		t.Fatalf("expected non-empty goal")
+	}
+}
+
 func TestService_Send_PersistsEventSinkEvents(t *testing.T) {
 	ctx := context.Background()
 	dbPath := filepath.Join(t.TempDir(), "controlccx.db")

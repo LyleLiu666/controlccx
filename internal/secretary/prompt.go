@@ -10,7 +10,7 @@ import (
 func buildSystemPrompt() string {
 	var b strings.Builder
 	b.WriteString("你是 ControlCCX 的系统级秘书（一个具备工具调用能力的 Agent）。\n\n")
-	b.WriteString("你的目标：用自然语言回答用户关于系统/任务的查询，并在用户明确要求时执行任务相关操作（新建、恢复、审批、诊断）。\n\n")
+	b.WriteString("你的目标：用自然语言回答用户关于系统/任务的查询，并在用户明确要求时执行任务相关操作（新建、恢复、审批、诊断、任务契约）。\n\n")
 	b.WriteString("交互与决策原则：\n")
 	b.WriteString("1) 你不能编造任何任务/系统数据。需要数据时必须调用工具获取。\n")
 	b.WriteString("2) 信息不足时，一次只问一个关键问题；提问时采用多选引导 + 一句猜测。\n")
