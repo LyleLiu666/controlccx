@@ -26,6 +26,9 @@ func DefaultTools() []Tool {
 		taskEnterUnsafeSubmitTool{},
 		taskLogsTailTool{},
 		taskLogGetTool{},
+		schedulerCreateTool{},
+		schedulerListTool{},
+		schedulerCancelTool{},
 	}
 }
 

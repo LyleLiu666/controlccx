@@ -15,6 +15,7 @@ import (
 	"controlccx/internal/auth"
 	"controlccx/internal/chat"
 	"controlccx/internal/config"
+	"controlccx/internal/events"
 	"controlccx/internal/providers"
 	"controlccx/internal/secretary/llm"
 	sectools "controlccx/internal/secretary/tools"
@@ -31,10 +32,18 @@ type Service struct {
 	auth      *auth.Store
 	providers *providers.Store
 	taskOps   *taskops.Service
+	hub       *events.Hub
 
 	client agentsdk.Client
 
 	sendMu sync.Mutex
+
+	scheduleMu sync.Mutex
+	schedules  map[string]*scheduleJob
+
+	eventsPruneMu    sync.Mutex
+	eventsLastPrune  time.Time
+	eventsSincePrune int
 
 	compressOpts CompressionOptions
 }
@@ -85,6 +94,12 @@ func WithCompressionOptions(opts CompressionOptions) Option {
 	}
 }
 
+func WithEventHub(hub *events.Hub) Option {
+	return func(s *Service) {
+		s.hub = hub
+	}
+}
+
 func WithTaskOps(ops *taskops.Service) Option {
 	return func(s *Service) {
 		s.taskOps = ops
@@ -98,6 +113,7 @@ func NewService(cfg config.Config, taskStore *tasks.Store, chatStore *chat.Store
 		chat:         chatStore,
 		auth:         authStore,
 		providers:    providersStore,
+		schedules:    make(map[string]*scheduleJob),
 		compressOpts: DefaultCompressionOptions(),
 	}
 	for _, opt := range opts {
@@ -135,8 +151,9 @@ func (s *Service) send(ctx context.Context, userText string, hooks *SendHooks) (
 	defer s.sendMu.Unlock()
 
 	reg := sectools.NewRegistry(sectools.Deps{
-		Tasks: s.tasks,
-		Ops:   s.taskOps,
+		Tasks:     s.tasks,
+		Ops:       s.taskOps,
+		Scheduler: s,
 	})
 
 	client := s.client
@@ -212,9 +229,44 @@ func (s *Service) send(ctx context.Context, userText string, hooks *SendHooks) (
 	}
 	_ = s.chat.PruneKeepLast(ctx, 2000)
 	if s.events != nil {
-		_ = s.events.PruneKeepLastRuns(ctx, 200)
+		s.maybePruneEvents(ctx, true)
 	}
 	return reply, nil
+}
+
+func (s *Service) maybePruneEvents(ctx context.Context, force bool) {
+	if s == nil || s.events == nil {
+		return
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	const (
+		keepRuns      = 200
+		minInterval   = 5 * time.Second
+		appendTrigger = 20
+	)
+
+	now := time.Now().UTC()
+	shouldPrune := force
+
+	s.eventsPruneMu.Lock()
+	if !force {
+		s.eventsSincePrune++
+		if s.eventsSincePrune >= appendTrigger || (!s.eventsLastPrune.IsZero() && now.Sub(s.eventsLastPrune) >= minInterval) {
+			shouldPrune = true
+		}
+	}
+	if shouldPrune {
+		s.eventsLastPrune = now
+		s.eventsSincePrune = 0
+	}
+	s.eventsPruneMu.Unlock()
+
+	if shouldPrune {
+		_ = s.events.PruneKeepLastRuns(ctx, keepRuns)
+	}
 }
 
 func composeEventSink(sinks ...agentsdk.EventSink) agentsdk.EventSink {

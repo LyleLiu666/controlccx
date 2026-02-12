@@ -181,6 +181,7 @@ func main() {
 		providersStore,
 		secretary.WithEventStore(secretaryEvents),
 		secretary.WithCompressionStore(secretaryCompressions),
+		secretary.WithEventHub(hub),
 		secretary.WithTaskOps(opsSvc),
 	)
 
@@ -237,6 +238,7 @@ func main() {
 	srv.RegisterOnShutdown(cancelBridge)
 	srv.RegisterOnShutdown(audit.StartGCLoop(auditSvc, log.Printf))
 	srv.RegisterOnShutdown(stopBackgroundLoops)
+	srv.RegisterOnShutdown(secretarySvc.StartTaskStatusReporter(context.Background(), hub))
 	go func() {
 		if err := daemon.BridgeSSEToHub(bridgeCtx, runnerBaseURL+"/api/events", hub, daemon.SSEBridgeOptions{
 			Logf:  log.Printf,
