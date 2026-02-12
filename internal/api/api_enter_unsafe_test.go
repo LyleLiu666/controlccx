@@ -116,6 +116,31 @@ func TestAPI_TaskEnterUnsafe_CancelsAndCreatesFollowup(t *testing.T) {
 		t.Fatalf("proof_type=%q, want %q", proofs[0].ProofType, "restore_point")
 	}
 
+	decisions, err := taskStore.ListRiskDecisionsByTask(ctx, src.ID, tasks.ListRiskDecisionsOptions{Limit: 10})
+	if err != nil {
+		t.Fatalf("ListRiskDecisionsByTask: %v", err)
+	}
+	if len(decisions) == 0 {
+		t.Fatalf("expected at least one risk decision for task %s", src.ID)
+	}
+	latest := decisions[0]
+	if latest.ActionType != "task.enter_unsafe" {
+		t.Fatalf("action_type=%q, want %q", latest.ActionType, "task.enter_unsafe")
+	}
+	if latest.RiskLevel != tasks.RiskHigh {
+		t.Fatalf("risk_level=%q, want %q", latest.RiskLevel, tasks.RiskHigh)
+	}
+	var scope map[string]any
+	if err := json.Unmarshal(latest.Scope, &scope); err != nil {
+		t.Fatalf("scope json: %v", err)
+	}
+	if _, ok := scope["reversible"]; !ok {
+		t.Fatalf("scope missing reversible field: %v", scope)
+	}
+	if _, ok := scope["reversibility"]; !ok {
+		t.Fatalf("scope missing reversibility field: %v", scope)
+	}
+
 	if len(runner.cancelCalls) != 1 || runner.cancelCalls[0] != src.ID {
 		t.Fatalf("cancelCalls=%v, want [%s]", runner.cancelCalls, src.ID)
 	}

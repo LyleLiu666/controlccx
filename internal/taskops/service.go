@@ -24,10 +24,13 @@ type approvalForwarder interface {
 }
 
 type Service struct {
-	Tasks   *tasks.Store
-	Workers Runner
-	Hub     *events.Hub
-	Tools   *tooling.Service
+	Tasks           *tasks.Store
+	Workers         Runner
+	Hub             *events.Hub
+	Tools           *tooling.Service
+	RiskLLM         runsafe.LLMBackend
+	RiskLLMTimeout  time.Duration
+	RiskLLMMinScore float64
 }
 
 type RunOptions struct {
@@ -463,6 +466,9 @@ func (s *Service) EnterUnsafeTask(ctx context.Context, id string, prompt string)
 	if err != nil {
 		return tasks.Task{}, err
 	}
+	if err := s.evaluateAndPersistRiskDecision(ctx, src, in, prompt, restoreRef); err != nil {
+		return tasks.Task{}, err
+	}
 
 	newTask, err := s.Tasks.CreateTask(ctx, in)
 	if err != nil {
@@ -516,6 +522,44 @@ func (s *Service) ensureAutoRestorePoint(ctx context.Context, src tasks.Task) (b
 		return false, "", err
 	}
 	return true, ref, nil
+}
+
+func (s *Service) evaluateAndPersistRiskDecision(ctx context.Context, src tasks.Task, in tasks.CreateTaskInput, prompt string, restoreRef string) error {
+	if s == nil || s.Tasks == nil {
+		return errors.New("tasks store not configured")
+	}
+	verdict := runsafe.EvaluateRisk(ctx, runsafe.RiskInput{
+		ActionType:       "task.enter_unsafe",
+		Prompt:           strings.TrimSpace(prompt),
+		WorkerType:       src.WorkerType,
+		UnsafeAutomation: in.UnsafeAutomation,
+		NetworkTier:      in.NetworkTier,
+		HasRollbackProof: strings.TrimSpace(restoreRef) != "",
+	}, runsafe.EvaluateRiskOptions{
+		LLM:         s.RiskLLM,
+		LLMTimeout:  s.RiskLLMTimeout,
+		MinLLMScore: s.RiskLLMMinScore,
+	})
+	scope := runsafe.MarshalRiskScope(verdict, map[string]any{
+		"action_type":       "task.enter_unsafe",
+		"restore_proof_ref": strings.TrimSpace(restoreRef),
+		"network_tier":      strings.TrimSpace(string(in.NetworkTier)),
+	})
+	if _, err := s.Tasks.CreateRiskDecision(ctx, tasks.CreateRiskDecisionInput{
+		TaskID:         strings.TrimSpace(src.ID),
+		SessionID:      strings.TrimSpace(src.SessionID),
+		ConversationID: strings.TrimSpace(src.ConversationID),
+		WorkerType:     src.WorkerType,
+		ActionType:     "task.enter_unsafe",
+		RiskLevel:      verdict.RiskLevel,
+		Decision:       strings.TrimSpace(verdict.Decision),
+		Rationale:      strings.TrimSpace(verdict.Rationale),
+		Scope:          scope,
+		Source:         strings.TrimSpace(verdict.Source),
+	}); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (s *Service) DecideApproval(ctx context.Context, taskID string, approvalID string, decision string, reason string) (tasks.ApprovalRequest, error) {
