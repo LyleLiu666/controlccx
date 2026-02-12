@@ -46,6 +46,12 @@ When a GitHub Release is **published**, GitHub Actions builds and uploads binari
 pnpm test
 ```
 
+Manual acceptance helpers:
+
+- Session queue behavior: `./scripts/manual_session_queue_acceptance.sh <session-key>`
+- Secretary scheduler E2E (create -> auto-poll -> immediate callback reports): `./scripts/manual_secretary_scheduler_e2e.sh`
+- Secretary scheduler visibility E2E (SSE + chat history consistency): `./scripts/manual_secretary_scheduler_visibility_e2e.sh`
+
 ## Configuration
 
 Default data dir: `~/.controlccx/`
