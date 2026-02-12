@@ -192,3 +192,65 @@ func TestExtractLatestToolDataWithState_TruncatedBlock_SetsSawStart(t *testing.T
 		t.Fatalf("expected sawStart=true for truncated payload")
 	}
 }
+
+func TestParseToolData_UnwrapsArgsXMLIntoTopLevelFields(t *testing.T) {
+	input := `<tool_data>
+  <call>
+    <tool_name>task_new_submit</tool_name>
+    <args>
+      <worker_type>claude-code</worker_type>
+      <prompt>mkdir -p /tmp/test_dir_12345</prompt>
+      <workdir>/tmp</workdir>
+    </args>
+  </call>
+</tool_data>`
+
+	calls, err := ParseToolData(input)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if len(calls) != 1 {
+		t.Fatalf("expected 1 call, got %d", len(calls))
+	}
+	if calls[0].ToolName != "task_new_submit" {
+		t.Fatalf("expected tool 'task_new_submit', got %q", calls[0].ToolName)
+	}
+	if got := calls[0].Fields["worker_type"]; got != "claude-code" {
+		t.Fatalf("expected worker_type %q, got %q", "claude-code", got)
+	}
+	if got := calls[0].Fields["prompt"]; got != "mkdir -p /tmp/test_dir_12345" {
+		t.Fatalf("expected prompt %q, got %q", "mkdir -p /tmp/test_dir_12345", got)
+	}
+	if got := calls[0].Fields["workdir"]; got != "/tmp" {
+		t.Fatalf("expected workdir %q, got %q", "/tmp", got)
+	}
+	if got := calls[0].Fields["args"]; got == "" {
+		t.Fatalf("expected raw args field to remain available")
+	}
+}
+
+func TestParseToolData_UnwrapsArgumentsJSONAndNormalizesAliases(t *testing.T) {
+	input := `<tool_data>
+  <call>
+    <tool_name>task_new_submit</tool_name>
+    <arguments>{"workerType":"codex","prompt":"echo hi","workDir":"/tmp"}</arguments>
+  </call>
+</tool_data>`
+
+	calls, err := ParseToolData(input)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if len(calls) != 1 {
+		t.Fatalf("expected 1 call, got %d", len(calls))
+	}
+	if got := calls[0].Fields["worker_type"]; got != "codex" {
+		t.Fatalf("expected worker_type %q, got %q", "codex", got)
+	}
+	if got := calls[0].Fields["prompt"]; got != "echo hi" {
+		t.Fatalf("expected prompt %q, got %q", "echo hi", got)
+	}
+	if got := calls[0].Fields["workdir"]; got != "/tmp" {
+		t.Fatalf("expected workdir %q, got %q", "/tmp", got)
+	}
+}

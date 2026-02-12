@@ -15,6 +15,7 @@ type controlPlaneComponent struct {
 	OK              bool   `json:"ok"`
 	Name            string `json:"name"`
 	ProtocolVersion int    `json:"protocol_version,omitempty"`
+	BinaryStamp     string `json:"binary_stamp,omitempty"`
 	PID             int    `json:"pid,omitempty"`
 	Addr            string `json:"addr,omitempty"`
 	Error           string `json:"error,omitempty"`
@@ -31,6 +32,7 @@ type daemonHealthPayload struct {
 	OK              bool   `json:"ok"`
 	Name            string `json:"name"`
 	ProtocolVersion int    `json:"protocol_version"`
+	BinaryStamp     string `json:"binary_stamp,omitempty"`
 	PID             int    `json:"pid"`
 	Addr            string `json:"addr"`
 	TSMS            int64  `json:"ts_ms"`
@@ -89,6 +91,7 @@ func controlPlaneHandler(runnerBaseURL, instanceToken string) http.HandlerFunc {
 			out.Name = strings.TrimSpace(payload.Name)
 		}
 		out.ProtocolVersion = payload.ProtocolVersion
+		out.BinaryStamp = strings.TrimSpace(payload.BinaryStamp)
 		out.PID = payload.PID
 		out.Addr = strings.TrimSpace(payload.Addr)
 		out.TSMS = payload.TSMS

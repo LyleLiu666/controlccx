@@ -6,13 +6,12 @@ import (
 	"strings"
 	"sync"
 
-	"controlccx/internal/chat"
 	"controlccx/internal/events"
 	"controlccx/internal/tasks"
 )
 
-// StartTaskStatusReporter subscribes to task.updated events and appends proactive
-// secretary updates when a task reaches a terminal/blocked status.
+// StartTaskStatusReporter subscribes to task.updated events and forwards task
+// results to the secretary agent as a user-role system message.
 func (s *Service) StartTaskStatusReporter(ctx context.Context, hub *events.Hub) func() {
 	if s == nil || s.chat == nil || hub == nil {
 		return func() {}
@@ -52,7 +51,7 @@ func (s *Service) StartTaskStatusReporter(ctx context.Context, hub *events.Hub) 
 					continue
 				}
 				lastReported[task.ID] = task.Status
-				_ = s.appendAssistantReport(reportCtx, buildTaskStatusReport(task))
+				_, _ = s.Send(reportCtx, buildTaskStatusSystemUserPrompt(task))
 			}
 		}
 	}()
@@ -112,7 +111,7 @@ func humanTaskStatus(status tasks.Status) string {
 	}
 }
 
-func buildTaskStatusReport(task tasks.Task) string {
+func buildTaskStatusSystemUserPrompt(task tasks.Task) string {
 	taskID := strings.TrimSpace(task.ID)
 	worker := strings.TrimSpace(string(task.WorkerType))
 	prompt := truncateRunes(strings.TrimSpace(task.Prompt), 120)
@@ -124,39 +123,28 @@ func buildTaskStatusReport(task tasks.Task) string {
 	reasonCompact := strings.Join(strings.Fields(strings.TrimSpace(reason)), " ")
 
 	lines := []string{
-		"任务进展汇报：",
-		"任务 ID: " + taskID,
-		"当前状态: " + humanTaskStatus(task.Status),
+		"【系统消息】",
+		"这是一条由 ControlCCX 自动注入的系统消息，不是用户直接输入。",
+		"请你向用户汇报结果：简洁说明任务状态、结果与建议下一步。",
+		"执行要求：不要调用工具，不要创建/修改任务，只做结果汇报。",
+		"",
+		"任务执行结果：",
+		"- task_id: " + taskID,
+		"- status: " + humanTaskStatus(task.Status),
 	}
 	if worker != "" {
-		lines = append(lines, "Worker: "+worker)
+		lines = append(lines, "- worker: "+worker)
 	}
 	if prompt != "" {
-		lines = append(lines, "任务摘要: "+prompt)
+		lines = append(lines, "- task_summary: "+prompt)
 	}
 	if reason != "" && task.Status != tasks.StatusSucceeded {
-		lines = append(lines, "原因: "+truncateRunes(reasonCompact, 160))
+		lines = append(lines, "- reason: "+truncateRunes(reasonCompact, 160))
 	}
 	if warning != "" && (task.Status == tasks.StatusSucceeded || warning != reasonCompact) {
-		lines = append(lines, "警告: "+truncateRunes(warning, 160))
+		lines = append(lines, "- warning: "+truncateRunes(warning, 160))
 	}
-	lines = append(lines, "如需我继续跟进，回复：查看任务 "+taskID)
+	lines = append(lines, "")
+	lines = append(lines, "请直接面向用户输出中文汇报。")
 	return strings.TrimSpace(strings.Join(lines, "\n"))
-}
-
-func (s *Service) appendAssistantReport(ctx context.Context, content string) error {
-	if s == nil || s.chat == nil {
-		return nil
-	}
-	content = strings.TrimSpace(content)
-	if content == "" {
-		return nil
-	}
-	s.sendMu.Lock()
-	defer s.sendMu.Unlock()
-	if _, err := s.chat.Append(ctx, chat.RoleAssistant, content); err != nil {
-		return err
-	}
-	_ = s.chat.PruneKeepLast(ctx, 2000)
-	return nil
 }

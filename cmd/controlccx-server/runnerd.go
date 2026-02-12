@@ -72,6 +72,7 @@ func runRunnerd(cfg config.Config, runnerAddr string) error {
 
 	hub := events.NewHub()
 	workerMgr := worker.NewManager(cfg, taskStore, hub, authStore, toolsSvc)
+	binaryStamp := currentExecutableBinaryStampBestEffort()
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
@@ -87,6 +88,7 @@ func runRunnerd(cfg config.Config, runnerAddr string) error {
 			"ok":               true,
 			"name":             "runnerd",
 			"protocol_version": daemon.ProtocolVersion,
+			"binary_stamp":     binaryStamp,
 			"pid":              os.Getpid(),
 			"addr":             runnerAddr,
 			"ts_ms":            time.Now().UTC().UnixMilli(),

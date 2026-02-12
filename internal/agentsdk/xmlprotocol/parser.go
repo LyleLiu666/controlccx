@@ -1,6 +1,7 @@
 package xmlprotocol
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"html"
@@ -228,7 +229,36 @@ func parseCall(callInner string, raw string) (Call, error) {
 		}
 	}
 
+	mergeNestedArgumentFields(fields)
+
 	// Normalize common aliases.
+	if _, ok := fields["worker_type"]; !ok {
+		if v, ok := fields["workerType"]; ok {
+			fields["worker_type"] = v
+		}
+		if v, ok := fields["worker"]; ok {
+			fields["worker_type"] = v
+		}
+	}
+	if _, ok := fields["workdir"]; !ok {
+		if v, ok := fields["workDir"]; ok {
+			fields["workdir"] = v
+		}
+		if v, ok := fields["work_dir"]; ok {
+			fields["workdir"] = v
+		}
+		if v, ok := fields["cwd"]; ok {
+			fields["workdir"] = v
+		}
+		if v, ok := fields["dir"]; ok {
+			fields["workdir"] = v
+		}
+	}
+	if _, ok := fields["conversation_id"]; !ok {
+		if v, ok := fields["conversationId"]; ok {
+			fields["conversation_id"] = v
+		}
+	}
 	if _, ok := fields["filePath"]; !ok {
 		if v, ok := fields["file_path"]; ok {
 			fields["filePath"] = v
@@ -348,6 +378,95 @@ func parseCall(callInner string, raw string) (Call, error) {
 		Fields:   fields,
 		Raw:      raw,
 	}, nil
+}
+
+func mergeNestedArgumentFields(fields map[string]string) {
+	if len(fields) == 0 {
+		return
+	}
+
+	envelopeTags := []string{"args", "arguments", "params", "parameters", "input", "fields"}
+	for _, tag := range envelopeTags {
+		raw, ok := lookupFieldCaseInsensitive(fields, tag)
+		if !ok {
+			continue
+		}
+		nested := parseNestedArgumentFields(raw)
+		for k, v := range nested {
+			if strings.TrimSpace(v) == "" {
+				continue
+			}
+			if cur, exists := fields[k]; !exists || strings.TrimSpace(cur) == "" {
+				fields[k] = v
+			}
+		}
+	}
+}
+
+func lookupFieldCaseInsensitive(fields map[string]string, key string) (string, bool) {
+	if v, ok := fields[key]; ok {
+		return v, true
+	}
+	for k, v := range fields {
+		if strings.EqualFold(strings.TrimSpace(k), key) {
+			return v, true
+		}
+	}
+	return "", false
+}
+
+func parseNestedArgumentFields(raw string) map[string]string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+
+	if tags := topLevelTagNames(raw); len(tags) > 0 {
+		out := make(map[string]string, len(tags))
+		for _, tag := range tags {
+			if value, ok := tagValue(raw, tag); ok {
+				out[tag] = value
+			}
+		}
+		if len(out) > 0 {
+			return out
+		}
+	}
+
+	var obj map[string]any
+	if err := json.Unmarshal([]byte(raw), &obj); err != nil || len(obj) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(obj))
+	for k, v := range obj {
+		out[k] = jsonValueToString(v)
+	}
+	return out
+}
+
+func jsonValueToString(value any) string {
+	switch v := value.(type) {
+	case nil:
+		return ""
+	case string:
+		return v
+	case bool:
+		if v {
+			return "true"
+		}
+		return "false"
+	case float64:
+		// Use JSON to preserve integral vs decimal formatting.
+		if b, err := json.Marshal(v); err == nil {
+			return string(b)
+		}
+		return fmt.Sprint(v)
+	default:
+		if b, err := json.Marshal(v); err == nil {
+			return string(b)
+		}
+		return fmt.Sprint(v)
+	}
 }
 
 func toolNameAndTag(callInner string) (name string, tag string, ok bool) {
