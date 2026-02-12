@@ -10,18 +10,22 @@ import (
 )
 
 type RunExecutionPlanLoopInput struct {
-	MaxIterations   int    `json:"max_iterations,omitempty"`
-	IterationPrompt string `json:"iteration_prompt,omitempty"`
+	MaxIterations      int    `json:"max_iterations,omitempty"`
+	MaxTotalIterations int    `json:"max_total_iterations,omitempty"`
+	IterationPrompt    string `json:"iteration_prompt,omitempty"`
 }
 
 type RunExecutionPlanLoopResult struct {
-	Key                 string                   `json:"key"`
-	ConversationID      string                   `json:"conversation_id"`
-	IterationsRequested int                      `json:"iterations_requested"`
-	IterationsExecuted  int                      `json:"iterations_executed"`
-	NextAction          tasks.NextAction         `json:"next_action"`
-	State               tasks.ExecutionPlanState `json:"state"`
-	LastTaskID          string                   `json:"last_task_id,omitempty"`
+	Key                 string                        `json:"key"`
+	ConversationID      string                        `json:"conversation_id"`
+	IterationsRequested int                           `json:"iterations_requested"`
+	MaxTotalIterations  int                           `json:"max_total_iterations"`
+	IterationsExecuted  int                           `json:"iterations_executed"`
+	LimitReached        bool                          `json:"limit_reached"`
+	NextAction          tasks.NextAction              `json:"next_action"`
+	State               tasks.ExecutionPlanState      `json:"state"`
+	Progress            []tasks.ExecutionPlanProgress `json:"progress,omitempty"`
+	LastTaskID          string                        `json:"last_task_id,omitempty"`
 }
 
 type executionPlanV1 struct {
@@ -44,12 +48,19 @@ func (s *Service) RunExecutionPlanLoopV1(ctx context.Context, key string, in Run
 		return RunExecutionPlanLoopResult{}, newMutationError(400, MutationErrorInvalidArgument, "session key is required", "", nil, nil)
 	}
 
-	maxIterations := in.MaxIterations
-	if maxIterations <= 0 {
-		maxIterations = 1
+	perCallBudget := in.MaxIterations
+	if perCallBudget <= 0 {
+		perCallBudget = 1
 	}
-	if maxIterations > 10 {
-		maxIterations = 10
+	if perCallBudget > 10 {
+		perCallBudget = 10
+	}
+	maxTotalIterations := in.MaxTotalIterations
+	if maxTotalIterations <= 0 {
+		maxTotalIterations = 10
+	}
+	if maxTotalIterations > 200 {
+		maxTotalIterations = 200
 	}
 
 	conversationID, err := resolveConversationIDForSessionKey(ctx, s.Tasks, key)
@@ -85,11 +96,30 @@ func (s *Service) RunExecutionPlanLoopV1(ctx context.Context, key string, in Run
 	result := RunExecutionPlanLoopResult{
 		Key:                 key,
 		ConversationID:      conversationID,
-		IterationsRequested: maxIterations,
+		IterationsRequested: perCallBudget,
+		MaxTotalIterations:  maxTotalIterations,
 		State:               state,
 	}
 
-	for i := 0; i < maxIterations; i++ {
+	if state.Iteration >= maxTotalIterations {
+		result.LimitReached = true
+		summary := fmt.Sprintf("iteration limit reached (%d/%d)", state.Iteration, maxTotalIterations)
+		_, _ = s.Tasks.AppendExecutionPlanProgress(ctx, tasks.AppendExecutionPlanProgressInput{
+			Key:       state.Key,
+			Iteration: state.Iteration,
+			Action:    "limit",
+			Status:    "limit_reached",
+			Summary:   summary,
+		})
+		result.Progress = s.executionPlanProgressBestEffort(ctx, state.Key, 50)
+		return result, nil
+	}
+
+	remaining := maxTotalIterations - state.Iteration
+	if remaining < perCallBudget {
+		perCallBudget = remaining
+	}
+	for i := 0; i < perCallBudget; i++ {
 		next, err := s.Tasks.ComputeNextAction(ctx, conversationID)
 		if err != nil {
 			return result, err
@@ -131,6 +161,14 @@ func (s *Service) RunExecutionPlanLoopV1(ctx context.Context, key string, in Run
 			if err != nil {
 				return result, err
 			}
+			summary := fmt.Sprintf("iteration %d/%d action=%s", state.Iteration, maxTotalIterations, strings.TrimSpace(string(next.Action)))
+			_, _ = s.Tasks.AppendExecutionPlanProgress(ctx, tasks.AppendExecutionPlanProgressInput{
+				Key:       state.Key,
+				Iteration: state.Iteration,
+				Action:    strings.TrimSpace(string(next.Action)),
+				Status:    state.Status,
+				Summary:   summary,
+			})
 			result.State = state
 			result.LastTaskID = strings.TrimSpace(state.LastTaskID)
 			if progressed {
@@ -148,7 +186,16 @@ func (s *Service) RunExecutionPlanLoopV1(ctx context.Context, key string, in Run
 			if err != nil {
 				return result, err
 			}
+			summary := fmt.Sprintf("iteration %d/%d waiting: next_action=%s", state.Iteration, maxTotalIterations, strings.TrimSpace(string(next.Action)))
+			_, _ = s.Tasks.AppendExecutionPlanProgress(ctx, tasks.AppendExecutionPlanProgressInput{
+				Key:       state.Key,
+				Iteration: state.Iteration,
+				Action:    strings.TrimSpace(string(next.Action)),
+				Status:    "waiting",
+				Summary:   summary,
+			})
 			result.State = state
+			result.Progress = s.executionPlanProgressBestEffort(ctx, state.Key, 50)
 			return result, nil
 		}
 	}
@@ -156,6 +203,10 @@ func (s *Service) RunExecutionPlanLoopV1(ctx context.Context, key string, in Run
 	if next, err := s.Tasks.ComputeNextAction(ctx, conversationID); err == nil {
 		result.NextAction = next
 	}
+	if result.State.Iteration >= maxTotalIterations {
+		result.LimitReached = true
+	}
+	result.Progress = s.executionPlanProgressBestEffort(ctx, state.Key, 50)
 	return result, nil
 }
 
@@ -274,4 +325,15 @@ func executionPlanStepTitle(planJSON string, iteration int) string {
 		idx = len(plan.Steps) - 1
 	}
 	return strings.TrimSpace(plan.Steps[idx].Title)
+}
+
+func (s *Service) executionPlanProgressBestEffort(ctx context.Context, key string, limit int) []tasks.ExecutionPlanProgress {
+	if s == nil || s.Tasks == nil {
+		return nil
+	}
+	list, err := s.Tasks.ListExecutionPlanProgress(ctx, key, limit)
+	if err != nil {
+		return nil
+	}
+	return list
 }

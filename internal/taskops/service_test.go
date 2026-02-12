@@ -215,6 +215,83 @@ func TestRunExecutionPlanLoopV1_RequiresConfirmedMissionContract(t *testing.T) {
 	}
 }
 
+func TestRunExecutionPlanLoopV1_StopsAtConfiguredLimitAndReturnsProgress(t *testing.T) {
+	ctx, svc := newServiceForTest(t)
+	baseTask, err := svc.Tasks.CreateTask(ctx, tasks.CreateTaskInput{
+		WorkerType:     tasks.WorkerClaudeCode,
+		Mode:           tasks.ModeNew,
+		ConversationID: "conv-plan-loop-limit",
+		Prompt:         "seed",
+		WorkDir:        ".",
+		SessionID:      "sess-plan-loop-limit",
+	})
+	if err != nil {
+		t.Fatalf("create base task: %v", err)
+	}
+	if err := svc.Tasks.FinishTask(ctx, baseTask.ID, tasks.FinishTaskInput{
+		Status:     tasks.StatusFailed,
+		Error:      "boom",
+		SessionID:  baseTask.SessionID,
+		FinishedAt: baseTask.CreatedAt,
+	}); err != nil {
+		t.Fatalf("finish base task: %v", err)
+	}
+
+	contractKey := tasks.ConversationKey(baseTask.ConversationID)
+	if _, err := svc.Tasks.UpsertMissionContract(ctx, tasks.UpsertMissionContractInput{
+		Key:  contractKey,
+		Goal: "Deliver autonomous execution",
+	}); err != nil {
+		t.Fatalf("upsert mission contract: %v", err)
+	}
+	if _, err := svc.Tasks.ConfirmMissionContract(ctx, contractKey); err != nil {
+		t.Fatalf("confirm mission contract: %v", err)
+	}
+
+	key := tasks.SessionKeyForTask(baseTask)
+	first, err := svc.RunExecutionPlanLoopV1(ctx, key, RunExecutionPlanLoopInput{
+		MaxIterations:      1,
+		MaxTotalIterations: 1,
+	})
+	if err != nil {
+		t.Fatalf("run loop first: %v", err)
+	}
+	if first.IterationsExecuted != 1 {
+		t.Fatalf("iterations_executed=%d, want 1", first.IterationsExecuted)
+	}
+	if strings.TrimSpace(first.LastTaskID) == "" {
+		t.Fatalf("expected last_task_id")
+	}
+	if err := svc.Tasks.FinishTask(ctx, first.LastTaskID, tasks.FinishTaskInput{
+		Status:     tasks.StatusFailed,
+		Error:      "step-1 done",
+		SessionID:  baseTask.SessionID,
+		FinishedAt: baseTask.CreatedAt,
+	}); err != nil {
+		t.Fatalf("finish first loop task: %v", err)
+	}
+
+	second, err := svc.RunExecutionPlanLoopV1(ctx, key, RunExecutionPlanLoopInput{
+		MaxIterations:      1,
+		MaxTotalIterations: 1,
+	})
+	if err != nil {
+		t.Fatalf("run loop second: %v", err)
+	}
+	if !second.LimitReached {
+		t.Fatalf("expected limit_reached=true")
+	}
+	if second.IterationsExecuted != 0 {
+		t.Fatalf("iterations_executed=%d, want 0", second.IterationsExecuted)
+	}
+	if len(second.Progress) == 0 {
+		t.Fatalf("expected non-empty progress history")
+	}
+	if second.Progress[0].Status != "limit_reached" {
+		t.Fatalf("latest progress status=%q, want limit_reached", second.Progress[0].Status)
+	}
+}
+
 func TestDecideApproval_AutoResolvePending(t *testing.T) {
 	ctx, svc := newServiceForTest(t)
 	task, err := svc.Tasks.CreateTask(ctx, tasks.CreateTaskInput{

@@ -203,6 +203,17 @@ func Migrate(ctx context.Context, conn *sql.DB) error {
 				status TEXT NOT NULL DEFAULT '',
 				updated_at INTEGER NOT NULL DEFAULT 0
 			);`,
+		`CREATE TABLE IF NOT EXISTS execution_plan_progress (
+				id INTEGER PRIMARY KEY AUTOINCREMENT,
+				key TEXT NOT NULL,
+				iteration INTEGER NOT NULL DEFAULT 0,
+				action TEXT NOT NULL DEFAULT '',
+				status TEXT NOT NULL DEFAULT '',
+				summary TEXT NOT NULL DEFAULT '',
+				created_at INTEGER NOT NULL DEFAULT 0
+			);`,
+		`CREATE INDEX IF NOT EXISTS idx_execution_plan_progress_key_created_at
+			ON execution_plan_progress(key, created_at DESC, id DESC);`,
 		`CREATE TABLE IF NOT EXISTS session_workspaces (
 				key TEXT PRIMARY KEY,
 				kind TEXT NOT NULL DEFAULT '',
