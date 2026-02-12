@@ -116,10 +116,12 @@ func buildTaskStatusReport(task tasks.Task) string {
 	taskID := strings.TrimSpace(task.ID)
 	worker := strings.TrimSpace(string(task.WorkerType))
 	prompt := truncateRunes(strings.TrimSpace(task.Prompt), 120)
+	warning := strings.Join(strings.Fields(strings.TrimSpace(task.Warning)), " ")
 	reason := strings.TrimSpace(task.Error)
 	if reason == "" {
 		reason = strings.TrimSpace(task.FinishReason)
 	}
+	reasonCompact := strings.Join(strings.Fields(strings.TrimSpace(reason)), " ")
 
 	lines := []string{
 		"任务进展汇报：",
@@ -133,7 +135,10 @@ func buildTaskStatusReport(task tasks.Task) string {
 		lines = append(lines, "任务摘要: "+prompt)
 	}
 	if reason != "" && task.Status != tasks.StatusSucceeded {
-		lines = append(lines, "原因: "+truncateRunes(reason, 160))
+		lines = append(lines, "原因: "+truncateRunes(reasonCompact, 160))
+	}
+	if warning != "" && (task.Status == tasks.StatusSucceeded || warning != reasonCompact) {
+		lines = append(lines, "警告: "+truncateRunes(warning, 160))
 	}
 	lines = append(lines, "如需我继续跟进，回复：查看任务 "+taskID)
 	return strings.TrimSpace(strings.Join(lines, "\n"))

@@ -974,7 +974,7 @@ func (m *Manager) consumeStdout(ctx context.Context, task tasks.Task, driver tas
 					}
 
 					summary := summarizeToolResultContent(r.Content, 500)
-					msg := strings.TrimSpace(fmt.Sprintf("tool_error: %s %s %s", toolName, exitPart, summary))
+					msg := strings.TrimSpace(fmt.Sprintf("tool_error: %s tool_use_id=%s %s %s", toolName, id, exitPart, summary))
 					m.appendLog(task.ID, tasks.LogStderr, msg)
 				}
 			}

@@ -58,8 +58,10 @@ func TestTaskLogsTail_BoundedAndTruncated(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create task: %v", err)
 	}
+	suffix := "Operation not permitted"
 	for i := 0; i < 30; i++ {
-		msg := strings.Repeat("中", 260)
+		// Ensure we exceed the 800 rune cap so head+tail truncation is exercised.
+		msg := strings.Repeat("中", 1500) + " " + suffix
 		if _, err := deps.Tasks.AppendLog(ctx, task.ID, tasks.LogSystem, msg); err != nil {
 			t.Fatalf("append log: %v", err)
 		}
@@ -79,7 +81,8 @@ func TestTaskLogsTail_BoundedAndTruncated(t *testing.T) {
 	var out struct {
 		Count int `json:"count"`
 		Logs  []struct {
-			Message string `json:"message"`
+			Message   string `json:"message"`
+			Truncated bool   `json:"truncated"`
 		} `json:"logs"`
 	}
 	raw, err := json.Marshal(outAny)
@@ -99,6 +102,12 @@ func TestTaskLogsTail_BoundedAndTruncated(t *testing.T) {
 		msg := strings.TrimSpace(l.Message)
 		if len([]rune(msg)) > 800 {
 			t.Fatalf("line too long: %d", len([]rune(msg)))
+		}
+		if !l.Truncated {
+			t.Fatalf("expected truncated=true, got false (msg=%q)", msg)
+		}
+		if !strings.Contains(msg, suffix) {
+			t.Fatalf("expected tail to retain suffix %q, got %q", suffix, msg)
 		}
 	}
 }
@@ -288,7 +297,8 @@ func TestTaskLogGet_CapsAt12000(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create task: %v", err)
 	}
-	entry, err := deps.Tasks.AppendLog(ctx, task.ID, tasks.LogSystem, strings.Repeat("A", 15000))
+	suffix := "Operation not permitted"
+	entry, err := deps.Tasks.AppendLog(ctx, task.ID, tasks.LogSystem, strings.Repeat("A", 15000)+"\n"+suffix)
 	if err != nil {
 		t.Fatalf("append log: %v", err)
 	}
@@ -322,6 +332,9 @@ func TestTaskLogGet_CapsAt12000(t *testing.T) {
 	if out["truncated"] != true {
 		t.Fatalf("truncated=%v want true", out["truncated"])
 	}
+	if !strings.Contains(msg, suffix) {
+		t.Fatalf("expected tail to retain suffix %q, got %q", suffix, msg)
+	}
 }
 
 func TestTaskContinueSubmit_RejectsCancelPrompt(t *testing.T) {
@@ -337,18 +350,20 @@ func TestTaskContinueSubmit_RejectsCancelPrompt(t *testing.T) {
 	}
 
 	reg := NewRegistry(deps)
-	_, err = reg.Execute(ctx, agentsdk.ToolCall{
-		Name: "task_continue_submit",
-		Fields: map[string]string{
-			"task_id": task.ID,
-			"prompt":  "/cancel",
-		},
-	})
-	if err == nil {
-		t.Fatalf("expected error")
-	}
-	if !strings.Contains(strings.ToLower(err.Error()), "task_cancel_submit") {
-		t.Fatalf("err=%q want mention task_cancel_submit", err.Error())
+	for _, prompt := range []string{"/cancel", " /Cancel now ", "cancel", "CANCEL!", "取消", "取消一下"} {
+		_, err = reg.Execute(ctx, agentsdk.ToolCall{
+			Name: "task_continue_submit",
+			Fields: map[string]string{
+				"task_id": task.ID,
+				"prompt":  prompt,
+			},
+		})
+		if err == nil {
+			t.Fatalf("expected error for prompt=%q", prompt)
+		}
+		if !strings.Contains(strings.ToLower(err.Error()), "task_cancel_submit") {
+			t.Fatalf("err=%q want mention task_cancel_submit (prompt=%q)", err.Error(), prompt)
+		}
 	}
 }
 

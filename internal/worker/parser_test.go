@@ -16,6 +16,35 @@ func TestParseClaudeJSONLine(t *testing.T) {
 	}
 }
 
+func TestParseClaudeJSONLine_ToolUseAndToolResult(t *testing.T) {
+	use := []byte(`{"type":"assistant","session_id":"sess-1","message":{"role":"assistant","content":[{"type":"tool_use","id":"call-1","name":"Bash","input":{"cmd":"echo hi"}}]}}`)
+	parsed, err := parseClaudeJSONLine(use)
+	if err != nil {
+		t.Fatalf("parse tool_use: %v", err)
+	}
+	if len(parsed.ToolUses) != 1 || parsed.ToolUses[0].ID != "call-1" || parsed.ToolUses[0].Name != "Bash" {
+		t.Fatalf("tool_uses=%+v", parsed.ToolUses)
+	}
+
+	result := []byte(`{"type":"user","session_id":"sess-1","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"call-1","content":["Exit code 1\\n","mkdir: Operation not permitted\\n"],"is_error":true}]}}`)
+	parsed, err = parseClaudeJSONLine(result)
+	if err != nil {
+		t.Fatalf("parse tool_result: %v", err)
+	}
+	if len(parsed.ToolResults) != 1 {
+		t.Fatalf("tool_results=%+v", parsed.ToolResults)
+	}
+	if parsed.ToolResults[0].ToolUseID != "call-1" {
+		t.Fatalf("tool_use_id=%q want %q", parsed.ToolResults[0].ToolUseID, "call-1")
+	}
+	if !parsed.ToolResults[0].IsError {
+		t.Fatalf("is_error=false want true")
+	}
+	if parsed.ToolResults[0].Content == "" {
+		t.Fatalf("expected non-empty content")
+	}
+}
+
 func TestParseCodexJSONLine(t *testing.T) {
 	t.Run("thread started", func(t *testing.T) {
 		line := []byte(`{"type":"thread.started","thread_id":"tid-1"}`)

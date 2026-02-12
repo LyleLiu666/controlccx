@@ -98,6 +98,22 @@ func TestService_StartTaskStatusReporter_AutoReportsTerminalAndBlocked(t *testin
 	}
 }
 
+func TestBuildTaskStatusReport_SucceededWithWarning_IncludesWarningLine(t *testing.T) {
+	out := buildTaskStatusReport(tasks.Task{
+		ID:         "task-1",
+		Status:     tasks.StatusSucceeded,
+		WorkerType: tasks.WorkerCodex,
+		Prompt:     "do thing",
+		Warning:    "run succeeded but tool errors were observed; see stderr logs",
+	})
+	if !strings.Contains(out, "警告:") {
+		t.Fatalf("expected warning line, got: %q", out)
+	}
+	if !strings.Contains(out, "tool errors were observed") {
+		t.Fatalf("expected warning content, got: %q", out)
+	}
+}
+
 func waitForChatMessagesAtLeast(t *testing.T, store *chat.Store, min int, timeout time.Duration) []chat.Message {
 	t.Helper()
 	deadline := time.Now().Add(timeout)

@@ -4,9 +4,47 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"controlccx/internal/agentsdk"
 )
+
+func looksLikeCancelPrompt(prompt string) bool {
+	prompt = strings.TrimSpace(prompt)
+	if prompt == "" {
+		return false
+	}
+
+	lower := strings.ToLower(prompt)
+	// Slash-prefixed commands are unambiguous; treat any "/cancel..." variant as a cancel attempt.
+	if strings.HasPrefix(lower, "/cancel") {
+		return true
+	}
+
+	stripLower := strings.TrimSpace(strings.TrimRightFunc(lower, func(r rune) bool {
+		return unicode.IsSpace(r) || unicode.IsPunct(r)
+	}))
+	if stripLower == "cancel" {
+		return true
+	}
+
+	stripZH := strings.TrimSpace(strings.TrimRightFunc(prompt, func(r rune) bool {
+		return unicode.IsSpace(r) || unicode.IsPunct(r)
+	}))
+	if stripZH == "取消" {
+		return true
+	}
+	// Short Chinese variants like "取消一下" are also likely cancel attempts.
+	if strings.HasPrefix(stripZH, "取消") {
+		n := utf8.RuneCountInString(stripZH)
+		if n > 0 && n <= 6 {
+			return true
+		}
+	}
+
+	return false
+}
 
 type taskContinueSubmitTool struct{}
 
@@ -27,10 +65,8 @@ func (taskContinueSubmitTool) Execute(ctx context.Context, call agentsdk.ToolCal
 	}
 	body := runOptionsFromFields(call.Fields)
 	{
-		p := strings.TrimSpace(body.Prompt)
-		lp := strings.ToLower(p)
 		// Do not overload "continue" with "cancel" semantics: this created a severe UX bug.
-		if p == "/cancel" || lp == "cancel" || p == "取消" {
+		if looksLikeCancelPrompt(body.Prompt) {
 			err := errors.New("cancel prompt is not supported; use task_cancel_submit instead")
 			ops.AppendActionAuditLog(ctx, taskID, "task_continue_submit", map[string]any{"task_id": taskID, "session_key": key, "prompt": body.Prompt}, err)
 			return nil, err

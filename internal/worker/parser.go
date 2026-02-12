@@ -38,11 +38,11 @@ func parseClaudeJSONLine(line []byte) (parsedLine, error) {
 			Role    string `json:"role,omitempty"`
 			Content []struct {
 				Type      string `json:"type,omitempty"`
-				Text      string `json:"text,omitempty"`
+				Text      any    `json:"text,omitempty"`
 				ID        string `json:"id,omitempty"`
 				Name      string `json:"name,omitempty"`
 				ToolUseID string `json:"tool_use_id,omitempty"`
-				Content   string `json:"content,omitempty"`
+				Content   any    `json:"content,omitempty"`
 				IsError   bool   `json:"is_error,omitempty"`
 			} `json:"content,omitempty"`
 		} `json:"message,omitempty"`
@@ -79,9 +79,10 @@ func parseClaudeJSONLine(line []byte) (parsedLine, error) {
 				if id == "" {
 					continue
 				}
+				content := strings.TrimSpace(normalizeText(c.Content))
 				out.ToolResults = append(out.ToolResults, parsedToolResult{
 					ToolUseID: id,
-					Content:   strings.TrimSpace(c.Content),
+					Content:   content,
 					IsError:   c.IsError,
 				})
 			default:
