@@ -134,3 +134,83 @@ func TestStore_SessionContinueQueue_ClaimAndMarkDone(t *testing.T) {
 		t.Fatalf("claim #2 prompt=%q, want B", next2.Prompt)
 	}
 }
+
+func TestStore_SessionContinueQueue_ListConversations_IsolatedByProjectScope(t *testing.T) {
+	ctx := context.Background()
+	conn, err := db.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "controlccx.db")})
+	if err != nil {
+		t.Fatalf("db open: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+
+	store := NewStore(conn)
+
+	seedConversation := func(conversationID, workdir string) {
+		t.Helper()
+		task, err := store.CreateTask(ctx, CreateTaskInput{
+			WorkerType:     WorkerCodex,
+			Mode:           ModeNew,
+			ConversationID: conversationID,
+			Prompt:         "seed",
+			WorkDir:        workdir,
+		})
+		if err != nil {
+			t.Fatalf("seed create task (%s): %v", conversationID, err)
+		}
+		if err := store.FinishTask(ctx, task.ID, FinishTaskInput{
+			Status:     StatusSucceeded,
+			FinishedAt: time.Now().UTC(),
+		}); err != nil {
+			t.Fatalf("seed finish task (%s): %v", conversationID, err)
+		}
+	}
+
+	// Project A has a backlog with multiple conversations.
+	seedConversation("a-1", "/repo/project-a")
+	seedConversation("a-2", "/repo/project-a")
+	seedConversation("a-3", "/repo/project-a")
+	// Project B has one conversation.
+	seedConversation("b-1", "/repo/project-b")
+
+	enqueue := func(conversationID, prompt string) {
+		t.Helper()
+		if _, err := store.EnqueueSessionContinue(ctx, EnqueueSessionContinueInput{
+			ConversationID: conversationID,
+			Prompt:         prompt,
+			RunOptionsJSON: `{"prompt":"` + prompt + `"}`,
+			Priority:       0,
+			Source:         "continue",
+		}); err != nil {
+			t.Fatalf("enqueue %s: %v", conversationID, err)
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+
+	// Intentionally enqueue all project A items first.
+	enqueue("a-1", "A1")
+	enqueue("a-2", "A2")
+	enqueue("a-3", "A3")
+	enqueue("b-1", "B1")
+
+	got, err := store.ListSessionContinueQueueConversations(ctx, 2)
+	if err != nil {
+		t.Fatalf("list conversations: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("len=%d, want 2 (limit)", len(got))
+	}
+
+	hasA := false
+	hasB := false
+	for _, cid := range got {
+		switch cid {
+		case "a-1", "a-2", "a-3":
+			hasA = true
+		case "b-1":
+			hasB = true
+		}
+	}
+	if !hasA || !hasB {
+		t.Fatalf("want one conversation from each project scope, got=%v", got)
+	}
+}
