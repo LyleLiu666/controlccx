@@ -19,6 +19,7 @@ type Deps struct {
 	Tasks     *tasks.Store
 	Ops       *taskops.Service
 	Scheduler Scheduler
+	FSRoots   []string
 }
 
 type Descriptor struct {

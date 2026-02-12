@@ -8,7 +8,6 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -393,15 +392,10 @@ func (a *API) handleFSList(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "path is required", http.StatusBadRequest)
 		return
 	}
-
-	path := filepath.Clean(raw)
-	if !filepath.IsAbs(path) {
-		cwd, err := os.Getwd()
-		if err != nil {
-			http.Error(w, "cannot resolve cwd", http.StatusInternalServerError)
-			return
-		}
-		path = filepath.Join(cwd, path)
+	path, err := resolveFSPath(raw, "")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
 	}
 
 	roots := a.FSRoots
@@ -434,27 +428,10 @@ func (a *API) handleFSRead(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	baseRaw := strings.TrimSpace(r.URL.Query().Get("base"))
-
-	path := filepath.Clean(raw)
-	if baseRaw != "" && !filepath.IsAbs(path) {
-		base := filepath.Clean(baseRaw)
-		if !filepath.IsAbs(base) {
-			cwd, err := os.Getwd()
-			if err != nil {
-				http.Error(w, "cannot resolve cwd", http.StatusInternalServerError)
-				return
-			}
-			base = filepath.Join(cwd, base)
-		}
-		path = filepath.Join(base, path)
-	}
-	if !filepath.IsAbs(path) {
-		cwd, err := os.Getwd()
-		if err != nil {
-			http.Error(w, "cannot resolve cwd", http.StatusInternalServerError)
-			return
-		}
-		path = filepath.Join(cwd, path)
+	path, err := resolveFSPath(raw, baseRaw)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
 	}
 
 	roots := a.FSRoots

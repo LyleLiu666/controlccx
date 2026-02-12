@@ -9,6 +9,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"controlccx/internal/fssec"
 )
 
 const maxFSWriteBytes = 1 << 20 // 1 MiB
@@ -22,31 +24,7 @@ func (a *API) fsRootsOrDefault() []FSRoot {
 }
 
 func resolveFSPath(rawPath, baseRaw string) (string, error) {
-	rawPath = strings.TrimSpace(rawPath)
-	if rawPath == "" {
-		return "", fmt.Errorf("path is required")
-	}
-
-	path := filepath.Clean(rawPath)
-	if baseRaw != "" && !filepath.IsAbs(path) {
-		base := filepath.Clean(strings.TrimSpace(baseRaw))
-		if !filepath.IsAbs(base) {
-			cwd, err := os.Getwd()
-			if err != nil {
-				return "", fmt.Errorf("cannot resolve cwd")
-			}
-			base = filepath.Join(cwd, base)
-		}
-		path = filepath.Join(base, path)
-	}
-	if !filepath.IsAbs(path) {
-		cwd, err := os.Getwd()
-		if err != nil {
-			return "", fmt.Errorf("cannot resolve cwd")
-		}
-		path = filepath.Join(cwd, path)
-	}
-	return path, nil
+	return fssec.ResolvePath(rawPath, baseRaw)
 }
 
 func (a *API) handleFSWrite(w http.ResponseWriter, r *http.Request) {

@@ -26,6 +26,9 @@ const (
 
 var schedulerReadOnlyTools = map[string]struct{}{
 	"system_info":    {},
+	"fs_roots":       {},
+	"fs_entries":     {},
+	"fs_read_text":   {},
 	"tasks_count":    {},
 	"tasks_list":     {},
 	"task_logs_tail": {},
@@ -317,6 +320,7 @@ func (s *Service) executeScheduledTool(job *scheduleJob, tickNo int, runID strin
 		Tasks:     s.tasks,
 		Ops:       s.taskOps,
 		Scheduler: s,
+		FSRoots:   s.fsRoots,
 	})
 	payload, toolErr := reg.Execute(job.ctx, agentsdk.ToolCall{
 		ID:     callID,
@@ -447,6 +451,7 @@ func (s *Service) runScheduleCallback(job *scheduleJob, tickNo int, runID string
 			Tasks:     s.tasks,
 			Ops:       s.taskOps,
 			Scheduler: s,
+			FSRoots:   s.fsRoots,
 		}),
 		MaxSteps: 500,
 		Callbacks: xmlprotocol.Callbacks{

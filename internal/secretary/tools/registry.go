@@ -11,6 +11,9 @@ import (
 func DefaultTools() []Tool {
 	return []Tool{
 		systemInfoTool{},
+		fsRootsTool{},
+		fsEntriesTool{},
+		fsReadTextTool{},
 		tasksCountTool{},
 		tasksListTool{},
 		taskNewSubmitTool{},

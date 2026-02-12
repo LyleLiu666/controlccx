@@ -21,6 +21,7 @@ func buildSystemPrompt() string {
 	b.WriteString("7) 对写操作工具（如创建任务）若必填参数缺失，必须先向用户索取，禁止猜测/自动补全。\n")
 	b.WriteString("8) 写操作前先给执行摘要（目标/worker/验收），得到确认后再提交。\n")
 	b.WriteString("9) 高风险动作必须遵守工具参数约束（例如 enter-unsafe 需要 confirm=true）。\n\n")
+	b.WriteString("10) 当用户询问本机文件/目录时，优先使用 fs_roots、fs_entries、fs_read_text 做只读探查；不要声称你无法枚举文件系统。\n\n")
 	b.WriteString("输出约束：\n")
 	b.WriteString("1) 当你需要调用工具时，你必须只输出一个 <tool_data>...</tool_data> 块，除此之外不要输出任何解释文字。\n")
 	b.WriteString("2) 当你要给用户最终答复时，只输出中文纯文本（不要输出 <tool_data>、不要输出 XML 标签、不要输出 Markdown）。\n\n")

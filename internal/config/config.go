@@ -13,6 +13,7 @@ type Config struct {
 	Server                ServerConfig  `yaml:"server"`
 	Paths                 PathsConfig   `yaml:"paths"`
 	Workers               WorkersConfig `yaml:"workers"`
+	FSRoots               []string      `yaml:"fs_roots"`
 	AuditRetentionDays    int           `yaml:"audit_retention_days"`
 	AuditMaxRowsPerSource int           `yaml:"audit_max_rows_per_source"`
 	AuditGCInterval       string        `yaml:"audit_gc_interval"`

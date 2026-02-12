@@ -172,6 +172,7 @@ func main() {
 		Hub:     hub,
 		Tools:   toolsSvc,
 	}
+	fsRoots := api.FSRootsFromPaths(cfg.FSRoots)
 
 	secretarySvc := secretary.NewService(
 		cfg,
@@ -183,6 +184,7 @@ func main() {
 		secretary.WithCompressionStore(secretaryCompressions),
 		secretary.WithEventHub(hub),
 		secretary.WithTaskOps(opsSvc),
+		secretary.WithFSRoots(cfg.FSRoots),
 	)
 
 	skillsSvc, err := skills.NewService(skills.Options{})
@@ -204,6 +206,7 @@ func main() {
 		Tasks:                taskStore,
 		Workers:              runnerClient,
 		Hub:                  hub,
+		FSRoots:              fsRoots,
 		Audit:                auditSvc,
 		Auth:                 authStore,
 		InstanceToken:        instanceToken,

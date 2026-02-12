@@ -33,6 +33,7 @@ type Service struct {
 	providers *providers.Store
 	taskOps   *taskops.Service
 	hub       *events.Hub
+	fsRoots   []string
 
 	client agentsdk.Client
 
@@ -106,6 +107,28 @@ func WithTaskOps(ops *taskops.Service) Option {
 	}
 }
 
+func WithFSRoots(roots []string) Option {
+	return func(s *Service) {
+		if len(roots) == 0 {
+			s.fsRoots = nil
+			return
+		}
+		out := make([]string, 0, len(roots))
+		for _, r := range roots {
+			v := strings.TrimSpace(r)
+			if v == "" {
+				continue
+			}
+			out = append(out, v)
+		}
+		if len(out) == 0 {
+			s.fsRoots = nil
+			return
+		}
+		s.fsRoots = out
+	}
+}
+
 func NewService(cfg config.Config, taskStore *tasks.Store, chatStore *chat.Store, authStore *auth.Store, providersStore *providers.Store, opts ...Option) *Service {
 	s := &Service{
 		cfg:          cfg,
@@ -154,6 +177,7 @@ func (s *Service) send(ctx context.Context, userText string, hooks *SendHooks) (
 		Tasks:     s.tasks,
 		Ops:       s.taskOps,
 		Scheduler: s,
+		FSRoots:   s.fsRoots,
 	})
 
 	client := s.client

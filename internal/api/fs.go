@@ -1,19 +1,16 @@
 package api
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"sort"
 	"strings"
+
+	"controlccx/internal/fssec"
 )
 
-type FSRoot struct {
-	Name string `json:"name"`
-	Path string `json:"path"`
-}
+type FSRoot = fssec.Root
 
 type FSListEntry struct {
 	Name string `json:"name"`
@@ -27,26 +24,11 @@ type FSListResponse struct {
 }
 
 func DefaultFSRoots() []FSRoot {
-	var roots []FSRoot
+	return fssec.DefaultRoots()
+}
 
-	if home, err := os.UserHomeDir(); err == nil && home != "" {
-		roots = append(roots, FSRoot{Name: "Home", Path: filepath.Clean(home)})
-	}
-	if cwd, err := os.Getwd(); err == nil && cwd != "" {
-		roots = append(roots, FSRoot{Name: "Cwd", Path: filepath.Clean(cwd)})
-	}
-
-	if runtime.GOOS == "windows" {
-		for _, drive := range listWindowsDrives() {
-			roots = append(roots, FSRoot{Name: drive, Path: drive})
-		}
-	} else {
-		roots = append(roots, FSRoot{Name: "Root", Path: string(os.PathSeparator)})
-	}
-
-	roots = dedupeRoots(roots)
-	sort.SliceStable(roots, func(i, j int) bool { return roots[i].Name < roots[j].Name })
-	return roots
+func FSRootsFromPaths(paths []string) []FSRoot {
+	return fssec.RootsFromPaths(paths)
 }
 
 func ListDirs(path string) (FSListResponse, error) {
@@ -88,120 +70,5 @@ func ListDirs(path string) (FSListResponse, error) {
 }
 
 func isUnderAnyRoot(path string, roots []FSRoot) bool {
-	pathAbs, err := filepath.Abs(path)
-	if err != nil {
-		return false
-	}
-	pathAbs = evalSymlinksBestEffort(pathAbs)
-
-	for _, r := range roots {
-		rootAbs, err := filepath.Abs(r.Path)
-		if err != nil {
-			continue
-		}
-		rootAbs = evalSymlinksBestEffort(rootAbs)
-		if isWithin(rootAbs, pathAbs) {
-			return true
-		}
-	}
-	return false
-}
-
-func evalSymlinksBestEffort(pathAbs string) string {
-	pathAbs = filepath.Clean(pathAbs)
-	p := pathAbs
-	suffix := ""
-	for {
-		resolved, err := filepath.EvalSymlinks(p)
-		if err == nil {
-			if suffix != "" {
-				resolved = filepath.Join(resolved, suffix)
-			}
-			return filepath.Clean(resolved)
-		}
-
-		if os.IsNotExist(err) {
-			parent := filepath.Dir(p)
-			if parent == p {
-				if suffix != "" {
-					return filepath.Join(p, suffix)
-				}
-				return pathAbs
-			}
-			base := filepath.Base(p)
-			if suffix == "" {
-				suffix = base
-			} else {
-				suffix = filepath.Join(base, suffix)
-			}
-			p = parent
-			continue
-		}
-
-		if errors.Is(err, os.ErrPermission) {
-			if suffix != "" {
-				return filepath.Join(p, suffix)
-			}
-			return pathAbs
-		}
-		if suffix != "" {
-			return filepath.Join(p, suffix)
-		}
-		return pathAbs
-	}
-}
-
-func isWithin(rootAbs, pathAbs string) bool {
-	rootAbs = filepath.Clean(rootAbs)
-	pathAbs = filepath.Clean(pathAbs)
-
-	// Windows file systems are case-insensitive in practice.
-	if runtime.GOOS == "windows" {
-		rootAbs = strings.ToLower(rootAbs)
-		pathAbs = strings.ToLower(pathAbs)
-	}
-
-	rel, err := filepath.Rel(rootAbs, pathAbs)
-	if err != nil {
-		return false
-	}
-	if rel == "." {
-		return true
-	}
-	if rel == ".." {
-		return false
-	}
-	if strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
-		return false
-	}
-	return true
-}
-
-func dedupeRoots(in []FSRoot) []FSRoot {
-	seen := make(map[string]struct{}, len(in))
-	var out []FSRoot
-	for _, r := range in {
-		p := filepath.Clean(r.Path)
-		key := p
-		if runtime.GOOS == "windows" {
-			key = strings.ToLower(key)
-		}
-		if _, ok := seen[key]; ok {
-			continue
-		}
-		seen[key] = struct{}{}
-		out = append(out, FSRoot{Name: r.Name, Path: p})
-	}
-	return out
-}
-
-func listWindowsDrives() []string {
-	var out []string
-	for c := byte('A'); c <= byte('Z'); c++ {
-		drive := string([]byte{c, ':'}) + string(os.PathSeparator)
-		if info, err := os.Stat(drive); err == nil && info.IsDir() {
-			out = append(out, drive)
-		}
-	}
-	return out
+	return fssec.IsUnderAnyRoot(path, roots)
 }
