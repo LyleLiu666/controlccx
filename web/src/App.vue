@@ -12,6 +12,7 @@ import type {
   FSListEntry,
   FSRoot,
   LogEntry,
+  NextAction,
   Skill,
   Tool,
   ToolStatus,
@@ -39,6 +40,7 @@ import {
   fetchFSRead,
   fetchFSRoots,
   fetchLogs,
+  fetchSessionNextAction,
   fetchSkills,
   fetchTools,
   fetchToolsStatus,
@@ -59,6 +61,7 @@ import {
   linkSkill,
   renameSession,
   continueSessionWithOptions,
+  executeSessionNextAction,
   preemptSessionContinueWithOptions,
   fetchSessionContinueQueue,
   resumeTaskWithOptions,
@@ -194,6 +197,11 @@ const resumeSafetyOverride = ref(false);
 const resumeHighRiskOptIn = ref(false);
 const sessionContinueQueue = ref<SessionContinueQueueItem[]>([]);
 const sessionContinueQueueLoading = ref(false);
+const sessionNextAction = ref<NextAction | null>(null);
+const sessionNextActionLoading = ref(false);
+const sessionNextActionError = ref("");
+const sessionPrimaryActionBusy = ref(false);
+let sessionNextActionReqID = 0;
 const errorBanner = ref<string>("");
 
 const {
@@ -2178,6 +2186,7 @@ watch(
     const desired = desiredOutputTabForTask(t);
     // Auto switch only when it would help: running->logs, finished->result.
     if (outputTab.value !== desired) outputTab.value = desired;
+    if (selectedSessionKey.value) void refreshSessionNextAction();
   },
 );
 
@@ -5107,6 +5116,188 @@ async function loadSelectedSessionContinueQueue() {
   }
 }
 
+async function refreshSessionNextAction() {
+  const key = String(selectedSessionKey.value ?? "").trim();
+  sessionNextActionReqID += 1;
+  const reqID = sessionNextActionReqID;
+
+  if (!key) {
+    sessionNextAction.value = null;
+    sessionNextActionLoading.value = false;
+    sessionNextActionError.value = "";
+    return;
+  }
+
+  sessionNextActionLoading.value = true;
+  sessionNextActionError.value = "";
+  try {
+    const next = await fetchSessionNextAction(key);
+    if (reqID !== sessionNextActionReqID) return;
+    sessionNextAction.value = next;
+  } catch (e: any) {
+    if (reqID !== sessionNextActionReqID) return;
+    sessionNextAction.value = null;
+    sessionNextActionError.value = e?.message ?? String(e);
+  } finally {
+    if (reqID !== sessionNextActionReqID) return;
+    sessionNextActionLoading.value = false;
+  }
+}
+
+type SessionPrimaryActionMeta = {
+  action: NextAction["action"];
+  label: string;
+  reason: string;
+};
+
+const sessionPrimaryAction = computed<SessionPrimaryActionMeta>(() => {
+  const next = sessionNextAction.value;
+  if (!next) {
+    return {
+      action: "resume_run",
+      label: "继续",
+      reason: sessionNextActionError.value ? "next_action_unavailable" : "",
+    };
+  }
+  switch (next.action) {
+    case "resolve_approval":
+      return { action: next.action, label: "审批…", reason: next.reason };
+    case "wait_in_flight":
+      return { action: next.action, label: "查看运行中任务", reason: next.reason };
+    case "merge_workspace":
+      return { action: next.action, label: "Merge back", reason: next.reason };
+    case "resume_run":
+      return { action: next.action, label: "继续（推荐）", reason: next.reason };
+    case "start_run":
+      return { action: next.action, label: "开始运行（推荐）", reason: next.reason };
+    case "confirm_contract":
+      return { action: next.action, label: "确认任务契约", reason: next.reason };
+    default:
+      return { action: "resume_run", label: "继续", reason: next.reason };
+  }
+});
+
+const sessionPrimaryActionDisabled = computed<boolean>(() => {
+  const sess = selectedSession.value;
+  if (!sess) return true;
+  if (sessionPrimaryActionBusy.value) return true;
+
+  switch (sessionPrimaryAction.value.action) {
+    case "resume_run":
+    case "start_run":
+      return !sess.session_id || !!sess.deleted_at || highRiskConfirmOpen.value || taskPlaneDegraded.value;
+    case "merge_workspace":
+      return (
+        sessionWorkspaceLoading.value ||
+        !selectedSessionWorkspace.value?.run_workdir ||
+        selectedTask.value?.status === "running" ||
+        selectedTask.value?.status === "queued" ||
+        selectedTask.value?.status === "waiting"
+      );
+    default:
+      return false;
+  }
+});
+
+const sessionPrimaryActionReason = computed<string>(() => {
+  const reason = String(sessionPrimaryAction.value.reason ?? "").trim();
+  if (reason) return reason;
+  return "";
+});
+
+async function onPrimarySessionAction() {
+  const sess = selectedSession.value;
+  if (!sess) return;
+  if (sessionPrimaryActionBusy.value) return;
+  const primary = sessionPrimaryAction.value;
+
+  switch (primary.action) {
+    case "resolve_approval": {
+      const targetTaskID = String(sessionNextAction.value?.task_id ?? "").trim();
+      if (targetTaskID) selectedTaskId.value = targetTaskID;
+      const target = targetTaskID || selectedTask.value?.id || "";
+      if (!target) return;
+      approvalPromptRunID.value = target;
+      approvalPromptOpen.value = true;
+      return;
+    }
+    case "wait_in_flight": {
+      const targetTaskID =
+        String(sessionNextAction.value?.task_id ?? "").trim() ||
+        String(selectedSessionInFlightTask.value?.id ?? "").trim();
+      if (targetTaskID) {
+        selectedTaskId.value = targetTaskID;
+        try {
+          await loadLogs(targetTaskID);
+        } catch {
+          // ignore
+        }
+      }
+      outputTab.value = "logs";
+      return;
+    }
+    case "merge_workspace":
+      await mergeBackSelectedWorkspace();
+      void refreshSessionNextAction();
+      return;
+    case "confirm_contract":
+      await openSecretaryDrawer();
+      errorBanner.value = "任务契约未确认：请先在秘书中确认契约，再继续执行。";
+      return;
+    case "resume_run":
+    case "start_run":
+      break;
+    default:
+      await onResumeTask();
+      void refreshSessionNextAction();
+      return;
+  }
+
+  if (sess.deleted_at) {
+    errorBanner.value = "该会话已删除（软删除），无法继续。";
+    return;
+  }
+  if (!sess.session_id) {
+    errorBanner.value = "该会话还没有 session_id，无法继续。";
+    return;
+  }
+  if (!ensureTaskPlaneAvailable()) return;
+
+  errorBanner.value = "";
+  sessionPrimaryActionBusy.value = true;
+  try {
+    openRunLaunchMask({ title: "执行推荐动作中…", detail: "正在按 NextAction 执行…" });
+    const out = await executeSessionNextAction(sess.key, {
+      action: primary.action,
+      prompt: resumePrompt.value,
+    });
+    resumePrompt.value = "";
+    if (out.queue) {
+      closeRunLaunchMask();
+      await onContinueQueuedAck(out.queue, "continue");
+      return;
+    }
+    if (out.task) {
+      const nextTask = out.task;
+      trackRunLaunchMaskForTask(nextTask);
+      resumeOriginByRunID.set(nextTask.id, "manual");
+      upsertTask(nextTask);
+      selectedTaskId.value = nextTask.id;
+      await loadLogs(nextTask.id);
+      await loadSelectedSessionContinueQueue();
+      return;
+    }
+    closeRunLaunchMask();
+  } catch (e: any) {
+    closeRunLaunchMask();
+    if (await maybeAttachSessionInFlightTask(e)) return;
+    errorBanner.value = e?.message ?? String(e);
+  } finally {
+    sessionPrimaryActionBusy.value = false;
+    void refreshSessionNextAction();
+  }
+}
+
 const resumeDriver = computed<ToolDriver>(() =>
   toolDriverForWorkerType(selectedSession.value?.worker_type ?? ""),
 );
@@ -5253,8 +5444,10 @@ watch(
     // Default to autopilot on session switches; advanced overrides are per-run.
     resumeSafetyOverride.value = false;
     resumeHighRiskOptIn.value = false;
+    sessionPrimaryActionBusy.value = false;
     void refreshAcceptance();
     void loadSelectedSessionContinueQueue();
+    void refreshSessionNextAction();
   },
   { immediate: true },
 );
@@ -6478,6 +6671,15 @@ watch(
                   </template>
                 </div>
               </div>
+              <div class="nextActionBar">
+                <span class="pill low">推荐动作</span>
+                <span class="mono">{{ sessionPrimaryAction.action }}</span>
+                <span v-if="sessionPrimaryActionReason">· {{ sessionPrimaryActionReason }}</span>
+                <span v-if="sessionNextActionLoading" class="tinyHint">同步中…</span>
+                <button type="button" class="tinyBtn" @click="refreshSessionNextAction" :disabled="sessionNextActionLoading">
+                  刷新
+                </button>
+              </div>
 	            <div class="resumeRow">
 	              <input
 	                v-if="!resumeExpanded"
@@ -6519,35 +6721,48 @@ watch(
 	              </div>
               <button
                 type="button"
-                class="primary"
-                @click="onResumeTask"
-                :disabled="!resumePrompt.trim() || !selectedSession.session_id || !!selectedSession.deleted_at || highRiskConfirmOpen"
+                class="primary resumePrimaryAction"
+                @click="onPrimarySessionAction"
+                :disabled="sessionPrimaryActionDisabled"
 	              >
-                继续
-              </button>
-              <button
-                type="button"
-                class="secondary"
-                @click="onPreemptResumeTask"
-                :disabled="
-                  !resumePrompt.trim() ||
-                  !selectedSession.session_id ||
-                  !!selectedSession.deleted_at ||
-                  highRiskConfirmOpen ||
-                  !selectedSessionInFlightTask
-                "
-              >
-                抢占当前并继续
-              </button>
-              <button
-                type="button"
-                class="resumeToggle"
-                @click="resumeExpanded = !resumeExpanded"
-                :title="resumeExpanded ? 'Collapse' : 'Expand'"
-              >
-                {{ resumeExpanded ? "▴" : "⋯" }}
+                {{ sessionPrimaryAction.label }}
               </button>
             </div>
+            <details class="resumeSecondary">
+              <summary>更多操作</summary>
+              <div class="resumeSecondaryActions">
+                <button
+                  type="button"
+                  class="secondary"
+                  @click="onResumeTask"
+                  :disabled="!resumePrompt.trim() || !selectedSession.session_id || !!selectedSession.deleted_at || highRiskConfirmOpen"
+                >
+                  手动继续（高级）
+                </button>
+                <button
+                  type="button"
+                  class="secondary"
+                  @click="onPreemptResumeTask"
+                  :disabled="
+                    !resumePrompt.trim() ||
+                    !selectedSession.session_id ||
+                    !!selectedSession.deleted_at ||
+                    highRiskConfirmOpen ||
+                    !selectedSessionInFlightTask
+                  "
+                >
+                  抢占当前并继续
+                </button>
+                <button
+                  type="button"
+                  class="secondary"
+                  @click="resumeExpanded = !resumeExpanded"
+                  :title="resumeExpanded ? 'Collapse' : 'Expand'"
+                >
+                  {{ resumeExpanded ? "收起高级设置" : "展开高级设置" }}
+                </button>
+              </div>
+            </details>
             <div v-if="selectedSessionInFlightTask || sessionContinueQueueLoading || sessionContinueQueue.length > 0" class="tinyHint">
               <span v-if="selectedSessionInFlightTask">
                 运行中：{{ selectedSessionInFlightTask.id.slice(0, 8) }}（{{ selectedSessionInFlightTask.status }}）
