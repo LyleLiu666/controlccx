@@ -40,6 +40,61 @@ func TestFSRoots_UsesConfiguredRoots(t *testing.T) {
 	}
 }
 
+func TestFSPwd_UsesCWDWhenAllowed(t *testing.T) {
+	ctx := context.Background()
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	reg := NewRegistry(Deps{FSRoots: []string{cwd}})
+
+	outAny, err := reg.Execute(ctx, agentsdk.ToolCall{Name: "fs_pwd"})
+	if err != nil {
+		t.Fatalf("fs_pwd: %v", err)
+	}
+
+	var out struct {
+		Path   string `json:"path"`
+		Source string `json:"source"`
+	}
+	raw, _ := json.Marshal(outAny)
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatalf("decode output: %v raw=%s", err, string(raw))
+	}
+	if filepath.Clean(out.Path) != filepath.Clean(cwd) {
+		t.Fatalf("path=%q want %q", out.Path, cwd)
+	}
+	if out.Source != "cwd" {
+		t.Fatalf("source=%q want cwd", out.Source)
+	}
+}
+
+func TestFSPwd_FallsBackToFirstRootWhenCWDNotAllowed(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	reg := NewRegistry(Deps{FSRoots: []string{root}})
+
+	outAny, err := reg.Execute(ctx, agentsdk.ToolCall{Name: "fs_pwd"})
+	if err != nil {
+		t.Fatalf("fs_pwd: %v", err)
+	}
+
+	var out struct {
+		Path   string `json:"path"`
+		Source string `json:"source"`
+	}
+	raw, _ := json.Marshal(outAny)
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatalf("decode output: %v raw=%s", err, string(raw))
+	}
+	if filepath.Clean(out.Path) != filepath.Clean(root) {
+		t.Fatalf("path=%q want %q", out.Path, root)
+	}
+	if out.Source != "root_fallback" {
+		t.Fatalf("source=%q want root_fallback", out.Source)
+	}
+}
+
 func TestFSEntries_RespectsRootsAndHiddenFlag(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()

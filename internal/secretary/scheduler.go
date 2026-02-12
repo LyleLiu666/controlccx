@@ -27,6 +27,7 @@ const (
 var schedulerReadOnlyTools = map[string]struct{}{
 	"system_info":    {},
 	"fs_roots":       {},
+	"fs_pwd":         {},
 	"fs_entries":     {},
 	"fs_read_text":   {},
 	"tasks_count":    {},

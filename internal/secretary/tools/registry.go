@@ -12,6 +12,7 @@ func DefaultTools() []Tool {
 	return []Tool{
 		systemInfoTool{},
 		fsRootsTool{},
+		fsPWDTool{},
 		fsEntriesTool{},
 		fsReadTextTool{},
 		tasksCountTool{},

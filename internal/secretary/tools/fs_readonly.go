@@ -36,6 +36,28 @@ func (fsRootsTool) Execute(ctx context.Context, call agentsdk.ToolCall, deps Dep
 	return map[string]any{"roots": fssec.EffectiveRoots(deps.FSRoots)}, nil
 }
 
+type fsPWDTool struct{}
+
+func (fsPWDTool) Name() string { return "fs_pwd" }
+
+func (fsPWDTool) DescriptionZH() string {
+	return "获取秘书当前目录（只读）。优先返回当前进程工作目录；若不在可读根内则回退到第一个可读根。无参数。"
+}
+
+func (fsPWDTool) Execute(ctx context.Context, call agentsdk.ToolCall, deps Deps) (any, error) {
+	_ = ctx
+	_ = call
+	roots := fssec.EffectiveRoots(deps.FSRoots)
+	path, source, err := fsPWDPath(roots)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{
+		"path":   path,
+		"source": source,
+	}, nil
+}
+
 type fsEntriesTool struct{}
 
 func (fsEntriesTool) Name() string { return "fs_entries" }
@@ -226,4 +248,17 @@ type fsEntry struct {
 	Path string      `json:"path"`
 	Kind fsEntryKind `json:"kind"`
 	Size int64       `json:"size,omitempty"`
+}
+
+func fsPWDPath(roots []fssec.Root) (path string, source string, err error) {
+	cwd, cwdErr := os.Getwd()
+	if cwdErr == nil && strings.TrimSpace(cwd) != "" {
+		if resolved, resolveErr := fssec.ResolvePath(cwd, ""); resolveErr == nil && fssec.IsUnderAnyRoot(resolved, roots) {
+			return resolved, "cwd", nil
+		}
+	}
+	if len(roots) == 0 {
+		return "", "", errors.New("no readable roots available")
+	}
+	return filepath.Clean(roots[0].Path), "root_fallback", nil
 }
