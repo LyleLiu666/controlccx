@@ -586,6 +586,106 @@ func TestExecutionPlanLoopSubmit_RunsAndPersistsProgress(t *testing.T) {
 	}
 }
 
+func TestExecutionPlanLoopSubmit_EmitsHumanHandoffAtLimit(t *testing.T) {
+	ctx, deps := newDepsForToolsTest(t)
+	reg := NewRegistry(deps)
+
+	task, err := deps.Tasks.CreateTask(ctx, tasks.CreateTaskInput{
+		WorkerType:     tasks.WorkerClaudeCode,
+		Mode:           tasks.ModeNew,
+		ConversationID: "conv-loop-limit-tool",
+		Prompt:         "seed",
+		WorkDir:        ".",
+		SessionID:      "sess-loop-limit-tool",
+	})
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	if err := deps.Tasks.FinishTask(ctx, task.ID, tasks.FinishTaskInput{
+		Status:     tasks.StatusFailed,
+		Error:      "boom",
+		SessionID:  task.SessionID,
+		FinishedAt: task.CreatedAt,
+	}); err != nil {
+		t.Fatalf("finish task: %v", err)
+	}
+
+	contractKey := tasks.ConversationKey(task.ConversationID)
+	if _, err := deps.Tasks.UpsertMissionContract(ctx, tasks.UpsertMissionContractInput{
+		Key:  contractKey,
+		Goal: "deliver autonomous loop",
+	}); err != nil {
+		t.Fatalf("upsert mission contract: %v", err)
+	}
+	if _, err := deps.Tasks.ConfirmMissionContract(ctx, contractKey); err != nil {
+		t.Fatalf("confirm mission contract: %v", err)
+	}
+
+	firstAny, err := reg.Execute(ctx, agentsdk.ToolCall{
+		Name: "execution_plan_loop_submit",
+		Fields: map[string]string{
+			"task_id":              task.ID,
+			"max_iterations":       "1",
+			"max_total_iterations": "1",
+		},
+	})
+	if err != nil {
+		t.Fatalf("run first loop: %v", err)
+	}
+	var first struct {
+		LastTaskID string `json:"last_task_id"`
+	}
+	rawFirst, _ := json.Marshal(firstAny)
+	if err := json.Unmarshal(rawFirst, &first); err != nil {
+		t.Fatalf("decode first output: %v raw=%s", err, string(rawFirst))
+	}
+	if strings.TrimSpace(first.LastTaskID) == "" {
+		t.Fatalf("expected last_task_id")
+	}
+	if err := deps.Tasks.FinishTask(ctx, first.LastTaskID, tasks.FinishTaskInput{
+		Status:     tasks.StatusFailed,
+		Error:      "step-1 done",
+		SessionID:  task.SessionID,
+		FinishedAt: task.CreatedAt,
+	}); err != nil {
+		t.Fatalf("finish loop task: %v", err)
+	}
+
+	secondAny, err := reg.Execute(ctx, agentsdk.ToolCall{
+		Name: "execution_plan_loop_submit",
+		Fields: map[string]string{
+			"task_id":              task.ID,
+			"max_iterations":       "1",
+			"max_total_iterations": "1",
+		},
+	})
+	if err != nil {
+		t.Fatalf("run second loop: %v", err)
+	}
+	var second struct {
+		LimitReached bool `json:"limit_reached"`
+		Handoff      struct {
+			Action           string   `json:"action"`
+			Summary          string   `json:"summary"`
+			Blockers         []string `json:"blockers"`
+			SuggestedActions []string `json:"suggested_actions"`
+		} `json:"handoff"`
+	}
+	rawSecond, _ := json.Marshal(secondAny)
+	if err := json.Unmarshal(rawSecond, &second); err != nil {
+		t.Fatalf("decode second output: %v raw=%s", err, string(rawSecond))
+	}
+	if !second.LimitReached {
+		t.Fatalf("expected limit_reached=true")
+	}
+	if second.Handoff.Action != "human_handoff" {
+		t.Fatalf("handoff.action=%q, want human_handoff", second.Handoff.Action)
+	}
+	if strings.TrimSpace(second.Handoff.Summary) == "" {
+		t.Fatalf("expected handoff summary")
+	}
+}
+
 func TestRollbackPlaybookGenerate_UsesProofReferences(t *testing.T) {
 	ctx, deps := newDepsForToolsTest(t)
 	reg := NewRegistry(deps)

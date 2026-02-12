@@ -281,6 +281,18 @@ func TestRunExecutionPlanLoopV1_StopsAtConfiguredLimitAndReturnsProgress(t *test
 	if !second.LimitReached {
 		t.Fatalf("expected limit_reached=true")
 	}
+	if second.Handoff == nil {
+		t.Fatalf("expected handoff payload")
+	}
+	if second.Handoff.Action != "human_handoff" {
+		t.Fatalf("handoff.action=%q, want human_handoff", second.Handoff.Action)
+	}
+	if strings.TrimSpace(second.Handoff.Summary) == "" {
+		t.Fatalf("expected handoff summary")
+	}
+	if len(second.Handoff.Blockers) == 0 || len(second.Handoff.SuggestedActions) == 0 {
+		t.Fatalf("expected blockers and suggested actions in handoff")
+	}
 	if second.IterationsExecuted != 0 {
 		t.Fatalf("iterations_executed=%d, want 0", second.IterationsExecuted)
 	}

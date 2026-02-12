@@ -23,9 +23,17 @@ type RunExecutionPlanLoopResult struct {
 	IterationsExecuted  int                           `json:"iterations_executed"`
 	LimitReached        bool                          `json:"limit_reached"`
 	NextAction          tasks.NextAction              `json:"next_action"`
+	Handoff             *RemediationHandoff           `json:"handoff,omitempty"`
 	State               tasks.ExecutionPlanState      `json:"state"`
 	Progress            []tasks.ExecutionPlanProgress `json:"progress,omitempty"`
 	LastTaskID          string                        `json:"last_task_id,omitempty"`
+}
+
+type RemediationHandoff struct {
+	Action           string   `json:"action"`
+	Summary          string   `json:"summary"`
+	Blockers         []string `json:"blockers"`
+	SuggestedActions []string `json:"suggested_actions"`
 }
 
 type executionPlanV1 struct {
@@ -103,6 +111,9 @@ func (s *Service) RunExecutionPlanLoopV1(ctx context.Context, key string, in Run
 
 	if state.Iteration >= maxTotalIterations {
 		result.LimitReached = true
+		if next, err := s.Tasks.ComputeNextAction(ctx, conversationID); err == nil {
+			result.NextAction = next
+		}
 		summary := fmt.Sprintf("iteration limit reached (%d/%d)", state.Iteration, maxTotalIterations)
 		_, _ = s.Tasks.AppendExecutionPlanProgress(ctx, tasks.AppendExecutionPlanProgressInput{
 			Key:       state.Key,
@@ -112,6 +123,7 @@ func (s *Service) RunExecutionPlanLoopV1(ctx context.Context, key string, in Run
 			Summary:   summary,
 		})
 		result.Progress = s.executionPlanProgressBestEffort(ctx, state.Key, 50)
+		result.Handoff = buildLoopLimitHandoff(state, maxTotalIterations, result.NextAction)
 		return result, nil
 	}
 
@@ -205,6 +217,7 @@ func (s *Service) RunExecutionPlanLoopV1(ctx context.Context, key string, in Run
 	}
 	if result.State.Iteration >= maxTotalIterations {
 		result.LimitReached = true
+		result.Handoff = buildLoopLimitHandoff(result.State, maxTotalIterations, result.NextAction)
 	}
 	result.Progress = s.executionPlanProgressBestEffort(ctx, state.Key, 50)
 	return result, nil
@@ -336,4 +349,26 @@ func (s *Service) executionPlanProgressBestEffort(ctx context.Context, key strin
 		return nil
 	}
 	return list
+}
+
+func buildLoopLimitHandoff(state tasks.ExecutionPlanState, maxTotal int, next tasks.NextAction) *RemediationHandoff {
+	summary := fmt.Sprintf("自动修复已达到迭代上限（%d/%d），需要人工接管。", state.Iteration, maxTotal)
+	blockers := []string{fmt.Sprintf("loop limit reached: %d/%d", state.Iteration, maxTotal)}
+	if action := strings.TrimSpace(string(next.Action)); action != "" {
+		reason := strings.TrimSpace(next.Reason)
+		if reason == "" {
+			reason = "unspecified"
+		}
+		blockers = append(blockers, fmt.Sprintf("next_action=%s reason=%s", action, reason))
+	}
+	return &RemediationHandoff{
+		Action:   "human_handoff",
+		Summary:  summary,
+		Blockers: blockers,
+		SuggestedActions: []string{
+			"检查最近一次失败日志与验收结果，确认卡点。",
+			"评估是否需要调整任务契约/验收标准后再继续。",
+			"人工选择下一步：继续、降级目标、或终止本轮修复。",
+		},
+	}
 }
