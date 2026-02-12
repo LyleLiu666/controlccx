@@ -304,6 +304,106 @@ func TestRunExecutionPlanLoopV1_StopsAtConfiguredLimitAndReturnsProgress(t *test
 	}
 }
 
+func TestRunExecutionPlanLoopV1_ProjectPolicyAffectsBudget(t *testing.T) {
+	ctx, svc := newServiceForTest(t)
+	projA := filepath.Join(t.TempDir(), "proj-a")
+	baseA, err := svc.Tasks.CreateTask(ctx, tasks.CreateTaskInput{
+		WorkerType:     tasks.WorkerClaudeCode,
+		Mode:           tasks.ModeNew,
+		ConversationID: "conv-policy-a",
+		Prompt:         "seed",
+		WorkDir:        projA,
+		SessionID:      "sess-policy-a",
+	})
+	if err != nil {
+		t.Fatalf("create task A: %v", err)
+	}
+	if err := svc.Tasks.FinishTask(ctx, baseA.ID, tasks.FinishTaskInput{
+		Status:     tasks.StatusFailed,
+		Error:      "boom",
+		SessionID:  baseA.SessionID,
+		FinishedAt: baseA.CreatedAt,
+	}); err != nil {
+		t.Fatalf("finish task A: %v", err)
+	}
+	if _, err := svc.Tasks.UpsertMissionContract(ctx, tasks.UpsertMissionContractInput{
+		Key:  tasks.ConversationKey(baseA.ConversationID),
+		Goal: "Deliver autonomous execution",
+	}); err != nil {
+		t.Fatalf("upsert mission contract A: %v", err)
+	}
+	if _, err := svc.Tasks.ConfirmMissionContract(ctx, tasks.ConversationKey(baseA.ConversationID)); err != nil {
+		t.Fatalf("confirm mission contract A: %v", err)
+	}
+
+	graded, err := svc.RunExecutionPlanLoopV1(ctx, tasks.SessionKeyForTask(baseA), RunExecutionPlanLoopInput{
+		MaxIterations:      3,
+		MaxTotalIterations: 20,
+	})
+	if err != nil {
+		t.Fatalf("run loop A: %v", err)
+	}
+	if graded.ProjectPolicyMode != tasks.AutonomyModeGraded {
+		t.Fatalf("policy mode=%q, want %q", graded.ProjectPolicyMode, tasks.AutonomyModeGraded)
+	}
+	if graded.IterationsRequested != 1 {
+		t.Fatalf("iterations_requested=%d, want 1 in graded mode", graded.IterationsRequested)
+	}
+	if graded.MaxTotalIterations != 10 {
+		t.Fatalf("max_total_iterations=%d, want 10 in graded mode", graded.MaxTotalIterations)
+	}
+
+	projB := filepath.Join(t.TempDir(), "proj-b")
+	baseB, err := svc.Tasks.CreateTask(ctx, tasks.CreateTaskInput{
+		WorkerType:     tasks.WorkerClaudeCode,
+		Mode:           tasks.ModeNew,
+		ConversationID: "conv-policy-b",
+		Prompt:         "seed",
+		WorkDir:        projB,
+		SessionID:      "sess-policy-b",
+	})
+	if err != nil {
+		t.Fatalf("create task B: %v", err)
+	}
+	if err := svc.Tasks.FinishTask(ctx, baseB.ID, tasks.FinishTaskInput{
+		Status:     tasks.StatusFailed,
+		Error:      "boom",
+		SessionID:  baseB.SessionID,
+		FinishedAt: baseB.CreatedAt,
+	}); err != nil {
+		t.Fatalf("finish task B: %v", err)
+	}
+	if _, err := svc.Tasks.UpsertMissionContract(ctx, tasks.UpsertMissionContractInput{
+		Key:  tasks.ConversationKey(baseB.ConversationID),
+		Goal: "Deliver autonomous execution",
+	}); err != nil {
+		t.Fatalf("upsert mission contract B: %v", err)
+	}
+	if _, err := svc.Tasks.ConfirmMissionContract(ctx, tasks.ConversationKey(baseB.ConversationID)); err != nil {
+		t.Fatalf("confirm mission contract B: %v", err)
+	}
+	if _, err := svc.Tasks.UpsertProjectAutonomyPolicy(ctx, projB, tasks.AutonomyModeMax); err != nil {
+		t.Fatalf("upsert project policy B: %v", err)
+	}
+
+	maxMode, err := svc.RunExecutionPlanLoopV1(ctx, tasks.SessionKeyForTask(baseB), RunExecutionPlanLoopInput{
+		MaxIterations:      3,
+		MaxTotalIterations: 20,
+	})
+	if err != nil {
+		t.Fatalf("run loop B: %v", err)
+	}
+	if maxMode.ProjectPolicyMode != tasks.AutonomyModeMax {
+		t.Fatalf("policy mode=%q, want %q", maxMode.ProjectPolicyMode, tasks.AutonomyModeMax)
+	}
+	if maxMode.IterationsRequested != 3 {
+		t.Fatalf("iterations_requested=%d, want 3 in max mode", maxMode.IterationsRequested)
+	}
+	if maxMode.MaxTotalIterations != 20 {
+		t.Fatalf("max_total_iterations=%d, want 20 in max mode", maxMode.MaxTotalIterations)
+	}
+}
+
 func TestDecideApproval_AutoResolvePending(t *testing.T) {
 	ctx, svc := newServiceForTest(t)
 	task, err := svc.Tasks.CreateTask(ctx, tasks.CreateTaskInput{

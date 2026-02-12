@@ -214,6 +214,11 @@ func Migrate(ctx context.Context, conn *sql.DB) error {
 			);`,
 		`CREATE INDEX IF NOT EXISTS idx_execution_plan_progress_key_created_at
 			ON execution_plan_progress(key, created_at DESC, id DESC);`,
+		`CREATE TABLE IF NOT EXISTS project_autonomy_policies (
+				project_key TEXT PRIMARY KEY,
+				mode TEXT NOT NULL DEFAULT 'graded',
+				updated_at INTEGER NOT NULL DEFAULT 0
+			);`,
 		`CREATE TABLE IF NOT EXISTS session_workspaces (
 				key TEXT PRIMARY KEY,
 				kind TEXT NOT NULL DEFAULT '',

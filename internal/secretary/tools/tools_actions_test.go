@@ -521,6 +521,47 @@ func TestMissionContractUpsert_RequiresGoal(t *testing.T) {
 	}
 }
 
+func TestProjectAutonomyPolicyUpsert_ByTaskID(t *testing.T) {
+	ctx, deps := newDepsForToolsTest(t)
+	reg := NewRegistry(deps)
+
+	workdir := filepath.Join(t.TempDir(), "proj-policy-tool")
+	task, err := deps.Tasks.CreateTask(ctx, tasks.CreateTaskInput{
+		WorkerType: tasks.WorkerClaudeCode,
+		Mode:       tasks.ModeNew,
+		Prompt:     "seed",
+		WorkDir:    workdir,
+		SessionID:  "sess-policy-tool",
+	})
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	outAny, err := reg.Execute(ctx, agentsdk.ToolCall{
+		Name: "project_autonomy_policy_upsert",
+		Fields: map[string]string{
+			"task_id": task.ID,
+			"mode":    "max",
+		},
+	})
+	if err != nil {
+		t.Fatalf("upsert project policy via tool: %v", err)
+	}
+	var out struct {
+		Policy tasks.ProjectAutonomyPolicy `json:"policy"`
+	}
+	raw, _ := json.Marshal(outAny)
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatalf("decode output: %v raw=%s", err, string(raw))
+	}
+	if out.Policy.Mode != tasks.AutonomyModeMax {
+		t.Fatalf("policy.mode=%q, want %q", out.Policy.Mode, tasks.AutonomyModeMax)
+	}
+	if out.Policy.ProjectKey != tasks.NormalizeProjectKey(workdir) {
+		t.Fatalf("policy.project_key=%q, want %q", out.Policy.ProjectKey, tasks.NormalizeProjectKey(workdir))
+	}
+}
+
 func TestExecutionPlanLoopSubmit_RunsAndPersistsProgress(t *testing.T) {
 	ctx, deps := newDepsForToolsTest(t)
 	reg := NewRegistry(deps)

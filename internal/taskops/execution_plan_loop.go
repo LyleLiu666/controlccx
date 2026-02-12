@@ -18,6 +18,8 @@ type RunExecutionPlanLoopInput struct {
 type RunExecutionPlanLoopResult struct {
 	Key                 string                        `json:"key"`
 	ConversationID      string                        `json:"conversation_id"`
+	ProjectKey          string                        `json:"project_key,omitempty"`
+	ProjectPolicyMode   string                        `json:"project_policy_mode"`
 	IterationsRequested int                           `json:"iterations_requested"`
 	MaxTotalIterations  int                           `json:"max_total_iterations"`
 	IterationsExecuted  int                           `json:"iterations_executed"`
@@ -96,6 +98,32 @@ func (s *Service) RunExecutionPlanLoopV1(ctx context.Context, key string, in Run
 		}, nil)
 	}
 
+	projectKey := ""
+	projectPolicyMode := tasks.AutonomyModeGraded
+	if runs, err := s.Tasks.ListTasksByConversationID(ctx, conversationID, 1, tasks.ListTasksOptions{IncludeDeleted: true}); err != nil {
+		return RunExecutionPlanLoopResult{}, err
+	} else if len(runs) > 0 {
+		projectKey = tasks.NormalizeProjectKey(runs[0].WorkDir)
+	}
+	if projectKey != "" {
+		policy, err := s.Tasks.GetProjectAutonomyPolicy(ctx, projectKey)
+		if err != nil {
+			return RunExecutionPlanLoopResult{}, err
+		}
+		projectPolicyMode = strings.TrimSpace(policy.Mode)
+		if projectPolicyMode == "" {
+			projectPolicyMode = tasks.AutonomyModeGraded
+		}
+	}
+	if projectPolicyMode == tasks.AutonomyModeGraded {
+		if perCallBudget > 1 {
+			perCallBudget = 1
+		}
+		if maxTotalIterations > 10 {
+			maxTotalIterations = 10
+		}
+	}
+
 	state, err := s.ensureExecutionPlanState(ctx, contract)
 	if err != nil {
 		return RunExecutionPlanLoopResult{}, err
@@ -104,6 +132,8 @@ func (s *Service) RunExecutionPlanLoopV1(ctx context.Context, key string, in Run
 	result := RunExecutionPlanLoopResult{
 		Key:                 key,
 		ConversationID:      conversationID,
+		ProjectKey:          projectKey,
+		ProjectPolicyMode:   projectPolicyMode,
 		IterationsRequested: perCallBudget,
 		MaxTotalIterations:  maxTotalIterations,
 		State:               state,
