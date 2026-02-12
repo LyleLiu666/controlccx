@@ -478,6 +478,53 @@ func TestTaskNewSubmit_CreatesTaskAndWritesAuditLog(t *testing.T) {
 	}
 }
 
+func TestTaskResumeSubmit_RejectsDeletedSession(t *testing.T) {
+	ctx, deps := newDepsForToolsTest(t)
+	task, err := deps.Tasks.CreateTask(ctx, tasks.CreateTaskInput{
+		WorkerType: tasks.WorkerClaudeCode,
+		Mode:       tasks.ModeNew,
+		Prompt:     "seed",
+		WorkDir:    ".",
+		SessionID:  "sess-secretary",
+	})
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	if err := deps.Tasks.FinishTask(ctx, task.ID, tasks.FinishTaskInput{
+		Status:     tasks.StatusSucceeded,
+		SessionID:  task.SessionID,
+		FinishedAt: task.CreatedAt,
+	}); err != nil {
+		t.Fatalf("finish task: %v", err)
+	}
+	if err := deps.Tasks.DeleteSession(ctx, tasks.SessionKeyForTask(task)); err != nil {
+		t.Fatalf("delete session: %v", err)
+	}
+
+	reg := NewRegistry(deps)
+	_, err = reg.Execute(ctx, agentsdk.ToolCall{
+		Name: "task_resume_submit",
+		Fields: map[string]string{
+			"task_id": task.ID,
+			"prompt":  "continue",
+		},
+	})
+	if err == nil {
+		t.Fatalf("expected deleted session error")
+	}
+	if !strings.Contains(strings.ToLower(err.Error()), "session is deleted") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	list, err := deps.Tasks.ListTasksWithOptions(ctx, 50, tasks.ListTasksOptions{IncludeDeleted: true})
+	if err != nil {
+		t.Fatalf("list tasks: %v", err)
+	}
+	if len(list) != 1 {
+		t.Fatalf("tasks=%d want 1", len(list))
+	}
+}
+
 func TestTaskNewSubmit_DescriptionIncludesWorkerGuidance(t *testing.T) {
 	desc := taskNewSubmitTool{}.DescriptionZH()
 	wants := []string{

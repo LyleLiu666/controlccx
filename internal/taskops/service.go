@@ -172,6 +172,9 @@ func (s *Service) ResumeTask(ctx context.Context, id string, body RunOptions) (t
 	if err != nil {
 		return tasks.Task{}, err
 	}
+	if prev.SessionDeletedAt != nil {
+		return tasks.Task{}, newMutationError(400, MutationErrorInvalidArgument, "session is deleted; cannot continue", "", nil, nil)
+	}
 	if s.Tools != nil {
 		if _, ok := s.Tools.Resolve(string(prev.WorkerType)); !ok {
 			return tasks.Task{}, newMutationError(400, MutationErrorInvalidArgument, "unknown tool id: "+string(prev.WorkerType), "", nil, nil)
@@ -294,6 +297,9 @@ func (s *Service) RehydrateTask(ctx context.Context, id string, body RunOptions)
 	if err != nil {
 		return tasks.Task{}, err
 	}
+	if src.SessionDeletedAt != nil {
+		return tasks.Task{}, newMutationError(400, MutationErrorInvalidArgument, "session is deleted; cannot continue", "", nil, nil)
+	}
 	if s.Tools != nil {
 		if _, ok := s.Tools.Resolve(string(src.WorkerType)); !ok {
 			return tasks.Task{}, newMutationError(400, MutationErrorInvalidArgument, "unknown tool id: "+string(src.WorkerType), "", nil, nil)
@@ -411,6 +417,9 @@ func (s *Service) EnterUnsafeTask(ctx context.Context, id string, prompt string)
 	src, err := s.Tasks.GetTask(ctx, id)
 	if err != nil {
 		return tasks.Task{}, err
+	}
+	if src.SessionDeletedAt != nil {
+		return tasks.Task{}, newMutationError(400, MutationErrorInvalidArgument, "session is deleted; cannot continue", "", nil, nil)
 	}
 	if strings.TrimSpace(src.ConversationID) == "" {
 		return tasks.Task{}, newMutationError(400, MutationErrorInvalidArgument, "task has no conversation_id", "", nil, nil)

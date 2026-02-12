@@ -632,3 +632,136 @@ func TestCreateContinueTaskForConversation_ReturnsSessionTaskInFlight(t *testing
 		t.Fatalf("error code=%q want %q", problem.Error, MutationErrorSessionTaskInFlight)
 	}
 }
+
+func TestResumeTask_RejectsDeletedSession(t *testing.T) {
+	ctx, svc := newServiceForTest(t)
+	base, err := svc.Tasks.CreateTask(ctx, tasks.CreateTaskInput{
+		WorkerType: tasks.WorkerClaudeCode,
+		Mode:       tasks.ModeNew,
+		Prompt:     "seed",
+		WorkDir:    ".",
+		SessionID:  "sess-deleted",
+	})
+	if err != nil {
+		t.Fatalf("create base: %v", err)
+	}
+	if err := svc.Tasks.FinishTask(ctx, base.ID, tasks.FinishTaskInput{
+		Status:     tasks.StatusSucceeded,
+		SessionID:  base.SessionID,
+		FinishedAt: base.CreatedAt,
+	}); err != nil {
+		t.Fatalf("finish base: %v", err)
+	}
+	if err := svc.Tasks.DeleteSession(ctx, tasks.SessionKeyForTask(base)); err != nil {
+		t.Fatalf("delete session: %v", err)
+	}
+
+	_, err = svc.ResumeTask(ctx, base.ID, RunOptions{Prompt: "continue"})
+	if err == nil {
+		t.Fatalf("expected deleted session error")
+	}
+	problem := ParseMutationError(err)
+	if problem.Error != MutationErrorInvalidArgument {
+		t.Fatalf("error code=%q want %q", problem.Error, MutationErrorInvalidArgument)
+	}
+	if !strings.Contains(strings.ToLower(problem.Message), "session is deleted") {
+		t.Fatalf("message=%q want session is deleted", problem.Message)
+	}
+
+	list, err := svc.Tasks.ListTasksWithOptions(ctx, 50, tasks.ListTasksOptions{IncludeDeleted: true})
+	if err != nil {
+		t.Fatalf("list tasks: %v", err)
+	}
+	if len(list) != 1 {
+		t.Fatalf("tasks=%d want 1", len(list))
+	}
+}
+
+func TestRehydrateTask_RejectsDeletedSession(t *testing.T) {
+	ctx, svc := newServiceForTest(t)
+	base, err := svc.Tasks.CreateTask(ctx, tasks.CreateTaskInput{
+		WorkerType: tasks.WorkerClaudeCode,
+		Mode:       tasks.ModeNew,
+		Prompt:     "seed",
+		WorkDir:    ".",
+		SessionID:  "sess-deleted",
+	})
+	if err != nil {
+		t.Fatalf("create base: %v", err)
+	}
+	if err := svc.Tasks.FinishTask(ctx, base.ID, tasks.FinishTaskInput{
+		Status:     tasks.StatusFailed,
+		Error:      "No conversation found with session ID",
+		SessionID:  base.SessionID,
+		FinishedAt: base.CreatedAt,
+	}); err != nil {
+		t.Fatalf("finish base: %v", err)
+	}
+	if err := svc.Tasks.DeleteSession(ctx, tasks.SessionKeyForTask(base)); err != nil {
+		t.Fatalf("delete session: %v", err)
+	}
+
+	_, err = svc.RehydrateTask(ctx, base.ID, RunOptions{Prompt: "continue"})
+	if err == nil {
+		t.Fatalf("expected deleted session error")
+	}
+	problem := ParseMutationError(err)
+	if problem.Error != MutationErrorInvalidArgument {
+		t.Fatalf("error code=%q want %q", problem.Error, MutationErrorInvalidArgument)
+	}
+	if !strings.Contains(strings.ToLower(problem.Message), "session is deleted") {
+		t.Fatalf("message=%q want session is deleted", problem.Message)
+	}
+
+	list, err := svc.Tasks.ListTasksWithOptions(ctx, 50, tasks.ListTasksOptions{IncludeDeleted: true})
+	if err != nil {
+		t.Fatalf("list tasks: %v", err)
+	}
+	if len(list) != 1 {
+		t.Fatalf("tasks=%d want 1", len(list))
+	}
+}
+
+func TestEnterUnsafeTask_RejectsDeletedSession(t *testing.T) {
+	ctx, svc := newServiceForTest(t)
+	base, err := svc.Tasks.CreateTask(ctx, tasks.CreateTaskInput{
+		WorkerType: tasks.WorkerClaudeCode,
+		Mode:       tasks.ModeNew,
+		Prompt:     "seed",
+		WorkDir:    ".",
+		SessionID:  "sess-deleted",
+	})
+	if err != nil {
+		t.Fatalf("create base: %v", err)
+	}
+	if err := svc.Tasks.FinishTask(ctx, base.ID, tasks.FinishTaskInput{
+		Status:     tasks.StatusSucceeded,
+		SessionID:  base.SessionID,
+		FinishedAt: base.CreatedAt,
+	}); err != nil {
+		t.Fatalf("finish base: %v", err)
+	}
+	if err := svc.Tasks.DeleteSession(ctx, tasks.SessionKeyForTask(base)); err != nil {
+		t.Fatalf("delete session: %v", err)
+	}
+
+	_, err = svc.EnterUnsafeTask(ctx, base.ID, "continue")
+	if err == nil {
+		t.Fatalf("expected deleted session error")
+	}
+	problem := ParseMutationError(err)
+	if problem.Error != MutationErrorInvalidArgument {
+		t.Fatalf("error code=%q want %q", problem.Error, MutationErrorInvalidArgument)
+	}
+	if !strings.Contains(strings.ToLower(problem.Message), "session is deleted") {
+		t.Fatalf("message=%q want session is deleted", problem.Message)
+	}
+
+	list, err := svc.Tasks.ListTasksWithOptions(ctx, 50, tasks.ListTasksOptions{IncludeDeleted: true})
+	if err != nil {
+		t.Fatalf("list tasks: %v", err)
+	}
+	if len(list) != 1 {
+		t.Fatalf("tasks=%d want 1", len(list))
+	}
+}
