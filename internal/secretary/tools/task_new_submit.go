@@ -14,7 +14,7 @@ type taskNewSubmitTool struct{}
 func (taskNewSubmitTool) Name() string { return "task_new_submit" }
 
 func (taskNewSubmitTool) DescriptionZH() string {
-	return "创建全新任务。参数：worker_type（必填，worker_type 仅允许 claude-code | codex | exec）、prompt（必填）、workdir（必填）；可选：conversation_id、workdir_strategy、worktree_untracked 及安全参数。worker 选择建议：简单且追求速度 -> claude-code；严肃/生产级迭代 -> codex；不确定则先问。自动推荐不使用 exec，exec 仅在用户明确要求 shell/脚本执行时使用。"
+	return "创建全新任务。参数：worker_type（必填，worker_type 仅允许 claude-code | codex | exec）、prompt（必填）、workdir（必填）；可选：conversation_id、workdir_strategy、worktree_untracked 及安全参数。worker_type 语义：claude-code=Claude Code 代理执行；codex=Codex 代理执行；exec=在本机 workdir 直接执行 shell/脚本（由 worker 进程执行，不是秘书自身执行）。选择建议：简单且追求速度 -> claude-code；严肃/生产级迭代 -> codex；不确定则先问。自动推荐不使用 exec，exec 仅在用户明确要求 shell/脚本执行时使用。"
 }
 
 func (taskNewSubmitTool) Execute(ctx context.Context, call agentsdk.ToolCall, deps Deps) (any, error) {

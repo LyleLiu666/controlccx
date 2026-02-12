@@ -10,6 +10,7 @@ import (
 
 	"controlccx/internal/agentsdk"
 	"controlccx/internal/db"
+	sectools "controlccx/internal/secretary/tools"
 	"controlccx/internal/tasks"
 )
 
@@ -92,5 +93,32 @@ func TestTools_TasksList_TruncatesUTF8Safely(t *testing.T) {
 	}
 	if !utf8.ValidString(got) {
 		t.Fatalf("expected valid utf-8, got: %q", got)
+	}
+}
+
+func TestTools_TaskNewSubmit_DescriptionClarifiesWorkerTypeSemantics(t *testing.T) {
+	descs := sectools.Descriptors()
+	var found bool
+	for _, d := range descs {
+		if strings.TrimSpace(d.Name) != "task_new_submit" {
+			continue
+		}
+		found = true
+		desc := strings.TrimSpace(d.DescriptionZH)
+		wants := []string{
+			"worker_type 仅允许 claude-code | codex | exec",
+			"claude-code=Claude Code 代理执行",
+			"codex=Codex 代理执行",
+			"exec=在本机 workdir 直接执行 shell/脚本（由 worker 进程执行，不是秘书自身执行）",
+		}
+		for _, want := range wants {
+			if !strings.Contains(desc, want) {
+				t.Fatalf("task_new_submit description missing %q: %s", want, desc)
+			}
+		}
+		break
+	}
+	if !found {
+		t.Fatalf("task_new_submit descriptor not found")
 	}
 }

@@ -54,6 +54,7 @@ func TestBuildSystemPrompt_PrincipleDrivenGuidance(t *testing.T) {
 	wants := []string{
 		"一次只问一个关键问题",
 		"多选引导 + 一句猜测",
+		"worker_type 语义：claude-code=Claude Code 代理执行；codex=Codex 代理执行；exec=在本机 workdir 直接执行 shell/脚本（由 worker 进程执行，不是秘书自身执行）。",
 		"简单且追求速度 -> claude-code",
 		"严肃/生产级迭代 -> codex",
 		"不确定则先问再提",

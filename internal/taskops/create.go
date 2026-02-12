@@ -22,9 +22,13 @@ func (s *Service) CreateTask(ctx context.Context, in tasks.CreateTaskInput) (tas
 	}
 
 	if s.Tools != nil {
-		if _, ok := s.Tools.Resolve(string(in.WorkerType)); !ok {
-			msg := "unknown tool id: " + string(in.WorkerType)
-			return tasks.Task{}, newMutationError(400, MutationErrorInvalidArgument, msg, "", nil, nil)
+		// "exec" is a built-in worker type that does not require a configurable tool profile.
+		// Tooling is only used for external CLIs (claude-code / codex).
+		if in.WorkerType != tasks.WorkerExec {
+			if _, ok := s.Tools.Resolve(string(in.WorkerType)); !ok {
+				msg := "unknown tool id: " + string(in.WorkerType)
+				return tasks.Task{}, newMutationError(400, MutationErrorInvalidArgument, msg, "", nil, nil)
+			}
 		}
 	}
 

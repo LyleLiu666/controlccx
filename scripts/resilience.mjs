@@ -56,6 +56,21 @@ async function postJson(url, body) {
   });
 }
 
+function unwrapTaskMutationID(payload, { action = "" } = {}) {
+  if (!payload || payload.ok !== true) {
+    const err = String(payload?.error ?? "").trim();
+    const msg = String(payload?.message ?? "").trim();
+    throw new Error(`task mutation failed: ${[err, msg].filter(Boolean).join(" ")}`.trim());
+  }
+  if (action) {
+    const got = String(payload?.action ?? "").trim();
+    if (got !== action) throw new Error(`unexpected task action: got=${got} want=${action}`);
+  }
+  const id = String(payload?.task?.id ?? "").trim();
+  if (!id) throw new Error("task create response missing id");
+  return id;
+}
+
 function killBestEffort(pid) {
   if (!pid || typeof pid !== "number") return;
   try {
@@ -193,20 +208,15 @@ try {
     // ignore
   }
 
-  await postJson(`${base}/api/tools/upsert`, {
-    tool: { id: "exec", driver: "exec", command: "sh", args: [] },
-  });
-
 async function startTickTask(label, ticks = 12) {
   const script = `echo "${label}: start"\ni=0\nwhile [ $i -lt ${ticks} ]; do echo "${label}: tick $i"; i=$((i+1)); sleep 1; done\necho "${label}: end"\n`;
-  const task = await postJson(`${base}/api/tasks`, {
+  const created = await postJson(`${base}/api/tasks`, {
     worker_type: "exec",
     mode: "new",
     prompt: script,
     workdir: dataDir,
   });
-  if (!task?.id) throw new Error("task create response missing id");
-  return task.id;
+  return unwrapTaskMutationID(created, { action: "task.create" });
 }
 
 async function waitForTaskDone(taskId, timeoutMs = 30_000) {

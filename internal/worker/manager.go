@@ -578,7 +578,9 @@ func (m *Manager) buildToolCommand(ctx context.Context, task tasks.Task) (ToolCo
 
 	if m != nil && m.tools != nil {
 		toolID := strings.TrimSpace(string(task.WorkerType))
-		if toolID != "" {
+		// "exec" is a built-in worker type and does not require a configurable tool profile.
+		// Tooling is only used for external CLIs (claude-code / codex).
+		if toolID != "" && toolID != string(tasks.WorkerExec) {
 			profile, ok := m.tools.Resolve(toolID)
 			if !ok {
 				return ToolCommand{}, "", fmt.Errorf("unknown tool id: %s", toolID)
@@ -602,7 +604,7 @@ func (m *Manager) buildToolCommand(ctx context.Context, task tasks.Task) (ToolCo
 		}
 	}
 
-	if driver == tasks.WorkerExec && m != nil && m.tools != nil {
+	if driver == tasks.WorkerExec && task.WorkerType != tasks.WorkerExec && m != nil && m.tools != nil {
 		toolID := strings.TrimSpace(string(task.WorkerType))
 		profile, ok := m.tools.Resolve(toolID)
 		if !ok {

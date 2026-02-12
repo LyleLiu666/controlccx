@@ -495,6 +495,37 @@ func TestCreateTask_Success_NewMode(t *testing.T) {
 	}
 }
 
+func TestCreateTask_ExecAllowedWhenToolingConfigured(t *testing.T) {
+	ctx, svc := newServiceForTest(t)
+	toolsSvc, err := tooling.NewService(tooling.Options{
+		DataDir: t.TempDir(),
+		Defaults: []tooling.Tool{
+			{ID: "claude-code", Driver: tooling.DriverClaudeCode, Command: "claude"},
+			{ID: "codex", Driver: tooling.DriverCodex, Command: "codex"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("new tools service: %v", err)
+	}
+	svc.Tools = toolsSvc
+
+	task, err := svc.CreateTask(ctx, tasks.CreateTaskInput{
+		WorkerType: tasks.WorkerExec,
+		Mode:       tasks.ModeNew,
+		Prompt:     "echo hello",
+		WorkDir:    ".",
+	})
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	if strings.TrimSpace(task.ID) == "" {
+		t.Fatalf("expected task id")
+	}
+	if task.WorkerType != tasks.WorkerExec {
+		t.Fatalf("worker_type=%q want %q", task.WorkerType, tasks.WorkerExec)
+	}
+}
+
 func TestCreateTask_UnknownTool_ReturnsInvalidArgument(t *testing.T) {
 	ctx, svc := newServiceForTest(t)
 	toolsSvc, err := tooling.NewService(tooling.Options{DataDir: t.TempDir()})

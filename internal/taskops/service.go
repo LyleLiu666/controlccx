@@ -176,8 +176,10 @@ func (s *Service) ResumeTask(ctx context.Context, id string, body RunOptions) (t
 		return tasks.Task{}, newMutationError(400, MutationErrorInvalidArgument, "session is deleted; cannot continue", "", nil, nil)
 	}
 	if s.Tools != nil {
-		if _, ok := s.Tools.Resolve(string(prev.WorkerType)); !ok {
-			return tasks.Task{}, newMutationError(400, MutationErrorInvalidArgument, "unknown tool id: "+string(prev.WorkerType), "", nil, nil)
+		if prev.WorkerType != tasks.WorkerExec {
+			if _, ok := s.Tools.Resolve(string(prev.WorkerType)); !ok {
+				return tasks.Task{}, newMutationError(400, MutationErrorInvalidArgument, "unknown tool id: "+string(prev.WorkerType), "", nil, nil)
+			}
 		}
 	}
 	if strings.TrimSpace(prev.SessionID) == "" {
@@ -301,8 +303,10 @@ func (s *Service) RehydrateTask(ctx context.Context, id string, body RunOptions)
 		return tasks.Task{}, newMutationError(400, MutationErrorInvalidArgument, "session is deleted; cannot continue", "", nil, nil)
 	}
 	if s.Tools != nil {
-		if _, ok := s.Tools.Resolve(string(src.WorkerType)); !ok {
-			return tasks.Task{}, newMutationError(400, MutationErrorInvalidArgument, "unknown tool id: "+string(src.WorkerType), "", nil, nil)
+		if src.WorkerType != tasks.WorkerExec {
+			if _, ok := s.Tools.Resolve(string(src.WorkerType)); !ok {
+				return tasks.Task{}, newMutationError(400, MutationErrorInvalidArgument, "unknown tool id: "+string(src.WorkerType), "", nil, nil)
+			}
 		}
 	}
 	if strings.TrimSpace(src.SessionID) == "" {

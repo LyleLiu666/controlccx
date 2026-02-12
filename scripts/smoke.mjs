@@ -84,6 +84,21 @@ async function postJSON(url, body) {
   return await res.json();
 }
 
+function unwrapTaskMutationID(payload, { action = "" } = {}) {
+  if (!payload || payload.ok !== true) {
+    const err = String(payload?.error ?? "").trim();
+    const msg = String(payload?.message ?? "").trim();
+    throw new Error(`task mutation failed: ${[err, msg].filter(Boolean).join(" ")}`.trim());
+  }
+  if (action) {
+    const got = String(payload?.action ?? "").trim();
+    if (got !== action) throw new Error(`unexpected task action: got=${got} want=${action}`);
+  }
+  const id = String(payload?.task?.id ?? "").trim();
+  if (!id) throw new Error("create task missing id");
+  return id;
+}
+
 async function waitForOK(url, { timeoutMS = 10_000 } = {}) {
   const deadline = Date.now() + timeoutMS;
   while (Date.now() < deadline) {
@@ -524,14 +539,13 @@ try {
 
   async function runTaskAndCapture({ workerType, workDir, expectedKey, expectedTool }) {
     mkdirSync(workDir, { recursive: true });
-    const task = await postJSON(`${phaseB.base}/api/tasks`, {
+    const created = await postJSON(`${phaseB.base}/api/tasks`, {
       worker_type: workerType,
       mode: "new",
       prompt: "CCX_SMOKE: verify provider switching",
       workdir: workDir,
     });
-    const taskID = String(task?.id ?? "").trim();
-    if (!taskID) throw new Error("create task missing id");
+    const taskID = unwrapTaskMutationID(created, { action: "task.create" });
     const finished = await waitForTaskFinish(phaseB.base, taskID);
     if (String(finished?.status ?? "") !== "succeeded") {
       throw new Error(`task ${taskID} did not succeed: status=${finished?.status ?? ""}`);
