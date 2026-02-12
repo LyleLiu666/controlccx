@@ -883,6 +883,7 @@ const {
   showDeleted: sessionsShowDeleted,
   autoSelectFirst: false,
   onTokenRequired: (msg) => openInstanceTokenModal(msg),
+  onServerEvent: (evt) => handleSecretaryServerEvent(evt),
   onTaskUpsert: (prev, next) => {
     maybeDismissRunLaunchMaskForTask(next);
     void maybePromptBlocked(prev, next);
@@ -1021,6 +1022,7 @@ const {
   closeDrawer: closeSecretaryDrawer,
   send: sendSecretaryChat,
   clear: clearSecretaryChat,
+  handleServerEvent: handleSecretaryServerEvent,
 } = useSecretaryChat();
 
 const feedCoachDismissed = ref(false);

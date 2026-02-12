@@ -8,6 +8,7 @@ export type UseTasksOptions = {
   onTaskUpsert?: (prev: Task | undefined, next: Task) => void;
   autoSelectFirst?: boolean;
   onTokenRequired?: (message: string) => void;
+  onServerEvent?: (evt: ServerEvent) => void;
 };
 
 export function useTasks(opts: UseTasksOptions) {
@@ -176,6 +177,8 @@ export function useTasks(opts: UseTasksOptions) {
   }
 
   function handleServerEvent(evt: ServerEvent) {
+    opts.onServerEvent?.(evt);
+
     eventsConnected.value = true;
     eventsLastEventMs.value = Date.now();
 

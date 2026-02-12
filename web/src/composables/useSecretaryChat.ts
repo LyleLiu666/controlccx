@@ -1,8 +1,9 @@
-import { nextTick, ref } from "vue";
-import type { SecretaryMessage, SecretaryThinkingEvent } from "../types";
+import { nextTick, onBeforeUnmount, ref } from "vue";
+import type { SecretaryMessage, SecretaryMessageRole, SecretaryThinkingEvent, ServerEvent } from "../types";
 import { clearSecretaryMessages, fetchSecretaryMessages, sendSecretaryMessageStream } from "../api";
 
 export function useSecretaryChat() {
+  const autoRefreshMs = 2500;
   const open = ref(false);
   const messages = ref<SecretaryMessage[]>([]);
   const input = ref("");
@@ -11,6 +12,7 @@ export function useSecretaryChat() {
   const error = ref("");
   const thinkingLines = ref<string[]>([]);
   const streamingReply = ref("");
+  let autoRefreshTimer: ReturnType<typeof setInterval> | null = null;
 
   async function refresh(limit = 200) {
     if (loading.value) return;
@@ -25,14 +27,39 @@ export function useSecretaryChat() {
     }
   }
 
+  async function refreshSilently(limit = 200) {
+    try {
+      messages.value = await fetchSecretaryMessages(limit);
+      error.value = "";
+    } catch {
+      // Keep current UI state on background refresh failures.
+    }
+  }
+
+  function startAutoRefresh() {
+    if (autoRefreshTimer) return;
+    autoRefreshTimer = setInterval(() => {
+      if (!open.value || sending.value || loading.value) return;
+      void refreshSilently(200);
+    }, autoRefreshMs);
+  }
+
+  function stopAutoRefresh() {
+    if (!autoRefreshTimer) return;
+    clearInterval(autoRefreshTimer);
+    autoRefreshTimer = null;
+  }
+
   async function openDrawer() {
     open.value = true;
     await refresh(200);
+    startAutoRefresh();
     await nextTick();
   }
 
   function closeDrawer() {
     open.value = false;
+    stopAutoRefresh();
   }
 
   function appendThinkingLine(line: string) {
@@ -59,6 +86,47 @@ export function useSecretaryChat() {
       return step + (line || err || "发生错误");
     }
     return step + line;
+  }
+
+  function handleServerEvent(evt: ServerEvent) {
+    if (!evt || typeof evt.type !== "string") return;
+    if (evt.type === "secretary.thinking") {
+      const payload = (evt.payload ?? {}) as Record<string, any>;
+      const thinking: SecretaryThinkingEvent = {
+        kind: typeof payload.kind === "string" ? payload.kind : undefined,
+        step: Number.isFinite(payload.step) ? Number(payload.step) : undefined,
+        line: typeof payload.line === "string" ? payload.line : "",
+        tool_name: typeof payload.tool_name === "string" ? payload.tool_name : undefined,
+        ok: typeof payload.ok === "boolean" ? payload.ok : undefined,
+        error: typeof payload.error === "string" ? payload.error : undefined,
+      };
+      appendThinkingLine(formatThinkingLine(thinking));
+      return;
+    }
+    if (evt.type !== "secretary.message") return;
+
+    const payload = (evt.payload ?? {}) as Record<string, any>;
+    const content =
+      typeof payload.content === "string"
+        ? payload.content.trim()
+        : typeof payload.message === "string"
+          ? payload.message.trim()
+          : "";
+    if (!content) return;
+
+    const roleRaw = typeof payload.role === "string" ? payload.role.trim() : "";
+    const role: SecretaryMessageRole = roleRaw === "user" ? "user" : "assistant";
+    const id = Number.isFinite(payload.id) ? Number(payload.id) : Date.now();
+    const timeValue = typeof payload.time === "string" && payload.time.trim() ? payload.time : new Date().toISOString();
+    messages.value = [
+      ...messages.value,
+      {
+        id,
+        time: timeValue,
+        role,
+        content,
+      },
+    ];
   }
 
   async function send(opts?: { message?: string; refresh?: boolean }) {
@@ -143,6 +211,10 @@ export function useSecretaryChat() {
     }
   }
 
+  onBeforeUnmount(() => {
+    stopAutoRefresh();
+  });
+
   return {
     open,
     messages,
@@ -157,5 +229,6 @@ export function useSecretaryChat() {
     closeDrawer,
     send,
     clear,
+    handleServerEvent,
   };
 }

@@ -512,7 +512,31 @@ export type ServerEvent = {
   seq?: number;
   type: string;
   time: string;
-  payload?: any;
+  payload?: any | SecretaryServerThinkingPayload | SecretaryServerMessagePayload;
+};
+
+export type SecretaryServerThinkingPayload = {
+  source?: "timer" | string;
+  phase?: "callback" | string;
+  schedule_id?: string;
+  tick_no?: number;
+  kind?: SecretaryThinkingKind;
+  step?: number;
+  tool_name?: string;
+  ok?: boolean;
+  error?: string;
+  line?: string;
+};
+
+export type SecretaryServerMessagePayload = {
+  source?: "timer" | string;
+  schedule_id?: string;
+  tick_no?: number;
+  id?: number;
+  time?: string;
+  role?: SecretaryMessageRole;
+  content?: string;
+  message?: string;
 };
 
 export type SecretaryMessageRole = "user" | "assistant";
