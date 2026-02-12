@@ -17,6 +17,7 @@ import (
 )
 
 const staleWatchdogTimeout = 15 * time.Minute
+const projectContinueInFlightBudget = 1
 
 type sessionContinueOptions struct {
 	Prompt                string            `json:"prompt"`
@@ -167,29 +168,50 @@ func (a *API) drainContinueQueuesOnce(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	scopeInFlight := make(map[string]int, len(conversations))
 	for _, cid := range conversations {
-		if err := a.drainContinueQueueConversation(ctx, cid); err != nil {
+		scope, err := a.Tasks.ProjectScopeForConversation(ctx, cid)
+		if err != nil {
 			return err
+		}
+		inFlight, ok := scopeInFlight[scope]
+		if !ok {
+			count, err := a.Tasks.CountInFlightTasksByProjectScope(ctx, scope)
+			if err != nil {
+				return err
+			}
+			inFlight = count
+			scopeInFlight[scope] = count
+		}
+		if inFlight >= projectContinueInFlightBudget {
+			continue
+		}
+		dispatched, err := a.drainContinueQueueConversation(ctx, cid)
+		if err != nil {
+			return err
+		}
+		if dispatched {
+			scopeInFlight[scope] = inFlight + 1
 		}
 	}
 	return nil
 }
 
-func (a *API) drainContinueQueueConversation(ctx context.Context, conversationID string) error {
+func (a *API) drainContinueQueueConversation(ctx context.Context, conversationID string) (bool, error) {
 	conversationID = strings.TrimSpace(conversationID)
 	if conversationID == "" {
-		return nil
+		return false, nil
 	}
 	item, ok, err := a.Tasks.ClaimNextSessionContinue(ctx, conversationID)
 	if err != nil || !ok {
-		return err
+		return false, err
 	}
 
 	var body sessionContinueOptions
 	if raw := strings.TrimSpace(item.RunOptionsJSON); raw != "" {
 		if err := json.Unmarshal([]byte(raw), &body); err != nil {
 			_ = a.Tasks.MarkSessionContinueQueueState(ctx, item.ID, tasks.SessionContinueQueueStateFailed)
-			return nil
+			return false, nil
 		}
 	}
 	if strings.TrimSpace(body.Prompt) == "" {
@@ -197,13 +219,13 @@ func (a *API) drainContinueQueueConversation(ctx context.Context, conversationID
 	}
 	if strings.TrimSpace(body.Prompt) == "" {
 		_ = a.Tasks.MarkSessionContinueQueueState(ctx, item.ID, tasks.SessionContinueQueueStateFailed)
-		return nil
+		return false, nil
 	}
 
 	ops := a.taskOpsOrShim()
 	if ops == nil {
 		_ = a.Tasks.MarkSessionContinueQueueState(ctx, item.ID, tasks.SessionContinueQueueStateFailed)
-		return nil
+		return false, nil
 	}
 	newTask, err := ops.CreateContinueTaskForConversation(ctx, conversationID, toTaskOpsRunOptions(body))
 	if err != nil {
@@ -221,14 +243,14 @@ func (a *API) drainContinueQueueConversation(ctx context.Context, conversationID
 		} else {
 			_ = a.Tasks.MarkSessionContinueQueueState(ctx, item.ID, tasks.SessionContinueQueueStateFailed)
 		}
-		return nil
+		return false, nil
 	}
 
 	_ = a.Tasks.MarkSessionContinueQueueState(ctx, item.ID, tasks.SessionContinueQueueStateDone)
 	if a.Hub != nil {
 		a.Hub.Publish(events.Event{Type: "task.updated", Time: time.Now().UTC(), Payload: newTask})
 	}
-	return nil
+	return true, nil
 }
 
 func (a *API) runStaleWatchdogOnce(ctx context.Context, now time.Time) (int, error) {

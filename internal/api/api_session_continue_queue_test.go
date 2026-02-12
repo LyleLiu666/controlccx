@@ -226,6 +226,133 @@ func TestAPI_DrainContinueQueue_PreservesPreemptOrderCBeforeB(t *testing.T) {
 	}
 }
 
+func TestAPI_DrainContinueQueue_EnforcesProjectBudgetAndFairness(t *testing.T) {
+	ctx := context.Background()
+	conn, err := db.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "controlccx.db")})
+	if err != nil {
+		t.Fatalf("db open: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+
+	taskStore := tasks.NewStore(conn)
+	apiSvc := &API{Tasks: taskStore, Hub: events.NewHub()}
+	root := t.TempDir()
+	repoA := filepath.Join(root, "repo-a")
+	repoB := filepath.Join(root, "repo-b")
+
+	// Project A has one in-flight run already.
+	aRun, err := taskStore.CreateTask(ctx, tasks.CreateTaskInput{
+		WorkerType:      tasks.WorkerClaudeCode,
+		Mode:            tasks.ModeNew,
+		Prompt:          "A-running",
+		WorkDir:         filepath.Join(repoA, ".ccx", "worktrees", "run"),
+		ConversationID:  "conv-a-run",
+		WorkDirStrategy: "worktree",
+		BaseWorkDir:     repoA,
+		WorktreeDir:     filepath.Join(repoA, ".ccx", "worktrees", "run"),
+		WorktreeBranch:  "ccx-a-run",
+	})
+	if err != nil {
+		t.Fatalf("create A running: %v", err)
+	}
+	if err := taskStore.SetRunning(ctx, aRun.ID); err != nil {
+		t.Fatalf("set A running: %v", err)
+	}
+
+	// Project A backlog conversation (same base project scope as A running).
+	aSeed, err := taskStore.CreateTask(ctx, tasks.CreateTaskInput{
+		WorkerType:      tasks.WorkerClaudeCode,
+		Mode:            tasks.ModeNew,
+		Prompt:          "A-seed",
+		WorkDir:         filepath.Join(repoA, ".ccx", "worktrees", "a-backlog"),
+		SessionID:       "sess-a-backlog",
+		ConversationID:  "conv-a-backlog",
+		WorkDirStrategy: "worktree",
+		BaseWorkDir:     repoA,
+		WorktreeDir:     filepath.Join(repoA, ".ccx", "worktrees", "a-backlog"),
+		WorktreeBranch:  "ccx-a-backlog",
+	})
+	if err != nil {
+		t.Fatalf("create A backlog seed: %v", err)
+	}
+	if err := taskStore.FinishTask(ctx, aSeed.ID, tasks.FinishTaskInput{
+		Status:     tasks.StatusSucceeded,
+		SessionID:  aSeed.SessionID,
+		FinishedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("finish A backlog seed: %v", err)
+	}
+
+	// Project B backlog conversation.
+	bSeed, err := taskStore.CreateTask(ctx, tasks.CreateTaskInput{
+		WorkerType:      tasks.WorkerClaudeCode,
+		Mode:            tasks.ModeNew,
+		Prompt:          "B-seed",
+		WorkDir:         filepath.Join(repoB, ".ccx", "worktrees", "b-backlog"),
+		SessionID:       "sess-b-backlog",
+		ConversationID:  "conv-b-backlog",
+		WorkDirStrategy: "worktree",
+		BaseWorkDir:     repoB,
+		WorktreeDir:     filepath.Join(repoB, ".ccx", "worktrees", "b-backlog"),
+		WorktreeBranch:  "ccx-b-backlog",
+	})
+	if err != nil {
+		t.Fatalf("create B backlog seed: %v", err)
+	}
+	if err := taskStore.FinishTask(ctx, bSeed.ID, tasks.FinishTaskInput{
+		Status:     tasks.StatusSucceeded,
+		SessionID:  bSeed.SessionID,
+		FinishedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("finish B backlog seed: %v", err)
+	}
+
+	optsA, _ := json.Marshal(sessionContinueOptions{Prompt: "A-next"})
+	itemA, err := taskStore.EnqueueSessionContinue(ctx, tasks.EnqueueSessionContinueInput{
+		ConversationID: aSeed.ConversationID,
+		Prompt:         "A-next",
+		RunOptionsJSON: string(optsA),
+		Priority:       0,
+		Source:         "continue",
+	})
+	if err != nil {
+		t.Fatalf("enqueue A: %v", err)
+	}
+	optsB, _ := json.Marshal(sessionContinueOptions{Prompt: "B-next"})
+	itemB, err := taskStore.EnqueueSessionContinue(ctx, tasks.EnqueueSessionContinueInput{
+		ConversationID: bSeed.ConversationID,
+		Prompt:         "B-next",
+		RunOptionsJSON: string(optsB),
+		Priority:       0,
+		Source:         "continue",
+	})
+	if err != nil {
+		t.Fatalf("enqueue B: %v", err)
+	}
+
+	if err := apiSvc.drainContinueQueuesOnce(ctx); err != nil {
+		t.Fatalf("drain: %v", err)
+	}
+
+	gotA, err := taskStore.GetSessionContinueQueueItem(ctx, itemA.ID)
+	if err != nil {
+		t.Fatalf("get A item: %v", err)
+	}
+	gotB, err := taskStore.GetSessionContinueQueueItem(ctx, itemB.ID)
+	if err != nil {
+		t.Fatalf("get B item: %v", err)
+	}
+
+	// Project A should be held by budget (already has one in-flight run),
+	// while project B should still make progress.
+	if gotA.State != tasks.SessionContinueQueueStatePending {
+		t.Fatalf("A state=%q, want %q", gotA.State, tasks.SessionContinueQueueStatePending)
+	}
+	if gotB.State != tasks.SessionContinueQueueStateDone {
+		t.Fatalf("B state=%q, want %q", gotB.State, tasks.SessionContinueQueueStateDone)
+	}
+}
+
 func TestAPI_SessionContinue_CrossSessionSameWorkdirStillBlocked(t *testing.T) {
 	ctx := context.Background()
 	conn, err := db.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "controlccx.db")})

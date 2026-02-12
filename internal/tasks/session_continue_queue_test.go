@@ -214,3 +214,137 @@ func TestStore_SessionContinueQueue_ListConversations_IsolatedByProjectScope(t *
 		t.Fatalf("want one conversation from each project scope, got=%v", got)
 	}
 }
+
+func TestStore_ProjectScopeForConversation_UsesBaseWorkdirThenWorkdir(t *testing.T) {
+	ctx := context.Background()
+	conn, err := db.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "controlccx.db")})
+	if err != nil {
+		t.Fatalf("db open: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+
+	store := NewStore(conn)
+	root := t.TempDir()
+
+	_, err = store.CreateTask(ctx, CreateTaskInput{
+		WorkerType:      WorkerClaudeCode,
+		Mode:            ModeNew,
+		Prompt:          "seed-a",
+		SessionID:       "sess-a",
+		ConversationID:  "conv-a",
+		WorkDir:         filepath.Join(root, "repo-a", ".ccx", "worktrees", "a1"),
+		WorkDirStrategy: "worktree",
+		BaseWorkDir:     filepath.Join(root, "repo-a"),
+		WorktreeDir:     filepath.Join(root, "repo-a", ".ccx", "worktrees", "a1"),
+		WorktreeBranch:  "ccx-a1",
+	})
+	if err != nil {
+		t.Fatalf("create seed-a: %v", err)
+	}
+	scopeA, err := store.ProjectScopeForConversation(ctx, "conv-a")
+	if err != nil {
+		t.Fatalf("scope conv-a: %v", err)
+	}
+	if scopeA != filepath.Join(root, "repo-a") {
+		t.Fatalf("scopeA=%q, want %q", scopeA, filepath.Join(root, "repo-a"))
+	}
+
+	_, err = store.CreateTask(ctx, CreateTaskInput{
+		WorkerType:     WorkerClaudeCode,
+		Mode:           ModeNew,
+		Prompt:         "seed-legacy",
+		SessionID:      "sess-legacy",
+		ConversationID: "conv-legacy",
+		WorkDir:        filepath.Join(root, "repo-legacy"),
+	})
+	if err != nil {
+		t.Fatalf("create seed-legacy: %v", err)
+	}
+	scopeLegacy, err := store.ProjectScopeForConversation(ctx, "conv-legacy")
+	if err != nil {
+		t.Fatalf("scope conv-legacy: %v", err)
+	}
+	if scopeLegacy != filepath.Join(root, "repo-legacy") {
+		t.Fatalf("scopeLegacy=%q, want %q", scopeLegacy, filepath.Join(root, "repo-legacy"))
+	}
+
+	scopeMissing, err := store.ProjectScopeForConversation(ctx, "conv-missing")
+	if err != nil {
+		t.Fatalf("scope conv-missing: %v", err)
+	}
+	if scopeMissing != "conv-missing" {
+		t.Fatalf("scopeMissing=%q, want %q", scopeMissing, "conv-missing")
+	}
+}
+
+func TestStore_CountInFlightTasksByProjectScope(t *testing.T) {
+	ctx := context.Background()
+	conn, err := db.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "controlccx.db")})
+	if err != nil {
+		t.Fatalf("db open: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+
+	store := NewStore(conn)
+	root := t.TempDir()
+	projectA := filepath.Join(root, "repo-a")
+	projectB := filepath.Join(root, "repo-b")
+
+	createWorktree := func(conversationID, sessionID, prompt, projectRoot, leaf string) Task {
+		t.Helper()
+		worktreeDir := filepath.Join(projectRoot, ".ccx", "worktrees", leaf)
+		task, err := store.CreateTask(ctx, CreateTaskInput{
+			WorkerType:      WorkerClaudeCode,
+			Mode:            ModeNew,
+			Prompt:          prompt,
+			SessionID:       sessionID,
+			ConversationID:  conversationID,
+			WorkDir:         worktreeDir,
+			WorkDirStrategy: "worktree",
+			BaseWorkDir:     projectRoot,
+			WorktreeDir:     worktreeDir,
+			WorktreeBranch:  "ccx-" + leaf,
+		})
+		if err != nil {
+			t.Fatalf("create %s: %v", leaf, err)
+		}
+		return task
+	}
+
+	aRunning := createWorktree("conv-a-running", "sess-a-running", "a-running", projectA, "a-running")
+	if err := store.SetRunning(ctx, aRunning.ID); err != nil {
+		t.Fatalf("set a-running: %v", err)
+	}
+
+	_ = createWorktree("conv-a-queued", "sess-a-queued", "a-queued", projectA, "a-queued")
+
+	aDone := createWorktree("conv-a-done", "sess-a-done", "a-done", projectA, "a-done")
+	if err := store.FinishTask(ctx, aDone.ID, FinishTaskInput{
+		Status:     StatusSucceeded,
+		SessionID:  aDone.SessionID,
+		FinishedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("finish a-done: %v", err)
+	}
+
+	bRunning := createWorktree("conv-b-running", "sess-b-running", "b-running", projectB, "b-running")
+	if err := store.SetRunning(ctx, bRunning.ID); err != nil {
+		t.Fatalf("set b-running: %v", err)
+	}
+
+	countA, err := store.CountInFlightTasksByProjectScope(ctx, projectA)
+	if err != nil {
+		t.Fatalf("count projectA: %v", err)
+	}
+	if countA != 2 {
+		t.Fatalf("countA=%d, want 2", countA)
+	}
+
+	countB, err := store.CountInFlightTasksByProjectScope(ctx, projectB)
+	if err != nil {
+		t.Fatalf("count projectB: %v", err)
+	}
+	if countB != 1 {
+		t.Fatalf("countB=%d, want 1", countB)
+	}
+}

@@ -193,6 +193,57 @@ func (s *Store) ListSessionContinueQueueConversations(ctx context.Context, limit
 	return out, nil
 }
 
+func (s *Store) ProjectScopeForConversation(ctx context.Context, conversationID string) (string, error) {
+	if s == nil || s.db == nil {
+		return "", errors.New("tasks: store not initialized")
+	}
+	conversationID = strings.TrimSpace(conversationID)
+	if conversationID == "" {
+		return "", errors.New("tasks: conversation_id is required")
+	}
+	var scope string
+	err := s.db.QueryRowContext(ctx, `
+		SELECT COALESCE(NULLIF((
+			SELECT COALESCE(NULLIF(o.base_workdir, ''), NULLIF(t.workdir, ''))
+			FROM tasks t
+			LEFT JOIN task_run_options o ON o.task_id = t.id
+			WHERE t.conversation_id = ?
+			ORDER BY t.created_at DESC, t.id DESC
+			LIMIT 1
+		), ''), ?) AS project_scope;
+	`, conversationID, conversationID).Scan(&scope)
+	if err != nil {
+		return "", fmt.Errorf("tasks: resolve project scope for conversation: %w", err)
+	}
+	scope = strings.TrimSpace(scope)
+	if scope == "" {
+		scope = conversationID
+	}
+	return scope, nil
+}
+
+func (s *Store) CountInFlightTasksByProjectScope(ctx context.Context, projectScope string) (int, error) {
+	if s == nil || s.db == nil {
+		return 0, errors.New("tasks: store not initialized")
+	}
+	projectScope = strings.TrimSpace(projectScope)
+	if projectScope == "" {
+		return 0, errors.New("tasks: project_scope is required")
+	}
+	var count int
+	err := s.db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM tasks t
+		LEFT JOIN task_run_options o ON o.task_id = t.id
+		WHERE t.status IN (?, ?, ?, ?)
+			AND COALESCE(NULLIF(o.base_workdir, ''), NULLIF(t.workdir, ''), NULLIF(t.conversation_id, ''), t.id) = ?;
+	`, string(StatusQueued), string(StatusRunning), string(StatusWaiting), string(StatusAwaitingApproval), projectScope).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("tasks: count in-flight by project scope: %w", err)
+	}
+	return count, nil
+}
+
 func (s *Store) ClaimNextSessionContinue(ctx context.Context, conversationID string) (SessionContinueQueueItem, bool, error) {
 	if s == nil || s.db == nil {
 		return SessionContinueQueueItem{}, false, errors.New("tasks: store not initialized")
