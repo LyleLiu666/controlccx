@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"controlccx/internal/db"
@@ -146,5 +147,76 @@ func TestAPI_TaskEnterUnsafe_CancelsAndCreatesFollowup(t *testing.T) {
 	}
 	if len(runner.startCalls) != 0 {
 		t.Fatalf("startCalls=%v, want none (waiting task should not be started)", runner.startCalls)
+	}
+}
+
+func TestAPI_TaskEnterUnsafe_HighRiskWithoutProofIsBlocked(t *testing.T) {
+	ctx := context.Background()
+	conn, err := db.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "controlccx.db")})
+	if err != nil {
+		t.Fatalf("db open: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+
+	taskStore := tasks.NewStore(conn)
+	hub := events.NewHub()
+	runner := &stubRunner{}
+
+	apiSvc := &API{
+		Tasks:   taskStore,
+		Workers: runner,
+		Hub:     hub,
+	}
+
+	src, err := taskStore.CreateTask(ctx, tasks.CreateTaskInput{
+		WorkerType: tasks.WorkerClaudeCode,
+		Mode:       tasks.ModeNew,
+		Prompt:     "do A",
+		WorkDir:    ".",
+		SessionID:  "sess-risk",
+	})
+	if err != nil {
+		t.Fatalf("create src: %v", err)
+	}
+	if err := taskStore.SetRunning(ctx, src.ID); err != nil {
+		t.Fatalf("set running: %v", err)
+	}
+
+	// Seed an invalid restore proof marker: high-risk evaluator will treat recoverability as unknown.
+	if _, err := taskStore.CreateRollbackProof(ctx, tasks.CreateRollbackProofInput{
+		TaskID:     src.ID,
+		ActionType: "task.enter_unsafe",
+		ActionRef:  src.ID,
+		ProofType:  "restore_point",
+		ProofRef:   "",
+		Detail:     []byte(`{"source":"test-invalid-proof"}`),
+	}); err != nil {
+		t.Fatalf("create invalid rollback proof: %v", err)
+	}
+
+	srv := httptest.NewServer(apiSvc.Handler())
+	t.Cleanup(srv.Close)
+
+	buf, _ := json.Marshal(map[string]any{"prompt": "continue"})
+	res, err := http.Post(srv.URL+"/api/tasks/"+src.ID+"/enter-unsafe", "application/json", bytes.NewReader(buf))
+	if err != nil {
+		t.Fatalf("post enter-unsafe: %v", err)
+	}
+	t.Cleanup(func() { _ = res.Body.Close() })
+	if res.StatusCode != http.StatusConflict {
+		t.Fatalf("status=%d, want 409", res.StatusCode)
+	}
+	bodyOut := decodeMutationResponse(t, res)
+	requireMutationProblemCode(t, bodyOut, "unsupported")
+	if !strings.Contains(strings.ToLower(bodyOut.Message), "recoverability proof") {
+		t.Fatalf("message=%q, want mention recoverability proof", bodyOut.Message)
+	}
+
+	runs, err := taskStore.ListTasksByConversationID(ctx, src.ConversationID, 20, tasks.ListTasksOptions{})
+	if err != nil {
+		t.Fatalf("list runs: %v", err)
+	}
+	if len(runs) != 1 {
+		t.Fatalf("len(runs)=%d, want 1 (no follow-up run should be created)", len(runs))
 	}
 }

@@ -466,8 +466,25 @@ func (s *Service) EnterUnsafeTask(ctx context.Context, id string, prompt string)
 	if err != nil {
 		return tasks.Task{}, err
 	}
-	if err := s.evaluateAndPersistRiskDecision(ctx, src, in, prompt, restoreRef); err != nil {
+	verdict, err := s.evaluateAndPersistRiskDecision(ctx, src, in, prompt, restoreRef)
+	if err != nil {
 		return tasks.Task{}, err
+	}
+	if verdict.RiskLevel == tasks.RiskHigh && !verdict.Reversible {
+		return tasks.Task{}, newMutationError(
+			409,
+			MutationErrorUnsupported,
+			"high-risk action blocked: recoverability proof is required before execution",
+			"create/attach a restore proof (snapshot/rollback point) then retry enter-unsafe",
+			map[string]any{
+				"task_id":       strings.TrimSpace(src.ID),
+				"action_type":   "task.enter_unsafe",
+				"risk_level":    string(verdict.RiskLevel),
+				"reversible":    verdict.Reversible,
+				"reversibility": strings.TrimSpace(verdict.Reversibility),
+			},
+			nil,
+		)
 	}
 
 	newTask, err := s.Tasks.CreateTask(ctx, in)
@@ -524,9 +541,9 @@ func (s *Service) ensureAutoRestorePoint(ctx context.Context, src tasks.Task) (b
 	return true, ref, nil
 }
 
-func (s *Service) evaluateAndPersistRiskDecision(ctx context.Context, src tasks.Task, in tasks.CreateTaskInput, prompt string, restoreRef string) error {
+func (s *Service) evaluateAndPersistRiskDecision(ctx context.Context, src tasks.Task, in tasks.CreateTaskInput, prompt string, restoreRef string) (runsafe.RiskVerdict, error) {
 	if s == nil || s.Tasks == nil {
-		return errors.New("tasks store not configured")
+		return runsafe.RiskVerdict{}, errors.New("tasks store not configured")
 	}
 	verdict := runsafe.EvaluateRisk(ctx, runsafe.RiskInput{
 		ActionType:       "task.enter_unsafe",
@@ -557,9 +574,9 @@ func (s *Service) evaluateAndPersistRiskDecision(ctx context.Context, src tasks.
 		Scope:          scope,
 		Source:         strings.TrimSpace(verdict.Source),
 	}); err != nil {
-		return err
+		return runsafe.RiskVerdict{}, err
 	}
-	return nil
+	return verdict, nil
 }
 
 func (s *Service) DecideApproval(ctx context.Context, taskID string, approvalID string, decision string, reason string) (tasks.ApprovalRequest, error) {
