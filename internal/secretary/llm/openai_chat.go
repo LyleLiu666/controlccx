@@ -10,7 +10,6 @@ import (
 	"os"
 	"strings"
 	"sync"
-	"time"
 
 	"controlccx/internal/agentsdk"
 	"controlccx/internal/auth"
@@ -23,7 +22,6 @@ import (
 const (
 	defaultOpenAIChatBaseURL = "https://api.openai.com"
 	defaultOpenAIChatModel   = "gpt-4o-mini"
-	defaultOpenAIChatTimeout = 60 * time.Second
 	defaultOpenAIChatTokens  = 2048
 )
 
@@ -86,7 +84,8 @@ func (b *OpenAIChatBackend) CompleteChatStream(ctx context.Context, messages []a
 func (b *OpenAIChatBackend) completeChat(ctx context.Context, messages []agentsdk.Message, opts *agentsdk.ChatCompletionOptions, callback agentsdk.StreamCallback) (string, error) {
 	b.setLastReceipt(nil)
 
-	ctx, cancel := withDefaultTimeout(ctx, defaultOpenAIChatTimeout)
+	timeout := resolveSecretaryLLMTimeout(b.cfg)
+	ctx, cancel := withDefaultTimeout(ctx, timeout)
 	defer cancel()
 
 	baseURL := strings.TrimSpace(b.resolveOpenAIBaseURL())

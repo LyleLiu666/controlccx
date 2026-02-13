@@ -433,7 +433,8 @@ func secretaryFailedMessage(backend string, err error) string {
   - openai-chat：Base URL（可选）、API Key、Model（可选）
 - 或直接设置环境变量：
   - simple-http：ANTHROPIC_BASE_URL / ANTHROPIC_AUTH_TOKEN / ANTHROPIC_API_KEY / ANTHROPIC_MODEL
-  - openai-chat：OPENAI_BASE_URL / OPENAI_API_KEY / OPENAI_MODEL`, name, detail))
+  - openai-chat：OPENAI_BASE_URL / OPENAI_API_KEY / OPENAI_MODEL
+- 如果错误包含 context deadline exceeded：说明单次 LLM 请求超时；可在 config.yaml 里设置 secretary.llm_timeout（例如 30m），或设置 CONTROLCCX_SECRETARY_LLM_TIMEOUT=30m（0 表示不设超时）。`, name, detail))
 }
 
 func truncateRunes(s string, max int) string {

@@ -7,7 +7,10 @@ import (
 
 func withDefaultTimeout(ctx context.Context, d time.Duration) (context.Context, context.CancelFunc) {
 	if ctx == nil {
-		return context.WithTimeout(context.Background(), d)
+		ctx = context.Background()
+	}
+	if d <= 0 {
+		return ctx, func() {}
 	}
 	if _, ok := ctx.Deadline(); ok {
 		return ctx, func() {}

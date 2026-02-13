@@ -10,13 +10,14 @@ import (
 )
 
 type Config struct {
-	Server                ServerConfig  `yaml:"server"`
-	Paths                 PathsConfig   `yaml:"paths"`
-	Workers               WorkersConfig `yaml:"workers"`
-	FSRoots               []string      `yaml:"fs_roots"`
-	AuditRetentionDays    int           `yaml:"audit_retention_days"`
-	AuditMaxRowsPerSource int           `yaml:"audit_max_rows_per_source"`
-	AuditGCInterval       string        `yaml:"audit_gc_interval"`
+	Server                ServerConfig    `yaml:"server"`
+	Paths                 PathsConfig     `yaml:"paths"`
+	Workers               WorkersConfig   `yaml:"workers"`
+	Secretary             SecretaryConfig `yaml:"secretary"`
+	FSRoots               []string        `yaml:"fs_roots"`
+	AuditRetentionDays    int             `yaml:"audit_retention_days"`
+	AuditMaxRowsPerSource int             `yaml:"audit_max_rows_per_source"`
+	AuditGCInterval       string          `yaml:"audit_gc_interval"`
 }
 
 type ServerConfig struct {
@@ -39,6 +40,12 @@ type WorkersConfig struct {
 	UnsafeAutomation bool `yaml:"unsafe_automation"`
 }
 
+type SecretaryConfig struct {
+	// LLMTimeout controls the maximum duration of a single Secretary LLM request.
+	// Supports Go duration strings (e.g. "30m", "90s"). Use "0" to disable the internal timeout.
+	LLMTimeout string `yaml:"llm_timeout"`
+}
+
 func DefaultDataDir() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
@@ -57,6 +64,9 @@ func Default() Config {
 		},
 		Workers: WorkersConfig{
 			UnsafeAutomation: false,
+		},
+		Secretary: SecretaryConfig{
+			LLMTimeout: "30m",
 		},
 		AuditRetentionDays:    90,
 		AuditMaxRowsPerSource: 500000,

@@ -64,6 +64,10 @@ Example `config.yaml`:
 ```yaml
 server:
   addr: 127.0.0.1:5174
+secretary:
+  # Per LLM request timeout for the built-in secretary agent. Example: 30m / 90s.
+  # Set to "0" to disable (not recommended; can hang until the client disconnects).
+  llm_timeout: 30m
 paths:
   claude: /path/to/claude
   codex: /path/to/codex
@@ -74,6 +78,8 @@ workers:
   # (e.g. Claude Code skip permissions, Codex bypass approvals/sandbox).
   unsafe_automation: false
 ```
+
+You can also override the secretary LLM timeout via env var: `CONTROLCCX_SECRETARY_LLM_TIMEOUT=30m`.
 
 ## Worker authentication
 

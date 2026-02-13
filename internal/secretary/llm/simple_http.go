@@ -13,7 +13,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"time"
 
 	"controlccx/internal/agentsdk"
 	"controlccx/internal/auth"
@@ -26,7 +25,6 @@ import (
 const (
 	defaultSimpleHTTPBaseURL = "https://api.anthropic.com"
 	defaultSimpleHTTPModel   = "claude-3-5-sonnet-latest"
-	defaultSimpleHTTPTimeout = 60 * time.Second
 	defaultSimpleHTTPTokens  = 2048
 )
 
@@ -111,7 +109,8 @@ func (b *SimpleHTTPBackend) completeChat(
 ) (string, error) {
 	b.setLastReceipt(nil)
 
-	ctx, cancel := withDefaultTimeout(ctx, defaultSimpleHTTPTimeout)
+	timeout := resolveSecretaryLLMTimeout(b.cfg)
+	ctx, cancel := withDefaultTimeout(ctx, timeout)
 	defer cancel()
 
 	baseURL := strings.TrimSpace(b.resolveAnthropicBaseURL())
