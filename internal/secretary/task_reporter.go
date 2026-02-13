@@ -11,9 +11,9 @@ import (
 )
 
 // StartTaskStatusReporter subscribes to task.updated events and forwards task
-// results to the secretary agent as a user-role system message.
+// results/attention signals to the secretary agent as a user-role system message.
 func (s *Service) StartTaskStatusReporter(ctx context.Context, hub *events.Hub) func() {
-	if s == nil || s.chat == nil || hub == nil {
+	if s == nil || s.tasks == nil || s.chat == nil || hub == nil {
 		return func() {}
 	}
 	if ctx == nil {
@@ -31,7 +31,7 @@ func (s *Service) StartTaskStatusReporter(ctx context.Context, hub *events.Hub) 
 	}
 
 	go func() {
-		lastReported := make(map[string]tasks.Status)
+		lastStatus := make(map[string]tasks.Status)
 		for {
 			select {
 			case <-reportCtx.Done():
@@ -44,14 +44,31 @@ func (s *Service) StartTaskStatusReporter(ctx context.Context, hub *events.Hub) 
 					continue
 				}
 				task, ok := decodeTaskFromEventPayload(evt.Payload)
-				if !ok || !isTaskStatusReportable(task.Status) {
+				if !ok {
 					continue
 				}
-				if prev, exists := lastReported[task.ID]; exists && prev == task.Status {
+
+				if prev, exists := lastStatus[task.ID]; exists && prev == task.Status {
 					continue
 				}
-				lastReported[task.ID] = task.Status
-				_, _ = s.Send(reportCtx, buildTaskStatusSystemUserPrompt(task))
+				lastStatus[task.ID] = task.Status
+
+				switch task.Status {
+				case tasks.StatusAwaitingApproval:
+					pending, err := s.tasks.ListApprovalRequestsByTask(reportCtx, task.ID, tasks.ListApprovalRequestsOptions{
+						Status: tasks.ApprovalStatusPending,
+						Limit:  5,
+					})
+					if err != nil {
+						pending = nil
+					}
+					_, _ = s.Send(reportCtx, buildTaskAwaitingApprovalSystemUserPrompt(task, pending))
+				default:
+					if !isTaskStatusReportable(task.Status) {
+						continue
+					}
+					_, _ = s.Send(reportCtx, buildTaskStatusSystemUserPrompt(task))
+				}
 			}
 		}
 	}()
@@ -109,6 +126,71 @@ func humanTaskStatus(status tasks.Status) string {
 	default:
 		return strings.TrimSpace(string(status))
 	}
+}
+
+func buildTaskAwaitingApprovalSystemUserPrompt(task tasks.Task, pending []tasks.ApprovalRequest) string {
+	taskID := strings.TrimSpace(task.ID)
+	worker := strings.TrimSpace(string(task.WorkerType))
+	prompt := truncateRunes(strings.TrimSpace(task.Prompt), 120)
+
+	lines := []string{
+		"【系统消息】",
+		"这是一条由 ControlCCX 自动注入的系统消息，不是用户直接输入。",
+		"检测到该 run 正在等待审批（awaiting_approval）。请你基于上下文判断是否应批准，并尽量让 run 继续执行。",
+		"你可以调用工具 task_approval_decide 来提交 approve/deny 决策；如果你认为需要用户确认，请向用户说明原因并等待用户操作。",
+		"",
+		"待审批信息：",
+		"- task_id: " + taskID,
+		"- status: awaiting_approval",
+	}
+	if worker != "" {
+		lines = append(lines, "- worker: "+worker)
+	}
+	if prompt != "" {
+		lines = append(lines, "- task_summary: "+prompt)
+	}
+	if len(pending) == 0 {
+		lines = append(lines, "- pending_approvals: []")
+		lines = append(lines, "")
+		lines = append(lines, "注意：当前未查询到 pending approval_requests（可能已被处理/过期或数据未落库）。你仍可尝试根据 task_id 调用 task_approval_decide。")
+		lines = append(lines, "")
+		lines = append(lines, "请直接开始处理。")
+		return strings.TrimSpace(strings.Join(lines, "\n"))
+	}
+
+	lines = append(lines, "- pending_approvals:")
+	for _, ar := range pending {
+		approvalID := strings.TrimSpace(ar.ID)
+		actionType := strings.TrimSpace(ar.ActionType)
+		riskLevel := strings.TrimSpace(string(ar.RiskLevel))
+		workdir := strings.TrimSpace(ar.WorkDir)
+		summary := strings.Join(strings.Fields(strings.TrimSpace(ar.Summary)), " ")
+		raw := strings.Join(strings.Fields(strings.TrimSpace(string(ar.Raw))), " ")
+
+		if approvalID == "" {
+			continue
+		}
+		lines = append(lines, "  - approval_id: "+approvalID)
+		if actionType != "" {
+			lines = append(lines, "    action_type: "+actionType)
+		}
+		if riskLevel != "" {
+			lines = append(lines, "    risk_level: "+riskLevel)
+		}
+		if workdir != "" {
+			lines = append(lines, "    workdir: "+truncateRunes(workdir, 160))
+		}
+		if summary != "" {
+			lines = append(lines, "    summary: "+truncateRunes(summary, 160))
+		}
+		if raw != "" && raw != "{}" {
+			lines = append(lines, "    raw: "+truncateRunes(raw, 240))
+		}
+	}
+
+	lines = append(lines, "")
+	lines = append(lines, "请直接开始处理。")
+	return strings.TrimSpace(strings.Join(lines, "\n"))
 }
 
 func buildTaskStatusSystemUserPrompt(task tasks.Task) string {

@@ -30,6 +30,7 @@ func TestService_StartTaskStatusReporter_ForwardsSystemUserPromptAndLetsAgentRep
 		responses: []string{
 			"任务 task-succeeded 已完成，我已向用户汇报。",
 			"任务 task-blocked 受阻（approval required），我已向用户汇报。",
+			"任务 task-awaiting 需要审批，我已处理。",
 		},
 	}
 	svc := NewService(config.Default(), taskStore, chatStore, nil, nil, WithClient(client))
@@ -37,6 +38,29 @@ func TestService_StartTaskStatusReporter_ForwardsSystemUserPromptAndLetsAgentRep
 	hub := events.NewHub()
 	stop := svc.StartTaskStatusReporter(context.Background(), hub)
 	defer stop()
+
+	awaitingTask, err := taskStore.CreateTask(ctx, tasks.CreateTaskInput{
+		WorkerType: tasks.WorkerCodex,
+		Mode:       tasks.ModeNew,
+		Prompt:     "run tests",
+		WorkDir:    ".",
+	})
+	if err != nil {
+		t.Fatalf("create awaiting task: %v", err)
+	}
+
+	approval, err := taskStore.CreateApprovalRequest(ctx, tasks.CreateApprovalRequestInput{
+		TaskID:     awaitingTask.ID,
+		WorkerType: tasks.WorkerCodex,
+		WorkDir:    ".",
+		ActionType: "execCommandApproval",
+		RiskLevel:  tasks.RiskMedium,
+		Summary:    "go test ./...",
+		Raw:        []byte(`{"cmd":"go test ./..."}`),
+	})
+	if err != nil {
+		t.Fatalf("create approval request: %v", err)
+	}
 
 	hub.Publish(events.Event{
 		Type: "task.updated",
@@ -69,6 +93,16 @@ func TestService_StartTaskStatusReporter_ForwardsSystemUserPromptAndLetsAgentRep
 			"error":       "approval required",
 		},
 	})
+	hub.Publish(events.Event{
+		Type: "task.updated",
+		Time: time.Now().UTC(),
+		Payload: tasks.Task{
+			ID:         awaitingTask.ID,
+			Status:     tasks.StatusAwaitingApproval,
+			WorkerType: tasks.WorkerCodex,
+			Prompt:     "run tests",
+		},
+	})
 	// Same status update for same task should not generate duplicate report.
 	hub.Publish(events.Event{
 		Type: "task.updated",
@@ -81,9 +115,9 @@ func TestService_StartTaskStatusReporter_ForwardsSystemUserPromptAndLetsAgentRep
 		},
 	})
 
-	msgs := waitForChatMessagesAtLeast(t, chatStore, 4, 2*time.Second)
-	if len(msgs) != 4 {
-		t.Fatalf("messages len=%d want 4; msgs=%+v", len(msgs), msgs)
+	msgs := waitForChatMessagesAtLeast(t, chatStore, 6, 2*time.Second)
+	if len(msgs) != 6 {
+		t.Fatalf("messages len=%d want 6; msgs=%+v", len(msgs), msgs)
 	}
 
 	var userMsgs []chat.Message
@@ -98,14 +132,14 @@ func TestService_StartTaskStatusReporter_ForwardsSystemUserPromptAndLetsAgentRep
 			t.Fatalf("unexpected role=%q", m.Role)
 		}
 	}
-	if len(userMsgs) != 2 {
-		t.Fatalf("user messages=%d want 2; msgs=%+v", len(userMsgs), msgs)
+	if len(userMsgs) != 3 {
+		t.Fatalf("user messages=%d want 3; msgs=%+v", len(userMsgs), msgs)
 	}
-	if len(assistantMsgs) != 2 {
-		t.Fatalf("assistant messages=%d want 2; msgs=%+v", len(assistantMsgs), msgs)
+	if len(assistantMsgs) != 3 {
+		t.Fatalf("assistant messages=%d want 3; msgs=%+v", len(assistantMsgs), msgs)
 	}
 
-	userBody := strings.TrimSpace(userMsgs[0].Content + "\n" + userMsgs[1].Content)
+	userBody := strings.TrimSpace(userMsgs[0].Content + "\n" + userMsgs[1].Content + "\n" + userMsgs[2].Content)
 	if strings.Contains(userBody, "task-running") {
 		t.Fatalf("unexpected running report prompt: %q", userBody)
 	}
@@ -125,12 +159,32 @@ func TestService_StartTaskStatusReporter_ForwardsSystemUserPromptAndLetsAgentRep
 		t.Fatalf("missing blocked task in prompt: %q", userBody)
 	}
 
-	assistantBody := strings.TrimSpace(assistantMsgs[0].Content + "\n" + assistantMsgs[1].Content)
+	assistantBody := strings.TrimSpace(assistantMsgs[0].Content + "\n" + assistantMsgs[1].Content + "\n" + assistantMsgs[2].Content)
 	if !strings.Contains(assistantBody, "task-succeeded") {
 		t.Fatalf("assistant did not report succeeded task: %q", assistantBody)
 	}
 	if !strings.Contains(assistantBody, "task-blocked") {
 		t.Fatalf("assistant did not report blocked task: %q", assistantBody)
+	}
+
+	var approvalPrompt string
+	for _, m := range userMsgs {
+		if strings.Contains(m.Content, "task_approval_decide") {
+			approvalPrompt = m.Content
+			break
+		}
+	}
+	if approvalPrompt == "" {
+		t.Fatalf("missing awaiting approval prompt; msgs=%+v", userMsgs)
+	}
+	if strings.Contains(approvalPrompt, "不要调用工具") {
+		t.Fatalf("approval prompt should allow tool usage: %q", approvalPrompt)
+	}
+	if !strings.Contains(approvalPrompt, awaitingTask.ID) {
+		t.Fatalf("approval prompt missing task id: %q", approvalPrompt)
+	}
+	if !strings.Contains(approvalPrompt, approval.ID) {
+		t.Fatalf("approval prompt missing approval id: %q", approvalPrompt)
 	}
 }
 
@@ -153,6 +207,134 @@ func TestBuildTaskStatusSystemUserPrompt_SucceededWithWarning_IncludesWarningLin
 	}
 	if !strings.Contains(out, "tool errors were observed") {
 		t.Fatalf("expected warning content, got: %q", out)
+	}
+}
+
+func TestService_StartTaskStatusReporter_ForwardsAwaitingApprovalOncePerTransition(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "controlccx.db")
+
+	conn, err := db.Open(ctx, db.Options{Path: dbPath})
+	if err != nil {
+		t.Fatalf("db open: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+
+	taskStore := tasks.NewStore(conn)
+	chatStore := chat.NewStore(conn)
+	client := &scriptedClient{
+		responses: []string{
+			"已收到第一次审批请求。",
+			"已收到第二次审批请求。",
+		},
+	}
+	svc := NewService(config.Default(), taskStore, chatStore, nil, nil, WithClient(client))
+
+	hub := events.NewHub()
+	stop := svc.StartTaskStatusReporter(context.Background(), hub)
+	defer stop()
+
+	approvalTask, err := taskStore.CreateTask(ctx, tasks.CreateTaskInput{
+		WorkerType: tasks.WorkerCodex,
+		Mode:       tasks.ModeNew,
+		Prompt:     "approval",
+		WorkDir:    ".",
+	})
+	if err != nil {
+		t.Fatalf("create approval task: %v", err)
+	}
+
+	first, err := taskStore.CreateApprovalRequest(ctx, tasks.CreateApprovalRequestInput{
+		TaskID:     approvalTask.ID,
+		WorkerType: tasks.WorkerCodex,
+		WorkDir:    ".",
+		ActionType: "execCommandApproval",
+		RiskLevel:  tasks.RiskMedium,
+		Summary:    "first approval",
+		Raw:        []byte(`{"cmd":"echo first"}`),
+	})
+	if err != nil {
+		t.Fatalf("create first approval request: %v", err)
+	}
+
+	hub.Publish(events.Event{
+		Type: "task.updated",
+		Time: time.Now().UTC(),
+		Payload: tasks.Task{
+			ID:         approvalTask.ID,
+			Status:     tasks.StatusAwaitingApproval,
+			WorkerType: tasks.WorkerCodex,
+			Prompt:     "first",
+		},
+	})
+	_ = waitForChatMessagesAtLeast(t, chatStore, 2, 2*time.Second)
+
+	if err := taskStore.UpdateApprovalRequestDecision(ctx, first.ID, tasks.UpdateApprovalRequestDecisionInput{
+		Status: tasks.ApprovalStatusApproved,
+		Reason: "approved in test",
+	}); err != nil {
+		t.Fatalf("update first approval decision: %v", err)
+	}
+
+	hub.Publish(events.Event{
+		Type: "task.updated",
+		Time: time.Now().UTC(),
+		Payload: tasks.Task{
+			ID:         approvalTask.ID,
+			Status:     tasks.StatusRunning,
+			WorkerType: tasks.WorkerCodex,
+			Prompt:     "running",
+		},
+	})
+
+	second, err := taskStore.CreateApprovalRequest(ctx, tasks.CreateApprovalRequestInput{
+		TaskID:     approvalTask.ID,
+		WorkerType: tasks.WorkerCodex,
+		WorkDir:    ".",
+		ActionType: "execCommandApproval",
+		RiskLevel:  tasks.RiskMedium,
+		Summary:    "second approval",
+		Raw:        []byte(`{"cmd":"echo second"}`),
+	})
+	if err != nil {
+		t.Fatalf("create second approval request: %v", err)
+	}
+
+	hub.Publish(events.Event{
+		Type: "task.updated",
+		Time: time.Now().UTC(),
+		Payload: tasks.Task{
+			ID:         approvalTask.ID,
+			Status:     tasks.StatusAwaitingApproval,
+			WorkerType: tasks.WorkerCodex,
+			Prompt:     "second",
+		},
+	})
+
+	msgs := waitForChatMessagesAtLeast(t, chatStore, 4, 2*time.Second)
+	if len(msgs) != 4 {
+		t.Fatalf("messages len=%d want 4; msgs=%+v", len(msgs), msgs)
+	}
+
+	var approvalPrompts []string
+	for _, m := range msgs {
+		if m.Role != chat.RoleUser {
+			continue
+		}
+		if strings.Contains(m.Content, "task_approval_decide") {
+			approvalPrompts = append(approvalPrompts, m.Content)
+		}
+	}
+	if len(approvalPrompts) != 2 {
+		t.Fatalf("approval prompts=%d want 2; prompts=%q", len(approvalPrompts), approvalPrompts)
+	}
+
+	allPrompts := strings.Join(approvalPrompts, "\n")
+	if !strings.Contains(allPrompts, first.ID) {
+		t.Fatalf("missing first approval id in prompts: %q", allPrompts)
+	}
+	if !strings.Contains(allPrompts, second.ID) {
+		t.Fatalf("missing second approval id in prompts: %q", allPrompts)
 	}
 }
 
