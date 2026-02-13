@@ -54,12 +54,14 @@ func TestBuildSystemPrompt_PrincipleDrivenGuidance(t *testing.T) {
 	wants := []string{
 		"一次只问一个关键问题",
 		"多选引导 + 一句猜测",
-		"worker_type 语义：claude-code=Claude Code 代理执行；codex=Codex 代理执行；exec=在本机 workdir 直接执行 shell/脚本（由 worker 进程执行，不是秘书自身执行）。",
+		"worker_type 语义：claude-code=Claude Code 代理执行；codex=Codex 代理执行；exec=在本机 workdir 直接执行你提供的 shell（bash）命令",
+		"不会做自然语言转译",
+		"prompt 必须是可直接执行的命令字符串",
 		"简单且追求速度 -> claude-code",
 		"严肃/生产级迭代 -> codex",
 		"不确定则先问再提",
 		"执行摘要（目标/worker/验收/关键假设）",
-		"exec 仅可在用户明确要求 shell/脚本执行时使用",
+		"exec 仅可在用户明确要求执行具体 shell 命令时使用",
 	}
 
 	for _, want := range wants {

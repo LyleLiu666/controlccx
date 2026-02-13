@@ -109,7 +109,10 @@ func TestTools_TaskNewSubmit_DescriptionClarifiesWorkerTypeSemantics(t *testing.
 			"worker_type 仅允许 claude-code | codex | exec",
 			"claude-code=Claude Code 代理执行",
 			"codex=Codex 代理执行",
-			"exec=在本机 workdir 直接执行 shell/脚本（由 worker 进程执行，不是秘书自身执行）",
+			"exec=在本机 workdir 直接执行你提供的 shell（bash）命令",
+			"不会做自然语言转译",
+			"prompt 必须是可直接执行的命令字符串",
+			"由 worker 进程执行，不是秘书自身执行",
 		}
 		for _, want := range wants {
 			if !strings.Contains(desc, want) {
