@@ -727,12 +727,19 @@ export type ProviderCodexTarget = {
   reasoning_effort?: string;
 };
 
+export type ProviderSecretaryBackend = "simple-http" | "openai-chat";
+
 export type ProviderSecretaryTarget = {
-  backend?: "simple-http";
+  backend?: ProviderSecretaryBackend;
   simple_http?: {
     base_url?: string;
     api_key?: string;
     auth_token?: string;
+    model?: string;
+  };
+  openai_chat?: {
+    base_url?: string;
+    api_key?: string;
     model?: string;
   };
 };

@@ -118,6 +118,54 @@ func TestStoreCRUDAndMasking(t *testing.T) {
 	}
 }
 
+func TestStore_SecretaryOpenAIChat_NormalizesBackendAndMasksAPIKey(t *testing.T) {
+	dir := t.TempDir()
+
+	s, err := NewStore(dir)
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+
+	p, err := s.Upsert(Profile{
+		Name: "Secretary OpenAI",
+		Targets: Targets{
+			Secretary: SecretaryTarget{
+				OpenAIChat: SecretaryOpenAIChat{
+					BaseURL: " https://api.openai.com ",
+					APIKey:  " sk-openai-secret-123456 ",
+					Model:   " gpt-4o-mini ",
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Upsert: %v", err)
+	}
+	if p.ID == "" {
+		t.Fatalf("expected id")
+	}
+	if p.Tool != "secretary" {
+		t.Fatalf("tool=%q, want %q", p.Tool, "secretary")
+	}
+	if p.Targets.Secretary.Backend != "openai-chat" {
+		t.Fatalf("secretary.backend=%q, want %q", p.Targets.Secretary.Backend, "openai-chat")
+	}
+	if p.Targets.Secretary.OpenAIChat.APIKey != "sk-openai-secret-123456" {
+		t.Fatalf("openai_chat.api_key=%q", p.Targets.Secretary.OpenAIChat.APIKey)
+	}
+
+	masked := s.MaskedProfiles()
+	if len(masked) != 1 {
+		t.Fatalf("masked len=%d, want 1", len(masked))
+	}
+	if masked[0].Targets.Secretary.OpenAIChat.APIKey == p.Targets.Secretary.OpenAIChat.APIKey {
+		t.Fatalf("expected openai_chat api_key to be masked")
+	}
+	if masked[0].Targets.Secretary.Backend != "openai-chat" {
+		t.Fatalf("masked secretary.backend=%q, want %q", masked[0].Targets.Secretary.Backend, "openai-chat")
+	}
+}
+
 func TestStoreUpsert_RequiresName(t *testing.T) {
 	s, err := NewStore(t.TempDir())
 	if err != nil {

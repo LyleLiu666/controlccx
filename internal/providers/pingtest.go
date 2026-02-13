@@ -13,9 +13,11 @@ import (
 )
 
 const (
-	defaultPingTestTimeout  = 8 * time.Second
-	defaultPingTestMaxTokens = 16
-	defaultPingTestModel     = "claude-3-5-sonnet-latest"
+	defaultPingTestTimeout       = 8 * time.Second
+	defaultPingTestMaxTokens     = 16
+	defaultPingTestModel         = "claude-3-5-sonnet-latest"
+	defaultPingTestOpenAIBaseURL = "https://api.openai.com"
+	defaultPingTestOpenAIModel   = "gpt-4o-mini"
 )
 
 type PingTestOptions struct {
@@ -166,6 +168,129 @@ func PingTest(ctx context.Context, cfg SecretarySimpleHTTP, opts PingTestOptions
 	}
 }
 
+func PingTestOpenAIChat(ctx context.Context, cfg SecretaryOpenAIChat, opts PingTestOptions) PingTestResult {
+	baseURL := strings.TrimSpace(cfg.BaseURL)
+	if baseURL == "" {
+		baseURL = defaultPingTestOpenAIBaseURL
+	}
+
+	endpoint, err := normalizeOpenAIChatCompletionsEndpoint(baseURL)
+	if err != nil {
+		return PingTestResult{Endpoint: baseURL, OK: false, Hint: "invalid_url", Error: err.Error()}
+	}
+
+	apiKey := strings.TrimSpace(cfg.APIKey)
+	if apiKey == "" {
+		return PingTestResult{Endpoint: endpoint, OK: false, Hint: "missing_credentials", Error: "missing credentials"}
+	}
+
+	model := strings.TrimSpace(cfg.Model)
+	if model == "" {
+		model = defaultPingTestOpenAIModel
+	}
+
+	timeout := opts.Timeout
+	if timeout <= 0 {
+		timeout = defaultPingTestTimeout
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	maxTokens := opts.MaxTokens
+	if maxTokens <= 0 {
+		maxTokens = defaultPingTestMaxTokens
+	}
+	if maxTokens > 512 {
+		maxTokens = 512
+	}
+
+	prompt := strings.TrimSpace(opts.Prompt)
+	if prompt == "" {
+		prompt = "ping\n\nReply with the single word 'pong'."
+	}
+
+	body := map[string]any{
+		"model":      model,
+		"max_tokens": maxTokens,
+		"messages": []map[string]any{
+			{"role": "user", "content": prompt},
+		},
+	}
+	data, err := json.Marshal(body)
+	if err != nil {
+		return PingTestResult{Endpoint: endpoint, OK: false, Hint: "internal_error", Error: fmt.Errorf("marshal request: %w", err).Error()}
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(data))
+	if err != nil {
+		return PingTestResult{Endpoint: endpoint, OK: false, Hint: "internal_error", Error: fmt.Errorf("build request: %w", err).Error()}
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+
+	client := opts.Client
+	if client == nil {
+		client = &http.Client{}
+	}
+
+	start := time.Now()
+	res, err := client.Do(req)
+	latency := time.Since(start)
+	if err != nil {
+		return PingTestResult{
+			Endpoint:  endpoint,
+			OK:        false,
+			LatencyMS: latency.Milliseconds(),
+			Error:     err.Error(),
+			Hint:      hintFromSpeedTestError(err),
+		}
+	}
+	defer func() { _ = res.Body.Close() }()
+
+	raw, err := io.ReadAll(io.LimitReader(res.Body, 2<<20))
+	if err != nil {
+		return PingTestResult{Endpoint: endpoint, OK: false, StatusCode: res.StatusCode, LatencyMS: latency.Milliseconds(), Hint: "network_error", Error: fmt.Errorf("read response: %w", err).Error()}
+	}
+	if res.StatusCode < 200 || res.StatusCode >= 300 {
+		msg := extractPingTestErrorMessage(raw)
+		if msg == "" {
+			msg = strings.TrimSpace(string(raw))
+		}
+		msg = strings.TrimSpace(msg)
+		if msg == "" {
+			msg = http.StatusText(res.StatusCode)
+		}
+		return PingTestResult{
+			Endpoint:   endpoint,
+			OK:         false,
+			StatusCode: res.StatusCode,
+			LatencyMS:  latency.Milliseconds(),
+			Error:      msg,
+			Hint:       "bad_status",
+		}
+	}
+
+	text := strings.TrimSpace(extractPingTestCompletionText(raw))
+	if text == "" {
+		return PingTestResult{
+			Endpoint:   endpoint,
+			OK:         false,
+			StatusCode: res.StatusCode,
+			LatencyMS:  latency.Milliseconds(),
+			Error:      "empty completion",
+			Hint:       "empty_response",
+		}
+	}
+	return PingTestResult{
+		Endpoint:   endpoint,
+		OK:         true,
+		StatusCode: res.StatusCode,
+		LatencyMS:  latency.Milliseconds(),
+		Response:   text,
+	}
+}
+
 func normalizeAnthropicMessagesEndpoint(base string) (string, error) {
 	base = strings.TrimSpace(base)
 	if base == "" {
@@ -185,6 +310,29 @@ func normalizeAnthropicMessagesEndpoint(base string) (string, error) {
 		u.Path = "/v1/messages"
 	} else {
 		u.Path = path + "/v1/messages"
+	}
+	return u.String(), nil
+}
+
+func normalizeOpenAIChatCompletionsEndpoint(base string) (string, error) {
+	base = strings.TrimSpace(base)
+	if base == "" {
+		return "", fmt.Errorf("base url is empty")
+	}
+	u, err := url.Parse(base)
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return "", fmt.Errorf("invalid base url %q", base)
+	}
+	path := strings.TrimSpace(u.Path)
+	if strings.HasSuffix(path, "/v1/chat/completions") || path == "/v1/chat/completions" {
+		u.Path = pingEnsureLeadingSlash(path)
+		return u.String(), nil
+	}
+	path = strings.TrimRight(path, "/")
+	if path == "" {
+		u.Path = "/v1/chat/completions"
+	} else {
+		u.Path = path + "/v1/chat/completions"
 	}
 	return u.String(), nil
 }

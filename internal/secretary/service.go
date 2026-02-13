@@ -191,7 +191,7 @@ func (s *Service) send(ctx context.Context, userText string, hooks *SendHooks) (
 
 	client := s.client
 	if client == nil {
-		backend := llm.NewSimpleHTTPBackendWithProviders(s.cfg, s.auth, s.providers)
+		backend := llm.NewProviderBackendWithProviders(s.cfg, s.auth, s.providers)
 		client = &llm.Client{Backend: backend}
 	}
 
@@ -428,8 +428,12 @@ func secretaryFailedMessage(backend string, err error) string {
 	return strings.TrimSpace(fmt.Sprintf(`秘书调用 LLM 失败（backend=%s）：%s
 
 最小排查：
-- 在 Providers 面板为“秘书”配置 simple-http（ANTHROPIC_BASE_URL 可选；优先配置 ANTHROPIC_AUTH_TOKEN，其次 ANTHROPIC_API_KEY）
-- 或直接设置环境变量：ANTHROPIC_BASE_URL / ANTHROPIC_AUTH_TOKEN / ANTHROPIC_API_KEY`, name, detail))
+- 在 Providers 面板为“秘书”选择 backend 并配置对应字段：
+  - simple-http：Base URL（可选）、Auth Token（优先）或 API Key、Model（可选）
+  - openai-chat：Base URL（可选）、API Key、Model（可选）
+- 或直接设置环境变量：
+  - simple-http：ANTHROPIC_BASE_URL / ANTHROPIC_AUTH_TOKEN / ANTHROPIC_API_KEY / ANTHROPIC_MODEL
+  - openai-chat：OPENAI_BASE_URL / OPENAI_API_KEY / OPENAI_MODEL`, name, detail))
 }
 
 func truncateRunes(s string, max int) string {

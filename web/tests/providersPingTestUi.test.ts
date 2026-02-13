@@ -18,5 +18,5 @@ test("App wires provider ping test handler", () => {
   assert.match(appVue, /:pingTesting=\"providerPingTesting\"/);
   assert.match(appVue, /:pingResult=\"providerPingResult\"/);
   assert.match(appVue, /@pingtest=\"runProviderPingTest\"/);
+  assert.match(appVue, /await pingtestProvider\(\{\s*\n\s*id: providerEditID\.value\.trim\(\),\s*\n\s*backend,/);
 });
-

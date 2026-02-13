@@ -746,6 +746,10 @@ const providerSecretarySimpleHTTPBaseURL = ref("");
 const providerSecretarySimpleHTTPApiKey = ref("");
 const providerSecretarySimpleHTTPAuthToken = ref("");
 const providerSecretarySimpleHTTPModel = ref("");
+const providerSecretaryBackend = ref<"simple-http" | "openai-chat">("simple-http");
+const providerSecretaryOpenAIBaseURL = ref("");
+const providerSecretaryOpenAIApiKey = ref("");
+const providerSecretaryOpenAIModel = ref("");
 
 const selectedProvider = computed<ProviderProfile | null>(() => {
   const id = providerEditID.value.trim();
@@ -767,6 +771,9 @@ const providerSecretarySimpleHTTPApiKeyHint = computed<string>(
 const providerSecretarySimpleHTTPAuthTokenHint = computed<string>(
   () => selectedProvider.value?.targets?.secretary?.simple_http?.auth_token ?? "",
 );
+const providerSecretaryOpenAIApiKeyHint = computed<string>(
+  () => selectedProvider.value?.targets?.secretary?.openai_chat?.api_key ?? "",
+);
 
 const providerSpeedTesting = ref(false);
 const providerSpeedTestTarget = ref<"claude" | "codex" | "">("");
@@ -774,6 +781,10 @@ const providerClaudeSpeedTest = ref<ProviderSpeedTestResult | null>(null);
 const providerCodexSpeedTest = ref<ProviderSpeedTestResult | null>(null);
 const providerPingTesting = ref(false);
 const providerPingResult = ref<ProviderPingTestResult | null>(null);
+
+watch(providerSecretaryBackend, () => {
+  providerPingResult.value = null;
+});
 
 const {
   skillsOpen,
@@ -4205,6 +4216,10 @@ function startNewProvider() {
   providerSecretarySimpleHTTPApiKey.value = "";
   providerSecretarySimpleHTTPAuthToken.value = "";
   providerSecretarySimpleHTTPModel.value = "";
+  providerSecretaryBackend.value = "simple-http";
+  providerSecretaryOpenAIBaseURL.value = "";
+  providerSecretaryOpenAIApiKey.value = "";
+  providerSecretaryOpenAIModel.value = "";
 
   providerClaudeSpeedTest.value = null;
   providerCodexSpeedTest.value = null;
@@ -4241,6 +4256,26 @@ function loadProviderIntoEditor(p: ProviderProfile) {
   ).trim();
   providerSecretarySimpleHTTPApiKey.value = "";
   providerSecretarySimpleHTTPAuthToken.value = "";
+
+  const rawSecretaryBackend = String(p?.targets?.secretary?.backend ?? "").trim();
+  if (rawSecretaryBackend === "openai-chat") providerSecretaryBackend.value = "openai-chat";
+  else if (rawSecretaryBackend === "simple-http") providerSecretaryBackend.value = "simple-http";
+  else {
+    const openai = p?.targets?.secretary?.openai_chat;
+    const hasOpenAI =
+      String(openai?.base_url ?? "").trim() ||
+      String(openai?.api_key ?? "").trim() ||
+      String(openai?.model ?? "").trim();
+    providerSecretaryBackend.value = hasOpenAI ? "openai-chat" : "simple-http";
+  }
+
+  providerSecretaryOpenAIBaseURL.value = String(
+    p?.targets?.secretary?.openai_chat?.base_url ?? "",
+  ).trim();
+  providerSecretaryOpenAIModel.value = String(
+    p?.targets?.secretary?.openai_chat?.model ?? "",
+  ).trim();
+  providerSecretaryOpenAIApiKey.value = "";
 
   providerClaudeSpeedTest.value = null;
   providerCodexSpeedTest.value = null;
@@ -4311,12 +4346,17 @@ async function saveProviderProfile(target: "claude" | "codex" | "secretary") {
           reasoning_effort: providerCodexReasoningEffort.value.trim(),
         },
         secretary: {
-          backend: "simple-http",
+          backend: providerSecretaryBackend.value,
           simple_http: {
             base_url: providerSecretarySimpleHTTPBaseURL.value.trim(),
             api_key: providerSecretarySimpleHTTPApiKey.value.trim(),
             auth_token: providerSecretarySimpleHTTPAuthToken.value.trim(),
             model: providerSecretarySimpleHTTPModel.value.trim(),
+          },
+          openai_chat: {
+            base_url: providerSecretaryOpenAIBaseURL.value.trim(),
+            api_key: providerSecretaryOpenAIApiKey.value.trim(),
+            model: providerSecretaryOpenAIModel.value.trim(),
           },
         },
       },
@@ -4332,6 +4372,7 @@ async function saveProviderProfile(target: "claude" | "codex" | "secretary") {
     providerCodexApiKey.value = "";
     providerSecretarySimpleHTTPApiKey.value = "";
     providerSecretarySimpleHTTPAuthToken.value = "";
+    providerSecretaryOpenAIApiKey.value = "";
     await refreshProviders(res.profile.id);
   } catch (e: any) {
     providersError.value = providerErrorMessage(e);
@@ -4387,12 +4428,17 @@ async function activateProviderTarget(target: "claude" | "codex" | "secretary") 
           reasoning_effort: providerCodexReasoningEffort.value.trim(),
         },
         secretary: {
-          backend: "simple-http",
+          backend: providerSecretaryBackend.value,
           simple_http: {
             base_url: providerSecretarySimpleHTTPBaseURL.value.trim(),
             api_key: providerSecretarySimpleHTTPApiKey.value.trim(),
             auth_token: providerSecretarySimpleHTTPAuthToken.value.trim(),
             model: providerSecretarySimpleHTTPModel.value.trim(),
+          },
+          openai_chat: {
+            base_url: providerSecretaryOpenAIBaseURL.value.trim(),
+            api_key: providerSecretaryOpenAIApiKey.value.trim(),
+            model: providerSecretaryOpenAIModel.value.trim(),
           },
         },
       },
@@ -4408,6 +4454,7 @@ async function activateProviderTarget(target: "claude" | "codex" | "secretary") 
     providerCodexApiKey.value = "";
     providerSecretarySimpleHTTPApiKey.value = "";
     providerSecretarySimpleHTTPAuthToken.value = "";
+    providerSecretaryOpenAIApiKey.value = "";
     id = res.profile.id;
     await activateProvider({ target, id });
     await refreshProviders(id);
@@ -4442,13 +4489,24 @@ async function runProviderPingTest() {
   providersError.value = "";
   providerPingTesting.value = true;
   try {
-    const res = await pingtestProvider({
-      id: providerEditID.value.trim(),
-      base_url: providerSecretarySimpleHTTPBaseURL.value.trim(),
-      api_key: providerSecretarySimpleHTTPApiKey.value.trim(),
-      auth_token: providerSecretarySimpleHTTPAuthToken.value.trim(),
-      model: providerSecretarySimpleHTTPModel.value.trim(),
-    });
+    const backend = providerSecretaryBackend.value === "openai-chat" ? "openai-chat" : "simple-http";
+    const res =
+      backend === "openai-chat"
+        ? await pingtestProvider({
+            id: providerEditID.value.trim(),
+            backend,
+            base_url: providerSecretaryOpenAIBaseURL.value.trim(),
+            api_key: providerSecretaryOpenAIApiKey.value.trim(),
+            model: providerSecretaryOpenAIModel.value.trim(),
+          })
+        : await pingtestProvider({
+            id: providerEditID.value.trim(),
+            backend,
+            base_url: providerSecretarySimpleHTTPBaseURL.value.trim(),
+            api_key: providerSecretarySimpleHTTPApiKey.value.trim(),
+            auth_token: providerSecretarySimpleHTTPAuthToken.value.trim(),
+            model: providerSecretarySimpleHTTPModel.value.trim(),
+          });
     providerPingResult.value = res.result;
   } catch (e: any) {
     providersError.value = providerErrorMessage(e);
@@ -4547,6 +4605,7 @@ async function importProvidersFromEnv(target: "claude" | "codex" | "secretary") 
         profile?.targets?.codex?.reasoning_effort ?? providerCodexReasoningEffort.value,
       ).trim();
     } else {
+      providerSecretaryBackend.value = "simple-http";
       providerSecretarySimpleHTTPBaseURL.value = String(
         profile?.targets?.secretary?.simple_http?.base_url ?? providerSecretarySimpleHTTPBaseURL.value,
       ).trim();
@@ -6136,6 +6195,11 @@ watch(
         v-model:secretarySimpleHTTPModel="providerSecretarySimpleHTTPModel"
         :secretarySimpleHTTPApiKeyHint="providerSecretarySimpleHTTPApiKeyHint"
         :secretarySimpleHTTPAuthTokenHint="providerSecretarySimpleHTTPAuthTokenHint"
+        v-model:secretaryBackend="providerSecretaryBackend"
+        v-model:secretaryOpenAIBaseURL="providerSecretaryOpenAIBaseURL"
+        v-model:secretaryOpenAIApiKey="providerSecretaryOpenAIApiKey"
+        v-model:secretaryOpenAIModel="providerSecretaryOpenAIModel"
+        :secretaryOpenAIApiKeyHint="providerSecretaryOpenAIApiKeyHint"
         :speedTesting="providerSpeedTesting"
         :speedTestTarget="providerSpeedTestTarget"
         :claudeSpeedTest="providerClaudeSpeedTest"

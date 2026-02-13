@@ -167,7 +167,7 @@ func main() {
 	}
 
 	hub := events.NewHub()
-	autopilotLLM := llm.NewSimpleHTTPBackendWithProviders(cfg, authStore, providersStore)
+	autopilotLLM := llm.NewProviderBackendWithProviders(cfg, authStore, providersStore)
 	opsSvc := &taskops.Service{
 		Tasks:            taskStore,
 		Workers:          runnerClient,

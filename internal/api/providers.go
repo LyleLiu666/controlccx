@@ -95,6 +95,9 @@ func mergeProviderProfileForUpsert(existing providers.Profile, incoming provider
 	if isMaskedSecretPlaceholder(incoming.Targets.Secretary.SimpleHTTP.AuthToken) || strings.TrimSpace(incoming.Targets.Secretary.SimpleHTTP.AuthToken) == "" {
 		incoming.Targets.Secretary.SimpleHTTP.AuthToken = existing.Targets.Secretary.SimpleHTTP.AuthToken
 	}
+	if isMaskedSecretPlaceholder(incoming.Targets.Secretary.OpenAIChat.APIKey) || strings.TrimSpace(incoming.Targets.Secretary.OpenAIChat.APIKey) == "" {
+		incoming.Targets.Secretary.OpenAIChat.APIKey = existing.Targets.Secretary.OpenAIChat.APIKey
+	}
 	return incoming
 }
 
@@ -362,6 +365,7 @@ func (a *API) handleProvidersPing(w http.ResponseWriter, r *http.Request) {
 	}
 	var body struct {
 		ID        string `json:"id,omitempty"`
+		Backend   string `json:"backend,omitempty"`
 		BaseURL   string `json:"base_url,omitempty"`
 		APIKey    string `json:"api_key,omitempty"`
 		AuthToken string `json:"auth_token,omitempty"`
@@ -373,33 +377,26 @@ func (a *API) handleProvidersPing(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cfg := providers.SecretarySimpleHTTP{
-		BaseURL:   strings.TrimSpace(body.BaseURL),
-		APIKey:    strings.TrimSpace(body.APIKey),
-		AuthToken: strings.TrimSpace(body.AuthToken),
-		Model:     strings.TrimSpace(body.Model),
-	}
-
 	id := strings.TrimSpace(body.ID)
+	backend := strings.ToLower(strings.TrimSpace(body.Backend))
 	if id != "" {
 		p, ok := a.Providers.Get(id)
 		if !ok {
 			http.Error(w, "profile not found", http.StatusNotFound)
 			return
 		}
-		stored := p.Targets.Secretary.SimpleHTTP
-		if cfg.BaseURL == "" {
-			cfg.BaseURL = strings.TrimSpace(stored.BaseURL)
+		if backend == "" {
+			backend = strings.ToLower(strings.TrimSpace(p.Targets.Secretary.Backend))
 		}
-		if cfg.Model == "" {
-			cfg.Model = strings.TrimSpace(stored.Model)
-		}
-		if cfg.AuthToken == "" || isMaskedSecretPlaceholder(cfg.AuthToken) {
-			cfg.AuthToken = strings.TrimSpace(stored.AuthToken)
-		}
-		if cfg.APIKey == "" || isMaskedSecretPlaceholder(cfg.APIKey) {
-			cfg.APIKey = strings.TrimSpace(stored.APIKey)
-		}
+	}
+	if backend == "" {
+		backend = "simple-http"
+	}
+	switch backend {
+	case "simple-http", "openai-chat":
+	default:
+		http.Error(w, "invalid backend", http.StatusBadRequest)
+		return
 	}
 
 	timeout := 8 * time.Second
@@ -407,7 +404,61 @@ func (a *API) handleProvidersPing(w http.ResponseWriter, r *http.Request) {
 		timeout = time.Duration(body.TimeoutMS) * time.Millisecond
 	}
 
-	res := providers.PingTest(r.Context(), cfg, providers.PingTestOptions{Timeout: timeout})
+	var res providers.PingTestResult
+	switch backend {
+	case "simple-http":
+		cfg := providers.SecretarySimpleHTTP{
+			BaseURL:   strings.TrimSpace(body.BaseURL),
+			APIKey:    strings.TrimSpace(body.APIKey),
+			AuthToken: strings.TrimSpace(body.AuthToken),
+			Model:     strings.TrimSpace(body.Model),
+		}
+		if id != "" {
+			p, ok := a.Providers.Get(id)
+			if !ok {
+				http.Error(w, "profile not found", http.StatusNotFound)
+				return
+			}
+			stored := p.Targets.Secretary.SimpleHTTP
+			if cfg.BaseURL == "" {
+				cfg.BaseURL = strings.TrimSpace(stored.BaseURL)
+			}
+			if cfg.Model == "" {
+				cfg.Model = strings.TrimSpace(stored.Model)
+			}
+			if cfg.AuthToken == "" || isMaskedSecretPlaceholder(cfg.AuthToken) {
+				cfg.AuthToken = strings.TrimSpace(stored.AuthToken)
+			}
+			if cfg.APIKey == "" || isMaskedSecretPlaceholder(cfg.APIKey) {
+				cfg.APIKey = strings.TrimSpace(stored.APIKey)
+			}
+		}
+		res = providers.PingTest(r.Context(), cfg, providers.PingTestOptions{Timeout: timeout})
+	case "openai-chat":
+		cfg := providers.SecretaryOpenAIChat{
+			BaseURL: strings.TrimSpace(body.BaseURL),
+			APIKey:  strings.TrimSpace(body.APIKey),
+			Model:   strings.TrimSpace(body.Model),
+		}
+		if id != "" {
+			p, ok := a.Providers.Get(id)
+			if !ok {
+				http.Error(w, "profile not found", http.StatusNotFound)
+				return
+			}
+			stored := p.Targets.Secretary.OpenAIChat
+			if cfg.BaseURL == "" {
+				cfg.BaseURL = strings.TrimSpace(stored.BaseURL)
+			}
+			if cfg.Model == "" {
+				cfg.Model = strings.TrimSpace(stored.Model)
+			}
+			if cfg.APIKey == "" || isMaskedSecretPlaceholder(cfg.APIKey) {
+				cfg.APIKey = strings.TrimSpace(stored.APIKey)
+			}
+		}
+		res = providers.PingTestOpenAIChat(r.Context(), cfg, providers.PingTestOptions{Timeout: timeout})
+	}
 	writeJSON(w, map[string]any{"result": res})
 }
 

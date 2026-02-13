@@ -44,12 +44,13 @@ type CodexTarget struct {
 }
 
 type SecretaryTarget struct {
-	// Backend is kept for backwards compatibility; the secretary currently uses simple-http only.
-	Backend string `json:"backend,omitempty"` // simple-http
+	Backend string `json:"backend,omitempty"` // simple-http | openai-chat
 
 	// SimpleHTTP config is used by the Secretary backend. This is intentionally separate from the Claude Code target
 	// so Secretary can use an independent auth set.
 	SimpleHTTP SecretarySimpleHTTP `json:"simple_http,omitempty"`
+
+	OpenAIChat SecretaryOpenAIChat `json:"openai_chat,omitempty"`
 }
 
 type SecretarySimpleHTTP struct {
@@ -57,6 +58,12 @@ type SecretarySimpleHTTP struct {
 	APIKey    string `json:"api_key,omitempty"`
 	AuthToken string `json:"auth_token,omitempty"`
 	Model     string `json:"model,omitempty"`
+}
+
+type SecretaryOpenAIChat struct {
+	BaseURL string `json:"base_url,omitempty"`
+	APIKey  string `json:"api_key,omitempty"`
+	Model   string `json:"model,omitempty"`
 }
 
 type SyncLive struct {
@@ -377,6 +384,7 @@ func MaskProfile(p Profile) Profile {
 	p.Targets.Codex.APIKey = auth.MaskSecret(p.Targets.Codex.APIKey)
 	p.Targets.Secretary.SimpleHTTP.APIKey = auth.MaskSecret(p.Targets.Secretary.SimpleHTTP.APIKey)
 	p.Targets.Secretary.SimpleHTTP.AuthToken = auth.MaskSecret(p.Targets.Secretary.SimpleHTTP.AuthToken)
+	p.Targets.Secretary.OpenAIChat.APIKey = auth.MaskSecret(p.Targets.Secretary.OpenAIChat.APIKey)
 	return p
 }
 
@@ -401,13 +409,22 @@ func normalizeProfile(p Profile) Profile {
 	p.Targets.Secretary.SimpleHTTP.APIKey = strings.TrimSpace(p.Targets.Secretary.SimpleHTTP.APIKey)
 	p.Targets.Secretary.SimpleHTTP.AuthToken = strings.TrimSpace(p.Targets.Secretary.SimpleHTTP.AuthToken)
 	p.Targets.Secretary.SimpleHTTP.Model = strings.TrimSpace(p.Targets.Secretary.SimpleHTTP.Model)
+	p.Targets.Secretary.OpenAIChat.BaseURL = strings.TrimSpace(p.Targets.Secretary.OpenAIChat.BaseURL)
+	p.Targets.Secretary.OpenAIChat.APIKey = strings.TrimSpace(p.Targets.Secretary.OpenAIChat.APIKey)
+	p.Targets.Secretary.OpenAIChat.Model = strings.TrimSpace(p.Targets.Secretary.OpenAIChat.Model)
 
 	backend := strings.ToLower(strings.TrimSpace(p.Targets.Secretary.Backend))
-	if backend != "" && backend != "simple-http" {
+	switch backend {
+	case "", "simple-http", "openai-chat":
+	default:
 		backend = "simple-http"
 	}
 	if backend == "" {
-		if p.Tool == "secretary" ||
+		if strings.TrimSpace(p.Targets.Secretary.OpenAIChat.BaseURL) != "" ||
+			strings.TrimSpace(p.Targets.Secretary.OpenAIChat.APIKey) != "" ||
+			strings.TrimSpace(p.Targets.Secretary.OpenAIChat.Model) != "" {
+			backend = "openai-chat"
+		} else if p.Tool == "secretary" ||
 			strings.TrimSpace(p.Targets.Secretary.SimpleHTTP.BaseURL) != "" ||
 			strings.TrimSpace(p.Targets.Secretary.SimpleHTTP.APIKey) != "" ||
 			strings.TrimSpace(p.Targets.Secretary.SimpleHTTP.AuthToken) != "" ||
@@ -474,7 +491,10 @@ func hasSecretaryTargetData(t SecretaryTarget) bool {
 	return strings.TrimSpace(t.SimpleHTTP.BaseURL) != "" ||
 		strings.TrimSpace(t.SimpleHTTP.APIKey) != "" ||
 		strings.TrimSpace(t.SimpleHTTP.AuthToken) != "" ||
-		strings.TrimSpace(t.SimpleHTTP.Model) != ""
+		strings.TrimSpace(t.SimpleHTTP.Model) != "" ||
+		strings.TrimSpace(t.OpenAIChat.BaseURL) != "" ||
+		strings.TrimSpace(t.OpenAIChat.APIKey) != "" ||
+		strings.TrimSpace(t.OpenAIChat.Model) != ""
 }
 
 func cloneProfiles(in []Profile) []Profile {

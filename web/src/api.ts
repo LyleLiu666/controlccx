@@ -702,6 +702,7 @@ export async function speedtestProvider(input: {
 
 export async function pingtestProvider(input: {
   id?: string;
+  backend?: "simple-http" | "openai-chat";
   base_url?: string;
   api_key?: string;
   auth_token?: string;

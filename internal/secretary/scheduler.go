@@ -423,7 +423,7 @@ func (s *Service) runScheduleCallback(job *scheduleJob, tickNo int, runID string
 
 	client := s.client
 	if client == nil {
-		backend := llm.NewSimpleHTTPBackendWithProviders(s.cfg, s.auth, s.providers)
+		backend := llm.NewProviderBackendWithProviders(s.cfg, s.auth, s.providers)
 		client = &llm.Client{Backend: backend}
 	}
 

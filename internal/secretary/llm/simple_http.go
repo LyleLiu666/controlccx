@@ -109,6 +109,8 @@ func (b *SimpleHTTPBackend) completeChat(
 	stream bool,
 	callback agentsdk.StreamCallback,
 ) (string, error) {
+	b.setLastReceipt(nil)
+
 	ctx, cancel := withDefaultTimeout(ctx, defaultSimpleHTTPTimeout)
 	defer cancel()
 

@@ -5,6 +5,7 @@ import type {
   ProviderActiveSelection,
   ProviderPingTestResult,
   ProviderProfile,
+  ProviderSecretaryBackend,
   ProviderSpeedTestResult,
 } from "../types";
 
@@ -47,6 +48,12 @@ const props = defineProps<{
   secretarySimpleHTTPApiKeyHint: string;
   secretarySimpleHTTPAuthTokenHint: string;
 
+  secretaryBackend: ProviderSecretaryBackend;
+  secretaryOpenAIBaseURL: string;
+  secretaryOpenAIApiKey: string;
+  secretaryOpenAIModel: string;
+  secretaryOpenAIApiKeyHint: string;
+
   speedTesting: boolean;
   speedTestTarget: SpeedTestTarget;
   claudeSpeedTest: ProviderSpeedTestResult | null;
@@ -87,6 +94,11 @@ const emit = defineEmits<{
   (e: "update:secretarySimpleHTTPApiKey", value: string): void;
   (e: "update:secretarySimpleHTTPAuthToken", value: string): void;
   (e: "update:secretarySimpleHTTPModel", value: string): void;
+
+  (e: "update:secretaryBackend", value: ProviderSecretaryBackend): void;
+  (e: "update:secretaryOpenAIBaseURL", value: string): void;
+  (e: "update:secretaryOpenAIApiKey", value: string): void;
+  (e: "update:secretaryOpenAIModel", value: string): void;
 }>();
 
 const editNameModel = computed({
@@ -157,6 +169,26 @@ const secretarySimpleHTTPModelModel = computed({
   set: (value: string) => emit("update:secretarySimpleHTTPModel", value),
 });
 
+const secretaryBackendModel = computed({
+  get: () => props.secretaryBackend,
+  set: (value: ProviderSecretaryBackend) => emit("update:secretaryBackend", value),
+});
+
+const secretaryOpenAIBaseURLModel = computed({
+  get: () => props.secretaryOpenAIBaseURL,
+  set: (value: string) => emit("update:secretaryOpenAIBaseURL", value),
+});
+
+const secretaryOpenAIApiKeyModel = computed({
+  get: () => props.secretaryOpenAIApiKey,
+  set: (value: string) => emit("update:secretaryOpenAIApiKey", value),
+});
+
+const secretaryOpenAIModelModel = computed({
+  get: () => props.secretaryOpenAIModel,
+  set: (value: string) => emit("update:secretaryOpenAIModel", value),
+});
+
 const nameInputRef = ref<HTMLInputElement | null>(null);
 
 const page = ref<ProvidersPage>("overview");
@@ -194,16 +226,42 @@ function defaultBaseURLFor(t: ProviderTarget): string {
   }
 }
 
+function normalizeSecretaryBackend(value: unknown): ProviderSecretaryBackend {
+  const v = String(value ?? "").trim();
+  if (v === "openai-chat") return "openai-chat";
+  return "simple-http";
+}
+
+function inferSecretaryBackendFromProfile(p: ProviderProfile | null | undefined): ProviderSecretaryBackend {
+  if (!p) return "simple-http";
+  const secretary = p.targets?.secretary;
+  const raw = String(secretary?.backend ?? "").trim();
+  if (raw) return normalizeSecretaryBackend(raw);
+  if (
+    hasText(secretary?.openai_chat?.base_url) ||
+    hasText(secretary?.openai_chat?.api_key) ||
+    hasText(secretary?.openai_chat?.model)
+  ) {
+    return "openai-chat";
+  }
+  return "simple-http";
+}
+
 function rawProfileBaseURL(p: ProviderProfile | null | undefined, t: ProviderTarget): string {
   if (!p) return "";
   if (t === "claude") return String(p.targets?.claude?.base_url ?? "").trim();
   if (t === "codex") return String(p.targets?.codex?.base_url ?? "").trim();
+  const backend = inferSecretaryBackendFromProfile(p);
+  if (backend === "openai-chat") return String(p.targets?.secretary?.openai_chat?.base_url ?? "").trim();
   return String(p.targets?.secretary?.simple_http?.base_url ?? "").trim();
 }
 
 function profileBaseURL(p: ProviderProfile | null | undefined, t: ProviderTarget): string {
   const raw = rawProfileBaseURL(p, t);
-  return raw || defaultBaseURLFor(t);
+  if (t !== "secretary") return raw || defaultBaseURLFor(t);
+  const backend = inferSecretaryBackendFromProfile(p);
+  const fallback = backend === "openai-chat" ? "https://api.openai.com" : "https://api.anthropic.com";
+  return raw || fallback;
 }
 
 function profileBaseURLIsDefault(p: ProviderProfile | null | undefined, t: ProviderTarget): boolean {
@@ -214,6 +272,8 @@ function profileModel(p: ProviderProfile | null | undefined, t: ProviderTarget):
   if (!p) return "";
   if (t === "claude") return String(p.targets?.claude?.model ?? "").trim();
   if (t === "codex") return String(p.targets?.codex?.model ?? "").trim();
+  const backend = inferSecretaryBackendFromProfile(p);
+  if (backend === "openai-chat") return String(p.targets?.secretary?.openai_chat?.model ?? "").trim();
   return String(p.targets?.secretary?.simple_http?.model ?? "").trim();
 }
 
@@ -279,7 +339,10 @@ function hasSecretaryTargetData(p: ProviderProfile | null | undefined): boolean 
     hasText(secretary?.simple_http?.base_url) ||
     hasText(secretary?.simple_http?.api_key) ||
     hasText(secretary?.simple_http?.auth_token) ||
-    hasText(secretary?.simple_http?.model)
+    hasText(secretary?.simple_http?.model) ||
+    hasText(secretary?.openai_chat?.base_url) ||
+    hasText(secretary?.openai_chat?.api_key) ||
+    hasText(secretary?.openai_chat?.model)
   );
 }
 
@@ -365,6 +428,7 @@ function startNewForTarget(t: ProviderTarget) {
     void nextTick(() => nameInputRef.value?.focus());
     return;
   }
+  secretaryBackendModel.value = "simple-http";
   secretarySimpleHTTPBaseURLModel.value = "https://api.anthropic.com";
   void nextTick(() => nameInputRef.value?.focus());
 }
@@ -420,6 +484,21 @@ watch(
     if (props.loading) return;
     if (next === "overview") return;
     ensureEditorFor(next);
+  },
+);
+
+watch(
+  () => secretaryBackendModel.value,
+  (next) => {
+    if (next === "openai-chat") {
+      if (!secretaryOpenAIBaseURLModel.value.trim()) {
+        secretaryOpenAIBaseURLModel.value = "https://api.openai.com";
+      }
+      return;
+    }
+    if (!secretarySimpleHTTPBaseURLModel.value.trim()) {
+      secretarySimpleHTTPBaseURLModel.value = "https://api.anthropic.com";
+    }
   },
 );
 </script>
@@ -744,33 +823,67 @@ watch(
 
                   <div v-else class="toolsEditorGrid providersSubsectionGrid">
                     <label class="full">
-                      秘书后端（固定）
-                      <input value="simple-http" disabled />
+                      秘书后端
+                      <select v-model="secretaryBackendModel">
+                        <option value="simple-http">simple-http（Anthropic 兼容）</option>
+                        <option value="openai-chat">openai-chat（OpenAI Chat Completions）</option>
+                      </select>
                     </label>
 
-                    <div class="providersMinorTitle">Simple HTTP（Anthropic 兼容）</div>
-                    <label class="full">
-                      Base URL
-                      <input v-model="secretarySimpleHTTPBaseURLModel" placeholder="https://api.anthropic.com" autocomplete="off" />
-                    </label>
-                    <label class="full">
-                      Auth Token（优先）
-                      <input
-                        v-model="secretarySimpleHTTPAuthTokenModel"
-                        type="password"
-                        :placeholder="secretarySimpleHTTPAuthTokenHint ? `留空保留（${secretarySimpleHTTPAuthTokenHint}）` : '留空保留'"
-                        autocomplete="off"
-                      />
-                    </label>
-                    <label class="full">
-                      API Key
-                      <input
-                        v-model="secretarySimpleHTTPApiKeyModel"
-                        type="password"
-                        :placeholder="secretarySimpleHTTPApiKeyHint ? `留空保留（${secretarySimpleHTTPApiKeyHint}）` : '留空保留'"
-                        autocomplete="off"
-                      />
-                    </label>
+                    <template v-if="secretaryBackendModel === 'simple-http'">
+                      <div class="providersMinorTitle">Simple HTTP（Anthropic 兼容）</div>
+                      <label class="full">
+                        Base URL
+                        <input
+                          v-model="secretarySimpleHTTPBaseURLModel"
+                          placeholder="https://api.anthropic.com"
+                          autocomplete="off"
+                        />
+                      </label>
+                      <label class="full">
+                        Auth Token（优先）
+                        <input
+                          v-model="secretarySimpleHTTPAuthTokenModel"
+                          type="password"
+                          :placeholder="
+                            secretarySimpleHTTPAuthTokenHint
+                              ? `留空保留（${secretarySimpleHTTPAuthTokenHint}）`
+                              : '留空保留'
+                          "
+                          autocomplete="off"
+                        />
+                      </label>
+                      <label class="full">
+                        API Key
+                        <input
+                          v-model="secretarySimpleHTTPApiKeyModel"
+                          type="password"
+                          :placeholder="secretarySimpleHTTPApiKeyHint ? `留空保留（${secretarySimpleHTTPApiKeyHint}）` : '留空保留'"
+                          autocomplete="off"
+                        />
+                      </label>
+                    </template>
+
+                    <template v-else>
+                      <div class="providersMinorTitle">OpenAI Chat Completions</div>
+                      <label class="full">
+                        Base URL（可选）
+                        <input
+                          v-model="secretaryOpenAIBaseURLModel"
+                          placeholder="https://api.openai.com"
+                          autocomplete="off"
+                        />
+                      </label>
+                      <label class="full">
+                        API Key
+                        <input
+                          v-model="secretaryOpenAIApiKeyModel"
+                          type="password"
+                          :placeholder="secretaryOpenAIApiKeyHint ? `留空保留（${secretaryOpenAIApiKeyHint}）` : '留空保留'"
+                          autocomplete="off"
+                        />
+                      </label>
+                    </template>
                   </div>
                 </div>
 
@@ -806,11 +919,24 @@ watch(
                   </div>
 
                   <div v-else class="toolsEditorGrid providersSubsectionGrid">
-                    <div class="providersMinorTitle">Simple HTTP（Anthropic 兼容）</div>
-                    <label class="full">
-                      模型（model）
-                      <input v-model="secretarySimpleHTTPModelModel" placeholder="claude-3-5-sonnet-latest" autocomplete="off" />
-                    </label>
+                    <template v-if="secretaryBackendModel === 'simple-http'">
+                      <div class="providersMinorTitle">Simple HTTP（Anthropic 兼容）</div>
+                      <label class="full">
+                        模型（model）
+                        <input
+                          v-model="secretarySimpleHTTPModelModel"
+                          placeholder="claude-3-5-sonnet-latest"
+                          autocomplete="off"
+                        />
+                      </label>
+                    </template>
+                    <template v-else>
+                      <div class="providersMinorTitle">OpenAI Chat Completions</div>
+                      <label class="full">
+                        模型（model）
+                        <input v-model="secretaryOpenAIModelModel" placeholder="gpt-4o-mini" autocomplete="off" />
+                      </label>
+                    </template>
 
                     <div class="providersPingSection">
                       <div class="providersMinorTitle">连通性测试</div>
