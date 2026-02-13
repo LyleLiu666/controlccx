@@ -28,6 +28,7 @@ import (
 	"controlccx/internal/providers"
 	"controlccx/internal/runworkspace"
 	"controlccx/internal/secretary"
+	"controlccx/internal/secretary/llm"
 	"controlccx/internal/skills"
 	"controlccx/internal/taskops"
 	"controlccx/internal/tasks"
@@ -166,11 +167,14 @@ func main() {
 	}
 
 	hub := events.NewHub()
+	autopilotLLM := llm.NewSimpleHTTPBackendWithProviders(cfg, authStore, providersStore)
 	opsSvc := &taskops.Service{
-		Tasks:   taskStore,
-		Workers: runnerClient,
-		Hub:     hub,
-		Tools:   toolsSvc,
+		Tasks:            taskStore,
+		Workers:          runnerClient,
+		Hub:              hub,
+		Tools:            toolsSvc,
+		AutopilotLLM:     autopilotLLM,
+		AutopilotTimeout: 2 * time.Second,
 	}
 	fsRoots := api.FSRootsFromPaths(cfg.FSRoots)
 

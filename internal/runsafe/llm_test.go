@@ -28,14 +28,13 @@ func TestClassifyPrompt_LLMRefine(t *testing.T) {
 	}
 }
 
-func TestClassifyPrompt_LLMCannotEscalateToInstall(t *testing.T) {
+func TestClassifyPrompt_LLMInstallRequiresHighConfidence(t *testing.T) {
 	llm := &stubLLM{
 		name: "stub",
-		out:  `{"intent":"install","confidence":0.9,"reason":"(wrong)"}`,
+		out:  `{"intent":"install","confidence":0.75,"reason":"uncertain"}`,
 	}
 	got := ClassifyPrompt(context.Background(), "Please help me with this code", ClassifyOptions{LLM: llm})
-	if got.Intent == IntentInstall {
-		t.Fatalf("intent=%q, want not %q", got.Intent, IntentInstall)
+	if got.Intent != IntentCode {
+		t.Fatalf("intent=%q, want %q", got.Intent, IntentCode)
 	}
 }
-

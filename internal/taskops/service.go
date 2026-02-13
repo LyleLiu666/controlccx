@@ -24,13 +24,27 @@ type approvalForwarder interface {
 }
 
 type Service struct {
-	Tasks           *tasks.Store
-	Workers         Runner
-	Hub             *events.Hub
-	Tools           *tooling.Service
-	RiskLLM         runsafe.LLMBackend
-	RiskLLMTimeout  time.Duration
-	RiskLLMMinScore float64
+	Tasks             *tasks.Store
+	Workers           Runner
+	Hub               *events.Hub
+	Tools             *tooling.Service
+	AutopilotLLM      runsafe.LLMBackend
+	AutopilotTimeout  time.Duration
+	AutopilotMinScore float64
+	RiskLLM           runsafe.LLMBackend
+	RiskLLMTimeout    time.Duration
+	RiskLLMMinScore   float64
+}
+
+func (s *Service) autopilotClassifyOptions() runsafe.ClassifyOptions {
+	if s == nil {
+		return runsafe.ClassifyOptions{}
+	}
+	return runsafe.ClassifyOptions{
+		LLM:         s.AutopilotLLM,
+		LLMTimeout:  s.AutopilotTimeout,
+		MinLLMScore: s.AutopilotMinScore,
+	}
 }
 
 type RunOptions struct {
@@ -63,15 +77,15 @@ type QueueAck struct {
 }
 
 type CancelResult struct {
-	TaskID               string      `json:"task_id"`
-	Requested            bool        `json:"requested"`
-	StatusBefore         tasks.Status `json:"status_before"`
-	StatusAfter          tasks.Status `json:"status_after"`
-	RunnerCancelAttempted bool       `json:"runner_cancel_attempted,omitempty"`
-	RunnerCancelOK       bool        `json:"runner_cancel_ok,omitempty"`
-	PromotedTaskID       string      `json:"promoted_task_id,omitempty"`
-	StartedTaskID        string      `json:"started_task_id,omitempty"`
-	NextStartError       string      `json:"next_start_error,omitempty"`
+	TaskID                string       `json:"task_id"`
+	Requested             bool         `json:"requested"`
+	StatusBefore          tasks.Status `json:"status_before"`
+	StatusAfter           tasks.Status `json:"status_after"`
+	RunnerCancelAttempted bool         `json:"runner_cancel_attempted,omitempty"`
+	RunnerCancelOK        bool         `json:"runner_cancel_ok,omitempty"`
+	PromotedTaskID        string       `json:"promoted_task_id,omitempty"`
+	StartedTaskID         string       `json:"started_task_id,omitempty"`
+	NextStartError        string       `json:"next_start_error,omitempty"`
 }
 
 type RunnerUnavailableError struct {
@@ -408,7 +422,7 @@ func (s *Service) ResumeTask(ctx context.Context, id string, body RunOptions) (t
 	resumeIn, ap := runsafe.ApplyAutopilot(ctx, resumeIn, runsafe.ApplyOptions{
 		Driver:   driver,
 		Envelope: envelope,
-		Classify: runsafe.ClassifyOptions{},
+		Classify: s.autopilotClassifyOptions(),
 	})
 
 	newTask, err := s.Tasks.CreateTask(ctx, resumeIn)
@@ -530,7 +544,7 @@ func (s *Service) RehydrateTask(ctx context.Context, id string, body RunOptions)
 	in, ap := runsafe.ApplyAutopilot(ctx, in, runsafe.ApplyOptions{
 		Driver:   driver,
 		Envelope: envelope,
-		Classify: runsafe.ClassifyOptions{},
+		Classify: s.autopilotClassifyOptions(),
 	})
 
 	newTask, err := s.Tasks.CreateTask(ctx, in)
@@ -1017,7 +1031,7 @@ func (s *Service) createContinueTask(ctx context.Context, conversationID string,
 		in, ap := runsafe.ApplyAutopilot(ctx, in, runsafe.ApplyOptions{
 			Driver:   driver,
 			Envelope: envelope,
-			Classify: runsafe.ClassifyOptions{},
+			Classify: s.autopilotClassifyOptions(),
 		})
 
 		newTask, err := s.Tasks.CreateTask(ctx, in)
@@ -1110,7 +1124,7 @@ func (s *Service) createContinueTask(ctx context.Context, conversationID string,
 	resumeIn, ap := runsafe.ApplyAutopilot(ctx, resumeIn, runsafe.ApplyOptions{
 		Driver:   driver,
 		Envelope: envelope,
-		Classify: runsafe.ClassifyOptions{},
+		Classify: s.autopilotClassifyOptions(),
 	})
 
 	newTask, err := s.Tasks.CreateTask(ctx, resumeIn)
@@ -1162,6 +1176,10 @@ func (s *Service) CreateContinueTaskForConversation(ctx context.Context, convers
 func (s *Service) startTask(ctx context.Context, newTask tasks.Task) (tasks.Task, error) {
 	if s.Hub != nil {
 		s.Hub.Publish(events.Event{Type: "task.created", Time: time.Now().UTC(), Payload: newTask})
+	}
+	if newTask.Status != tasks.StatusQueued {
+		// Waiting tasks are started by the runner daemon when the workdir becomes available.
+		return newTask, nil
 	}
 	if s.Workers != nil {
 		if err := s.Workers.Start(ctx, newTask.ID); err != nil {

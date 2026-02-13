@@ -9,13 +9,20 @@ import (
 )
 
 func TestApplyAutopilot_Codex(t *testing.T) {
+	llm := &stubLLM{
+		name: "stub",
+		out:  `{"intent":"search-browse","confidence":0.9,"signals":["search"],"reason":"needs docs"}`,
+	}
 	in := tasks.CreateTaskInput{
 		WorkerType: tasks.WorkerCodex,
 		Mode:       tasks.ModeNew,
 		Prompt:     "帮我搜索一下 Claude Code sandbox 的文档",
 		WorkDir:    ".",
 	}
-	out, res := ApplyAutopilot(context.Background(), in, ApplyOptions{Driver: tasks.WorkerCodex})
+	out, res := ApplyAutopilot(context.Background(), in, ApplyOptions{
+		Driver:   tasks.WorkerCodex,
+		Classify: ClassifyOptions{LLM: llm},
+	})
 	if !res.Applied {
 		t.Fatalf("expected applied")
 	}
@@ -40,13 +47,20 @@ func TestApplyAutopilot_Codex(t *testing.T) {
 }
 
 func TestApplyAutopilot_Claude_Analyze(t *testing.T) {
+	llm := &stubLLM{
+		name: "stub",
+		out:  `{"intent":"analyze","confidence":0.9,"signals":["analyze"],"reason":"summarize request"}`,
+	}
 	in := tasks.CreateTaskInput{
 		WorkerType: tasks.WorkerClaudeCode,
 		Mode:       tasks.ModeNew,
 		Prompt:     "请总结这段代码的主要逻辑，并指出可能的 bug",
 		WorkDir:    ".",
 	}
-	out, res := ApplyAutopilot(context.Background(), in, ApplyOptions{Driver: tasks.WorkerClaudeCode})
+	out, res := ApplyAutopilot(context.Background(), in, ApplyOptions{
+		Driver:   tasks.WorkerClaudeCode,
+		Classify: ClassifyOptions{LLM: llm},
+	})
 	if !res.Applied {
 		t.Fatalf("expected applied")
 	}
@@ -71,6 +85,10 @@ func TestApplyAutopilot_Claude_Analyze(t *testing.T) {
 }
 
 func TestApplyAutopilot_Claude_Install_RequiresUnlock(t *testing.T) {
+	llm := &stubLLM{
+		name: "stub",
+		out:  `{"intent":"install","confidence":0.95,"signals":["install"],"reason":"dependency install"}`,
+	}
 	in := tasks.CreateTaskInput{
 		WorkerType: tasks.WorkerClaudeCode,
 		Mode:       tasks.ModeNew,
@@ -81,6 +99,7 @@ func TestApplyAutopilot_Claude_Install_RequiresUnlock(t *testing.T) {
 	out, res := ApplyAutopilot(context.Background(), in, ApplyOptions{
 		Driver:   tasks.WorkerClaudeCode,
 		Envelope: EnvelopeDefault,
+		Classify: ClassifyOptions{LLM: llm},
 	})
 	if !res.Applied {
 		t.Fatalf("expected applied")
@@ -104,6 +123,7 @@ func TestApplyAutopilot_Claude_Install_RequiresUnlock(t *testing.T) {
 	unlocked, _ := ApplyAutopilot(context.Background(), in, ApplyOptions{
 		Driver:   tasks.WorkerClaudeCode,
 		Envelope: EnvelopeInstallEnabled,
+		Classify: ClassifyOptions{LLM: llm},
 	})
 	if unlocked.SafetyPreset != "unsafe" || !unlocked.UnsafeAutomation {
 		t.Fatalf("unlock preset/unsafe=%q/%v, want unsafe/true", unlocked.SafetyPreset, unlocked.UnsafeAutomation)

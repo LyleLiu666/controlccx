@@ -42,7 +42,7 @@ func (s *Service) CreateTask(ctx context.Context, in tasks.CreateTaskInput) (tas
 	in, ap := runsafe.ApplyAutopilot(ctx, in, runsafe.ApplyOptions{
 		Driver:   driver,
 		Envelope: envelope,
-		Classify: runsafe.ClassifyOptions{},
+		Classify: s.autopilotClassifyOptions(),
 	})
 
 	var worktreePrepLogs []string
@@ -124,7 +124,18 @@ func (s *Service) CreateTask(ctx context.Context, in tasks.CreateTaskInput) (tas
 
 	task, err := s.Tasks.CreateTask(ctx, in)
 	if err != nil {
-		return tasks.Task{}, err
+		// Auto-resolve workdir busy for read-only intents by queuing (workdir_strategy=wait).
+		// This prevents "explore/analyze" runs from defaulting into isolated worktrees just to bypass locks.
+		if strings.TrimSpace(in.WorkDirStrategy) == "" && ap.Applied && isReadOnlyIntent(ap.Decision.Intent) {
+			var busy *tasks.WorkDirBusyError
+			if errors.As(err, &busy) {
+				in.WorkDirStrategy = "wait"
+				task, err = s.Tasks.CreateTask(ctx, in)
+			}
+		}
+		if err != nil {
+			return tasks.Task{}, err
+		}
 	}
 
 	for _, msg := range worktreePrepLogs {
@@ -142,4 +153,13 @@ func (s *Service) CreateTask(ctx context.Context, in tasks.CreateTaskInput) (tas
 
 	// Keep behavior aligned with existing API create path: start immediately.
 	return s.startTask(ctx, task)
+}
+
+func isReadOnlyIntent(intent runsafe.Intent) bool {
+	switch intent {
+	case runsafe.IntentAnalyze, runsafe.IntentSearchBrowse:
+		return true
+	default:
+		return false
+	}
 }
