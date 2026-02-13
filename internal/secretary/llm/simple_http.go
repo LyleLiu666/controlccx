@@ -414,7 +414,7 @@ func parseAnthropicStreamResponse(body io.Reader, callback agentsdk.StreamCallba
 
 	for {
 		line, err := reader.ReadString('\n')
-		if err != nil && !errors.Is(err, io.EOF) {
+		if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) {
 			return "", "", nil, fmt.Errorf("simple-http read stream: %w", err)
 		}
 		line = strings.TrimRight(line, "\n")
@@ -435,7 +435,7 @@ func parseAnthropicStreamResponse(body io.Reader, callback agentsdk.StreamCallba
 			}
 		}
 
-		if errors.Is(err, io.EOF) {
+		if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
 			break
 		}
 	}

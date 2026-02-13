@@ -507,6 +507,45 @@ func TestSimpleHTTPBackend_CompleteChatStream_FallsBackToJSONWhenProviderNoSSE(t
 	}
 }
 
+type unexpectedEOFReader struct {
+	data []byte
+}
+
+func (r *unexpectedEOFReader) Read(p []byte) (int, error) {
+	if len(r.data) == 0 {
+		return 0, io.ErrUnexpectedEOF
+	}
+	n := copy(p, r.data)
+	r.data = r.data[n:]
+	return n, nil
+}
+
+func TestParseAnthropicStreamResponse_TreatsUnexpectedEOFAsEOF(t *testing.T) {
+	body := &unexpectedEOFReader{
+		data: []byte(
+			"event: content_block_delta\n" +
+				"data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"Hel\"}}\n\n" +
+				"event: content_block_delta\n" +
+				"data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"lo\"}}",
+		),
+	}
+
+	var chunks []string
+	text, _, _, err := parseAnthropicStreamResponse(body, func(chunk string) error {
+		chunks = append(chunks, chunk)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if got := strings.Join(chunks, ""); got != "Hello" {
+		t.Fatalf("chunks join=%q want %q", got, "Hello")
+	}
+	if got := strings.TrimSpace(text); got != "Hello" {
+		t.Fatalf("text=%q want %q", got, "Hello")
+	}
+}
+
 func anyToString(v any) string {
 	if s, ok := v.(string); ok {
 		return s
