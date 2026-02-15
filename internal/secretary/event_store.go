@@ -154,7 +154,7 @@ func sanitizeEventForStorage(ev agentsdk.Event) agentsdk.Event {
 			for _, m := range p.Messages {
 				msgs = append(msgs, agentsdk.Message{
 					Role:    truncateRunes(strings.TrimSpace(m.Role), 40),
-					Content: truncateRunes(strings.TrimSpace(m.Content), 4000),
+					Content: strings.TrimSpace(m.Content),
 				})
 			}
 			p.Messages = msgs
