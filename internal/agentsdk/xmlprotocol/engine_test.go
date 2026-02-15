@@ -847,6 +847,68 @@ world`)
 	}
 }
 
+func TestRunLoop_RepairsInvalidJSONFields_AndEmitsToolProtocolResult(t *testing.T) {
+	client := &scriptedClient{
+		responses: []string{
+			`<tool_data><call><tool_name>dummy</tool_name><tool_fields_json>{'a': 1,}</tool_fields_json></call></tool_data>`,
+			`done`,
+		},
+	}
+	sink := &collectSink{}
+
+	_, err := RunLoop(context.Background(), RunLoopInput{
+		Client:   client,
+		Messages: []agentsdk.Message{{Role: "user", Content: "run"}},
+		Executor: funcExecutor(func(ctx context.Context, call agentsdk.ToolCall) (any, error) {
+			_ = ctx
+			if strings.TrimSpace(call.Name) != "dummy" {
+				return map[string]any{"ignored": true}, nil
+			}
+			raw := strings.TrimSpace(call.Fields["tool_fields_json"])
+			if raw == "" || !json.Valid([]byte(raw)) {
+				return nil, errors.New("invalid json payload")
+			}
+			return map[string]any{"ok": true}, nil
+		}),
+		Callbacks: Callbacks{
+			EventSink: sink,
+		},
+	})
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	var (
+		sawDummyOK      bool
+		sawToolProtocol bool
+	)
+	for _, ev := range sink.events {
+		if ev.Kind != agentsdk.EventKindToolResult {
+			continue
+		}
+		payload, ok := ev.Payload.(agentsdk.ToolResultEvent)
+		if !ok {
+			t.Fatalf("expected ToolResultEvent payload, got %T", ev.Payload)
+		}
+		switch strings.TrimSpace(payload.ToolName) {
+		case "dummy":
+			if payload.OK {
+				sawDummyOK = true
+			}
+		case "tool_protocol":
+			if payload.OK {
+				sawToolProtocol = true
+			}
+		}
+	}
+	if !sawDummyOK {
+		t.Fatalf("expected repaired dummy tool call to succeed")
+	}
+	if !sawToolProtocol {
+		t.Fatalf("expected tool_protocol result to be emitted when repairs occur")
+	}
+}
+
 func TestRunLoop_ExecutesToolAndReturnsJSONOutput(t *testing.T) {
 	client := &scriptedClient{
 		responses: []string{

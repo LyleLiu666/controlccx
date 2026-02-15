@@ -15,6 +15,12 @@ type Call struct {
 	Raw      string
 }
 
+type ToolDataParseResult struct {
+	Calls             []Call
+	Repairs           []Repair
+	CanonicalToolData string
+}
+
 var (
 	reCall          = regexp.MustCompile(`(?is)<call\b[^>]*>.*?</call>`)
 	reNamedParamTag = regexp.MustCompile(`(?is)<(parameter|param|arg)\b([^>]*)>(.*?)</(?:parameter|param|arg)>`)
@@ -157,36 +163,51 @@ func extractLatestToolDataFromCleaned(cleaned string) (block string, ok bool, sa
 }
 
 func ParseToolData(toolDataBlock string) ([]Call, error) {
+	res, err := ParseToolDataWithRepairs(toolDataBlock)
+	if err != nil {
+		return nil, err
+	}
+	return res.Calls, nil
+}
+
+func ParseToolDataWithRepairs(toolDataBlock string) (ToolDataParseResult, error) {
 	trimmed := strings.TrimSpace(toolDataBlock)
 	if trimmed == "" {
-		return nil, errors.New("empty tool_data")
+		return ToolDataParseResult{}, errors.New("empty tool_data")
 	}
 
 	lower := strings.ToLower(trimmed)
 	start := strings.Index(lower, "<tool_data")
 	if start == -1 {
-		return nil, errors.New("missing <tool_data>")
+		return ToolDataParseResult{}, errors.New("missing <tool_data>")
 	}
 	startTagEndRel := strings.Index(trimmed[start:], ">")
 	if startTagEndRel == -1 {
-		return nil, errors.New("malformed <tool_data> start tag")
+		return ToolDataParseResult{}, errors.New("malformed <tool_data> start tag")
 	}
 	startTagEnd := start + startTagEndRel + 1
 	end := strings.LastIndex(lower, "</tool_data>")
 	if end == -1 || end < startTagEnd {
-		return nil, errors.New("missing </tool_data>")
+		return ToolDataParseResult{}, errors.New("missing </tool_data>")
 	}
 
 	inner := trimmed[startTagEnd:end]
 	calls := make([]Call, 0)
+	repairs := make([]Repair, 0, 2)
 
 	rawCalls := reCall.FindAllString(inner, -1)
 	if len(rawCalls) == 0 {
-		call, err := parseCall(inner, inner)
+		call, callRepairs, err := parseCall(inner, inner)
 		if err != nil {
-			return nil, err
+			return ToolDataParseResult{}, err
 		}
-		return []Call{call}, nil
+		calls = append(calls, call)
+		repairs = append(repairs, callRepairs...)
+		return ToolDataParseResult{
+			Calls:             calls,
+			Repairs:           repairs,
+			CanonicalToolData: RenderCanonicalToolData(calls),
+		}, nil
 	}
 
 	for _, rawCall := range rawCalls {
@@ -194,31 +215,46 @@ func ParseToolData(toolDataBlock string) ([]Call, error) {
 		if !ok {
 			continue
 		}
-		call, err := parseCall(callInner, rawCall)
+		call, callRepairs, err := parseCall(callInner, rawCall)
 		if err != nil {
-			return nil, err
+			return ToolDataParseResult{}, err
 		}
 		calls = append(calls, call)
+		repairs = append(repairs, callRepairs...)
 	}
 
 	if len(calls) == 0 {
-		return nil, errors.New("no valid <call> blocks found")
+		return ToolDataParseResult{}, errors.New("no valid <call> blocks found")
 	}
-	return calls, nil
+	return ToolDataParseResult{
+		Calls:             calls,
+		Repairs:           repairs,
+		CanonicalToolData: RenderCanonicalToolData(calls),
+	}, nil
 }
 
-func parseCall(callInner string, raw string) (Call, error) {
-	callInner = repairMissingFilePathOpenTag(callInner)
+func parseCall(callInner string, raw string) (Call, []Repair, error) {
+	repairs := make([]Repair, 0, 2)
+
+	repairedInner := repairMissingFilePathOpenTag(callInner)
+	if repairedInner != callInner {
+		repairs = append(repairs, Repair{
+			Kind:     "xml_missing_open_tag",
+			Severity: "warn",
+			Message:  "repaired missing <filePath> opening tag",
+		})
+		callInner = repairedInner
+	}
 
 	fields := map[string]string{}
 
 	toolName, toolNameTag, ok := toolNameAndTag(callInner)
 	if !ok {
-		return Call{}, errors.New("missing <tool_name>")
+		return Call{}, nil, errors.New("missing <tool_name>")
 	}
 	toolName = strings.TrimSpace(toolName)
 	if toolName == "" {
-		return Call{}, errors.New("empty <tool_name>")
+		return Call{}, nil, errors.New("empty <tool_name>")
 	}
 
 	for _, tag := range topLevelTagNames(callInner) {
@@ -237,56 +273,134 @@ func parseCall(callInner string, raw string) (Call, error) {
 	if _, ok := fields["worker_type"]; !ok {
 		if v, ok := fields["workerType"]; ok {
 			fields["worker_type"] = v
+			repairs = append(repairs, Repair{
+				Kind:     "field_alias",
+				Severity: "info",
+				Message:  "normalized field alias workerType -> worker_type",
+				Detail:   map[string]string{"from": "workerType", "to": "worker_type"},
+			})
 		}
 		if v, ok := fields["worker"]; ok {
 			fields["worker_type"] = v
+			repairs = append(repairs, Repair{
+				Kind:     "field_alias",
+				Severity: "info",
+				Message:  "normalized field alias worker -> worker_type",
+				Detail:   map[string]string{"from": "worker", "to": "worker_type"},
+			})
 		}
 	}
 	if _, ok := fields["workdir"]; !ok {
 		if v, ok := fields["workDir"]; ok {
 			fields["workdir"] = v
+			repairs = append(repairs, Repair{
+				Kind:     "field_alias",
+				Severity: "info",
+				Message:  "normalized field alias workDir -> workdir",
+				Detail:   map[string]string{"from": "workDir", "to": "workdir"},
+			})
 		}
 		if v, ok := fields["work_dir"]; ok {
 			fields["workdir"] = v
+			repairs = append(repairs, Repair{
+				Kind:     "field_alias",
+				Severity: "info",
+				Message:  "normalized field alias work_dir -> workdir",
+				Detail:   map[string]string{"from": "work_dir", "to": "workdir"},
+			})
 		}
 		if v, ok := fields["cwd"]; ok {
 			fields["workdir"] = v
+			repairs = append(repairs, Repair{
+				Kind:     "field_alias",
+				Severity: "info",
+				Message:  "normalized field alias cwd -> workdir",
+				Detail:   map[string]string{"from": "cwd", "to": "workdir"},
+			})
 		}
 		if v, ok := fields["dir"]; ok {
 			fields["workdir"] = v
+			repairs = append(repairs, Repair{
+				Kind:     "field_alias",
+				Severity: "info",
+				Message:  "normalized field alias dir -> workdir",
+				Detail:   map[string]string{"from": "dir", "to": "workdir"},
+			})
 		}
 	}
 	if _, ok := fields["conversation_id"]; !ok {
 		if v, ok := fields["conversationId"]; ok {
 			fields["conversation_id"] = v
+			repairs = append(repairs, Repair{
+				Kind:     "field_alias",
+				Severity: "info",
+				Message:  "normalized field alias conversationId -> conversation_id",
+				Detail:   map[string]string{"from": "conversationId", "to": "conversation_id"},
+			})
 		}
 	}
 	if _, ok := fields["filePath"]; !ok {
 		if v, ok := fields["file_path"]; ok {
 			fields["filePath"] = v
+			repairs = append(repairs, Repair{
+				Kind:     "field_alias",
+				Severity: "info",
+				Message:  "normalized field alias file_path -> filePath",
+				Detail:   map[string]string{"from": "file_path", "to": "filePath"},
+			})
 		}
 		if v, ok := fields["filepath"]; ok {
 			fields["filePath"] = v
+			repairs = append(repairs, Repair{
+				Kind:     "field_alias",
+				Severity: "info",
+				Message:  "normalized field alias filepath -> filePath",
+				Detail:   map[string]string{"from": "filepath", "to": "filePath"},
+			})
 		}
 	}
 	if _, ok := fields["replaceAll"]; !ok {
 		if v, ok := fields["replace_all"]; ok {
 			fields["replaceAll"] = v
+			repairs = append(repairs, Repair{
+				Kind:     "field_alias",
+				Severity: "info",
+				Message:  "normalized field alias replace_all -> replaceAll",
+				Detail:   map[string]string{"from": "replace_all", "to": "replaceAll"},
+			})
 		}
 	}
 	if _, ok := fields["job_id"]; !ok {
 		if v, ok := fields["jobId"]; ok {
 			fields["job_id"] = v
+			repairs = append(repairs, Repair{
+				Kind:     "field_alias",
+				Severity: "info",
+				Message:  "normalized field alias jobId -> job_id",
+				Detail:   map[string]string{"from": "jobId", "to": "job_id"},
+			})
 		}
 	}
 	if _, ok := fields["wait_ms"]; !ok {
 		if v, ok := fields["waitMs"]; ok {
 			fields["wait_ms"] = v
+			repairs = append(repairs, Repair{
+				Kind:     "field_alias",
+				Severity: "info",
+				Message:  "normalized field alias waitMs -> wait_ms",
+				Detail:   map[string]string{"from": "waitMs", "to": "wait_ms"},
+			})
 		}
 	}
 	if _, ok := fields["wait_seconds"]; !ok {
 		if v, ok := fields["waitSeconds"]; ok {
 			fields["wait_seconds"] = v
+			repairs = append(repairs, Repair{
+				Kind:     "field_alias",
+				Severity: "info",
+				Message:  "normalized field alias waitSeconds -> wait_seconds",
+				Detail:   map[string]string{"from": "waitSeconds", "to": "wait_seconds"},
+			})
 		}
 	}
 	if _, ok := fields["max_runtime_ms"]; !ok {
@@ -342,44 +456,120 @@ func parseCall(callInner string, raw string) (Call, error) {
 	if _, ok := fields["max_steps"]; !ok {
 		if v, ok := fields["maxSteps"]; ok {
 			fields["max_steps"] = v
+			repairs = append(repairs, Repair{
+				Kind:     "field_alias",
+				Severity: "info",
+				Message:  "normalized field alias maxSteps -> max_steps",
+				Detail:   map[string]string{"from": "maxSteps", "to": "max_steps"},
+			})
 		}
 	}
 	if _, ok := fields["k_skills"]; !ok {
 		if v, ok := fields["kSkills"]; ok {
 			fields["k_skills"] = v
+			repairs = append(repairs, Repair{
+				Kind:     "field_alias",
+				Severity: "info",
+				Message:  "normalized field alias kSkills -> k_skills",
+				Detail:   map[string]string{"from": "kSkills", "to": "k_skills"},
+			})
 		}
 	}
 	if _, ok := fields["skill_ids"]; !ok {
 		if v, ok := fields["skillIds"]; ok {
 			fields["skill_ids"] = v
+			repairs = append(repairs, Repair{
+				Kind:     "field_alias",
+				Severity: "info",
+				Message:  "normalized field alias skillIds -> skill_ids",
+				Detail:   map[string]string{"from": "skillIds", "to": "skill_ids"},
+			})
 		}
 	}
 	if _, ok := fields["task_id"]; !ok {
 		if v, ok := fields["taskId"]; ok {
 			fields["task_id"] = v
+			repairs = append(repairs, Repair{
+				Kind:     "field_alias",
+				Severity: "info",
+				Message:  "normalized field alias taskId -> task_id",
+				Detail:   map[string]string{"from": "taskId", "to": "task_id"},
+			})
 		}
 	}
 	if _, ok := fields["offset_lines"]; !ok {
 		if v, ok := fields["offsetLines"]; ok {
 			fields["offset_lines"] = v
+			repairs = append(repairs, Repair{
+				Kind:     "field_alias",
+				Severity: "info",
+				Message:  "normalized field alias offsetLines -> offset_lines",
+				Detail:   map[string]string{"from": "offsetLines", "to": "offset_lines"},
+			})
 		}
 	}
 	if _, ok := fields["limit_lines"]; !ok {
 		if v, ok := fields["limitLines"]; ok {
 			fields["limit_lines"] = v
+			repairs = append(repairs, Repair{
+				Kind:     "field_alias",
+				Severity: "info",
+				Message:  "normalized field alias limitLines -> limit_lines",
+				Detail:   map[string]string{"from": "limitLines", "to": "limit_lines"},
+			})
 		}
 	}
 	if _, ok := fields["max_bytes"]; !ok {
 		if v, ok := fields["maxBytes"]; ok {
 			fields["max_bytes"] = v
+			repairs = append(repairs, Repair{
+				Kind:     "field_alias",
+				Severity: "info",
+				Message:  "normalized field alias maxBytes -> max_bytes",
+				Detail:   map[string]string{"from": "maxBytes", "to": "max_bytes"},
+			})
 		}
+	}
+
+	// Best-effort JSON repair for field values that look like JSON.
+	for k, v := range fields {
+		trimmed := strings.TrimSpace(v)
+		if trimmed == "" {
+			continue
+		}
+		if len(trimmed) > maxJSONRepairBytes {
+			continue
+		}
+		if !strings.HasPrefix(trimmed, "{") && !strings.HasPrefix(trimmed, "[") {
+			continue
+		}
+		if json.Valid([]byte(trimmed)) {
+			continue
+		}
+		repaired, ok, steps := RepairJSON(trimmed)
+		if !ok {
+			continue
+		}
+		if compact, ok := CompactJSON(repaired); ok {
+			repaired = compact
+		}
+		fields[k] = repaired
+		repairs = append(repairs, Repair{
+			Kind:     "json_repair",
+			Severity: "warn",
+			Message:  "repaired invalid json in field value",
+			Detail: map[string]string{
+				"tag":   k,
+				"steps": strings.Join(steps, ","),
+			},
+		})
 	}
 
 	return Call{
 		ToolName: toolName,
 		Fields:   fields,
 		Raw:      raw,
-	}, nil
+	}, repairs, nil
 }
 
 func mergeNestedArgumentFields(fields map[string]string) {

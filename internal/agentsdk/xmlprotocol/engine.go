@@ -216,7 +216,7 @@ func RunLoop(ctx context.Context, in RunLoopInput) (string, error) {
 			return combined.String(), nil
 		}
 
-		calls, err := ParseToolData(toolBlock)
+		parseRes, err := ParseToolDataWithRepairs(toolBlock)
 		if err != nil {
 			trace(ctx, in.Callbacks, toolStep, fmt.Sprintf("Tool protocol parse error: %v", err))
 			emitEvent(ctx, in.Callbacks.EventSink, agentsdk.EventKindError, toolStep, agentsdk.ErrorEvent{Error: err.Error()})
@@ -259,6 +259,14 @@ func RunLoop(ctx context.Context, in RunLoopInput) (string, error) {
 			continue
 		}
 
+		if len(parseRes.Repairs) > 0 && strings.TrimSpace(parseRes.CanonicalToolData) != "" {
+			repaired := strings.TrimSpace(replaceLast(cleanedRaw, toolBlock, parseRes.CanonicalToolData))
+			if repaired != "" {
+				assistantForHistory = repaired
+			}
+		}
+
+		calls := parseRes.Calls
 		msgs = append(msgs, agentsdk.Message{Role: "assistant", Content: assistantForHistory})
 
 		results := make([]ToolResult, 0, len(calls))
@@ -333,6 +341,35 @@ func RunLoop(ctx context.Context, in RunLoopInput) (string, error) {
 			}
 		}
 
+		if len(parseRes.Repairs) > 0 {
+			warnPayload := map[string]any{
+				"warning":  "tool_data repaired",
+				"repaired": true,
+				"repairs":  parseRes.Repairs,
+				"advice":   "Use well-formed <tool_data><call>... XML. Close tags correctly and prefer canonical field names.",
+			}
+			warnBytes, _ := json.Marshal(warnPayload)
+			warnJSON := string(warnBytes)
+			protoToolName := "tool_protocol"
+			protoToolCallID := fmt.Sprintf("xml_%d_protocol", step)
+			protoResult := ToolResult{
+				ToolName:   protoToolName,
+				ToolCallID: protoToolCallID,
+				OK:         true,
+				OutputJSON: warnJSON,
+			}
+			recordedCalls = append(recordedCalls, agentsdk.ToolCall{ID: protoToolCallID, Name: protoToolName})
+			results = append(results, protoResult)
+			emitEvent(ctx, in.Callbacks.EventSink, agentsdk.EventKindToolResult, toolStep, agentsdk.ToolResultEvent{
+				ToolName:   protoResult.ToolName,
+				ToolCallID: protoResult.ToolCallID,
+				OK:         protoResult.OK,
+				OutputJSON: protoResult.OutputJSON,
+				Error:      protoResult.Error,
+			})
+			trace(ctx, in.Callbacks, toolStep, "Tool protocol: repaired tool_data (see tool_protocol result)")
+		}
+
 		toolResultMsg := buildToolResultMessage(results)
 		if in.Callbacks.ObserveStep != nil {
 			in.Callbacks.ObserveStep(StepRecord{
@@ -382,6 +419,17 @@ func normalizeMaxSteps(maxSteps int) int {
 		return maxMaxStepsCap
 	}
 	return maxSteps
+}
+
+func replaceLast(s, old, new string) string {
+	if old == "" {
+		return s
+	}
+	idx := strings.LastIndex(s, old)
+	if idx < 0 {
+		return s
+	}
+	return s[:idx] + new + s[idx+len(old):]
 }
 
 func (in RunLoopInput) recoverTruncatedWriteFileAppend(

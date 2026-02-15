@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { AuditEntryDetail } from "../types";
 import { onMounted } from "vue";
 import { useAudit } from "../composables/useAudit";
 
@@ -67,6 +68,26 @@ function onNextPage() {
 onMounted(() => {
   void init();
 });
+
+function resolvedRunID(d: AuditEntryDetail | null | undefined): string {
+  if (!d) return "";
+  const direct = String((d as any).run_id ?? "").trim();
+  if (direct) return direct;
+  const meta = (d as any).meta ?? {};
+  return String(meta?.run_id ?? "").trim();
+}
+
+function focusRun(runID: string) {
+  const rid = String(runID ?? "").trim();
+  if (!rid) return;
+  querySources.value = ["secretary_event"];
+  queryKeyword.value = "";
+  queryFrom.value = "";
+  queryTo.value = "";
+  queryTaskID.value = "";
+  queryRunID.value = rid;
+  void search();
+}
 </script>
 
 <template>
@@ -202,6 +223,16 @@ onMounted(() => {
           <div class="auditDetailHead">
             <div class="auditDetailTitle">{{ detail.title }}</div>
             <div class="tinyHint mono">{{ detail.id }}</div>
+            <div v-if="resolvedRunID(detail)" class="auditDetailRunRow">
+              <span class="tinyHint mono">run_id: {{ resolvedRunID(detail) }}</span>
+              <button
+                type="button"
+                class="miniBtn"
+                @click="focusRun(resolvedRunID(detail))"
+              >
+                只看此 run
+              </button>
+            </div>
           </div>
           <div
             v-if="detail.meta?.kv_cache || detail.meta?.provider_receipt"
@@ -392,6 +423,26 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   gap: 4px;
+}
+
+.auditDetailRunRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.miniBtn {
+  padding: 4px 8px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--surface2);
+  color: var(--fg);
+  font-size: 12px;
+}
+
+.miniBtn:hover {
+  border-color: var(--accent);
 }
 
 .auditDetailTitle {
