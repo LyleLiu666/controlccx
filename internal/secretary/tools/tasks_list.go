@@ -18,6 +18,10 @@ func (tasksListTool) DescriptionZH() string {
 	return "列出最近任务摘要。参数：limit（可选，默认50，最大200）、include_deleted（可选，1/true 表示包含已删除会话）；task_id 或 conversation_id（可选，提供后仅返回同项目范围任务，避免跨项目上下文污染）。"
 }
 
+func (tasksListTool) ReturnsZH() string {
+	return "tasks[]（每项含 id/status/worker_type/prompt/workdir/updated_at/created_at），可选 project_scope"
+}
+
 func (tasksListTool) Params() []string {
 	return []string{"limit", "include_deleted", "task_id", "conversation_id"}
 }

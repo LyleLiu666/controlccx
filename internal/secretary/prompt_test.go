@@ -205,6 +205,35 @@ func TestBuildSystemPrompt_TargetIncludesTaskCreation(t *testing.T) {
 	}
 }
 
+func TestBuildSystemPrompt_ToolLinesIncludeReturnHints(t *testing.T) {
+	prompt := buildSystemPrompt()
+	toolSection := extractToolSection(t, prompt)
+	toolLines := parseToolLines(t, toolSection)
+
+	type testCase struct {
+		name     string
+		contains []string
+	}
+	cases := []testCase{
+		{name: "tasks_list", contains: []string{"返回：", "tasks"}},
+		{name: "task_logs_tail", contains: []string{"返回：", "logs"}},
+		{name: "task_log_get", contains: []string{"返回：", "message"}},
+		{name: "task_new_submit", contains: []string{"返回：", "task"}},
+		{name: "scheduler_create", contains: []string{"返回：", "schedule_id"}},
+	}
+	for _, tc := range cases {
+		line, ok := toolLines[tc.name]
+		if !ok {
+			t.Fatalf("prompt missing tool line: %s", tc.name)
+		}
+		for _, want := range tc.contains {
+			if !strings.Contains(line, want) {
+				t.Fatalf("tool %q line missing %q: %q", tc.name, want, line)
+			}
+		}
+	}
+}
+
 func TestBuildSystemPrompt_PrincipleDrivenGuidance(t *testing.T) {
 	prompt := buildSystemPrompt()
 

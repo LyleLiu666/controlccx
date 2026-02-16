@@ -52,6 +52,9 @@ func Descriptors() []Descriptor {
 			d.Required = trimStringList(pd.Required())
 			d.AnyOfRequired = trimStringGroups(pd.AnyOfRequired())
 		}
+		if rd, ok := t.(ReturnsDescriber); ok {
+			d.ReturnsZH = strings.TrimSpace(rd.ReturnsZH())
+		}
 		out = append(out, d)
 	}
 	return out
@@ -92,6 +95,12 @@ func NewRegistry(deps Deps) *agentsdk.ToolRegistry {
 	for _, t := range DefaultTools() {
 		tool := t
 		_ = reg.Register(tool.Name(), func(ctx context.Context, call agentsdk.ToolCall) (any, error) {
+			if pd, ok := tool.(ParamDescriber); ok {
+				if err := validateRequired(call.Fields, pd.Required(), pd.AnyOfRequired()); err != nil {
+					appendValidationAuditLog(ctx, deps, call, err)
+					return nil, err
+				}
+			}
 			return tool.Execute(ctx, call, deps)
 		})
 	}
@@ -104,4 +113,22 @@ func NewRegistry(deps Deps) *agentsdk.ToolRegistry {
 		return nil, fmt.Errorf("%w: %s", agentsdk.ErrToolNotFound, name)
 	}
 	return reg
+}
+
+func appendValidationAuditLog(ctx context.Context, deps Deps, call agentsdk.ToolCall, err error) {
+	if err == nil || deps.Ops == nil || call.Fields == nil {
+		return
+	}
+	taskID := strings.TrimSpace(call.Fields["task_id"])
+	if taskID == "" {
+		return
+	}
+	action := strings.TrimSpace(call.Name)
+	if action == "" {
+		action = "secretary.tool"
+	}
+	deps.Ops.AppendActionAuditLog(ctx, taskID, action, map[string]any{
+		"task_id": taskID,
+		"fields":  copyStringMap(call.Fields),
+	}, err)
 }

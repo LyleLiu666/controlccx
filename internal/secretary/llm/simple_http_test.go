@@ -3,10 +3,12 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 
 	"controlccx/internal/agentsdk"
@@ -15,30 +17,61 @@ import (
 
 func TestSimpleHTTPBackend_CompleteChat_SendsStructuredMessagesWithPromptCaching(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "test-key")
+	t.Setenv("ANTHROPIC_AUTH_TOKEN", "")
 	t.Setenv("ANTHROPIC_MODEL", "test-model")
 
-	var gotBody []byte
+	var (
+		mu      sync.Mutex
+		gotBody []byte
+		reqErr  error
+	)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		recordErr := func(err error) {
+			if err == nil {
+				return
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			if reqErr != nil {
+				return
+			}
+			reqErr = err
+		}
+
 		if r.Method != http.MethodPost {
-			t.Fatalf("method=%s", r.Method)
+			recordErr(fmt.Errorf("method=%s", r.Method))
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
 		}
 		if r.URL.Path != "/v1/messages" {
-			t.Fatalf("path=%s", r.URL.Path)
+			recordErr(fmt.Errorf("path=%s", r.URL.Path))
+			http.Error(w, "not found", http.StatusNotFound)
+			return
 		}
 		if strings.TrimSpace(r.Header.Get("anthropic-version")) == "" {
-			t.Fatalf("missing anthropic-version header")
+			recordErr(fmt.Errorf("missing anthropic-version header"))
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
 		}
 		if v := strings.TrimSpace(r.Header.Get("anthropic-beta")); v != "prompt-caching" {
-			t.Fatalf("anthropic-beta=%q", v)
+			recordErr(fmt.Errorf("anthropic-beta=%q", v))
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
 		}
 		if v := strings.TrimSpace(r.Header.Get("x-api-key")); v != "test-key" {
-			t.Fatalf("x-api-key=%q", v)
+			recordErr(fmt.Errorf("x-api-key=%q", v))
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
 		}
 		b, err := io.ReadAll(r.Body)
 		if err != nil {
-			t.Fatalf("read body: %v", err)
+			recordErr(err)
+			http.Error(w, "read body failed", http.StatusInternalServerError)
+			return
 		}
+		mu.Lock()
 		gotBody = b
+		mu.Unlock()
 
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"content":[{"type":"text","text":"OK"}]}`))
@@ -71,6 +104,13 @@ func TestSimpleHTTPBackend_CompleteChat_SendsStructuredMessagesWithPromptCaching
 	if strings.TrimSpace(out) != "OK" {
 		t.Fatalf("out=%q", out)
 	}
+	mu.Lock()
+	seenErr := reqErr
+	body := append([]byte(nil), gotBody...)
+	mu.Unlock()
+	if seenErr != nil {
+		t.Fatalf("server request check failed: %v", seenErr)
+	}
 
 	type cacheControl struct {
 		Type string `json:"type"`
@@ -94,7 +134,7 @@ func TestSimpleHTTPBackend_CompleteChat_SendsStructuredMessagesWithPromptCaching
 	}
 
 	var parsed req
-	if err := json.Unmarshal(gotBody, &parsed); err != nil {
+	if err := json.Unmarshal(body, &parsed); err != nil {
 		t.Fatalf("unmarshal request: %v", err)
 	}
 	if parsed.Model != "test-model" {

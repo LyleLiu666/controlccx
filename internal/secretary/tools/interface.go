@@ -22,6 +22,10 @@ type ParamDescriber interface {
 	AnyOfRequired() [][]string
 }
 
+type ReturnsDescriber interface {
+	ReturnsZH() string
+}
+
 type Deps struct {
 	Tasks     *tasks.Store
 	Skills    *skills.Service
@@ -36,6 +40,7 @@ type Descriptor struct {
 	Params        []string
 	Required      []string
 	AnyOfRequired [][]string
+	ReturnsZH     string
 }
 
 type ScheduleState string

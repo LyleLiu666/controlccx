@@ -18,6 +18,10 @@ func (taskLogsTailTool) DescriptionZH() string {
 	return "查看任务最近日志（受限）。参数：task_id（必填）、count（可选，默认5，最大20）。每条最多800字（头200+尾600）。"
 }
 
+func (taskLogsTailTool) ReturnsZH() string {
+	return "task_id、count、logs[]（id/time/stream/message/truncated/original_chars），以及截断与限制信息"
+}
+
 func (taskLogsTailTool) Params() []string {
 	return []string{"task_id", "count"}
 }

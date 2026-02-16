@@ -17,6 +17,10 @@ func (schedulerCreateTool) DescriptionZH() string {
 	return "创建定时调度。参数：tool_name（或 target_tool_name，必填，目标工具名）、tool_fields_json（必填，JSON object string）、interval_sec（可选，默认10，最大60）、ttl_sec（可选，默认300）、allow_write（可选，默认false）。"
 }
 
+func (schedulerCreateTool) ReturnsZH() string {
+	return "schedule_id、state、target_tool_name、target_fields_json、interval_sec、ttl_sec、allow_write、created_at、expires_at、next_tick_at"
+}
+
 func (schedulerCreateTool) Params() []string {
 	return []string{
 		"tool_name",
