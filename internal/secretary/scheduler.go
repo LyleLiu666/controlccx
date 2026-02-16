@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"controlccx/internal/agentsdk"
+	"controlccx/internal/agentsdk/sessioncompress"
 	"controlccx/internal/agentsdk/xmlprotocol"
 	"controlccx/internal/chat"
 	"controlccx/internal/events"
@@ -445,10 +446,16 @@ func (s *Service) runScheduleCallback(job *scheduleJob, tickNo int, runID string
 	messages = append(messages, history...)
 	messages = append(messages, agentsdk.Message{Role: "user", Content: toolResultMessage})
 
+	contextCompressThreshold := s.compressOpts.MaxContextRunes
+	if contextCompressThreshold < sessioncompress.DefaultMaxContextRunes {
+		contextCompressThreshold = sessioncompress.DefaultMaxContextRunes
+	}
+
 	out, runErr := xmlprotocol.RunLoop(callbackCtx, xmlprotocol.RunLoopInput{
-		Client:     client,
-		Messages:   messages,
-		LLMOptions: s.llmOptionsBestEffort(callbackCtx),
+		Client:                        client,
+		Messages:                      messages,
+		LLMOptions:                    s.llmOptionsBestEffort(callbackCtx),
+		ContextCompressThresholdRunes: contextCompressThreshold,
 		Executor: sectools.NewRegistry(sectools.Deps{
 			Tasks:     s.tasks,
 			Skills:    s.skills,

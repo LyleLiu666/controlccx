@@ -59,6 +59,14 @@ type RunLoopInput struct {
 	// LLMOptions are forwarded verbatim to Client.ChatCompletionStream.
 	LLMOptions *agentsdk.ChatCompletionOptions
 
+	// ContextCompressThresholdRunes enables best-effort in-loop context compression.
+	// When > 0 and the rolling conversation exceeds this approximate rune budget,
+	// the loop summarizes older messages into a short background note.
+	//
+	// This is especially helpful for long tool loops where tool_result payloads
+	// bloat the prompt and degrade tool-call accuracy.
+	ContextCompressThresholdRunes int
+
 	Executor agentsdk.ToolExecutor
 
 	// MaxSteps is the upper bound of tool-loop iterations.
@@ -95,9 +103,94 @@ func RunLoop(ctx context.Context, in RunLoopInput) (string, error) {
 			in.Callbacks.OnStepStart(step)
 		}
 
+		if step > 0 && in.ContextCompressThresholdRunes > 0 {
+			before := len(msgs)
+			compressedMsgs, didCompress, compErr := compressConversationIfNeeded(
+				ctx,
+				in.Client,
+				msgs,
+				in.ContextCompressThresholdRunes,
+				in.LLMOptions,
+				in.Callbacks.EventSink,
+				toolStep,
+			)
+			if compErr != nil {
+				emitEvent(ctx, in.Callbacks.EventSink, agentsdk.EventKindError, toolStep, agentsdk.ErrorEvent{Error: compErr.Error()})
+				return combined.String(), compErr
+			}
+			if didCompress {
+				msgs = compressedMsgs
+				if in.LLMOptions != nil {
+					in.LLMOptions.CacheEpoch++
+				}
+				trace(ctx, in.Callbacks, toolStep, fmt.Sprintf("Context compressed: messages=%d -> %d", before, len(msgs)))
+			}
+		}
+
 		var raw strings.Builder
 		var visible strings.Builder
 		filter := &StreamFilter{}
+
+		type streamGate struct {
+			decided bool
+			blocked bool
+			buf     strings.Builder
+		}
+
+		var gate streamGate
+		resetGate := func() {
+			gate.decided = false
+			gate.blocked = false
+			gate.buf.Reset()
+		}
+		resetGate()
+
+		emitContent := func(delta string) error {
+			if delta == "" || gate.blocked {
+				return nil
+			}
+
+			if !gate.decided {
+				gate.buf.WriteString(delta)
+
+				probe := strings.TrimLeftFunc(gate.buf.String(), func(r rune) bool {
+					return r == ' ' || r == '\t' || r == '\n' || r == '\r'
+				})
+				if probe == "" {
+					return nil
+				}
+
+				lower := strings.ToLower(probe)
+				if strings.HasPrefix(probe, "{") || strings.HasPrefix(probe, "[") {
+					gate.blocked = true
+					gate.decided = true
+					gate.buf.Reset()
+					return nil
+				}
+
+				const jsonFence = "```json"
+				if strings.HasPrefix(jsonFence, lower) && len(lower) < len(jsonFence) {
+					return nil
+				}
+				if strings.HasPrefix(lower, jsonFence) {
+					gate.blocked = true
+					gate.decided = true
+					gate.buf.Reset()
+					return nil
+				}
+
+				gate.decided = true
+				buffered := gate.buf.String()
+				gate.buf.Reset()
+				delta = buffered
+			}
+
+			visible.WriteString(delta)
+			if in.Callbacks.OnContent != nil {
+				return in.Callbacks.OnContent(delta)
+			}
+			return nil
+		}
 
 		emitEvent(ctx, in.Callbacks.EventSink, agentsdk.EventKindLLMRequest, toolStep, agentsdk.LLMRequestEvent{
 			Messages: append([]agentsdk.Message(nil), msgs...),
@@ -110,23 +203,16 @@ func RunLoop(ctx context.Context, in RunLoopInput) (string, error) {
 			if emitted == "" {
 				return nil
 			}
-			visible.WriteString(emitted)
-			if in.Callbacks.OnContent != nil {
-				return in.Callbacks.OnContent(emitted)
-			}
-			return nil
+			return emitContent(emitted)
 		})
 		if tail := filter.Flush(); tail != "" {
-			visible.WriteString(tail)
-			if in.Callbacks.OnContent != nil {
-				if cbErr := in.Callbacks.OnContent(tail); cbErr != nil && err == nil {
-					err = cbErr
-				}
+			if cbErr := emitContent(tail); cbErr != nil && err == nil {
+				err = cbErr
 			}
 		}
 
 		stepVisible := visible.String()
-		if stepVisible != "" {
+		if err != nil && stepVisible != "" {
 			combined.WriteString(stepVisible)
 		}
 
@@ -156,6 +242,48 @@ func RunLoop(ctx context.Context, in RunLoopInput) (string, error) {
 
 		toolBlock, ok, sawToolStart := extractLatestToolDataFromCleaned(cleanedRaw)
 		if !ok {
+			if isForbiddenJSONToolCall(cleanedRaw) {
+				trace(ctx, in.Callbacks, toolStep, fmt.Sprintf("Tool protocol error: %v", errJSONToolCallForbidden))
+				emitEvent(ctx, in.Callbacks.EventSink, agentsdk.EventKindError, toolStep, agentsdk.ErrorEvent{Error: errJSONToolCallForbidden.Error()})
+
+				toolName := "tool_protocol"
+				toolCallID := fmt.Sprintf("xml_%d_protocol", step)
+				result := ToolResult{
+					ToolName:   toolName,
+					ToolCallID: toolCallID,
+					OK:         false,
+					Error:      errJSONToolCallForbidden.Error(),
+					OutputJSON: fmt.Sprintf(`{"error":%q}`, errJSONToolCallForbidden.Error()),
+				}
+				emitEvent(ctx, in.Callbacks.EventSink, agentsdk.EventKindToolResult, toolStep, agentsdk.ToolResultEvent{
+					ToolName:   result.ToolName,
+					ToolCallID: result.ToolCallID,
+					OK:         result.OK,
+					OutputJSON: result.OutputJSON,
+					Error:      result.Error,
+				})
+
+				toolResultMsg := buildToolResultMessage([]ToolResult{result})
+				if in.Callbacks.RecordFailure != nil {
+					in.Callbacks.RecordFailure(toolName, toolCallID, assistantForHistory, errJSONToolCallForbidden)
+				}
+				if in.Callbacks.ObserveStep != nil {
+					in.Callbacks.ObserveStep(StepRecord{
+						VisibleContent:    stepVisible,
+						AssistantContent:  assistantForHistory,
+						ToolCalls:         []agentsdk.ToolCall{{ID: toolCallID, Name: toolName}},
+						ToolResults:       []ToolResult{result},
+						ToolResultMessage: toolResultMsg,
+					})
+				}
+
+				msgs = append(msgs,
+					agentsdk.Message{Role: "assistant", Content: assistantForHistory},
+					agentsdk.Message{Role: "user", Content: toolResultMsg},
+				)
+				continue
+			}
+
 			if sawToolStart {
 				if recovered, ok := recoverTruncatedWriteFileAppend(cleanedRaw); ok {
 					combinedStep, continued, err := in.recoverTruncatedWriteFileAppend(ctx, step, recovered, stepVisible, &msgs)
@@ -210,12 +338,18 @@ func RunLoop(ctx context.Context, in RunLoopInput) (string, error) {
 				continue
 			}
 
+			if stepVisible != "" {
+				combined.WriteString(stepVisible)
+			}
 			if in.Callbacks.ObserveFinal != nil {
 				in.Callbacks.ObserveFinal(stepVisible, assistantForHistory)
 			}
 			return combined.String(), nil
 		}
 
+		if stepVisible != "" {
+			combined.WriteString(stepVisible)
+		}
 		parseRes, err := ParseToolDataWithRepairs(toolBlock)
 		if err != nil {
 			trace(ctx, in.Callbacks, toolStep, fmt.Sprintf("Tool protocol parse error: %v", err))

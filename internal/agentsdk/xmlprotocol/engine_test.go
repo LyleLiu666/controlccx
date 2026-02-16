@@ -654,6 +654,220 @@ func TestRunLoop_SelfHeal_ParseToolDataError(t *testing.T) {
 	}
 }
 
+func TestRunLoop_ForbiddenJSONToolCall_YieldsToolProtocolError_AndContinues(t *testing.T) {
+	client := &scriptedCaptureClient{
+		responses: []string{
+			`{"tool_name":"bash","arguments":{"command":"echo hi"}}`,
+			`<tool_data><call><tool_name>bash</tool_name><command>echo hi</command></call></tool_data>`,
+			`done`,
+		},
+	}
+
+	var steps []StepRecord
+	combined, err := RunLoop(context.Background(), RunLoopInput{
+		Client:   client,
+		Messages: []agentsdk.Message{{Role: "user", Content: "run"}},
+		Executor: funcExecutor(func(context.Context, agentsdk.ToolCall) (any, error) {
+			return map[string]any{"stdout": "hi"}, nil
+		}),
+		Callbacks: Callbacks{
+			ObserveStep: func(step StepRecord) { steps = append(steps, step) },
+		},
+	})
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if strings.TrimSpace(combined) != "done" {
+		t.Fatalf("expected final content %q, got %q", "done", combined)
+	}
+	if client.index != 3 {
+		t.Fatalf("expected 3 llm calls, got %d", client.index)
+	}
+	if len(steps) != 2 {
+		t.Fatalf("expected 2 tool-related steps (protocol error + tool), got %d", len(steps))
+	}
+	if len(steps[0].ToolResults) != 1 {
+		t.Fatalf("expected protocol error step to include 1 tool result, got %#v", steps[0].ToolResults)
+	}
+	if steps[0].ToolResults[0].ToolName != "tool_protocol" {
+		t.Fatalf("expected tool_protocol result, got %q", steps[0].ToolResults[0].ToolName)
+	}
+	if !strings.Contains(steps[0].ToolResults[0].Error, errJSONToolCallForbidden.Error()) {
+		t.Fatalf("expected protocol error %q, got %q", errJSONToolCallForbidden.Error(), steps[0].ToolResults[0].Error)
+	}
+
+	if len(client.requests) < 2 {
+		t.Fatalf("expected at least 2 llm requests, got %d", len(client.requests))
+	}
+	var toolResultMsg string
+	for _, m := range client.requests[1] {
+		if m.Role == "user" && strings.Contains(m.Content, "<tool_result>") {
+			toolResultMsg = m.Content
+			break
+		}
+	}
+	if strings.TrimSpace(toolResultMsg) == "" {
+		t.Fatalf("expected tool_result message in second request")
+	}
+	if !strings.Contains(toolResultMsg, "json tool call is forbidden") || !strings.Contains(toolResultMsg, "&lt;tool_data>") {
+		t.Fatalf("expected tool_result to include forbidden-json error, got %q", toolResultMsg)
+	}
+}
+
+func TestRunLoop_StreamGate_BlocksForbiddenJSONToolCallFromOnContent(t *testing.T) {
+	client := &scriptedClient{
+		responses: []string{
+			`{"tool_name":"bash","arguments":{"command":"echo hi"}}`,
+			`done`,
+		},
+	}
+
+	var streamed strings.Builder
+	combined, err := RunLoop(context.Background(), RunLoopInput{
+		Client:   client,
+		Messages: []agentsdk.Message{{Role: "user", Content: "run"}},
+		Executor: funcExecutor(func(context.Context, agentsdk.ToolCall) (any, error) {
+			return nil, nil
+		}),
+		Callbacks: Callbacks{
+			OnContent: func(chunk string) error {
+				streamed.WriteString(chunk)
+				return nil
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if strings.TrimSpace(combined) != "done" {
+		t.Fatalf("expected final content %q, got %q", "done", combined)
+	}
+	if strings.TrimSpace(streamed.String()) != "done" {
+		t.Fatalf("expected streamed content %q, got %q", "done", streamed.String())
+	}
+	if strings.Contains(streamed.String(), "{") || strings.Contains(streamed.String(), "tool_name") {
+		t.Fatalf("expected streamed content to exclude forbidden json, got %q", streamed.String())
+	}
+}
+
+func TestRunLoop_ContextCompression_SummarizesHistoryBeforeNextStep(t *testing.T) {
+	client := &scriptedCaptureClient{
+		responses: []string{
+			`<tool_data><call><tool_name>dummy</tool_name></call></tool_data>`,
+			"压缩摘要",
+			"done",
+		},
+	}
+
+	combined, err := RunLoop(context.Background(), RunLoopInput{
+		Client:                        client,
+		Messages:                      []agentsdk.Message{{Role: "user", Content: "run"}},
+		ContextCompressThresholdRunes: 2600,
+		Executor: funcExecutor(func(context.Context, agentsdk.ToolCall) (any, error) {
+			return map[string]any{"blob": strings.Repeat("u", 6000)}, nil
+		}),
+	})
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if strings.TrimSpace(combined) != "done" {
+		t.Fatalf("expected final content %q, got %q", "done", combined)
+	}
+	if client.index != 3 {
+		t.Fatalf("expected 3 llm calls (tool + compress + answer), got %d", client.index)
+	}
+	if len(client.requests) != 3 {
+		t.Fatalf("expected 3 captured requests, got %d", len(client.requests))
+	}
+
+	compressReq := client.requests[1]
+	if len(compressReq) < 2 || compressReq[0].Role != "system" || compressReq[1].Role != "user" {
+		t.Fatalf("unexpected compression request messages: %#v", compressReq)
+	}
+	if !strings.Contains(compressReq[0].Content, contextCompressionSentinel) {
+		t.Fatalf("expected compression system prompt to include sentinel %q", contextCompressionSentinel)
+	}
+	if !strings.Contains(compressReq[1].Content, "<BEGIN_TRANSCRIPT>") {
+		t.Fatalf("expected compression user message to include transcript markers")
+	}
+
+	mainReq := client.requests[2]
+	if len(mainReq) == 0 || mainReq[0].Role != "user" || !strings.Contains(mainReq[0].Content, contextCompressionSummaryPrefix) {
+		t.Fatalf("expected main request to start with compression summary, got %#v", mainReq)
+	}
+}
+
+func TestRunLoop_ContextCompression_EmitsLLMEventsToEventSink(t *testing.T) {
+	client := &scriptedClient{
+		responses: []string{
+			`<tool_data><call><tool_name>dummy</tool_name></call></tool_data>`,
+			"压缩摘要",
+			"done",
+		},
+	}
+	sink := &collectSink{}
+
+	combined, err := RunLoop(context.Background(), RunLoopInput{
+		Client:                        client,
+		Messages:                      []agentsdk.Message{{Role: "user", Content: "run"}},
+		ContextCompressThresholdRunes: 2600,
+		Executor: funcExecutor(func(context.Context, agentsdk.ToolCall) (any, error) {
+			return map[string]any{"blob": strings.Repeat("u", 6000)}, nil
+		}),
+		Callbacks: Callbacks{
+			EventSink: sink,
+		},
+	})
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if strings.TrimSpace(combined) != "done" {
+		t.Fatalf("expected final content %q, got %q", "done", combined)
+	}
+
+	var (
+		sawCompressReq  bool
+		sawCompressResp bool
+	)
+	for _, ev := range sink.events {
+		if ev.Protocol != "compress" {
+			continue
+		}
+		switch ev.Kind {
+		case agentsdk.EventKindLLMRequest:
+			req, ok := ev.Payload.(agentsdk.LLMRequestEvent)
+			if !ok {
+				t.Fatalf("expected LLMRequestEvent payload, got %T", ev.Payload)
+			}
+			if len(req.Messages) < 2 {
+				t.Fatalf("expected compression request to include system+user messages, got %#v", req.Messages)
+			}
+			if req.Messages[0].Role != "system" || !strings.Contains(req.Messages[0].Content, contextCompressionSentinel) {
+				t.Fatalf("unexpected compression system prompt: %#v", req.Messages[0])
+			}
+			if req.Messages[1].Role != "user" || !strings.Contains(req.Messages[1].Content, "<BEGIN_TRANSCRIPT>") {
+				t.Fatalf("unexpected compression user message: %#v", req.Messages[1])
+			}
+			sawCompressReq = true
+		case agentsdk.EventKindLLMResponse:
+			resp, ok := ev.Payload.(agentsdk.LLMResponseEvent)
+			if !ok {
+				t.Fatalf("expected LLMResponseEvent payload, got %T", ev.Payload)
+			}
+			if strings.TrimSpace(resp.Visible) != "压缩摘要" {
+				t.Fatalf("unexpected compression response: %#v", resp)
+			}
+			sawCompressResp = true
+		}
+	}
+	if !sawCompressReq {
+		t.Fatalf("expected at least one compress llm_request event")
+	}
+	if !sawCompressResp {
+		t.Fatalf("expected at least one compress llm_response event")
+	}
+}
+
 func TestBuildToolResultMessage_EscapesXMLText(t *testing.T) {
 	msg := buildToolResultMessage([]ToolResult{{
 		ToolName:   "bash",

@@ -11,6 +11,7 @@ import (
 	"unicode/utf8"
 
 	"controlccx/internal/agentsdk"
+	"controlccx/internal/agentsdk/sessioncompress"
 	"controlccx/internal/agentsdk/xmlprotocol"
 	"controlccx/internal/auth"
 	"controlccx/internal/chat"
@@ -225,13 +226,19 @@ func (s *Service) send(ctx context.Context, userText string, hooks *SendHooks) (
 		callbacks.OnContent = hooks.OnVisibleDelta
 	}
 
+	contextCompressThreshold := s.compressOpts.MaxContextRunes
+	if contextCompressThreshold < sessioncompress.DefaultMaxContextRunes {
+		contextCompressThreshold = sessioncompress.DefaultMaxContextRunes
+	}
+
 	out, runErr := xmlprotocol.RunLoop(ctx, xmlprotocol.RunLoopInput{
-		Client:     client,
-		Messages:   messages,
-		LLMOptions: s.llmOptionsBestEffort(ctx),
-		Executor:   reg,
-		MaxSteps:   500,
-		Callbacks:  callbacks,
+		Client:                        client,
+		Messages:                      messages,
+		LLMOptions:                    s.llmOptionsBestEffort(ctx),
+		ContextCompressThresholdRunes: contextCompressThreshold,
+		Executor:                      reg,
+		MaxSteps:                      500,
+		Callbacks:                     callbacks,
 	})
 
 	reply := strings.TrimSpace(out)

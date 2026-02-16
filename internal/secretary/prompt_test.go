@@ -279,3 +279,32 @@ func TestBuildSystemPrompt_ToolSectionParseIsStable(t *testing.T) {
 		t.Fatalf("prompt missing expected tool: task_continue_submit")
 	}
 }
+
+func TestBuildSystemPrompt_ToolProtocolExample_UsesPlaceholdersAndNoFakeStatusMeta(t *testing.T) {
+	prompt := buildSystemPrompt()
+	if strings.Contains(prompt, "<status>succeeded</status>") {
+		t.Fatalf("tool protocol example should not include a real <status>succeeded</status> callsite")
+	}
+	if !strings.Contains(prompt, "<tool_name>TOOL_NAME</tool_name>") {
+		t.Fatalf("tool protocol example should use TOOL_NAME placeholder")
+	}
+	if !strings.Contains(prompt, "<arg1>...</arg1>") {
+		t.Fatalf("tool protocol example should show placeholder args")
+	}
+}
+
+func TestBuildSystemPrompt_ToolProtocol_IncludesFormatConventionsAndForbiddenJSON(t *testing.T) {
+	prompt := buildSystemPrompt()
+
+	wants := []string{
+		"参数格式约定：",
+		"严禁使用 JSON 工具调用",
+		"工具结果会以 <tool_result> XML 发给你：禁止原样复述该 XML",
+		"不要猜测工具名",
+	}
+	for _, want := range wants {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("prompt missing tool protocol guidance: %q\nprompt:\n%s", want, prompt)
+		}
+	}
+}
