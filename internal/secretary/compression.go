@@ -71,7 +71,7 @@ func (s *Service) promptHistory(ctx context.Context, client agentsdk.Client, run
 		return nil, fmt.Errorf("secretary: chat store is required")
 	}
 	if s.compress == nil {
-		history, err := s.History(ctx, 40)
+		history, err := s.chat.Tail(ctx, 40)
 		if err != nil {
 			return nil, err
 		}

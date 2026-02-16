@@ -219,8 +219,17 @@ func (s *Service) send(ctx context.Context, userText string, hooks *SendHooks) (
 	messages = append(messages, promptHistory...)
 	messages = append(messages, agentsdk.Message{Role: "user", Content: msg})
 
+	stepRecords := make([]xmlprotocol.StepRecord, 0, 8)
+	finalAssistantContent := ""
 	callbacks := xmlprotocol.Callbacks{
 		EventSink: sink,
+		ObserveStep: func(record xmlprotocol.StepRecord) {
+			stepRecords = append(stepRecords, record)
+		},
+		ObserveFinal: func(visibleContent, assistantContent string) {
+			_ = visibleContent
+			finalAssistantContent = strings.TrimSpace(assistantContent)
+		},
 	}
 	if hooks != nil && hooks.OnVisibleDelta != nil {
 		callbacks.OnContent = hooks.OnVisibleDelta
@@ -261,10 +270,7 @@ func (s *Service) send(ctx context.Context, userText string, hooks *SendHooks) (
 		}
 	}
 
-	if _, err := s.chat.Append(ctx, chat.RoleUser, msg); err != nil {
-		return "", err
-	}
-	if _, err := s.chat.Append(ctx, chat.RoleAssistant, reply); err != nil {
+	if err := s.appendRunLoopTranscript(ctx, msg, stepRecords, finalAssistantContent, reply); err != nil {
 		return "", err
 	}
 	_ = s.chat.PruneKeepLast(ctx, 2000)
@@ -401,7 +407,38 @@ func (s *Service) History(ctx context.Context, limit int) ([]chat.Message, error
 	if limit <= 0 || limit > 500 {
 		limit = 200
 	}
-	return s.chat.Tail(ctx, limit)
+
+	const pageSize = 500
+	afterID := int64(0)
+	filtered := make([]chat.Message, 0, limit)
+
+	for {
+		page, err := s.chat.List(ctx, afterID, pageSize)
+		if err != nil {
+			return nil, err
+		}
+		if len(page) == 0 {
+			break
+		}
+		for _, m := range page {
+			afterID = m.ID
+			if isInternalTranscriptMessage(m.Role, m.Content) {
+				continue
+			}
+			filtered = append(filtered, m)
+			if len(filtered) > limit {
+				filtered = filtered[len(filtered)-limit:]
+			}
+		}
+		if len(page) < pageSize {
+			break
+		}
+	}
+
+	if len(filtered) == 0 {
+		return nil, nil
+	}
+	return filtered, nil
 }
 
 func (s *Service) Clear(ctx context.Context) error {
@@ -464,6 +501,57 @@ func truncateRunes(s string, max int) string {
 	}
 	b.WriteRune('…')
 	return b.String()
+}
+
+func (s *Service) appendRunLoopTranscript(ctx context.Context, initialUser string, stepRecords []xmlprotocol.StepRecord, finalAssistantContent string, fallbackReply string) error {
+	if s == nil || s.chat == nil {
+		return fmt.Errorf("secretary: chat store is required")
+	}
+	if err := s.appendChatMessageIfNonEmpty(ctx, chat.RoleUser, initialUser); err != nil {
+		return err
+	}
+	for _, step := range stepRecords {
+		if err := s.appendChatMessageIfNonEmpty(ctx, chat.RoleAssistant, step.AssistantContent); err != nil {
+			return err
+		}
+		if err := s.appendChatMessageIfNonEmpty(ctx, chat.RoleUser, step.ToolResultMessage); err != nil {
+			return err
+		}
+	}
+
+	final := strings.TrimSpace(fallbackReply)
+	if final == "" {
+		final = strings.TrimSpace(finalAssistantContent)
+	}
+	return s.appendChatMessageIfNonEmpty(ctx, chat.RoleAssistant, final)
+}
+
+func (s *Service) appendChatMessageIfNonEmpty(ctx context.Context, role chat.Role, content string) error {
+	if s == nil || s.chat == nil {
+		return fmt.Errorf("secretary: chat store is required")
+	}
+	text := strings.TrimSpace(content)
+	if text == "" {
+		return nil
+	}
+	_, err := s.chat.Append(ctx, role, text)
+	return err
+}
+
+func isInternalTranscriptMessage(role chat.Role, content string) bool {
+	text := strings.TrimSpace(content)
+	if text == "" {
+		return false
+	}
+
+	switch role {
+	case chat.RoleAssistant:
+		return strings.Contains(text, "<tool_data>")
+	case chat.RoleUser:
+		return strings.Contains(text, "<tool_result>")
+	default:
+		return false
+	}
 }
 
 func newRunID() string {

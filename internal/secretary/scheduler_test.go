@@ -410,6 +410,35 @@ func TestService_SchedulerCallback_CanCancelSchedule(t *testing.T) {
 		t.Fatalf("expected callback to append stop message")
 	}
 
+	rawMsgs, err := chatStore.Tail(context.Background(), 50)
+	if err != nil {
+		t.Fatalf("tail chat raw: %v", err)
+	}
+	hasToolData := false
+	hasToolResult := false
+	for _, m := range rawMsgs {
+		text := strings.TrimSpace(m.Content)
+		if m.Role == chat.RoleAssistant && strings.Contains(text, "<tool_data>") {
+			hasToolData = true
+		}
+		if m.Role == chat.RoleUser && strings.Contains(text, "<tool_result>") {
+			hasToolResult = true
+		}
+	}
+	if !hasToolData || !hasToolResult {
+		t.Fatalf("expected scheduler callback transcript persisted with tool_data/tool_result messages")
+	}
+
+	visibleMsgs, err := svc.History(context.Background(), 50)
+	if err != nil {
+		t.Fatalf("service history: %v", err)
+	}
+	for _, m := range visibleMsgs {
+		if strings.Contains(m.Content, "<tool_data>") || strings.Contains(m.Content, "<tool_result>") {
+			t.Fatalf("expected visible history to hide internal transcript message: %+v", m)
+		}
+	}
+
 	time.Sleep(2200 * time.Millisecond)
 
 	stored, err := eventStore.Tail(ctx, 1000)

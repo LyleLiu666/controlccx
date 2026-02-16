@@ -12,7 +12,6 @@ import (
 	"controlccx/internal/agentsdk"
 	"controlccx/internal/agentsdk/sessioncompress"
 	"controlccx/internal/agentsdk/xmlprotocol"
-	"controlccx/internal/chat"
 	"controlccx/internal/events"
 	"controlccx/internal/secretary/llm"
 	sectools "controlccx/internal/secretary/tools"
@@ -451,6 +450,8 @@ func (s *Service) runScheduleCallback(job *scheduleJob, tickNo int, runID string
 		contextCompressThreshold = sessioncompress.DefaultMaxContextRunes
 	}
 
+	stepRecords := make([]xmlprotocol.StepRecord, 0, 8)
+	finalAssistantContent := ""
 	out, runErr := xmlprotocol.RunLoop(callbackCtx, xmlprotocol.RunLoopInput{
 		Client:                        client,
 		Messages:                      messages,
@@ -466,6 +467,13 @@ func (s *Service) runScheduleCallback(job *scheduleJob, tickNo int, runID string
 		MaxSteps: 500,
 		Callbacks: xmlprotocol.Callbacks{
 			EventSink: s.scheduleCallbackEventSink(runID, job.id, tickNo),
+			ObserveStep: func(record xmlprotocol.StepRecord) {
+				stepRecords = append(stepRecords, record)
+			},
+			ObserveFinal: func(visibleContent, assistantContent string) {
+				_ = visibleContent
+				finalAssistantContent = strings.TrimSpace(assistantContent)
+			},
 		},
 	})
 
@@ -485,7 +493,7 @@ func (s *Service) runScheduleCallback(job *scheduleJob, tickNo int, runID string
 	}
 
 	s.sendMu.Lock()
-	if _, err := s.chat.Append(callbackCtx, chat.RoleAssistant, reply); err != nil {
+	if err := s.appendRunLoopTranscript(callbackCtx, toolResultMessage, stepRecords, finalAssistantContent, reply); err != nil {
 		s.sendMu.Unlock()
 		s.publishSecretaryThinking(job.id, tickNo, map[string]any{
 			"source":      "timer",

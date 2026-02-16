@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -486,6 +487,130 @@ func TestService_Send_PersistsProviderReceiptEvent_WhenBackendSupportsIt(t *test
 	}
 }
 
+func TestService_Send_PersistsTranscriptAndUsesItInNextLLMRequest(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "controlccx.db")
+
+	conn, err := db.Open(ctx, db.Options{Path: dbPath})
+	if err != nil {
+		t.Fatalf("db open: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+
+	taskStore := tasks.NewStore(conn)
+	chatStore := chat.NewStore(conn)
+
+	task, err := taskStore.CreateTask(ctx, tasks.CreateTaskInput{
+		WorkerType: tasks.WorkerExec,
+		Prompt:     "seed",
+		WorkDir:    ".",
+	})
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	if err := taskStore.FinishTask(ctx, task.ID, tasks.FinishTaskInput{
+		Status:     tasks.StatusSucceeded,
+		FinishedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("finish task: %v", err)
+	}
+
+	c := &scriptedClient{
+		responses: []string{
+			"<tool_data><call><tool_name>tasks_count</tool_name><status>succeeded</status></call></tool_data>",
+			"目前已完成（succeeded）的任务共有 1 个。",
+			"ok",
+		},
+	}
+
+	svc := NewService(config.Default(), taskStore, chatStore, nil, nil, WithClient(c))
+
+	reply1, err := svc.Send(ctx, "已完成（succeeded）的有多少？")
+	if err != nil {
+		t.Fatalf("send 1: %v", err)
+	}
+	if !strings.Contains(reply1, "1") {
+		t.Fatalf("reply1=%q want count", reply1)
+	}
+
+	_, err = svc.Send(ctx, "有一个任务是重构前端代码的 你看看是否可以继续")
+	if err != nil {
+		t.Fatalf("send 2: %v", err)
+	}
+
+	if len(c.messages) < 3 {
+		t.Fatalf("captured llm requests=%d want >=3", len(c.messages))
+	}
+	req := c.messages[2]
+
+	var (
+		firstUserIdx      = -1
+		toolAssistantIdx  = -1
+		toolResultUserIdx = -1
+		firstAnswerIdx    = -1
+		secondUserIdx     = -1
+	)
+
+	for i, m := range req {
+		if strings.Contains(m.Content, "已完成（succeeded）的有多少？") {
+			firstUserIdx = i
+		}
+		if m.Role == "assistant" && strings.Contains(m.Content, "<tool_data>") && strings.Contains(m.Content, "tasks_count") {
+			toolAssistantIdx = i
+		}
+		if m.Role == "user" && strings.Contains(m.Content, "<tool_result>") && strings.Contains(m.Content, "tasks_count") {
+			toolResultUserIdx = i
+		}
+		if m.Role == "assistant" && strings.Contains(m.Content, "目前已完成") {
+			firstAnswerIdx = i
+		}
+		if m.Role == "user" && strings.Contains(m.Content, "有一个任务是重构前端代码的 你看看是否可以继续") {
+			secondUserIdx = i
+		}
+	}
+	if firstUserIdx == -1 || toolAssistantIdx == -1 || toolResultUserIdx == -1 || firstAnswerIdx == -1 || secondUserIdx == -1 {
+		t.Fatalf("expected full transcript in next request, got: %#v", req)
+	}
+	if !(firstUserIdx < toolAssistantIdx &&
+		toolAssistantIdx < toolResultUserIdx &&
+		toolResultUserIdx < firstAnswerIdx &&
+		firstAnswerIdx < secondUserIdx) {
+		t.Fatalf(
+			"unexpected transcript order: firstUser=%d toolAssistant=%d toolResult=%d firstAnswer=%d secondUser=%d",
+			firstUserIdx, toolAssistantIdx, toolResultUserIdx, firstAnswerIdx, secondUserIdx,
+		)
+	}
+
+	rawHistory, err := chatStore.Tail(ctx, 20)
+	if err != nil {
+		t.Fatalf("tail raw history: %v", err)
+	}
+	hasToolData := false
+	hasToolResult := false
+	for _, m := range rawHistory {
+		text := strings.TrimSpace(m.Content)
+		if m.Role == chat.RoleAssistant && strings.Contains(text, "<tool_data>") {
+			hasToolData = true
+		}
+		if m.Role == chat.RoleUser && strings.Contains(text, "<tool_result>") {
+			hasToolResult = true
+		}
+	}
+	if !hasToolData || !hasToolResult {
+		t.Fatalf("expected raw chat history to include tool_data/tool_result messages")
+	}
+
+	visibleHistory, err := svc.History(ctx, 20)
+	if err != nil {
+		t.Fatalf("visible history: %v", err)
+	}
+	for _, m := range visibleHistory {
+		if strings.Contains(m.Content, "<tool_data>") || strings.Contains(m.Content, "<tool_result>") {
+			t.Fatalf("expected visible history to hide internal transcript messages, got: %+v", m)
+		}
+	}
+}
+
 func TestService_SendStream_EmitsVisibleAndToolHooks(t *testing.T) {
 	ctx := context.Background()
 	dbPath := filepath.Join(t.TempDir(), "controlccx.db")
@@ -672,6 +797,110 @@ func TestService_Send_SerializesConcurrentRequests(t *testing.T) {
 	}
 }
 
+func TestService_History_PaginatesVisibleMessagesWhenInternalTranscriptIsDense(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "controlccx.db")
+
+	conn, err := db.Open(ctx, db.Options{Path: dbPath})
+	if err != nil {
+		t.Fatalf("db open: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+
+	taskStore := tasks.NewStore(conn)
+	chatStore := chat.NewStore(conn)
+	svc := NewService(config.Default(), taskStore, chatStore, nil, nil)
+
+	// Seed visible messages first.
+	for i := 0; i < 260; i++ {
+		if _, err := chatStore.Append(ctx, chat.RoleUser, "visible-"+pad3(i)); err != nil {
+			t.Fatalf("append visible %d: %v", i, err)
+		}
+	}
+	// Then append many internal transcript pairs at the tail.
+	for i := 0; i < 160; i++ {
+		if _, err := chatStore.Append(ctx, chat.RoleAssistant, "<tool_data><call><tool_name>tasks_count</tool_name><i>"+pad3(i)+"</i></call></tool_data>"); err != nil {
+			t.Fatalf("append tool_data %d: %v", i, err)
+		}
+		if _, err := chatStore.Append(ctx, chat.RoleUser, "<tool_result><call><tool_name>tasks_count</tool_name><i>"+pad3(i)+"</i></call></tool_result>"); err != nil {
+			t.Fatalf("append tool_result %d: %v", i, err)
+		}
+	}
+
+	hist, err := svc.History(ctx, 200)
+	if err != nil {
+		t.Fatalf("history: %v", err)
+	}
+	if len(hist) != 200 {
+		t.Fatalf("history len=%d want 200", len(hist))
+	}
+	if got := strings.TrimSpace(hist[0].Content); got != "visible-060" {
+		t.Fatalf("first visible=%q want %q", got, "visible-060")
+	}
+	if got := strings.TrimSpace(hist[len(hist)-1].Content); got != "visible-259" {
+		t.Fatalf("last visible=%q want %q", got, "visible-259")
+	}
+	for _, m := range hist {
+		if strings.Contains(m.Content, "<tool_data>") || strings.Contains(m.Content, "<tool_result>") {
+			t.Fatalf("expected visible history to hide internal transcript messages, got: %+v", m)
+		}
+	}
+}
+
+func TestService_History_FiltersInternalTranscriptByRole(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "controlccx.db")
+
+	conn, err := db.Open(ctx, db.Options{Path: dbPath})
+	if err != nil {
+		t.Fatalf("db open: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+
+	taskStore := tasks.NewStore(conn)
+	chatStore := chat.NewStore(conn)
+	svc := NewService(config.Default(), taskStore, chatStore, nil, nil)
+
+	cases := []struct {
+		role    chat.Role
+		content string
+	}{
+		{role: chat.RoleUser, content: "normal-user"},
+		{role: chat.RoleAssistant, content: "normal-assistant"},
+		{role: chat.RoleUser, content: "用户示例：<tool_data>这不是内部协议</tool_data>"},
+		{role: chat.RoleAssistant, content: "助手示例：<tool_result>这不是内部协议</tool_result>"},
+		{role: chat.RoleAssistant, content: "<tool_data><call><tool_name>tasks_count</tool_name></call></tool_data>"},
+		{role: chat.RoleUser, content: "<tool_result><call><tool_name>tasks_count</tool_name></call></tool_result>"},
+		{role: chat.RoleAssistant, content: "tail-visible"},
+	}
+	for i, tc := range cases {
+		if _, err := chatStore.Append(ctx, tc.role, tc.content); err != nil {
+			t.Fatalf("append case %d: %v", i, err)
+		}
+	}
+
+	hist, err := svc.History(ctx, 20)
+	if err != nil {
+		t.Fatalf("history: %v", err)
+	}
+	if len(hist) != 5 {
+		t.Fatalf("history len=%d want 5", len(hist))
+	}
+
+	want := []string{
+		"normal-user",
+		"normal-assistant",
+		"用户示例：<tool_data>这不是内部协议</tool_data>",
+		"助手示例：<tool_result>这不是内部协议</tool_result>",
+		"tail-visible",
+	}
+	for i := range want {
+		if strings.TrimSpace(hist[i].Content) != want[i] {
+			t.Fatalf("hist[%d]=%q want %q", i, hist[i].Content, want[i])
+		}
+	}
+}
+
 func TestService_Send_AutoCompressesHistory(t *testing.T) {
 	ctx := context.Background()
 	dbPath := filepath.Join(t.TempDir(), "controlccx.db")
@@ -759,6 +988,16 @@ func TestService_Send_AutoCompressesHistory(t *testing.T) {
 	if !hasSummary {
 		t.Fatalf("expected summary to be injected into main prompt")
 	}
+}
+
+func pad3(i int) string {
+	if i < 10 {
+		return "00" + strconv.Itoa(i)
+	}
+	if i < 100 {
+		return "0" + strconv.Itoa(i)
+	}
+	return strconv.Itoa(i)
 }
 
 func TestSecretaryFailedMessage_DoesNotMentionCLIBackends(t *testing.T) {

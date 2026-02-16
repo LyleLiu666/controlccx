@@ -189,12 +189,12 @@ func TestSimpleHTTPBackend_CompleteChat_SendsStructuredMessagesWithPromptCaching
 		t.Fatalf("msg2=%#v", parsed.Messages[2])
 	}
 
-	// Prompt caching marks the most recent 2 messages.
+	// Prompt caching marks one stable tail anchor and skips newest user input.
 	if parsed.Messages[1].Content[0].CacheControl == nil || parsed.Messages[1].Content[0].CacheControl.Type != "ephemeral" {
 		t.Fatalf("expected cache_control on assistant tail, got %#v", parsed.Messages[1].Content[0].CacheControl)
 	}
-	if parsed.Messages[2].Content[0].CacheControl == nil || parsed.Messages[2].Content[0].CacheControl.Type != "ephemeral" {
-		t.Fatalf("expected cache_control on user tail, got %#v", parsed.Messages[2].Content[0].CacheControl)
+	if parsed.Messages[2].Content[0].CacheControl != nil {
+		t.Fatalf("expected newest user input to stay uncached, got %#v", parsed.Messages[2].Content[0].CacheControl)
 	}
 }
 

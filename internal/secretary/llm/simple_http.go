@@ -560,8 +560,11 @@ func cacheMessageIndexes(messages []agentsdk.Message) map[int]bool {
 		}
 	}
 
-	for i := len(messages) - 1; i >= 0 && i >= len(messages)-2; i-- {
-		indexes[i] = true
+	// Keep one stable tail anchor from the existing transcript and avoid marking
+	// the newest user input, which is inherently volatile.
+	stableTail := len(messages) - 2
+	if stableTail >= 0 {
+		indexes[stableTail] = true
 	}
 
 	return indexes
