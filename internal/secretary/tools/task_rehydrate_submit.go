@@ -15,6 +15,14 @@ func (taskRehydrateSubmitTool) DescriptionZH() string {
 	return "按 task_id 提交 rehydrate（基于持久化上下文新建run）。参数：task_id（必填）、prompt（可选）和可选安全参数。"
 }
 
+func (taskRehydrateSubmitTool) Params() []string {
+	return append([]string{"task_id", "prompt"}, RunOptsParams...)
+}
+
+func (taskRehydrateSubmitTool) Required() []string { return []string{"task_id"} }
+
+func (taskRehydrateSubmitTool) AnyOfRequired() [][]string { return nil }
+
 func (taskRehydrateSubmitTool) Execute(ctx context.Context, call agentsdk.ToolCall, deps Deps) (any, error) {
 	ops, err := requireOps(deps)
 	if err != nil {

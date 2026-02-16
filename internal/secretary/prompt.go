@@ -35,6 +35,7 @@ func buildSystemPrompt() string {
 	b.WriteString("  </call>\n")
 	b.WriteString("</tool_data>\n\n")
 	b.WriteString("工具说明：\n")
+	b.WriteString("安全参数组 [runopts]：" + strings.Join(sectools.RunOptsParams, "、") + "\n")
 	for _, d := range sectools.Descriptors() {
 		name := strings.TrimSpace(d.Name)
 		if name == "" {
@@ -44,9 +45,115 @@ func buildSystemPrompt() string {
 		if desc == "" {
 			desc = "（无描述）"
 		}
-		b.WriteString(fmt.Sprintf("- %s：%s\n", name, desc))
+
+		params := renderToolParams(d.Params)
+		suffix := renderToolParamSuffix(d.Required, d.AnyOfRequired)
+		if len(params) > 0 {
+			b.WriteString(fmt.Sprintf("- %s(%s)：%s%s\n", name, strings.Join(params, ", "), desc, suffix))
+			continue
+		}
+		b.WriteString(fmt.Sprintf("- %s：%s%s\n", name, desc, suffix))
 	}
 	b.WriteString("\n如果用户问“总共有多少任务/完成多少/失败多少”，优先调用 tasks_count，再用中文给出明确数字。")
 	b.WriteString("\n如果用户问“有哪些 skills 可调动/可用”，优先调用 skills_list（如需给出可用清单，建议 target=codex + only_enabled=true），再用中文列出技能名与状态摘要。")
 	return b.String()
+}
+
+func renderToolParams(params []string) []string {
+	if len(params) == 0 {
+		return nil
+	}
+
+	runOptsSet := make(map[string]struct{}, len(sectools.RunOptsParams))
+	for _, key := range sectools.RunOptsParams {
+		runOptsSet[key] = struct{}{}
+	}
+	paramSet := make(map[string]struct{}, len(params))
+	for _, p := range params {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		paramSet[p] = struct{}{}
+	}
+
+	hasAllRunOpts := true
+	for key := range runOptsSet {
+		if _, ok := paramSet[key]; !ok {
+			hasAllRunOpts = false
+			break
+		}
+	}
+
+	out := make([]string, 0, len(params))
+	for _, p := range params {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		if hasAllRunOpts {
+			if _, ok := runOptsSet[p]; ok {
+				continue
+			}
+		}
+		out = append(out, p)
+	}
+	if hasAllRunOpts {
+		out = append(out, "[runopts]")
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func renderToolParamSuffix(required []string, anyOfRequired [][]string) string {
+	var b strings.Builder
+	required = trimToolParams(required)
+	anyOfRequired = trimToolParamGroups(anyOfRequired)
+
+	if len(required) > 0 {
+		b.WriteString(" 必填：")
+		b.WriteString(strings.Join(required, "、"))
+		b.WriteString("。")
+	}
+	for _, group := range anyOfRequired {
+		if len(group) == 0 {
+			continue
+		}
+		b.WriteString(" 必填（任选一组）：")
+		b.WriteString(strings.Join(group, " | "))
+		b.WriteString("。")
+	}
+	return b.String()
+}
+
+func trimToolParams(in []string) []string {
+	out := make([]string, 0, len(in))
+	for _, s := range in {
+		s = strings.TrimSpace(s)
+		if s == "" {
+			continue
+		}
+		out = append(out, s)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func trimToolParamGroups(in [][]string) [][]string {
+	out := make([][]string, 0, len(in))
+	for _, group := range in {
+		trimmed := trimToolParams(group)
+		if len(trimmed) == 0 {
+			continue
+		}
+		out = append(out, trimmed)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }

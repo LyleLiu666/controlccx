@@ -18,6 +18,14 @@ func (skillsListTool) DescriptionZH() string {
 	return "列出本机技能（skills）及其在各目标（codex/claude_code/cursor/opencode/antigravity）的可用状态。参数：target（可选，过滤指定目标，如 codex 或 claude-code）、q（可选，名称模糊匹配）、only_enabled（可选，1/true 仅返回在目标里可用的技能）、include_paths（可选，1/true 时包含本机路径细节；默认不返回路径，避免输出过大）、limit（可选，默认200，最大500）、offset（可选，默认0）。"
 }
 
+func (skillsListTool) Params() []string {
+	return []string{"target", "q", "only_enabled", "include_paths", "limit", "offset"}
+}
+
+func (skillsListTool) Required() []string { return nil }
+
+func (skillsListTool) AnyOfRequired() [][]string { return nil }
+
 func normalizeSkillsTarget(raw string) skills.Target {
 	v := strings.ToLower(strings.TrimSpace(raw))
 	switch v {

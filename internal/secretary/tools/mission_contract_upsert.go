@@ -17,6 +17,24 @@ func (missionContractUpsertTool) DescriptionZH() string {
 	return "创建或更新任务契约（mission contract）。参数：key 或 task_id（二选一，建议 task_id）；goal（可选，创建/更新时必填）；constraints / acceptance_criteria / non_goals（可选，逗号或换行分隔）；confirm（可选，true 表示确认当前 revision，可与更新同发或单独确认）。"
 }
 
+func (missionContractUpsertTool) Params() []string {
+	return []string{
+		"key",
+		"task_id",
+		"goal",
+		"constraints",
+		"acceptance_criteria",
+		"non_goals",
+		"confirm",
+	}
+}
+
+func (missionContractUpsertTool) Required() []string { return nil }
+
+func (missionContractUpsertTool) AnyOfRequired() [][]string {
+	return [][]string{{"key", "task_id"}}
+}
+
 func (missionContractUpsertTool) Execute(ctx context.Context, call agentsdk.ToolCall, deps Deps) (any, error) {
 	if deps.Tasks == nil {
 		return nil, errors.New("tasks store not configured")

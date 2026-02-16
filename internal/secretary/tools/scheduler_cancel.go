@@ -16,6 +16,14 @@ func (schedulerCancelTool) DescriptionZH() string {
 	return "取消一个调度任务。参数：schedule_id（必填）。"
 }
 
+func (schedulerCancelTool) Params() []string {
+	return []string{"schedule_id"}
+}
+
+func (schedulerCancelTool) Required() []string { return []string{"schedule_id"} }
+
+func (schedulerCancelTool) AnyOfRequired() [][]string { return nil }
+
 func (schedulerCancelTool) Execute(ctx context.Context, call agentsdk.ToolCall, deps Deps) (any, error) {
 	scheduler, err := requireScheduler(deps)
 	if err != nil {

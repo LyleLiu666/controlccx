@@ -54,6 +54,14 @@ func (taskContinueSubmitTool) DescriptionZH() string {
 	return "提交会话继续请求。参数：task_id（必填，定位会话）、prompt（可选，默认continue）以及可选安全参数。"
 }
 
+func (taskContinueSubmitTool) Params() []string {
+	return append([]string{"task_id", "prompt"}, RunOptsParams...)
+}
+
+func (taskContinueSubmitTool) Required() []string { return []string{"task_id"} }
+
+func (taskContinueSubmitTool) AnyOfRequired() [][]string { return nil }
+
 func (taskContinueSubmitTool) Execute(ctx context.Context, call agentsdk.ToolCall, deps Deps) (any, error) {
 	ops, err := requireOps(deps)
 	if err != nil {

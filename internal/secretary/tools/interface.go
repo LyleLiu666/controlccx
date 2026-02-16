@@ -16,6 +16,12 @@ type Tool interface {
 	Execute(ctx context.Context, call agentsdk.ToolCall, deps Deps) (any, error)
 }
 
+type ParamDescriber interface {
+	Params() []string
+	Required() []string
+	AnyOfRequired() [][]string
+}
+
 type Deps struct {
 	Tasks     *tasks.Store
 	Skills    *skills.Service
@@ -27,6 +33,9 @@ type Deps struct {
 type Descriptor struct {
 	Name          string
 	DescriptionZH string
+	Params        []string
+	Required      []string
+	AnyOfRequired [][]string
 }
 
 type ScheduleState string

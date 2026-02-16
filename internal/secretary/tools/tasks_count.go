@@ -18,6 +18,14 @@ func (tasksCountTool) DescriptionZH() string {
 	return "统计任务数量。参数：status（可选，queued/waiting/running/succeeded/failed/canceled/interrupted/blocked/awaiting_approval）、include_deleted（可选，1/true 表示包含已删除会话）。"
 }
 
+func (tasksCountTool) Params() []string {
+	return []string{"status", "include_deleted"}
+}
+
+func (tasksCountTool) Required() []string { return nil }
+
+func (tasksCountTool) AnyOfRequired() [][]string { return nil }
+
 var knownTaskStatusesList = []string{
 	string(tasks.StatusQueued),
 	string(tasks.StatusWaiting),

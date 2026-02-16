@@ -46,7 +46,43 @@ func Descriptors() []Descriptor {
 		if name == "" {
 			continue
 		}
-		out = append(out, Descriptor{Name: name, DescriptionZH: strings.TrimSpace(t.DescriptionZH())})
+		d := Descriptor{Name: name, DescriptionZH: strings.TrimSpace(t.DescriptionZH())}
+		if pd, ok := t.(ParamDescriber); ok {
+			d.Params = trimStringList(pd.Params())
+			d.Required = trimStringList(pd.Required())
+			d.AnyOfRequired = trimStringGroups(pd.AnyOfRequired())
+		}
+		out = append(out, d)
+	}
+	return out
+}
+
+func trimStringList(in []string) []string {
+	out := make([]string, 0, len(in))
+	for _, s := range in {
+		s = strings.TrimSpace(s)
+		if s == "" {
+			continue
+		}
+		out = append(out, s)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func trimStringGroups(in [][]string) [][]string {
+	out := make([][]string, 0, len(in))
+	for _, group := range in {
+		trimmed := trimStringList(group)
+		if len(trimmed) == 0 {
+			continue
+		}
+		out = append(out, trimmed)
+	}
+	if len(out) == 0 {
+		return nil
 	}
 	return out
 }

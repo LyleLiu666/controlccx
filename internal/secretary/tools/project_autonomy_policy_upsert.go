@@ -16,6 +16,16 @@ func (projectAutonomyPolicyUpsertTool) DescriptionZH() string {
 	return "设置项目自治策略。参数：task_id 或 workdir（二选一）；mode（可选，graded|max，默认 graded）。"
 }
 
+func (projectAutonomyPolicyUpsertTool) Params() []string {
+	return []string{"task_id", "workdir", "mode"}
+}
+
+func (projectAutonomyPolicyUpsertTool) Required() []string { return nil }
+
+func (projectAutonomyPolicyUpsertTool) AnyOfRequired() [][]string {
+	return [][]string{{"task_id", "workdir"}}
+}
+
 func (projectAutonomyPolicyUpsertTool) Execute(ctx context.Context, call agentsdk.ToolCall, deps Deps) (any, error) {
 	if deps.Tasks == nil {
 		return nil, errors.New("tasks store not configured")
@@ -39,4 +49,3 @@ func (projectAutonomyPolicyUpsertTool) Execute(ctx context.Context, call agentsd
 	}
 	return map[string]any{"policy": policy}, nil
 }
-

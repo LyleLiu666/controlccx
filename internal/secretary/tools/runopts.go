@@ -7,6 +7,20 @@ import (
 	"controlccx/internal/tasks"
 )
 
+var RunOptsParams = []string{
+	"unsafe_automation",
+	"safety_envelope",
+	"safety_preset",
+	"task_intent",
+	"network_tier",
+	"codex_sandbox",
+	"codex_approval_policy",
+	"codex_search",
+	"claude_permission_mode",
+	"claude_sandbox",
+	"claude_webfetch_domains",
+}
+
 func runOptionsFromFields(fields map[string]string) taskops.RunOptions {
 	if fields == nil {
 		fields = map[string]string{}

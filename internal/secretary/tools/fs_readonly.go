@@ -66,6 +66,14 @@ func (fsEntriesTool) DescriptionZH() string {
 	return "列出目录内容（只读）。参数：path（必填）、base（可选）、include_hidden（可选，默认false）、kind（可选：all/dir/file，默认all）、limit（可选，默认200，最大500）。"
 }
 
+func (fsEntriesTool) Params() []string {
+	return []string{"path", "base", "include_hidden", "kind", "limit"}
+}
+
+func (fsEntriesTool) Required() []string { return []string{"path"} }
+
+func (fsEntriesTool) AnyOfRequired() [][]string { return nil }
+
 func (fsEntriesTool) Execute(ctx context.Context, call agentsdk.ToolCall, deps Deps) (any, error) {
 	_ = ctx
 	path, err := fssec.ResolvePath(call.Fields["path"], call.Fields["base"])
@@ -179,6 +187,14 @@ func (fsReadTextTool) Name() string { return "fs_read_text" }
 func (fsReadTextTool) DescriptionZH() string {
 	return "读取文本文件内容（只读）。参数：path（必填）、base（可选）、max_bytes（可选，默认65536，最大1048576）。"
 }
+
+func (fsReadTextTool) Params() []string {
+	return []string{"path", "base", "max_bytes"}
+}
+
+func (fsReadTextTool) Required() []string { return []string{"path"} }
+
+func (fsReadTextTool) AnyOfRequired() [][]string { return nil }
 
 func (fsReadTextTool) Execute(ctx context.Context, call agentsdk.ToolCall, deps Deps) (any, error) {
 	_ = ctx

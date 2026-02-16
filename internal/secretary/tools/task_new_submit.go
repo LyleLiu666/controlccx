@@ -17,6 +17,22 @@ func (taskNewSubmitTool) DescriptionZH() string {
 	return "创建全新任务。参数：worker_type（必填，worker_type 仅允许 claude-code | codex | exec）、prompt（必填）、workdir（必填）；可选：conversation_id、workdir_strategy、worktree_untracked 及安全参数。worker_type 语义：claude-code=Claude Code 代理执行；codex=Codex 代理执行；exec=在本机 workdir 直接执行你提供的 shell（bash）命令（原样交给 Unix 的 sh -lc / Windows 的 cmd.exe /c；不会做自然语言转译，prompt 必须是可直接执行的命令字符串；由 worker 进程执行，不是秘书自身执行）。选择建议：简单且追求速度 -> claude-code；严肃/生产级迭代 -> codex；不确定则先问。自动推荐不使用 exec，exec 仅在用户明确要求执行具体 shell 命令时使用。"
 }
 
+func (taskNewSubmitTool) Params() []string {
+	base := []string{
+		"worker_type",
+		"prompt",
+		"workdir",
+		"conversation_id",
+		"workdir_strategy",
+		"worktree_untracked",
+	}
+	return append(base, RunOptsParams...)
+}
+
+func (taskNewSubmitTool) Required() []string { return []string{"worker_type", "prompt", "workdir"} }
+
+func (taskNewSubmitTool) AnyOfRequired() [][]string { return nil }
+
 func (taskNewSubmitTool) Execute(ctx context.Context, call agentsdk.ToolCall, deps Deps) (any, error) {
 	ops, err := requireOps(deps)
 	if err != nil {

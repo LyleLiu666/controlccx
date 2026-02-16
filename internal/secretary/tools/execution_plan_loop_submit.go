@@ -16,6 +16,16 @@ func (executionPlanLoopSubmitTool) DescriptionZH() string {
 	return "按已确认的任务契约运行执行计划循环（v1）。参数：key 或 task_id（二选一，建议 task_id）；max_iterations（可选，单次最多执行几步，默认1，最大10）；max_total_iterations（可选，总上限，默认10）；iteration_prompt（可选，单轮执行提示）。"
 }
 
+func (executionPlanLoopSubmitTool) Params() []string {
+	return []string{"key", "task_id", "max_iterations", "max_total_iterations", "iteration_prompt"}
+}
+
+func (executionPlanLoopSubmitTool) Required() []string { return nil }
+
+func (executionPlanLoopSubmitTool) AnyOfRequired() [][]string {
+	return [][]string{{"key", "task_id"}}
+}
+
 func (executionPlanLoopSubmitTool) Execute(ctx context.Context, call agentsdk.ToolCall, deps Deps) (any, error) {
 	ops, err := requireOps(deps)
 	if err != nil {

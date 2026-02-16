@@ -18,6 +18,14 @@ func (taskLogsTailTool) DescriptionZH() string {
 	return "查看任务最近日志（受限）。参数：task_id（必填）、count（可选，默认5，最大20）。每条最多800字（头200+尾600）。"
 }
 
+func (taskLogsTailTool) Params() []string {
+	return []string{"task_id", "count"}
+}
+
+func (taskLogsTailTool) Required() []string { return []string{"task_id"} }
+
+func (taskLogsTailTool) AnyOfRequired() [][]string { return nil }
+
 func (taskLogsTailTool) Execute(ctx context.Context, call agentsdk.ToolCall, deps Deps) (any, error) {
 	if deps.Tasks == nil {
 		return nil, errors.New("tasks store not configured")

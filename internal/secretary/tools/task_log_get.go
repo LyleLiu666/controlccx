@@ -18,6 +18,14 @@ func (taskLogGetTool) DescriptionZH() string {
 	return "按日志ID查看单条完整日志。参数：task_id（必填）、log_id（必填）。返回最多12000字（头2000+尾10000），超出会标记truncated=true。"
 }
 
+func (taskLogGetTool) Params() []string {
+	return []string{"task_id", "log_id"}
+}
+
+func (taskLogGetTool) Required() []string { return []string{"task_id", "log_id"} }
+
+func (taskLogGetTool) AnyOfRequired() [][]string { return nil }
+
 func (taskLogGetTool) Execute(ctx context.Context, call agentsdk.ToolCall, deps Deps) (any, error) {
 	if deps.Tasks == nil {
 		return nil, errors.New("tasks store not configured")

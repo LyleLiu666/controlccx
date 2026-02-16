@@ -15,6 +15,14 @@ func (taskCancelSubmitTool) DescriptionZH() string {
 	return "取消一个任务（当前 run）。参数：task_id（必填）。"
 }
 
+func (taskCancelSubmitTool) Params() []string {
+	return []string{"task_id"}
+}
+
+func (taskCancelSubmitTool) Required() []string { return []string{"task_id"} }
+
+func (taskCancelSubmitTool) AnyOfRequired() [][]string { return nil }
+
 func (taskCancelSubmitTool) Execute(ctx context.Context, call agentsdk.ToolCall, deps Deps) (any, error) {
 	ops, err := requireOps(deps)
 	if err != nil {
@@ -33,15 +41,14 @@ func (taskCancelSubmitTool) Execute(ctx context.Context, call agentsdk.ToolCall,
 	}
 
 	return map[string]any{
-		"task_id":                strings.TrimSpace(res.TaskID),
-		"requested":              res.Requested,
-		"status_before":          string(res.StatusBefore),
-		"status_after":           string(res.StatusAfter),
+		"task_id":                 strings.TrimSpace(res.TaskID),
+		"requested":               res.Requested,
+		"status_before":           string(res.StatusBefore),
+		"status_after":            string(res.StatusAfter),
 		"runner_cancel_attempted": res.RunnerCancelAttempted,
-		"runner_cancel_ok":       res.RunnerCancelOK,
-		"promoted_task_id":       strings.TrimSpace(res.PromotedTaskID),
-		"started_task_id":        strings.TrimSpace(res.StartedTaskID),
-		"next_start_error":       strings.TrimSpace(res.NextStartError),
+		"runner_cancel_ok":        res.RunnerCancelOK,
+		"promoted_task_id":        strings.TrimSpace(res.PromotedTaskID),
+		"started_task_id":         strings.TrimSpace(res.StartedTaskID),
+		"next_start_error":        strings.TrimSpace(res.NextStartError),
 	}, nil
 }
-

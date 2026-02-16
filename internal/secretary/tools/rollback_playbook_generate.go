@@ -18,6 +18,14 @@ func (rollbackPlaybookGenerateTool) DescriptionZH() string {
 	return "根据已记录的 rollback proofs 生成分步回滚方案。参数：task_id（必填）；action_type + action_ref（可选，需同时提供，用于限定动作范围）。"
 }
 
+func (rollbackPlaybookGenerateTool) Params() []string {
+	return []string{"task_id", "action_type", "action_ref"}
+}
+
+func (rollbackPlaybookGenerateTool) Required() []string { return []string{"task_id"} }
+
+func (rollbackPlaybookGenerateTool) AnyOfRequired() [][]string { return nil }
+
 type rollbackPlaybookStep struct {
 	Index     int    `json:"index"`
 	Title     string `json:"title"`

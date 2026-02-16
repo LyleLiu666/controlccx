@@ -17,6 +17,24 @@ func (schedulerCreateTool) DescriptionZH() string {
 	return "创建定时调度。参数：tool_name（或 target_tool_name，必填，目标工具名）、tool_fields_json（必填，JSON object string）、interval_sec（可选，默认10，最大60）、ttl_sec（可选，默认300）、allow_write（可选，默认false）。"
 }
 
+func (schedulerCreateTool) Params() []string {
+	return []string{
+		"tool_name",
+		"target_tool_name",
+		"name",
+		"tool_fields_json",
+		"interval_sec",
+		"ttl_sec",
+		"allow_write",
+	}
+}
+
+func (schedulerCreateTool) Required() []string { return []string{"tool_fields_json"} }
+
+func (schedulerCreateTool) AnyOfRequired() [][]string {
+	return [][]string{{"tool_name", "target_tool_name", "name"}}
+}
+
 func (schedulerCreateTool) Execute(ctx context.Context, call agentsdk.ToolCall, deps Deps) (any, error) {
 	scheduler, err := requireScheduler(deps)
 	if err != nil {

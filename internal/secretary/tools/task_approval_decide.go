@@ -15,6 +15,14 @@ func (taskApprovalDecideTool) DescriptionZH() string {
 	return "提交审批决策。参数：task_id（必填）、decision（必填：approve/deny）、approval_id（可选，缺失时自动定位最新pending）、reason（可选）。"
 }
 
+func (taskApprovalDecideTool) Params() []string {
+	return []string{"task_id", "decision", "approval_id", "reason"}
+}
+
+func (taskApprovalDecideTool) Required() []string { return []string{"task_id", "decision"} }
+
+func (taskApprovalDecideTool) AnyOfRequired() [][]string { return nil }
+
 func (taskApprovalDecideTool) Execute(ctx context.Context, call agentsdk.ToolCall, deps Deps) (any, error) {
 	ops, err := requireOps(deps)
 	if err != nil {

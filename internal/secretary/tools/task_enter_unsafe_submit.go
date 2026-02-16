@@ -16,6 +16,14 @@ func (taskEnterUnsafeSubmitTool) DescriptionZH() string {
 	return "提交高风险继续（enter-unsafe）。参数：task_id（必填）、confirm（必填，必须true）、prompt（可选，默认continue）。"
 }
 
+func (taskEnterUnsafeSubmitTool) Params() []string {
+	return []string{"task_id", "confirm", "prompt"}
+}
+
+func (taskEnterUnsafeSubmitTool) Required() []string { return []string{"task_id", "confirm"} }
+
+func (taskEnterUnsafeSubmitTool) AnyOfRequired() [][]string { return nil }
+
 func (taskEnterUnsafeSubmitTool) Execute(ctx context.Context, call agentsdk.ToolCall, deps Deps) (any, error) {
 	ops, err := requireOps(deps)
 	if err != nil {

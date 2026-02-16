@@ -14,6 +14,14 @@ func (taskPreemptContinueSubmitTool) DescriptionZH() string {
 	return "抢占继续：尝试取消当前会话 in-flight run，并把新 continue 以更高优先级入队。参数：task_id（必填）、prompt（可选）和可选安全参数。"
 }
 
+func (taskPreemptContinueSubmitTool) Params() []string {
+	return append([]string{"task_id", "prompt"}, RunOptsParams...)
+}
+
+func (taskPreemptContinueSubmitTool) Required() []string { return []string{"task_id"} }
+
+func (taskPreemptContinueSubmitTool) AnyOfRequired() [][]string { return nil }
+
 func (taskPreemptContinueSubmitTool) Execute(ctx context.Context, call agentsdk.ToolCall, deps Deps) (any, error) {
 	ops, err := requireOps(deps)
 	if err != nil {
