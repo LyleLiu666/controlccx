@@ -2,7 +2,14 @@
 import MarkdownIt from "markdown-it";
 import mermaid from "mermaid";
 import hljs from "highlight.js/lib/common";
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import {
+  computed,
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  ref,
+  watch,
+} from "vue";
 import type {
   AcceptanceState,
   AuthInfo,
@@ -126,8 +133,14 @@ import { useLiveFeed } from "./composables/useLiveFeed";
 import { useSecretaryChat } from "./composables/useSecretaryChat";
 import { useSessionWorkspace } from "./composables/useSessionWorkspace";
 import { shouldDismissRunLaunchMask } from "./runLaunchMask";
-import { buildSkillMountPlan, type SkillMountConfirmItem } from "./skillsPreflight";
-import { listRunningSessionCandidates, type RunningSessionCandidate } from "./runningSessions";
+import {
+  buildSkillMountPlan,
+  type SkillMountConfirmItem,
+} from "./skillsPreflight";
+import {
+  listRunningSessionCandidates,
+  type RunningSessionCandidate,
+} from "./runningSessions";
 import {
   listRecentWorkspacePaths,
   mergeWorkspaceRecents,
@@ -154,7 +167,10 @@ type CreateTaskPayload = {
   claude_webfetch_domains?: string[];
 };
 
-function requireMutationTask(out: TaskMutationSuccess, fallbackAction: string): Task {
+function requireMutationTask(
+  out: TaskMutationSuccess,
+  fallbackAction: string,
+): Task {
   const task = out?.task;
   if (task && typeof task.id === "string" && task.id.trim()) return task;
   const action = String(out?.action ?? "").trim() || fallbackAction;
@@ -242,9 +258,13 @@ let workdirBusyOnSuccess: (() => void) | null = null;
 const worktreeUntrackedOpen = ref(false);
 const worktreeUntrackedBusy = ref(false);
 const worktreeUntrackedError = ref("");
-const worktreeUntrackedData = ref<WorktreeUntrackedTooLargePayload | null>(null);
+const worktreeUntrackedData = ref<WorktreeUntrackedTooLargePayload | null>(
+  null,
+);
 const worktreeUntrackedPendingInput = ref<CreateTaskPayload | null>(null);
-const worktreeUntrackedPendingOpts = ref<CreateTaskOptions | undefined>(undefined);
+const worktreeUntrackedPendingOpts = ref<CreateTaskOptions | undefined>(
+  undefined,
+);
 let worktreeUntrackedOnSuccess: (() => void) | null = null;
 
 const runLaunchMaskOpen = ref(false);
@@ -312,14 +332,20 @@ function runLaunchMaskDetailForTask(t: Task): string {
   const mode = t.mode === "resume" ? "继续" : "新建";
   const s = promptSummary(t.prompt);
   const clipped = s.length > 140 ? s.slice(0, 140) + "…" : s;
-  return clipped ? `${mode} · ${clipped}` : `${mode} · ${(t.id ?? "").slice(0, 8)}`;
+  return clipped
+    ? `${mode} · ${clipped}`
+    : `${mode} · ${(t.id ?? "").slice(0, 8)}`;
 }
 
-function trackRunLaunchMaskForTask(t: Task, opts?: { title?: string; detail?: string }) {
+function trackRunLaunchMaskForTask(
+  t: Task,
+  opts?: { title?: string; detail?: string },
+) {
   runLaunchMaskRunID.value = t.id;
   if (opts?.title) runLaunchMaskTitle.value = opts.title;
   if (opts?.detail) runLaunchMaskDetail.value = opts.detail;
-  if (!runLaunchMaskDetail.value) runLaunchMaskDetail.value = runLaunchMaskDetailForTask(t);
+  if (!runLaunchMaskDetail.value)
+    runLaunchMaskDetail.value = runLaunchMaskDetailForTask(t);
   if (shouldDismissRunLaunchMask(t)) closeRunLaunchMask();
 }
 
@@ -341,7 +367,10 @@ function extractWorkdirBusyPayload(e: unknown): {
   const d = e.data;
   if (!d || typeof d !== "object") return null;
   if (String((d as any).error ?? "").trim() !== "workdir_busy") return null;
-  const details = (d as any).details && typeof (d as any).details === "object" ? (d as any).details : d;
+  const details =
+    (d as any).details && typeof (d as any).details === "object"
+      ? (d as any).details
+      : d;
 
   return {
     message: String((d as any).message ?? e.message ?? "").trim(),
@@ -351,18 +380,29 @@ function extractWorkdirBusyPayload(e: unknown): {
   };
 }
 
-function extractWorktreeUntrackedTooLargePayload(e: unknown): WorktreeUntrackedTooLargePayload | null {
+function extractWorktreeUntrackedTooLargePayload(
+  e: unknown,
+): WorktreeUntrackedTooLargePayload | null {
   if (!isAPIError(e) || e.status !== 422) return null;
   const d = e.data;
   if (!d || typeof d !== "object") return null;
   if (String((d as any).error ?? "").trim() !== "invalid_argument") return null;
-  const details = (d as any).details && typeof (d as any).details === "object" ? (d as any).details : d;
-  if (String((details as any).reason ?? "").trim() !== "worktree_untracked_too_large") return null;
+  const details =
+    (d as any).details && typeof (d as any).details === "object"
+      ? (d as any).details
+      : d;
+  if (
+    String((details as any).reason ?? "").trim() !==
+    "worktree_untracked_too_large"
+  )
+    return null;
 
   const conversationID = String((details as any).conversation_id ?? "").trim();
   if (!conversationID) return null;
 
-  const largestRaw = Array.isArray((details as any).largest) ? (details as any).largest : [];
+  const largestRaw = Array.isArray((details as any).largest)
+    ? (details as any).largest
+    : [];
   const largest = largestRaw
     .map((x: any) => ({
       path: String(x?.path ?? "").trim(),
@@ -382,7 +422,12 @@ function extractWorktreeUntrackedTooLargePayload(e: unknown): WorktreeUntrackedT
 }
 
 function openWorkdirBusyModal(opts: {
-  busy: { message: string; workdir: string; existingTaskID: string; existingStatus: string };
+  busy: {
+    message: string;
+    workdir: string;
+    existingTaskID: string;
+    existingStatus: string;
+  };
   pendingInput: CreateTaskPayload;
   pendingOpts?: CreateTaskOptions;
   onSuccess?: () => void;
@@ -395,7 +440,9 @@ function openWorkdirBusyModal(opts: {
   workdirBusyExistingTaskID.value = opts.busy.existingTaskID;
   workdirBusyExistingStatus.value = opts.busy.existingStatus;
   workdirBusyPendingInput.value = { ...opts.pendingInput };
-  workdirBusyPendingOpts.value = opts.pendingOpts ? { ...opts.pendingOpts } : undefined;
+  workdirBusyPendingOpts.value = opts.pendingOpts
+    ? { ...opts.pendingOpts }
+    : undefined;
   workdirBusyOnSuccess = opts.onSuccess ?? null;
   workdirBusyOpen.value = true;
 }
@@ -424,7 +471,9 @@ function openWorktreeUntrackedModal(opts: {
   worktreeUntrackedError.value = "";
   worktreeUntrackedData.value = { ...opts.data };
   worktreeUntrackedPendingInput.value = { ...opts.pendingInput };
-  worktreeUntrackedPendingOpts.value = opts.pendingOpts ? { ...opts.pendingOpts } : undefined;
+  worktreeUntrackedPendingOpts.value = opts.pendingOpts
+    ? { ...opts.pendingOpts }
+    : undefined;
   worktreeUntrackedOnSuccess = opts.onSuccess ?? null;
   worktreeUntrackedOpen.value = true;
 }
@@ -503,13 +552,13 @@ async function confirmWorkdirBusyStrategy(strategy: "wait" | "worktree") {
   }
   workdirBusyBusy.value = true;
   workdirBusyError.value = "";
-  const createdInput: CreateTaskPayload = { ...pending, workdir_strategy: strategy };
+  const createdInput: CreateTaskPayload = {
+    ...pending,
+    workdir_strategy: strategy,
+  };
   try {
     openRunLaunchMask({ title: "启动中…", detail: "正在创建任务…" });
-    const out = await createTask(
-      createdInput,
-      workdirBusyPendingOpts.value,
-    );
+    const out = await createTask(createdInput, workdirBusyPendingOpts.value);
     const t = requireMutationTask(out, "task.create");
     trackRunLaunchMaskForTask(t);
     upsertTask(t);
@@ -574,7 +623,8 @@ function requestHighRiskConfirm(opts: {
   highRiskConfirmTitle.value = String(opts.title ?? "").trim() || "确认";
   highRiskConfirmMessage.value = String(opts.message ?? "").trim();
   highRiskConfirmDetail.value = String(opts.detail ?? "").trim();
-  highRiskConfirmConfirmLabel.value = String(opts.confirmLabel ?? "").trim() || "继续";
+  highRiskConfirmConfirmLabel.value =
+    String(opts.confirmLabel ?? "").trim() || "继续";
   highRiskConfirmBusy.value = false;
   highRiskConfirmOpen.value = true;
   return new Promise((resolve) => {
@@ -746,7 +796,9 @@ const providerSecretarySimpleHTTPBaseURL = ref("");
 const providerSecretarySimpleHTTPApiKey = ref("");
 const providerSecretarySimpleHTTPAuthToken = ref("");
 const providerSecretarySimpleHTTPModel = ref("");
-const providerSecretaryBackend = ref<"simple-http" | "openai-chat">("simple-http");
+const providerSecretaryBackend = ref<"simple-http" | "openai-chat">(
+  "simple-http",
+);
 const providerSecretaryOpenAIBaseURL = ref("");
 const providerSecretaryOpenAIApiKey = ref("");
 const providerSecretaryOpenAIModel = ref("");
@@ -769,7 +821,8 @@ const providerSecretarySimpleHTTPApiKeyHint = computed<string>(
   () => selectedProvider.value?.targets?.secretary?.simple_http?.api_key ?? "",
 );
 const providerSecretarySimpleHTTPAuthTokenHint = computed<string>(
-  () => selectedProvider.value?.targets?.secretary?.simple_http?.auth_token ?? "",
+  () =>
+    selectedProvider.value?.targets?.secretary?.simple_http?.auth_token ?? "",
 );
 const providerSecretaryOpenAIApiKeyHint = computed<string>(
   () => selectedProvider.value?.targets?.secretary?.openai_chat?.api_key ?? "",
@@ -898,7 +951,10 @@ const {
   onTaskUpsert: (prev, next) => {
     maybeDismissRunLaunchMaskForTask(next);
     void maybePromptBlocked(prev, next);
-    void maybePromptApproval(prev, next);
+    // 秘书会自动审批，不再自动弹出审批弹窗。
+    // 保留 maybePromptApproval 函数以备手动调用。
+    // 如果弹窗已打开但审批已被秘书处理，自动关闭：
+    maybeDismissApprovalPrompt(next);
     void maybePromptRehydrate(prev, next);
     if (sessionKeyForTask(next) === selectedSessionKey.value) {
       void loadSelectedSessionContinueQueue();
@@ -916,7 +972,15 @@ const selectedRunInstruction = computed(() => {
 const selectedRunActivity = computed(() => {
   const t = selectedTask.value;
   if (!t) return null;
-  if (!(t.status === "running" || t.status === "queued" || t.status === "waiting" || t.status === "awaiting_approval")) return null;
+  if (
+    !(
+      t.status === "running" ||
+      t.status === "queued" ||
+      t.status === "waiting" ||
+      t.status === "awaiting_approval"
+    )
+  )
+    return null;
   return deriveRunActivity(selectedLogs.value);
 });
 
@@ -1046,7 +1110,11 @@ const isPhone = ref(false);
 const sessionsDrawerOpen = ref(false);
 const sessionsFiltersOpen = ref(false);
 const sessionsHostAllowsPanel = computed(
-  () => !skillsOpen.value && !contextOpen.value && !filesOpen.value && !auditOpen.value,
+  () =>
+    !skillsOpen.value &&
+    !contextOpen.value &&
+    !filesOpen.value &&
+    !auditOpen.value,
 );
 const showSessionsPanel = computed(
   () => sessionsHostAllowsPanel.value && sessionsDrawerOpen.value,
@@ -1059,10 +1127,13 @@ const sessionActionsMenuPos = ref({ left: 0, top: 0 });
 const sessionActionsMenuEl = ref<HTMLDivElement | null>(null);
 
 const LS_KEY_CLAUDE_AUTO_APPROVE_LEGACY = "controlccx.claude.auto_approve.v1";
-const LS_KEY_MIGRATE_CLAUDE_DEFAULT_SAFETY_PRESET = "controlccx.migrate.claude_default_safety_preset.v1";
-const LS_KEY_RUN_SAFETY_PRESET_BY_TOOL = "controlccx.run_safety.preset_by_tool.v1";
+const LS_KEY_MIGRATE_CLAUDE_DEFAULT_SAFETY_PRESET =
+  "controlccx.migrate.claude_default_safety_preset.v1";
+const LS_KEY_RUN_SAFETY_PRESET_BY_TOOL =
+  "controlccx.run_safety.preset_by_tool.v1";
 const LS_KEY_RUN_SAFETY_AUTOPILOT = "controlccx.run_safety.autopilot.v1";
-const LS_KEY_RUN_SAFETY_INSTALL_UNLOCK = "controlccx.run_safety.install_unlock.v1";
+const LS_KEY_RUN_SAFETY_INSTALL_UNLOCK =
+  "controlccx.run_safety.install_unlock.v1";
 const LS_KEY_ATTENTION_DISMISSED = "controlccx.attention_dismissed.v1";
 const LS_KEY_REHYDRATE_PROMPT_SEEN = "controlccx.rehydrate_prompt_seen.v1";
 const LS_KEY_BLOCKED_PROMPT_SEEN = "controlccx.blocked_prompt_seen.v1";
@@ -1144,7 +1215,8 @@ function formatLocalDateTime(ts: string): string {
 function formatSessionLastRunTime(ts: string): string {
   const full = formatLocalDateTime(ts);
   if (!full) return "";
-  if (/^\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}$/.test(full)) return full.slice(5, 16);
+  if (/^\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}$/.test(full))
+    return full.slice(5, 16);
   return full;
 }
 
@@ -1285,7 +1357,8 @@ md.renderer.rules.code_inline = (tokens, idx, options, env, self) => {
     const escaped = escapeHtml(text);
     return `<code class="fileRef" data-file-path="${escaped}">${escaped}</code>`;
   }
-  if (defaultInlineCode) return defaultInlineCode(tokens, idx, options, env, self);
+  if (defaultInlineCode)
+    return defaultInlineCode(tokens, idx, options, env, self);
   return self.renderToken(tokens, idx, options);
 };
 
@@ -1348,14 +1421,19 @@ const selectedResultHtmlSrcDoc = computed(() => {
 });
 
 const filePreviewIsMarkdown = computed(() => {
-  const p = (filePreviewResolvedPath.value || filePreviewRawPath.value).trim().toLowerCase();
+  const p = (filePreviewResolvedPath.value || filePreviewRawPath.value)
+    .trim()
+    .toLowerCase();
   return p.endsWith(".md") || p.endsWith(".markdown");
 });
 
 const filePreviewPreviewDisabled = computed(() => {
   if (filePreviewLoading.value) return true;
   if (filePreviewTruncated.value) return true;
-  const size = filePreviewSize.value > 0 ? filePreviewSize.value : filePreviewContent.value.length;
+  const size =
+    filePreviewSize.value > 0
+      ? filePreviewSize.value
+      : filePreviewContent.value.length;
   const max = filePreviewIsMarkdown.value
     ? FILE_PREVIEW_MAX_PREVIEW_BYTES_MARKDOWN
     : FILE_PREVIEW_MAX_PREVIEW_BYTES_CODE;
@@ -1364,7 +1442,8 @@ const filePreviewPreviewDisabled = computed(() => {
 
 const filePreviewPreviewDisabledTitle = computed(() => {
   if (!filePreviewPreviewDisabled.value) return "";
-  if (filePreviewTruncated.value) return "文件已截断：Preview 已禁用，请用 Raw。";
+  if (filePreviewTruncated.value)
+    return "文件已截断：Preview 已禁用，请用 Raw。";
   return "文件过大：Preview 已禁用，请用 Raw。";
 });
 
@@ -1442,7 +1521,8 @@ function highlightJsonHtml(text: string): string {
   const raw = String(text ?? "");
   if (!raw) return "";
   try {
-    return hljs.highlight(raw, { language: "json", ignoreIllegals: true }).value;
+    return hljs.highlight(raw, { language: "json", ignoreIllegals: true })
+      .value;
   } catch {
     return escapeHtml(raw);
   }
@@ -1451,7 +1531,10 @@ function highlightJsonHtml(text: string): string {
 const prettyLogs = computed(() => {
   return filteredLogs.value.map((l) => {
     const pretty = prettifyLogMessage(l.message ?? "");
-    const jsonHtml = pretty.kind === "json" && pretty.prettyJson ? highlightJsonHtml(pretty.prettyJson) : "";
+    const jsonHtml =
+      pretty.kind === "json" && pretty.prettyJson
+        ? highlightJsonHtml(pretty.prettyJson)
+        : "";
     return {
       id: l.id,
       time: l.time,
@@ -1500,7 +1583,8 @@ function downloadSelectedLogs() {
   if (!t) return;
   const qs = new URLSearchParams();
   const streams = selectedLogStreams();
-  if (streams.length && streams.length < 4) qs.set("streams", streams.join(","));
+  if (streams.length && streams.length < 4)
+    qs.set("streams", streams.join(","));
   if (logSearch.value.trim()) qs.set("q", logSearch.value.trim());
   const url = `/api/tasks/${encodeURIComponent(t.id)}/logs/export?${qs.toString()}`;
   window.open(url, "_blank", "noopener,noreferrer");
@@ -1517,7 +1601,12 @@ async function copyFilteredLogs() {
 async function replaySelectedRun() {
   const t = selectedTask.value;
   if (!t) return;
-  if (!confirm("确认重放该 run 吗？（将使用相同的 tool/workdir/prompt 创建一个新任务）")) return;
+  if (
+    !confirm(
+      "确认重放该 run 吗？（将使用相同的 tool/workdir/prompt 创建一个新任务）",
+    )
+  )
+    return;
   errorBanner.value = "";
   let createdInput: CreateTaskPayload | null = null;
   try {
@@ -1553,18 +1642,27 @@ async function replaySelectedRun() {
   }
 }
 
-function selectedWorktreeMeta(): { baseWorkdir: string; worktreeDir: string; branch: string } | null {
+function selectedWorktreeMeta(): {
+  baseWorkdir: string;
+  worktreeDir: string;
+  branch: string;
+} | null {
   const t = selectedTask.value;
   if (!t) return null;
   if (String(t.workdir_strategy ?? "").trim() !== "worktree") return null;
   const base = String(t.base_workdir ?? "").trim();
-  const wt = String(t.worktree_dir ?? "").trim() || String(t.workdir ?? "").trim();
+  const wt =
+    String(t.worktree_dir ?? "").trim() || String(t.workdir ?? "").trim();
   const branch = String(t.worktree_branch ?? "").trim();
   if (!base || !wt || !branch) return null;
   return { baseWorkdir: base, worktreeDir: wt, branch };
 }
 
-function buildMergeBackPrompt(meta: { baseWorkdir: string; worktreeDir: string; branch: string }): string {
+function buildMergeBackPrompt(meta: {
+  baseWorkdir: string;
+  worktreeDir: string;
+  branch: string;
+}): string {
   return `你正在执行「Merge Back」助手：把 worktree 的改动合并回 base repo。
 
 关键信息：
@@ -1597,10 +1695,16 @@ async function mergeBackSelectedWorktree() {
   if (!t) return;
   const meta = selectedWorktreeMeta();
   if (!meta) {
-    errorBanner.value = "该 run 不是 worktree 运行，或缺少 worktree 元信息，无法合并。";
+    errorBanner.value =
+      "该 run 不是 worktree 运行，或缺少 worktree 元信息，无法合并。";
     return;
   }
-  if (t.status === "running" || t.status === "queued" || t.status === "waiting" || t.status === "awaiting_approval") {
+  if (
+    t.status === "running" ||
+    t.status === "queued" ||
+    t.status === "waiting" ||
+    t.status === "awaiting_approval"
+  ) {
     errorBanner.value = "该 worktree run 仍在运行/排队中，建议结束后再合并。";
     return;
   }
@@ -1610,7 +1714,10 @@ async function mergeBackSelectedWorktree() {
 
   errorBanner.value = "";
   try {
-    openRunLaunchMask({ title: "启动中…", detail: "正在创建 Merge Back 任务…" });
+    openRunLaunchMask({
+      title: "启动中…",
+      detail: "正在创建 Merge Back 任务…",
+    });
     const input: CreateTaskPayload = {
       worker_type: t.worker_type,
       prompt: buildMergeBackPrompt(meta),
@@ -1710,7 +1817,9 @@ async function openFilePreview(path: string, base: string) {
 
     const lower = (resolvedPath || p).trim().toLowerCase();
     const isMarkdown = lower.endsWith(".md") || lower.endsWith(".markdown");
-    const max = isMarkdown ? FILE_PREVIEW_MAX_PREVIEW_BYTES_MARKDOWN : FILE_PREVIEW_MAX_PREVIEW_BYTES_CODE;
+    const max = isMarkdown
+      ? FILE_PREVIEW_MAX_PREVIEW_BYTES_MARKDOWN
+      : FILE_PREVIEW_MAX_PREVIEW_BYTES_CODE;
     const effectiveSize = size > 0 ? size : content.length;
     if (!truncated && effectiveSize > 0 && effectiveSize <= max) {
       filePreviewTab.value = "preview";
@@ -1937,9 +2046,11 @@ function shouldDefaultReducedFx(): boolean {
   if (typeof window === "undefined") return false;
   try {
     if (typeof window.matchMedia === "function") {
-      if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return true;
+      if (window.matchMedia("(prefers-reduced-motion: reduce)").matches)
+        return true;
       try {
-        if (window.matchMedia("(prefers-reduced-transparency: reduce)").matches) return true;
+        if (window.matchMedia("(prefers-reduced-transparency: reduce)").matches)
+          return true;
       } catch {
         // ignore
       }
@@ -1947,7 +2058,10 @@ function shouldDefaultReducedFx(): boolean {
     const nav = window.navigator as any;
     const ua = String(nav?.userAgent ?? "");
     const isWindows = /Windows/i.test(ua);
-    const hc = typeof nav?.hardwareConcurrency === "number" ? nav.hardwareConcurrency : 0;
+    const hc =
+      typeof nav?.hardwareConcurrency === "number"
+        ? nav.hardwareConcurrency
+        : 0;
     const mem = typeof nav?.deviceMemory === "number" ? nav.deviceMemory : 0;
     const saveData = Boolean(nav?.connection?.saveData);
     const lowCpu = hc > 0 && hc <= 4;
@@ -1993,7 +2107,11 @@ function isWithinWorkspace(root: string, path: string): boolean {
 }
 
 const pinnedWorkspaces = ref<string[]>(
-  mergeWorkspaceRecents(loadStringArray(LS_KEY_PINNED_WORKSPACES), [], MAX_PINNED_WORKSPACES),
+  mergeWorkspaceRecents(
+    loadStringArray(LS_KEY_PINNED_WORKSPACES),
+    [],
+    MAX_PINNED_WORKSPACES,
+  ),
 );
 const workspaceRecents = ref<string[]>(
   mergeWorkspaceRecents(loadStringArray(LS_KEY_WORKSPACE_RECENTS), []),
@@ -2001,12 +2119,18 @@ const workspaceRecents = ref<string[]>(
 const pinnedWorkspaceNames = ref<Record<string, string>>(
   loadStringMap(LS_KEY_PINNED_WORKSPACE_NAMES),
 );
-const workspaceFilters = ref<string[]>(loadStringArray(LS_KEY_WORKSPACE_FILTERS));
+const workspaceFilters = ref<string[]>(
+  loadStringArray(LS_KEY_WORKSPACE_FILTERS),
+);
 const workspaceSelect = ref<string>(loadString(LS_KEY_WORKSPACE_FILTER));
 
 {
-  rehydratePromptSeenRuns.value = new Set(loadStringArray(LS_KEY_REHYDRATE_PROMPT_SEEN));
-  blockedPromptSeenRuns.value = new Set(loadStringArray(LS_KEY_BLOCKED_PROMPT_SEEN));
+  rehydratePromptSeenRuns.value = new Set(
+    loadStringArray(LS_KEY_REHYDRATE_PROMPT_SEEN),
+  );
+  blockedPromptSeenRuns.value = new Set(
+    loadStringArray(LS_KEY_BLOCKED_PROMPT_SEEN),
+  );
 
   runSafetyPresetByTool.value = loadStringMap(LS_KEY_RUN_SAFETY_PRESET_BY_TOOL);
   runSafetyAutopilotEnabled.value = loadBool(LS_KEY_RUN_SAFETY_AUTOPILOT, true);
@@ -2016,7 +2140,10 @@ const workspaceSelect = ref<string>(loadString(LS_KEY_WORKSPACE_FILTER));
   );
 
   // Back-compat: v1 Claude auto-approve was a single boolean toggle.
-  const legacyClaudeAutoApprove = loadBool(LS_KEY_CLAUDE_AUTO_APPROVE_LEGACY, false);
+  const legacyClaudeAutoApprove = loadBool(
+    LS_KEY_CLAUDE_AUTO_APPROVE_LEGACY,
+    false,
+  );
   if (legacyClaudeAutoApprove && !runSafetyPresetByTool.value["claude-code"]) {
     runSafetyPresetByTool.value = {
       ...runSafetyPresetByTool.value,
@@ -2045,7 +2172,10 @@ const workspaceSelect = ref<string>(loadString(LS_KEY_WORKSPACE_FILTER));
 
   liveFull.value = loadBool(LS_KEY_LIVE_FULL, false);
   {
-    const maxW = typeof window !== "undefined" ? Math.max(520, window.innerWidth - 32) : 1600;
+    const maxW =
+      typeof window !== "undefined"
+        ? Math.max(520, window.innerWidth - 32)
+        : 1600;
     const lw = loadInt(LS_KEY_LIVE_WIDTH, 980);
     liveWidth.value = Math.max(520, Math.min(maxW, Math.min(1600, lw)));
   }
@@ -2083,7 +2213,9 @@ watch(
     }
 
     saveStringArray(LS_KEY_PINNED_WORKSPACES, normalized);
-    const pinnedKeys = new Set(normalized.map((p) => normalizePathForCompare(p)));
+    const pinnedKeys = new Set(
+      normalized.map((p) => normalizePathForCompare(p)),
+    );
     const next: Record<string, string> = {};
     for (const [k, name] of Object.entries(pinnedWorkspaceNames.value)) {
       const key = normalizePathForCompare(k);
@@ -2104,11 +2236,9 @@ watch(
   (v) => saveStringMap(LS_KEY_PINNED_WORKSPACE_NAMES, v),
   { deep: true },
 );
-watch(
-  workspaceRecents,
-  (v) => saveStringArray(LS_KEY_WORKSPACE_RECENTS, v),
-  { deep: true },
-);
+watch(workspaceRecents, (v) => saveStringArray(LS_KEY_WORKSPACE_RECENTS, v), {
+  deep: true,
+});
 watch(
   workspaceFilters,
   (v) => {
@@ -2140,8 +2270,12 @@ watch(
   (v) => saveStringMap(LS_KEY_RUN_SAFETY_PRESET_BY_TOOL, v),
   { deep: true },
 );
-watch(runSafetyAutopilotEnabled, (v) => saveBool(LS_KEY_RUN_SAFETY_AUTOPILOT, Boolean(v)));
-watch(runSafetyInstallUnlock, (v) => saveBool(LS_KEY_RUN_SAFETY_INSTALL_UNLOCK, Boolean(v)));
+watch(runSafetyAutopilotEnabled, (v) =>
+  saveBool(LS_KEY_RUN_SAFETY_AUTOPILOT, Boolean(v)),
+);
+watch(runSafetyInstallUnlock, (v) =>
+  saveBool(LS_KEY_RUN_SAFETY_INSTALL_UNLOCK, Boolean(v)),
+);
 watch(theme, (v) => saveString(LS_KEY_THEME, v));
 watch(fxReduced, (v) => saveBool(LS_KEY_FX_REDUCED, Boolean(v)));
 watch(liveScope, (v) => saveString(LS_KEY_FEED_SCOPE, v));
@@ -2152,20 +2286,35 @@ watch(feedCoachDismissed, (v) => saveBool(LS_KEY_COACH_FEED, v));
 
 function desiredOutputTabForTask(t: Task | null): "result" | "logs" {
   if (!t) return "result";
-  if (t.status === "running" || t.status === "queued" || t.status === "waiting" || t.status === "awaiting_approval") return "logs";
+  if (
+    t.status === "running" ||
+    t.status === "queued" ||
+    t.status === "waiting" ||
+    t.status === "awaiting_approval"
+  )
+    return "logs";
   return "result";
 }
 
 watch(selectedTaskId, () => {
   const t = selectedTask.value;
   if (!t) return;
-  if (blockedPromptOpen.value && blockedPromptRunID.value !== selectedTaskId.value) {
+  if (
+    blockedPromptOpen.value &&
+    blockedPromptRunID.value !== selectedTaskId.value
+  ) {
     closeBlockedPrompt();
   }
-  if (approvalPromptOpen.value && approvalPromptRunID.value !== selectedTaskId.value) {
+  if (
+    approvalPromptOpen.value &&
+    approvalPromptRunID.value !== selectedTaskId.value
+  ) {
     closeApprovalPrompt();
   }
-  if (rehydratePromptOpen.value && rehydratePromptRunID.value !== selectedTaskId.value) {
+  if (
+    rehydratePromptOpen.value &&
+    rehydratePromptRunID.value !== selectedTaskId.value
+  ) {
     closeRehydratePrompt();
   }
   outputTab.value = desiredOutputTabForTask(t);
@@ -2182,7 +2331,8 @@ watch(outputTab, (v) => {
   if (v !== "trace") return;
   if (!selectedTaskId.value) return;
   void loadTrace(selectedTaskId.value);
-  if (selectedSessionKey.value) void loadSessionWorkspace(selectedSessionKey.value, { force: true });
+  if (selectedSessionKey.value)
+    void loadSessionWorkspace(selectedSessionKey.value, { force: true });
 });
 
 watch([workspaceFilters, sessionSearch], () => {
@@ -2244,10 +2394,7 @@ function scrollFocusedIntoView(el: HTMLElement) {
 }
 
 async function refresh() {
-  const [sys] = await Promise.all([
-    fetchSystemInfo(),
-    refreshTasks(200),
-  ]);
+  const [sys] = await Promise.all([fetchSystemInfo(), refreshTasks(200)]);
   systemInfo.value = sys;
 }
 
@@ -2259,7 +2406,10 @@ async function refreshAuth() {
   }
 }
 
-async function maybeConfirmSkillMountForNewRun(driver: ToolDriver, prompt: string): Promise<boolean> {
+async function maybeConfirmSkillMountForNewRun(
+  driver: ToolDriver,
+  prompt: string,
+): Promise<boolean> {
   if (driver !== "codex" && driver !== "claude-code") return true;
   const rawPrompt = String(prompt ?? "");
   if (!rawPrompt.trim()) return true;
@@ -2270,18 +2420,25 @@ async function maybeConfirmSkillMountForNewRun(driver: ToolDriver, prompt: strin
     skills = Array.isArray(res.skills) ? res.skills : [];
   } catch (e: any) {
     errorBanner.value =
-      "⚠️ 无法读取 skills 列表，已跳过挂载检查（仍可创建 run）。错误：" + (e?.message ?? String(e));
+      "⚠️ 无法读取 skills 列表，已跳过挂载检查（仍可创建 run）。错误：" +
+      (e?.message ?? String(e));
     return true;
   }
 
   const plan = buildSkillMountPlan({ driver, prompt: rawPrompt, skills });
   if (!plan) return true;
-  return requestSkillMountConfirm({ driver, target: plan.target, items: plan.items, namesToMount: plan.namesToMount });
+  return requestSkillMountConfirm({
+    driver,
+    target: plan.target,
+    items: plan.items,
+    namesToMount: plan.namesToMount,
+  });
 }
 
 function ensureTaskPlaneAvailable(): boolean {
   if (!taskPlaneDegraded.value) return true;
-  errorBanner.value = "任务执行面不可用：请确认 `controlccx-runnerd` 正在运行，或重启 ControlCCX。";
+  errorBanner.value =
+    "任务执行面不可用：请确认 `controlccx-runnerd` 正在运行，或重启 ControlCCX。";
   return false;
 }
 
@@ -2348,15 +2505,21 @@ async function maybeAttachSessionInFlightTask(e: unknown): Promise<boolean> {
   return true;
 }
 
-async function onCreateTask(opts?: { idempotencyKey?: string }): Promise<boolean> {
+async function onCreateTask(opts?: {
+  idempotencyKey?: string;
+}): Promise<boolean> {
   errorBanner.value = "";
   if (!ensureTaskPlaneAvailable()) return false;
   let createdInput: CreateTaskPayload | null = null;
   try {
     const driver = newRunDriver.value;
-    const skillsOk = await maybeConfirmSkillMountForNewRun(driver, newPrompt.value);
+    const skillsOk = await maybeConfirmSkillMountForNewRun(
+      driver,
+      newPrompt.value,
+    );
     if (!skillsOk) return false;
-    const useAutopilot = runSafetyAutopilotEnabled.value && !newRunSafetyOverride.value;
+    const useAutopilot =
+      runSafetyAutopilotEnabled.value && !newRunSafetyOverride.value;
 
     let safety: RunSafetyPayload = {};
     let defaultNetworkTier: string | undefined = undefined;
@@ -2445,8 +2608,14 @@ async function onSelectTask(id: string) {
   closeSessionActionsMenu();
   if (isPhone.value) sessionsDrawerOpen.value = false;
   await selectTask(id, {
-    closeMobileDrawer: isPhone.value ? () => { sessionsDrawerOpen.value = false; } : undefined,
-    closeRunsModal: () => { runsOpen.value = false; },
+    closeMobileDrawer: isPhone.value
+      ? () => {
+          sessionsDrawerOpen.value = false;
+        }
+      : undefined,
+    closeRunsModal: () => {
+      runsOpen.value = false;
+    },
   });
 }
 
@@ -2649,7 +2818,10 @@ function closeSessionActionsMenu() {
   sessionActionsMenuAnchor.value = null;
 }
 
-function positionSessionActionsMenu(opts?: { menuWidth?: number; menuHeight?: number }) {
+function positionSessionActionsMenu(opts?: {
+  menuWidth?: number;
+  menuHeight?: number;
+}) {
   const anchorEl = sessionActionsMenuAnchor.value;
   if (!anchorEl) return;
   const rect = anchorEl.getBoundingClientRect();
@@ -2688,7 +2860,10 @@ function openSessionActionsMenu(s: SessionGroup, ev: MouseEvent) {
 
 function toggleSessionActionsMenu(s: SessionGroup, ev: MouseEvent) {
   ev.stopPropagation();
-  if (sessionActionsMenuOpen.value && sessionActionsMenuSession.value?.key === s.key) {
+  if (
+    sessionActionsMenuOpen.value &&
+    sessionActionsMenuSession.value?.key === s.key
+  ) {
     closeSessionActionsMenu();
     return;
   }
@@ -2748,7 +2923,8 @@ function onSecretaryQuick(message: string) {
 }
 
 function onSecretaryClear() {
-  if (secretaryMessages.value.length > 0 && !window.confirm("清空秘书历史？")) return;
+  if (secretaryMessages.value.length > 0 && !window.confirm("清空秘书历史？"))
+    return;
   void clearSecretaryChat();
 }
 
@@ -2840,8 +3016,6 @@ function closeAuditPage() {
   navigateTo("/");
 }
 
-
-
 function closeSkillsPage() {
   skillsGovernanceOpen.value = false;
   skillsOpen.value = false;
@@ -2906,14 +3080,18 @@ function applyRouteFromLocation() {
   const qs = new URLSearchParams(window.location.search);
   const restoreFilesRoute = () => {
     const base = (filesBase.value ?? "").trim() || ".";
-    navigateTo(`/files?base=${encodePathForQueryValue(base)}`, { replace: true });
+    navigateTo(`/files?base=${encodePathForQueryValue(base)}`, {
+      replace: true,
+    });
   };
 
   // Back-compat / defensive: if someone lands on `/?base=...`, treat it as Files.
   if ((path === "/" || path === "/index.html") && qs.has("base")) {
     const base = (qs.get("base") ?? "").trim();
     skillsOpen.value = false;
-    navigateTo(`/files?base=${encodePathForQueryValue(base)}`, { replace: true });
+    navigateTo(`/files?base=${encodePathForQueryValue(base)}`, {
+      replace: true,
+    });
     void openFilesForBase(base);
     return;
   }
@@ -3170,8 +3348,14 @@ async function confirmBlockedPromptUnsafe() {
       const driver = toolDriverForWorkerType(t.worker_type);
       const currentPreset = effectiveSafetyPresetForTask(driver, t);
       const safety = buildRunSafetyPayload(driver, "code", currentPreset);
-      openRunLaunchMask({ title: "继续中…", detail: "正在创建 workspace 并继续运行…" });
-      const resumeOut = await resumeTaskWithOptions(runID, { prompt: "continue", ...safety });
+      openRunLaunchMask({
+        title: "继续中…",
+        detail: "正在创建 workspace 并继续运行…",
+      });
+      const resumeOut = await resumeTaskWithOptions(runID, {
+        prompt: "continue",
+        ...safety,
+      });
       const nt = requireMutationTask(resumeOut, "task.resume");
       trackRunLaunchMaskForTask(nt);
       resumeOriginByRunID.set(nt.id, "manual");
@@ -3196,13 +3380,15 @@ async function confirmBlockedPromptUnsafe() {
 
   const driver = toolDriverForWorkerType(t.worker_type);
   if (driver !== "claude-code") {
-    blockedPromptError.value = "当前仅支持对 Claude Code 的 blocked 运行进行一键重试。";
+    blockedPromptError.value =
+      "当前仅支持对 Claude Code 的 blocked 运行进行一键重试。";
     return;
   }
 
   const ok = await requestHighRiskConfirm({
     title: "高权限确认",
-    message: "该操作将跳过 Claude Code 的权限确认，并开放更高权限以继续执行。继续吗？",
+    message:
+      "该操作将跳过 Claude Code 的权限确认，并开放更高权限以继续执行。继续吗？",
     detail: highRiskPresetSummary(driver, "unsafe"),
     confirmLabel: "继续（高权限）",
   });
@@ -3213,7 +3399,10 @@ async function confirmBlockedPromptUnsafe() {
     const intent = normalizeTaskIntent(t.task_intent ?? "code");
     const safety = buildRunSafetyPayload(driver, intent, "unsafe");
     openRunLaunchMask({ title: "继续中…", detail: "正在继续运行…" });
-    const resumeOut = await resumeTaskWithOptions(runID, { prompt: "continue", ...safety });
+    const resumeOut = await resumeTaskWithOptions(runID, {
+      prompt: "continue",
+      ...safety,
+    });
     const nt = requireMutationTask(resumeOut, "task.resume");
     trackRunLaunchMaskForTask(nt);
     resumeOriginByRunID.set(nt.id, "manual");
@@ -3250,13 +3439,15 @@ async function confirmBlockedPromptSafeRetry() {
   const warning = String(t.warning ?? "").trim();
   const isWorkspaceRequired = warning.startsWith("CCX_WORKSPACE_REQUIRED:");
   if (isWorkspaceRequired) {
-    blockedPromptError.value = "该阻塞是 workspace 写入保护：请使用「创建 worktree/workspace 并继续」。";
+    blockedPromptError.value =
+      "该阻塞是 workspace 写入保护：请使用「创建 worktree/workspace 并继续」。";
     return;
   }
 
   const driver = toolDriverForWorkerType(t.worker_type);
   if (driver !== "claude-code") {
-    blockedPromptError.value = "当前仅支持对 Claude Code 的 blocked 运行进行安全重试。";
+    blockedPromptError.value =
+      "当前仅支持对 Claude Code 的 blocked 运行进行安全重试。";
     return;
   }
 
@@ -3266,7 +3457,10 @@ async function confirmBlockedPromptSafeRetry() {
     const preset = effectiveSafetyPresetForTask(driver, t);
     const safety = buildRunSafetyPayload(driver, intent, preset);
     openRunLaunchMask({ title: "重试中…", detail: "正在以当前安全设置重试…" });
-    const resumeOut = await resumeTaskWithOptions(runID, { prompt: "continue", ...safety });
+    const resumeOut = await resumeTaskWithOptions(runID, {
+      prompt: "continue",
+      ...safety,
+    });
     const nt = requireMutationTask(resumeOut, "task.resume");
     trackRunLaunchMaskForTask(nt);
     resumeOriginByRunID.set(nt.id, "manual");
@@ -3305,7 +3499,9 @@ async function confirmRehydratePrompt() {
   rehydratePromptError.value = "";
   try {
     openRunLaunchMask({ title: "恢复中…", detail: "正在恢复会话…" });
-    const rehydrateOut = await rehydrateTaskWithOptions(runID, { prompt: "continue" });
+    const rehydrateOut = await rehydrateTaskWithOptions(runID, {
+      prompt: "continue",
+    });
     const nt = requireMutationTask(rehydrateOut, "task.rehydrate");
     trackRunLaunchMaskForTask(nt);
     upsertTask(nt);
@@ -3334,17 +3530,37 @@ async function maybePromptBlocked(prev: Task | undefined, next: Task) {
   const prevStatus = prev?.status ?? "";
   const nextStatus = next.status ?? "";
   if (isTerminalStatus(prevStatus) || nextStatus !== "blocked") return;
-  if (!(prevStatus === "running" || prevStatus === "queued" || prevStatus === "waiting" || prevStatus === "")) return;
+  if (
+    !(
+      prevStatus === "running" ||
+      prevStatus === "queued" ||
+      prevStatus === "waiting" ||
+      prevStatus === ""
+    )
+  )
+    return;
 
   // Non-disruptive: only prompt when the blocked run belongs to the current session view.
   const nextSessionKey = sessionKeyForTask(next);
-  if (selectedTaskId.value !== next.id && selectedSessionKey.value !== nextSessionKey) return;
+  if (
+    selectedTaskId.value !== next.id &&
+    selectedSessionKey.value !== nextSessionKey
+  )
+    return;
 
   blockedPromptRunID.value = next.id;
   blockedPromptError.value = "";
   blockedPromptBusy.value = false;
   blockedPromptOpen.value = true;
   persistBlockedPromptSeen(next.id);
+}
+
+function maybeDismissApprovalPrompt(next: Task) {
+  if (!approvalPromptOpen.value) return;
+  if (approvalPromptRunID.value !== next.id) return;
+  if (next.status === "awaiting_approval") return;
+  // 秘书已审批或状态已变，关闭弹窗
+  closeApprovalPrompt();
 }
 
 async function maybePromptApproval(prev: Task | undefined, next: Task) {
@@ -3355,11 +3571,23 @@ async function maybePromptApproval(prev: Task | undefined, next: Task) {
   const nextStatus = next.status ?? "";
   if (nextStatus !== "awaiting_approval") return;
   if (prevStatus === nextStatus) return;
-  if (!(prevStatus === "running" || prevStatus === "queued" || prevStatus === "waiting" || prevStatus === "")) return;
+  if (
+    !(
+      prevStatus === "running" ||
+      prevStatus === "queued" ||
+      prevStatus === "waiting" ||
+      prevStatus === ""
+    )
+  )
+    return;
 
   // Non-disruptive: only prompt when the run belongs to the current session view.
   const nextSessionKey = sessionKeyForTask(next);
-  if (selectedTaskId.value !== next.id && selectedSessionKey.value !== nextSessionKey) return;
+  if (
+    selectedTaskId.value !== next.id &&
+    selectedSessionKey.value !== nextSessionKey
+  )
+    return;
 
   approvalPromptRunID.value = next.id;
   approvalPromptOpen.value = true;
@@ -3373,7 +3601,15 @@ async function maybePromptRehydrate(prev: Task | undefined, next: Task) {
   const prevStatus = prev?.status ?? "";
   const nextStatus = next.status ?? "";
   if (isTerminalStatus(prevStatus) || !isTerminalStatus(nextStatus)) return;
-  if (!(prevStatus === "running" || prevStatus === "queued" || prevStatus === "waiting" || prevStatus === "")) return;
+  if (
+    !(
+      prevStatus === "running" ||
+      prevStatus === "queued" ||
+      prevStatus === "waiting" ||
+      prevStatus === ""
+    )
+  )
+    return;
 
   const origin = resumeOriginByRunID.get(next.id) ?? "";
   if (!shouldOfferRehydrateForTask(next, origin)) return;
@@ -3381,7 +3617,11 @@ async function maybePromptRehydrate(prev: Task | undefined, next: Task) {
   // Non-disruptive: prompt for the currently selected run OR any run in the current session.
   // This helps when a background run (e.g. created outside the UI) fails with "No conversation found".
   const nextSessionKey = sessionKeyForTask(next);
-  if (selectedTaskId.value !== next.id && selectedSessionKey.value !== nextSessionKey) return;
+  if (
+    selectedTaskId.value !== next.id &&
+    selectedSessionKey.value !== nextSessionKey
+  )
+    return;
   rehydratePromptRunID.value = next.id;
   rehydratePromptError.value = "";
   rehydratePromptBusy.value = false;
@@ -3451,7 +3691,10 @@ async function onResumeTask() {
   errorBanner.value = "";
   try {
     openRunLaunchMask({ title: "继续中…", detail: "正在继续会话…" });
-    const out = await continueSessionWithOptions(sess.key, { prompt: resumePrompt.value, ...payload });
+    const out = await continueSessionWithOptions(sess.key, {
+      prompt: resumePrompt.value,
+      ...payload,
+    });
     resumePrompt.value = "";
     if (out.queue) {
       closeRunLaunchMask();
@@ -3491,7 +3734,10 @@ async function onPreemptResumeTask() {
   errorBanner.value = "";
   try {
     openRunLaunchMask({ title: "抢占中…", detail: "正在抢占并排入队列…" });
-    const out = await preemptSessionContinueWithOptions(sess.key, { prompt: resumePrompt.value, ...payload });
+    const out = await preemptSessionContinueWithOptions(sess.key, {
+      prompt: resumePrompt.value,
+      ...payload,
+    });
     resumePrompt.value = "";
     if (out.queue) {
       closeRunLaunchMask();
@@ -3511,18 +3757,25 @@ async function onPreemptResumeTask() {
   }
 }
 
-async function buildResumeSafetyPayload(sess: SessionGroup): Promise<RunSafetyPayload | null> {
+async function buildResumeSafetyPayload(
+  sess: SessionGroup,
+): Promise<RunSafetyPayload | null> {
   errorBanner.value = "";
   const driver = resumeDriver.value;
-  const useAutopilot = runSafetyAutopilotEnabled.value && !resumeSafetyOverride.value;
+  const useAutopilot =
+    runSafetyAutopilotEnabled.value && !resumeSafetyOverride.value;
 
   let payload: RunSafetyPayload = {};
   if (useAutopilot) {
     const preset = effectiveSafetyPresetForTask(driver, sess.latest);
-    if (isHighRiskPreset(driver, preset) && !isHighRiskAllowedByInstallUnlock(driver, preset)) {
+    if (
+      isHighRiskPreset(driver, preset) &&
+      !isHighRiskAllowedByInstallUnlock(driver, preset)
+    ) {
       const ok = await requestHighRiskConfirm({
         title: "需要开启下载/安装权限",
-        message: "这个任务需要开启下载/安装权限：允许 agent 下载/安装依赖并运行安装命令。点一次「继续」即可启用并运行。",
+        message:
+          "这个任务需要开启下载/安装权限：允许 agent 下载/安装依赖并运行安装命令。点一次「继续」即可启用并运行。",
         detail: highRiskPresetSummary(driver, preset),
         confirmLabel: "继续（启用并运行）",
       });
@@ -3557,10 +3810,15 @@ async function buildResumeSafetyPayload(sess: SessionGroup): Promise<RunSafetyPa
 }
 
 async function onContinueQueuedAck(
-  ack: { position?: number; existing_task_id?: string; preempted_task_id?: string },
+  ack: {
+    position?: number;
+    existing_task_id?: string;
+    preempted_task_id?: string;
+  },
   mode: "continue" | "preempt",
 ) {
-  const pos = typeof ack.position === "number" && ack.position > 0 ? ack.position : 1;
+  const pos =
+    typeof ack.position === "number" && ack.position > 0 ? ack.position : 1;
   if (mode === "preempt") {
     const preempted = String(ack.preempted_task_id ?? "").trim();
     if (preempted) {
@@ -3631,28 +3889,28 @@ async function loadDir(path: string) {
   }
 }
 
-	function selectDir(path: string) {
-	  newWorkdir.value = path;
-	  dirPickerOpen.value = false;
-	}
+function selectDir(path: string) {
+  newWorkdir.value = path;
+  dirPickerOpen.value = false;
+}
 
-	function onDirMkdirKeydown(e: KeyboardEvent) {
-	  if (e.key === "Escape") {
-	    e.preventDefault();
-	    closeDirMkdir();
-	    return;
-	  }
-	  if (e.key !== "Enter") return;
-	  if (isImeComposing(e)) return;
-	  e.preventDefault();
-	  void createDirMkdir();
-	}
+function onDirMkdirKeydown(e: KeyboardEvent) {
+  if (e.key === "Escape") {
+    e.preventDefault();
+    closeDirMkdir();
+    return;
+  }
+  if (e.key !== "Enter") return;
+  if (isImeComposing(e)) return;
+  e.preventDefault();
+  void createDirMkdir();
+}
 
-	function openDirMkdir() {
-	  if (!dirPath.value.trim()) return;
-	  if (dirMkdirOpen.value) return;
-	  dirMkdirOpen.value = true;
-	  dirMkdirName.value = "";
+function openDirMkdir() {
+  if (!dirPath.value.trim()) return;
+  if (dirMkdirOpen.value) return;
+  dirMkdirOpen.value = true;
+  dirMkdirName.value = "";
   dirError.value = "";
   void nextTick(() => dirMkdirInputEl.value?.focus());
 }
@@ -3859,7 +4117,8 @@ function openWorkspaceFilesInNewTab() {
 function openRunWorkspaceFilesInNewTab() {
   const ws = selectedSessionWorkspace.value;
   if (!ws) return;
-  const base = String(ws.run_workdir ?? "").trim() || String(ws.run_root ?? "").trim();
+  const base =
+    String(ws.run_workdir ?? "").trim() || String(ws.run_root ?? "").trim();
   if (!base) return;
   openInNewTab(`/files?base=${encodePathForQueryValue(base)}`);
 }
@@ -3893,7 +4152,13 @@ async function ensureSelectedWorkspace() {
 
 async function mergeBackSelectedWorkspace() {
   const t = selectedTask.value;
-  if (t && (t.status === "running" || t.status === "queued" || t.status === "waiting" || t.status === "awaiting_approval")) {
+  if (
+    t &&
+    (t.status === "running" ||
+      t.status === "queued" ||
+      t.status === "waiting" ||
+      t.status === "awaiting_approval")
+  ) {
     sessionWorkspaceNotice.value = "";
     return;
   }
@@ -3925,7 +4190,13 @@ async function mergeBackSelectedWorkspace() {
 
 async function discardSelectedWorkspace() {
   const t = selectedTask.value;
-  if (t && (t.status === "running" || t.status === "queued" || t.status === "waiting" || t.status === "awaiting_approval")) {
+  if (
+    t &&
+    (t.status === "running" ||
+      t.status === "queued" ||
+      t.status === "waiting" ||
+      t.status === "awaiting_approval")
+  ) {
     sessionWorkspaceNotice.value = "";
     return;
   }
@@ -3961,7 +4232,10 @@ async function filesSave() {
   filesFileError.value = "";
   filesNotice.value = "";
   try {
-    await fsWrite({ path: filesSelectedPath.value, content: filesFileContent.value });
+    await fsWrite({
+      path: filesSelectedPath.value,
+      content: filesFileContent.value,
+    });
     filesFileOriginal.value = filesFileContent.value;
     filesNotice.value = "已保存。";
     await refreshFilesDir(dirnameForBase(filesSelectedPath.value));
@@ -4231,7 +4505,9 @@ function loadProviderIntoEditor(p: ProviderProfile) {
   providerEditID.value = String(p?.id ?? "").trim();
   providerEditName.value = String(p?.name ?? "").trim() || providerEditID.value;
 
-  providerClaudeBaseURL.value = String(p?.targets?.claude?.base_url ?? "").trim();
+  providerClaudeBaseURL.value = String(
+    p?.targets?.claude?.base_url ?? "",
+  ).trim();
   providerClaudeModel.value = String(p?.targets?.claude?.model ?? "").trim();
   providerClaudeSmallFastModel.value = String(
     p?.targets?.claude?.small_fast_model ?? "",
@@ -4257,9 +4533,13 @@ function loadProviderIntoEditor(p: ProviderProfile) {
   providerSecretarySimpleHTTPApiKey.value = "";
   providerSecretarySimpleHTTPAuthToken.value = "";
 
-  const rawSecretaryBackend = String(p?.targets?.secretary?.backend ?? "").trim();
-  if (rawSecretaryBackend === "openai-chat") providerSecretaryBackend.value = "openai-chat";
-  else if (rawSecretaryBackend === "simple-http") providerSecretaryBackend.value = "simple-http";
+  const rawSecretaryBackend = String(
+    p?.targets?.secretary?.backend ?? "",
+  ).trim();
+  if (rawSecretaryBackend === "openai-chat")
+    providerSecretaryBackend.value = "openai-chat";
+  else if (rawSecretaryBackend === "simple-http")
+    providerSecretaryBackend.value = "simple-http";
   else {
     const openai = p?.targets?.secretary?.openai_chat;
     const hasOpenAI =
@@ -4400,7 +4680,9 @@ async function deleteProviderProfile() {
   }
 }
 
-async function activateProviderTarget(target: "claude" | "codex" | "secretary") {
+async function activateProviderTarget(
+  target: "claude" | "codex" | "secretary",
+) {
   providersError.value = "";
   let id = providerEditID.value.trim();
   if (!providerEditName.value.trim()) {
@@ -4489,7 +4771,10 @@ async function runProviderPingTest() {
   providersError.value = "";
   providerPingTesting.value = true;
   try {
-    const backend = providerSecretaryBackend.value === "openai-chat" ? "openai-chat" : "simple-http";
+    const backend =
+      providerSecretaryBackend.value === "openai-chat"
+        ? "openai-chat"
+        : "simple-http";
     const res =
       backend === "openai-chat"
         ? await pingtestProvider({
@@ -4561,7 +4846,11 @@ async function importProvidersFromFile() {
     providersError.value = "导入文件不是有效的 JSON";
     return;
   }
-  if (!payload || typeof payload !== "object" || !Array.isArray(payload.profiles)) {
+  if (
+    !payload ||
+    typeof payload !== "object" ||
+    !Array.isArray(payload.profiles)
+  ) {
     providersError.value = "导入文件格式不正确：缺少 profiles 数组";
     return;
   }
@@ -4578,7 +4867,9 @@ async function importProvidersFromFile() {
   }
 }
 
-async function importProvidersFromEnv(target: "claude" | "codex" | "secretary") {
+async function importProvidersFromEnv(
+  target: "claude" | "codex" | "secretary",
+) {
   providersError.value = "";
   if (providerEditID.value.trim()) {
     providersError.value = "仅新建配置可导入环境变量";
@@ -4590,31 +4881,51 @@ async function importProvidersFromEnv(target: "claude" | "codex" | "secretary") 
     const profile = res.profile;
     const imported = Array.isArray(res.imported) ? res.imported.length : 0;
     if (target === "claude") {
-      providerClaudeBaseURL.value = String(profile?.targets?.claude?.base_url ?? providerClaudeBaseURL.value).trim();
-      providerClaudeApiKey.value = String(profile?.targets?.claude?.api_key ?? "").trim();
-      providerClaudeAuthToken.value = String(profile?.targets?.claude?.auth_token ?? "").trim();
-      providerClaudeModel.value = String(profile?.targets?.claude?.model ?? providerClaudeModel.value).trim();
+      providerClaudeBaseURL.value = String(
+        profile?.targets?.claude?.base_url ?? providerClaudeBaseURL.value,
+      ).trim();
+      providerClaudeApiKey.value = String(
+        profile?.targets?.claude?.api_key ?? "",
+      ).trim();
+      providerClaudeAuthToken.value = String(
+        profile?.targets?.claude?.auth_token ?? "",
+      ).trim();
+      providerClaudeModel.value = String(
+        profile?.targets?.claude?.model ?? providerClaudeModel.value,
+      ).trim();
       providerClaudeSmallFastModel.value = String(
-        profile?.targets?.claude?.small_fast_model ?? providerClaudeSmallFastModel.value,
+        profile?.targets?.claude?.small_fast_model ??
+          providerClaudeSmallFastModel.value,
       ).trim();
     } else if (target === "codex") {
-      providerCodexBaseURL.value = String(profile?.targets?.codex?.base_url ?? providerCodexBaseURL.value).trim();
-      providerCodexApiKey.value = String(profile?.targets?.codex?.api_key ?? "").trim();
-      providerCodexModel.value = String(profile?.targets?.codex?.model ?? providerCodexModel.value).trim();
+      providerCodexBaseURL.value = String(
+        profile?.targets?.codex?.base_url ?? providerCodexBaseURL.value,
+      ).trim();
+      providerCodexApiKey.value = String(
+        profile?.targets?.codex?.api_key ?? "",
+      ).trim();
+      providerCodexModel.value = String(
+        profile?.targets?.codex?.model ?? providerCodexModel.value,
+      ).trim();
       providerCodexReasoningEffort.value = String(
-        profile?.targets?.codex?.reasoning_effort ?? providerCodexReasoningEffort.value,
+        profile?.targets?.codex?.reasoning_effort ??
+          providerCodexReasoningEffort.value,
       ).trim();
     } else {
       providerSecretaryBackend.value = "simple-http";
       providerSecretarySimpleHTTPBaseURL.value = String(
-        profile?.targets?.secretary?.simple_http?.base_url ?? providerSecretarySimpleHTTPBaseURL.value,
+        profile?.targets?.secretary?.simple_http?.base_url ??
+          providerSecretarySimpleHTTPBaseURL.value,
       ).trim();
-      providerSecretarySimpleHTTPApiKey.value = String(profile?.targets?.secretary?.simple_http?.api_key ?? "").trim();
+      providerSecretarySimpleHTTPApiKey.value = String(
+        profile?.targets?.secretary?.simple_http?.api_key ?? "",
+      ).trim();
       providerSecretarySimpleHTTPAuthToken.value = String(
         profile?.targets?.secretary?.simple_http?.auth_token ?? "",
       ).trim();
       providerSecretarySimpleHTTPModel.value = String(
-        profile?.targets?.secretary?.simple_http?.model ?? providerSecretarySimpleHTTPModel.value,
+        profile?.targets?.secretary?.simple_http?.model ??
+          providerSecretarySimpleHTTPModel.value,
       ).trim();
     }
     if (imported === 0) {
@@ -4725,7 +5036,10 @@ function toolDriverForWorkerType(workerType: string): ToolDriver {
   return "exec";
 }
 
-function isHighRiskAllowedByInstallUnlock(driver: ToolDriver, preset: string): boolean {
+function isHighRiskAllowedByInstallUnlock(
+  driver: ToolDriver,
+  preset: string,
+): boolean {
   if (!runSafetyInstallUnlock.value) return false;
   const p = String(preset ?? "").trim();
   if (driver === "codex") return p === "danger-full-access";
@@ -4733,7 +5047,11 @@ function isHighRiskAllowedByInstallUnlock(driver: ToolDriver, preset: string): b
   return false;
 }
 
-function setStringMapKey(map: { value: Record<string, string> }, key: string, value: string) {
+function setStringMapKey(
+  map: { value: Record<string, string> },
+  key: string,
+  value: string,
+) {
   const k = String(key ?? "").trim();
   if (!k) return;
   const v = String(value ?? "").trim();
@@ -4743,12 +5061,21 @@ function setStringMapKey(map: { value: Record<string, string> }, key: string, va
   map.value = next;
 }
 
-function buildSafetyEnvelopePayload(): Pick<RunSafetyPayload, "safety_envelope"> {
-  return runSafetyInstallUnlock.value ? { safety_envelope: "install-enabled" } : {};
+function buildSafetyEnvelopePayload(): Pick<
+  RunSafetyPayload,
+  "safety_envelope"
+> {
+  return runSafetyInstallUnlock.value
+    ? { safety_envelope: "install-enabled" }
+    : {};
 }
 
-const newRunDriver = computed<ToolDriver>(() => toolDriverForWorkerType(newWorkerType.value));
-const homeCanUseSkills = computed<boolean>(() => newRunDriver.value === "claude-code" || newRunDriver.value === "codex");
+const newRunDriver = computed<ToolDriver>(() =>
+  toolDriverForWorkerType(newWorkerType.value),
+);
+const homeCanUseSkills = computed<boolean>(
+  () => newRunDriver.value === "claude-code" || newRunDriver.value === "codex",
+);
 const newRunSafetyPreset = computed<string>({
   get: () =>
     normalizeSafetyPreset(
@@ -4756,13 +5083,16 @@ const newRunSafetyPreset = computed<string>({
       "code",
       runSafetyPresetByTool.value[newWorkerType.value] ?? "",
     ),
-  set: (value) => setStringMapKey(runSafetyPresetByTool, newWorkerType.value, value),
+  set: (value) =>
+    setStringMapKey(runSafetyPresetByTool, newWorkerType.value, value),
 });
 
 const newRunUseAutopilot = computed<boolean>(
   () => runSafetyAutopilotEnabled.value && !newRunSafetyOverride.value,
 );
-const newRunShowManualSafety = computed<boolean>(() => !newRunUseAutopilot.value);
+const newRunShowManualSafety = computed<boolean>(
+  () => !newRunUseAutopilot.value,
+);
 
 watch([newWorkerType, newRunSafetyPreset], () => {
   newRunHighRiskOptIn.value = false;
@@ -4773,7 +5103,9 @@ function formatArgsForEdit(args?: string[]) {
 }
 
 function formatEnvForEdit(env?: Record<string, string>) {
-  const entries = Object.entries(env ?? {}).sort((a, b) => a[0].localeCompare(b[0]));
+  const entries = Object.entries(env ?? {}).sort((a, b) =>
+    a[0].localeCompare(b[0]),
+  );
   return entries.map(([k, v]) => `${k}=${v}`).join("\n");
 }
 
@@ -4788,7 +5120,8 @@ function openToolsSettings() {
   toolsError.value = "";
   toolsSettingsOpen.value = true;
   if (!toolsList.value.length) void refreshTools();
-  const selected = toolForID(toolsSelectedID.value) ?? toolsList.value[0] ?? null;
+  const selected =
+    toolForID(toolsSelectedID.value) ?? toolsList.value[0] ?? null;
   if (selected) loadToolIntoEditor(selected);
 }
 
@@ -4872,9 +5205,11 @@ async function importAuthEnv(target: "claude" | "codex" | "all") {
     const skipped = Array.isArray(res.skipped) ? res.skipped : [];
     if (imported.length) {
       authSettingsNotice.value =
-        `已将环境变量保存到本地（${imported.length} 项）：` + imported.join(", ");
+        `已将环境变量保存到本地（${imported.length} 项）：` +
+        imported.join(", ");
     } else if (skipped.length) {
-      authSettingsNotice.value = "未发现可保存项：相关字段已保存过（不会覆盖）。";
+      authSettingsNotice.value =
+        "未发现可保存项：相关字段已保存过（不会覆盖）。";
     } else {
       authSettingsNotice.value = "未检测到可保存的环境变量。";
     }
@@ -4976,12 +5311,21 @@ onMounted(async () => {
     if (selectedTaskId.value) await loadLogs(selectedTaskId.value);
     await refreshAuth();
     await refreshTools();
-    if (missingAuthText.value && !authSettingsOpen.value && !runningSessionsStartupOpen.value) openAuthSettings();
+    if (
+      missingAuthText.value &&
+      !authSettingsOpen.value &&
+      !runningSessionsStartupOpen.value
+    )
+      openAuthSettings();
   }
   connectEvents();
   window.addEventListener("keydown", onGlobalKeyDown);
   window.addEventListener("popstate", onRoutePopState);
-  document.addEventListener("mousedown", onSessionActionsMenuDocumentMouseDown, true);
+  document.addEventListener(
+    "mousedown",
+    onSessionActionsMenuDocumentMouseDown,
+    true,
+  );
   document.addEventListener("mousedown", onHeaderMoreDocumentMouseDown, true);
   window.addEventListener("keydown", onSessionActionsMenuKeyDown, true);
   window.addEventListener("resize", closeSessionActionsMenu, true);
@@ -5016,8 +5360,16 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   window.removeEventListener("keydown", onGlobalKeyDown);
   window.removeEventListener("popstate", onRoutePopState);
-  document.removeEventListener("mousedown", onSessionActionsMenuDocumentMouseDown, true);
-  document.removeEventListener("mousedown", onHeaderMoreDocumentMouseDown, true);
+  document.removeEventListener(
+    "mousedown",
+    onSessionActionsMenuDocumentMouseDown,
+    true,
+  );
+  document.removeEventListener(
+    "mousedown",
+    onHeaderMoreDocumentMouseDown,
+    true,
+  );
   window.removeEventListener("keydown", onSessionActionsMenuKeyDown, true);
   window.removeEventListener("resize", closeSessionActionsMenu, true);
   window.removeEventListener("scroll", closeSessionActionsMenu, true);
@@ -5066,7 +5418,11 @@ const sessionsAll = computed<SessionGroup[]>(() => {
     runs.sort((a, b) => a.created_at.localeCompare(b.created_at));
     const latest = runs[runs.length - 1];
     const lastRunAt = String(
-      latest.finished_at ?? latest.started_at ?? latest.created_at ?? latest.updated_at ?? "",
+      latest.finished_at ??
+        latest.started_at ??
+        latest.created_at ??
+        latest.updated_at ??
+        "",
     ).trim();
 
     let score = 0;
@@ -5078,8 +5434,10 @@ const sessionsAll = computed<SessionGroup[]>(() => {
       score = Math.max(score, r.score);
       stderrCount = Math.max(stderrCount, r.stderr_count);
       if (!warning && r.warning) warning = r.warning;
-      if (!title && (r.session_title ?? "").trim()) title = (r.session_title ?? "").trim();
-      if (!deletedAt && (r.session_deleted_at ?? "").trim()) deletedAt = (r.session_deleted_at ?? "").trim();
+      if (!title && (r.session_title ?? "").trim())
+        title = (r.session_title ?? "").trim();
+      if (!deletedAt && (r.session_deleted_at ?? "").trim())
+        deletedAt = (r.session_deleted_at ?? "").trim();
     }
 
     out.push({
@@ -5154,7 +5512,12 @@ const selectedSessionInFlightTask = computed<Task | null>(() => {
   if (!sess) return null;
   for (let i = sess.runs.length - 1; i >= 0; i -= 1) {
     const r = sess.runs[i];
-    if (r.status === "running" || r.status === "queued" || r.status === "waiting" || r.status === "awaiting_approval") {
+    if (
+      r.status === "running" ||
+      r.status === "queued" ||
+      r.status === "waiting" ||
+      r.status === "awaiting_approval"
+    ) {
       return r;
     }
   }
@@ -5224,15 +5587,31 @@ const sessionPrimaryAction = computed<SessionPrimaryActionMeta>(() => {
     case "resolve_approval":
       return { action: next.action, label: "审批…", reason: next.reason };
     case "wait_in_flight":
-      return { action: next.action, label: "查看运行中任务", reason: next.reason };
+      return {
+        action: next.action,
+        label: "查看运行中任务",
+        reason: next.reason,
+      };
     case "merge_workspace":
       return { action: next.action, label: "Merge back", reason: next.reason };
     case "resume_run":
-      return { action: next.action, label: "继续（推荐）", reason: next.reason };
+      return {
+        action: next.action,
+        label: "继续（推荐）",
+        reason: next.reason,
+      };
     case "start_run":
-      return { action: next.action, label: "开始运行（推荐）", reason: next.reason };
+      return {
+        action: next.action,
+        label: "开始运行（推荐）",
+        reason: next.reason,
+      };
     case "confirm_contract":
-      return { action: next.action, label: "确认任务契约", reason: next.reason };
+      return {
+        action: next.action,
+        label: "确认任务契约",
+        reason: next.reason,
+      };
     default:
       return { action: "resume_run", label: "继续", reason: next.reason };
   }
@@ -5246,7 +5625,12 @@ const sessionPrimaryActionDisabled = computed<boolean>(() => {
   switch (sessionPrimaryAction.value.action) {
     case "resume_run":
     case "start_run":
-      return !sess.session_id || !!sess.deleted_at || highRiskConfirmOpen.value || taskPlaneDegraded.value;
+      return (
+        !sess.session_id ||
+        !!sess.deleted_at ||
+        highRiskConfirmOpen.value ||
+        taskPlaneDegraded.value
+      );
     case "merge_workspace":
       return (
         sessionWorkspaceLoading.value ||
@@ -5274,7 +5658,9 @@ async function onPrimarySessionAction() {
 
   switch (primary.action) {
     case "resolve_approval": {
-      const targetTaskID = String(sessionNextAction.value?.task_id ?? "").trim();
+      const targetTaskID = String(
+        sessionNextAction.value?.task_id ?? "",
+      ).trim();
       if (targetTaskID) selectedTaskId.value = targetTaskID;
       const target = targetTaskID || selectedTask.value?.id || "";
       if (!target) return;
@@ -5327,7 +5713,10 @@ async function onPrimarySessionAction() {
   errorBanner.value = "";
   sessionPrimaryActionBusy.value = true;
   try {
-    openRunLaunchMask({ title: "执行推荐动作中…", detail: "正在按 NextAction 执行…" });
+    openRunLaunchMask({
+      title: "执行推荐动作中…",
+      detail: "正在按 NextAction 执行…",
+    });
     const out = await executeSessionNextAction(sess.key, {
       action: primary.action,
       prompt: resumePrompt.value,
@@ -5362,7 +5751,9 @@ async function onPrimarySessionAction() {
 const resumeDriver = computed<ToolDriver>(() =>
   toolDriverForWorkerType(selectedSession.value?.worker_type ?? ""),
 );
-const resumeCanUseSkills = computed<boolean>(() => resumeDriver.value === "claude-code" || resumeDriver.value === "codex");
+const resumeCanUseSkills = computed<boolean>(
+  () => resumeDriver.value === "claude-code" || resumeDriver.value === "codex",
+);
 
 type SkillsInsertContext = "home" | "resume" | null;
 const skillsInsertOpen = ref(false);
@@ -5378,10 +5769,14 @@ const skillsInsertDriver = computed<ToolDriver>(() => {
   }
 });
 
-const skillsInsertPromptEl = computed<HTMLInputElement | HTMLTextAreaElement | null>(() => {
+const skillsInsertPromptEl = computed<
+  HTMLInputElement | HTMLTextAreaElement | null
+>(() => {
   switch (skillsInsertContext.value) {
     case "resume":
-      return resumeExpanded.value ? resumePromptTextEl.value : resumePromptInputEl.value;
+      return resumeExpanded.value
+        ? resumePromptTextEl.value
+        : resumePromptInputEl.value;
     case "home":
       return homePromptEl.value;
     default:
@@ -5419,7 +5814,10 @@ function closeSkillsInsert() {
   skillsInsertContext.value = null;
 }
 
-function atBlankLineStart(el: HTMLTextAreaElement | HTMLInputElement, value: string): boolean {
+function atBlankLineStart(
+  el: HTMLTextAreaElement | HTMLInputElement,
+  value: string,
+): boolean {
   const pos = el.selectionStart ?? 0;
   const before = value.slice(0, pos);
   const lineStart = before.lastIndexOf("\n") + 1;
@@ -5470,7 +5868,10 @@ const resumeSafetyPreset = computed<string>({
   get: () => {
     const sess = selectedSession.value;
     if (!sess) return "";
-    const raw = runSafetyPresetByTool.value[sess.worker_type] ?? sess.latest.safety_preset ?? "";
+    const raw =
+      runSafetyPresetByTool.value[sess.worker_type] ??
+      sess.latest.safety_preset ??
+      "";
     const intent = normalizeTaskIntent(sess.latest.task_intent ?? "code");
     return normalizeSafetyPreset(resumeDriver.value, intent, raw);
   },
@@ -5484,7 +5885,9 @@ const resumeSafetyPreset = computed<string>({
 const resumeUseAutopilot = computed<boolean>(
   () => runSafetyAutopilotEnabled.value && !resumeSafetyOverride.value,
 );
-const resumeShowManualSafety = computed<boolean>(() => !resumeUseAutopilot.value);
+const resumeShowManualSafety = computed<boolean>(
+  () => !resumeUseAutopilot.value,
+);
 const resumeAutopilotHighRiskBlocked = computed<boolean>(() => {
   if (!resumeUseAutopilot.value) return false;
   const sess = selectedSession.value;
@@ -5531,7 +5934,9 @@ watch(
 );
 
 const recentWorkspaces = computed(() => {
-  const taskRecents = listRecentWorkspacePaths(Array.from(tasks.value.values()));
+  const taskRecents = listRecentWorkspacePaths(
+    Array.from(tasks.value.values()),
+  );
   return mergeWorkspaceRecents(workspaceRecents.value, taskRecents);
 });
 
@@ -5699,10 +6104,13 @@ watch(
   { immediate: true },
 );
 
-watch([theme, filePreviewOpen, filePreviewTab, filePreviewMarkdownHtml], async () => {
-  applyMermaidTheme();
-  await renderFilePreviewMermaidIfNeeded();
-});
+watch(
+  [theme, filePreviewOpen, filePreviewTab, filePreviewMarkdownHtml],
+  async () => {
+    applyMermaidTheme();
+    await renderFilePreviewMermaidIfNeeded();
+  },
+);
 
 let feedCoachTimer: number | null = null;
 watch(
@@ -5752,7 +6160,13 @@ watch(
         </div>
         <div
           class="controlPlanePills"
-          :title="controlPlaneError ? `control plane status error: ${controlPlaneError}` : (controlPlaneLoading ? 'checking control plane…' : 'control plane')"
+          :title="
+            controlPlaneError
+              ? `control plane status error: ${controlPlaneError}`
+              : controlPlaneLoading
+                ? 'checking control plane…'
+                : 'control plane'
+          "
         >
           <span
             :class="['controlPlanePill', runnerdState]"
@@ -5777,86 +6191,114 @@ watch(
         >
           技能
         </button>
-	        <button type="button" class="primary" @click="openNewRun" :disabled="taskPlaneDegraded" :title="taskPlaneDegraded ? 'runnerd unavailable' : ''">
-	          新建运行
-	        </button>
-          <details ref="headerMoreEl" class="headerMore">
-            <summary class="headerMoreBtn" title="更多" aria-label="更多">⋯</summary>
-            <div class="headerMorePopup">
-              <button type="button" class="headerMoreItem" @click="onToggleThemeFromMenu">
-                {{ theme === "dark" ? "白天" : "夜间" }}
-              </button>
-              <button
-                type="button"
-                class="headerMoreItem"
-                @click="onToggleReducedFxFromMenu"
-                :title="
-                  fxReduced
-                    ? '恢复模糊/玻璃效果'
-                    : '减少模糊/玻璃效果（低功耗设备更流畅）'
-                "
+        <button
+          type="button"
+          class="primary"
+          @click="openNewRun"
+          :disabled="taskPlaneDegraded"
+          :title="taskPlaneDegraded ? 'runnerd unavailable' : ''"
+        >
+          新建运行
+        </button>
+        <details ref="headerMoreEl" class="headerMore">
+          <summary class="headerMoreBtn" title="更多" aria-label="更多">
+            ⋯
+          </summary>
+          <div class="headerMorePopup">
+            <button
+              type="button"
+              class="headerMoreItem"
+              @click="onToggleThemeFromMenu"
+            >
+              {{ theme === "dark" ? "白天" : "夜间" }}
+            </button>
+            <button
+              type="button"
+              class="headerMoreItem"
+              @click="onToggleReducedFxFromMenu"
+              :title="
+                fxReduced
+                  ? '恢复模糊/玻璃效果'
+                  : '减少模糊/玻璃效果（低功耗设备更流畅）'
+              "
+            >
+              {{ fxReduced ? "恢复特效" : "减少特效" }}
+            </button>
+            <button
+              type="button"
+              class="headerMoreItem"
+              @click="onOpenLiveFromMenu"
+              :title="anyRunning ? '打开实时（L · 运行中）' : '打开实时（L）'"
+            >
+              <span v-if="anyRunning" class="liveDot" aria-hidden="true"
+                >●</span
               >
-                {{ fxReduced ? "恢复特效" : "减少特效" }}
-              </button>
-              <button
-                type="button"
-                class="headerMoreItem"
-                @click="onOpenLiveFromMenu"
-                :title="anyRunning ? '打开实时（L · 运行中）' : '打开实时（L）'"
-              >
-                <span v-if="anyRunning" class="liveDot" aria-hidden="true">●</span>
-                实时
-              </button>
-              <button type="button" class="headerMoreItem" @click="onOpenSecretaryFromMenu">
-                秘书
-              </button>
-              <button type="button" class="headerMoreItem" @click="onOpenSettingsFromMenu">
-                设置
-              </button>
-            </div>
-          </details>
-	      </div>
-	    </header>
+              实时
+            </button>
+            <button
+              type="button"
+              class="headerMoreItem"
+              @click="onOpenSecretaryFromMenu"
+            >
+              秘书
+            </button>
+            <button
+              type="button"
+              class="headerMoreItem"
+              @click="onOpenSettingsFromMenu"
+            >
+              设置
+            </button>
+          </div>
+        </details>
+      </div>
+    </header>
 
-    <div v-if="controlPlaneBanner" class="banner warn">{{ controlPlaneBanner }}</div>
+    <div v-if="controlPlaneBanner" class="banner warn">
+      {{ controlPlaneBanner }}
+    </div>
     <div v-if="errorBanner" class="banner">{{ errorBanner }}</div>
 
-    <div v-if="isPhone && showSessionsPanel" class="sessionsOverlay" @click.self="sessionsDrawerOpen = false"></div>
+    <div
+      v-if="isPhone && showSessionsPanel"
+      class="sessionsOverlay"
+      @click.self="sessionsDrawerOpen = false"
+    ></div>
 
     <div class="grid" :class="{ gridSingle: !showSessionsPanel }">
-	      <section v-if="skillsOpen" class="panel skillsPagePanel">
-	          <div class="skillsPageWrap">
-            <SkillsPanel
-              :loading="skillsLoading"
-              :error="skillsError"
-              :data="skillsData"
-              v-model:filter="skillsFilter"
-              v-model:repo-filter="skillsRepoFilter"
-              v-model:group-by-repo="skillsGroupByRepo"
-              v-model:limit="skillsLimit"
-              :range-label="skillsRangeLabel"
-              :can-prev="skillsCanPrev"
-              :can-next="skillsCanNext"
-              :action-busy="skillsActionBusy"
-              :summarize-target="summarizeSkillTarget"
-              :badge-class="skillBadgeClass"
-              :make-key="skillsKey"
-	              @refresh="refreshSkills"
-	              @openGovernance="openSkillsGovernance"
-	              @prev-page="skillsPrevPage"
-	              @next-page="skillsNextPage"
-	              @toggle="onSkillsToggle"
-	              @takeover="onSkillsTakeover"
-	              @openVersions="openSkillVersions"
-	            />
-          </div>
-	      </section>
+      <section v-if="skillsOpen" class="panel skillsPagePanel">
+        <div class="skillsPageWrap">
+          <SkillsPanel
+            :loading="skillsLoading"
+            :error="skillsError"
+            :data="skillsData"
+            v-model:filter="skillsFilter"
+            v-model:repo-filter="skillsRepoFilter"
+            v-model:group-by-repo="skillsGroupByRepo"
+            v-model:limit="skillsLimit"
+            :range-label="skillsRangeLabel"
+            :can-prev="skillsCanPrev"
+            :can-next="skillsCanNext"
+            :action-busy="skillsActionBusy"
+            :summarize-target="summarizeSkillTarget"
+            :badge-class="skillBadgeClass"
+            :make-key="skillsKey"
+            @refresh="refreshSkills"
+            @openGovernance="openSkillsGovernance"
+            @prev-page="skillsPrevPage"
+            @next-page="skillsNextPage"
+            @toggle="onSkillsToggle"
+            @takeover="onSkillsTakeover"
+            @openVersions="openSkillVersions"
+          />
+        </div>
+      </section>
 
-	      <section v-else-if="contextOpen" class="panel contextPagePanel">
-	        <div class="contextPageWrap">
-	          <ContextPanel @back="closeContextPage" />
-	        </div>
-	      </section>
+      <section v-else-if="contextOpen" class="panel contextPagePanel">
+        <div class="contextPageWrap">
+          <ContextPanel @back="closeContextPage" />
+        </div>
+      </section>
 
       <FilesModal
         v-else-if="filesOpen"
@@ -5895,824 +6337,944 @@ watch(
       />
 
       <template v-else>
-      <section
-        v-if="showSessionsPanel"
-        class="panel sessionsPanel"
-        :class="{ sessionsDrawerPanel: isPhone }"
-      >
-        <h2>
-          Sessions
-          <span class="h2Spacer"></span>
-          <span class="h2Meta"
-            >{{ pagedSessions.length }} / {{ filteredSessions.length }}</span
-          >
-          <button
-            type="button"
-            class="h2Btn"
-            @click="sessionsDrawerOpen = false"
-            aria-label="Close sessions"
-          >
-            ✕
-          </button>
-        </h2>
-        <div class="list">
-          <div class="workspaceBar">
-            <div class="workspaceLeft">
-              <span class="workspaceTitle">Workspace</span>
-              <select v-model="workspaceSelect">
-                <option value="">All</option>
-                <optgroup v-if="pinnedWorkspaces.length" label="Pinned">
-                  <option
-                    v-for="p in pinnedWorkspaces"
-                    :key="'p-' + p"
-                    :value="p"
-                  >
-                    {{ workspaceOptionLabel(p) }}
-                  </option>
-                </optgroup>
-                <optgroup v-if="recentWorkspacesUnpinned.length" label="Recent">
-                  <option
-                    v-for="p in recentWorkspacesUnpinned"
-                    :key="'r-' + p"
-                    :value="p"
-                  >
-                    {{ p }}
-                  </option>
-                </optgroup>
-              </select>
-            </div>
-            <button
-              type="button"
-              @click="sessionsFiltersOpen = !sessionsFiltersOpen"
+        <section
+          v-if="showSessionsPanel"
+          class="panel sessionsPanel"
+          :class="{ sessionsDrawerPanel: isPhone }"
+        >
+          <h2>
+            Sessions
+            <span class="h2Spacer"></span>
+            <span class="h2Meta"
+              >{{ pagedSessions.length }} / {{ filteredSessions.length }}</span
             >
-              {{
-                sessionsFiltersOpen
-                  ? "Less"
-                  : workspaceFilters.length
-                    ? `Filters (${workspaceFilters.length})`
-                    : "Filters"
-              }}
-            </button>
             <button
               type="button"
-              @click="clearWorkspace"
-              :disabled="workspaceFilters.length === 0"
-              title="Clear workspace filters"
-            >
-              All
-            </button>
-          </div>
-
-          <div v-if="sessionsFiltersOpen" class="filtersBlock">
-            <div class="filtersActions">
-              <button
-                type="button"
-                @click="setWorkspace(newWorkdir)"
-                :disabled="!newWorkdir.trim()"
-              >
-                Set Workdir
-              </button>
-              <button
-                type="button"
-                @click="addWorkspaceFilter(newWorkdir)"
-                :disabled="!newWorkdir.trim()"
-                title="Add workdir as an extra workspace filter"
-              >
-                Add Workdir
-              </button>
-              <button
-                type="button"
-                @click="pinWorkspace(workspaceSelect || newWorkdir)"
-                :disabled="!(workspaceSelect || newWorkdir).trim()"
-              >
-                Pin
-              </button>
-            </div>
-
-              <div v-if="workspaceFilters.length" class="activeFilters">
-              <div class="filtersTitle">Active</div>
-              <div class="pinnedWorkspaces">
-                <div v-for="p in workspaceFilters" :key="'a-' + p" class="pinnedItem">
-                  <button
-                    type="button"
-                    class="pinnedBtn active"
-                    @click="toggleWorkspaceFilter(p)"
-                    :title="p"
-                  >
-                    <template v-if="pinnedWorkspaceName(p)">
-                      <span class="pinName">{{ pinnedWorkspaceName(p) }}</span>
-                      <span class="pinSub mono">{{ p }}</span>
-                    </template>
-                    <span v-else class="mono">{{ p }}</span>
-                  </button>
-                  <button
-                    type="button"
-                    class="pinnedX"
-                    @click="removeWorkspaceFilter(p)"
-                    title="Remove"
-                  >
-                    ✕
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            <div v-if="pinnedWorkspaces.length" class="activeFilters">
-              <div class="filtersTitle">Pinned</div>
-              <div class="pinnedWorkspaces">
-                <div v-for="p in pinnedWorkspaces" :key="p" class="pinnedItem">
-                  <button
-                    type="button"
-                    class="pinnedBtn"
-                    :class="{
-                      active: workspaceFilters.some(
-                        (x) =>
-                          normalizePathForCompare(x) === normalizePathForCompare(p),
-                      ),
-                    }"
-                    @click="toggleWorkspaceFilter(p)"
-                    :title="p"
-                  >
-                    <template v-if="pinnedWorkspaceName(p)">
-                      <span class="pinName">{{ pinnedWorkspaceName(p) }}</span>
-                      <span class="pinSub mono">{{ p }}</span>
-                    </template>
-                    <span v-else class="mono">{{ p }}</span>
-                  </button>
-                  <button
-                    type="button"
-                    class="pinnedEdit"
-                    @click="openWorkspaceRename(p)"
-                    title="Rename"
-                  >
-                    ✎
-                  </button>
-                  <button
-                    type="button"
-                    class="pinnedX"
-                    @click="unpinWorkspace(p)"
-                    title="Unpin"
-                  >
-                    ✕
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            <div class="activeFilters">
-              <div class="filtersTitle">Sessions</div>
-              <label class="settingsToggleRow">
-                <input type="checkbox" v-model="sessionsShowDeleted" />
-                <span>Show deleted</span>
-              </label>
-              <div class="tinyHint">Soft-deleted sessions are hidden by default.</div>
-            </div>
-          </div>
-
-          <div class="sessionSearchRow">
-            <input
-              v-model="sessionSearch"
-              placeholder="Search sessions (id/workdir/prompt/status)..."
-            />
-            <button
-              type="button"
-              @click="sessionSearch = ''"
-              :disabled="!sessionSearch.trim()"
-              title="Clear"
+              class="h2Btn"
+              @click="sessionsDrawerOpen = false"
+              aria-label="Close sessions"
             >
               ✕
             </button>
-          </div>
+          </h2>
+          <div class="list">
+            <div class="workspaceBar">
+              <div class="workspaceLeft">
+                <span class="workspaceTitle">Workspace</span>
+                <select v-model="workspaceSelect">
+                  <option value="">All</option>
+                  <optgroup v-if="pinnedWorkspaces.length" label="Pinned">
+                    <option
+                      v-for="p in pinnedWorkspaces"
+                      :key="'p-' + p"
+                      :value="p"
+                    >
+                      {{ workspaceOptionLabel(p) }}
+                    </option>
+                  </optgroup>
+                  <optgroup
+                    v-if="recentWorkspacesUnpinned.length"
+                    label="Recent"
+                  >
+                    <option
+                      v-for="p in recentWorkspacesUnpinned"
+                      :key="'r-' + p"
+                      :value="p"
+                    >
+                      {{ p }}
+                    </option>
+                  </optgroup>
+                </select>
+              </div>
+              <button
+                type="button"
+                @click="sessionsFiltersOpen = !sessionsFiltersOpen"
+              >
+                {{
+                  sessionsFiltersOpen
+                    ? "Less"
+                    : workspaceFilters.length
+                      ? `Filters (${workspaceFilters.length})`
+                      : "Filters"
+                }}
+              </button>
+              <button
+                type="button"
+                @click="clearWorkspace"
+                :disabled="workspaceFilters.length === 0"
+                title="Clear workspace filters"
+              >
+                All
+              </button>
+            </div>
 
-          <div class="listMeta">
-            Showing {{ pagedSessions.length }} / {{ filteredSessions.length }}
-            sessions
-            <span v-if="workspaceFilters.length">
-              · workspaces {{ workspaceFilters.length }}
-            </span>
-          </div>
+            <div v-if="sessionsFiltersOpen" class="filtersBlock">
+              <div class="filtersActions">
+                <button
+                  type="button"
+                  @click="setWorkspace(newWorkdir)"
+                  :disabled="!newWorkdir.trim()"
+                >
+                  Set Workdir
+                </button>
+                <button
+                  type="button"
+                  @click="addWorkspaceFilter(newWorkdir)"
+                  :disabled="!newWorkdir.trim()"
+                  title="Add workdir as an extra workspace filter"
+                >
+                  Add Workdir
+                </button>
+                <button
+                  type="button"
+                  @click="pinWorkspace(workspaceSelect || newWorkdir)"
+                  :disabled="!(workspaceSelect || newWorkdir).trim()"
+                >
+                  Pin
+                </button>
+              </div>
 
-          <div
-            v-for="s in pagedSessions"
-            :key="s.key"
-            class="row"
-            :class="{ active: s.key === selectedSessionKey, deleted: !!s.deleted_at }"
-            :title="s.latest.warning || s.warning || undefined"
-            role="button"
-            tabindex="0"
-            @click="onSelectTask(s.latest.id)"
-            @keydown.enter.prevent="onSelectTask(s.latest.id)"
-            @keydown.space.prevent="onSelectTask(s.latest.id)"
-          >
-	            <div class="rowTop">
-	              <div class="rowTopLeft">
-	                <span v-if="s.title" class="rowName" :title="s.title">{{
-	                  s.title
-	                }}</span>
+              <div v-if="workspaceFilters.length" class="activeFilters">
+                <div class="filtersTitle">Active</div>
+                <div class="pinnedWorkspaces">
+                  <div
+                    v-for="p in workspaceFilters"
+                    :key="'a-' + p"
+                    class="pinnedItem"
+                  >
+                    <button
+                      type="button"
+                      class="pinnedBtn active"
+                      @click="toggleWorkspaceFilter(p)"
+                      :title="p"
+                    >
+                      <template v-if="pinnedWorkspaceName(p)">
+                        <span class="pinName">{{
+                          pinnedWorkspaceName(p)
+                        }}</span>
+                        <span class="pinSub mono">{{ p }}</span>
+                      </template>
+                      <span v-else class="mono">{{ p }}</span>
+                    </button>
+                    <button
+                      type="button"
+                      class="pinnedX"
+                      @click="removeWorkspaceFilter(p)"
+                      title="Remove"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div v-if="pinnedWorkspaces.length" class="activeFilters">
+                <div class="filtersTitle">Pinned</div>
+                <div class="pinnedWorkspaces">
+                  <div
+                    v-for="p in pinnedWorkspaces"
+                    :key="p"
+                    class="pinnedItem"
+                  >
+                    <button
+                      type="button"
+                      class="pinnedBtn"
+                      :class="{
+                        active: workspaceFilters.some(
+                          (x) =>
+                            normalizePathForCompare(x) ===
+                            normalizePathForCompare(p),
+                        ),
+                      }"
+                      @click="toggleWorkspaceFilter(p)"
+                      :title="p"
+                    >
+                      <template v-if="pinnedWorkspaceName(p)">
+                        <span class="pinName">{{
+                          pinnedWorkspaceName(p)
+                        }}</span>
+                        <span class="pinSub mono">{{ p }}</span>
+                      </template>
+                      <span v-else class="mono">{{ p }}</span>
+                    </button>
+                    <button
+                      type="button"
+                      class="pinnedEdit"
+                      @click="openWorkspaceRename(p)"
+                      title="Rename"
+                    >
+                      ✎
+                    </button>
+                    <button
+                      type="button"
+                      class="pinnedX"
+                      @click="unpinWorkspace(p)"
+                      title="Unpin"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div class="activeFilters">
+                <div class="filtersTitle">Sessions</div>
+                <label class="settingsToggleRow">
+                  <input type="checkbox" v-model="sessionsShowDeleted" />
+                  <span>Show deleted</span>
+                </label>
+                <div class="tinyHint">
+                  Soft-deleted sessions are hidden by default.
+                </div>
+              </div>
+            </div>
+
+            <div class="sessionSearchRow">
+              <input
+                v-model="sessionSearch"
+                placeholder="Search sessions (id/workdir/prompt/status)..."
+              />
+              <button
+                type="button"
+                @click="sessionSearch = ''"
+                :disabled="!sessionSearch.trim()"
+                title="Clear"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div class="listMeta">
+              Showing {{ pagedSessions.length }} / {{ filteredSessions.length }}
+              sessions
+              <span v-if="workspaceFilters.length">
+                · workspaces {{ workspaceFilters.length }}
+              </span>
+            </div>
+
+            <div
+              v-for="s in pagedSessions"
+              :key="s.key"
+              class="row"
+              :class="{
+                active: s.key === selectedSessionKey,
+                deleted: !!s.deleted_at,
+              }"
+              :title="s.latest.warning || s.warning || undefined"
+              role="button"
+              tabindex="0"
+              @click="onSelectTask(s.latest.id)"
+              @keydown.enter.prevent="onSelectTask(s.latest.id)"
+              @keydown.space.prevent="onSelectTask(s.latest.id)"
+            >
+              <div class="rowTop">
+                <div class="rowTopLeft">
+                  <span v-if="s.title" class="rowName" :title="s.title">{{
+                    s.title
+                  }}</span>
                   <span v-else class="rowName mono" :title="s.workdir">{{
                     workdirLabelForSession(s.workdir)
                   }}</span>
-	                <span v-if="s.deleted_at" class="pill deleted">deleted</span>
+                  <span v-if="s.deleted_at" class="pill deleted">deleted</span>
+                </div>
+                <div class="rowTopRight">
+                  <span
+                    v-if="s.latest.warning || s.warning"
+                    class="warn"
+                    :title="s.latest.warning || s.warning"
+                    >⚠</span
+                  >
+                  <span class="pill" :class="s.status">{{ s.status }}</span>
+                  <span class="pill kind">{{ s.runs.length }} 次运行</span>
+                  <span
+                    v-if="s.last_run_at"
+                    class="pill time"
+                    :title="`运行时间：${formatLocalDateTime(s.last_run_at)}`"
+                    ><span class="mono">{{
+                      formatSessionLastRunTime(s.last_run_at)
+                    }}</span></span
+                  >
+                  <button
+                    type="button"
+                    class="rowMoreBtn"
+                    title="More"
+                    aria-label="Session actions"
+                    @click.stop="toggleSessionActionsMenu(s, $event)"
+                  >
+                    ⋯
+                  </button>
+                </div>
               </div>
-              <div class="rowTopRight">
+              <div class="rowSub">
                 <span
-                  v-if="s.latest.warning || s.warning"
-                  class="warn"
-                  :title="s.latest.warning || s.warning"
-                  >⚠</span
+                  v-if="s.title"
+                  class="rowWorkdir mono"
+                  :title="s.workdir"
+                  >{{ workdirLabelForSession(s.workdir) }}</span
                 >
-                <span class="pill" :class="s.status">{{ s.status }}</span>
-                <span class="pill kind">{{ s.runs.length }} 次运行</span>
                 <span
-	                  v-if="s.last_run_at"
-	                  class="pill time"
-	                  :title="`运行时间：${formatLocalDateTime(s.last_run_at)}`"
-	                  ><span class="mono">{{ formatSessionLastRunTime(s.last_run_at) }}</span></span
-	                >
-	                <button
-	                  type="button"
-	                  class="rowMoreBtn"
-                  title="More"
-                  aria-label="Session actions"
-                  @click.stop="toggleSessionActionsMenu(s, $event)"
+                  v-if="promptSummary(s.latest.prompt)"
+                  class="rowPrompt"
+                  :title="s.latest.prompt"
+                  >{{ promptSummary(s.latest.prompt) }}</span
                 >
-                  ⋯
+              </div>
+            </div>
+
+            <button
+              v-if="canLoadMoreSessions"
+              type="button"
+              class="loadMore"
+              @click="loadMoreSessions"
+            >
+              Load more
+            </button>
+          </div>
+        </section>
+
+        <ProvidersPanel
+          v-if="providersSettingsOpen"
+          :loading="providersLoading"
+          :saving="providersSaving"
+          :error="providersError"
+          :storagePath="providersStoragePath"
+          :authStatus="authStatus"
+          :profiles="providersProfiles"
+          :active="providersActive"
+          :editID="providerEditID"
+          v-model:editName="providerEditName"
+          v-model:claudeBaseURL="providerClaudeBaseURL"
+          v-model:claudeApiKey="providerClaudeApiKey"
+          v-model:claudeAuthToken="providerClaudeAuthToken"
+          v-model:claudeModel="providerClaudeModel"
+          v-model:claudeSmallFastModel="providerClaudeSmallFastModel"
+          v-model:claudeSyncLive="providerClaudeSyncLive"
+          :claudeApiKeyHint="providerClaudeApiKeyHint"
+          :claudeAuthTokenHint="providerClaudeAuthTokenHint"
+          v-model:codexBaseURL="providerCodexBaseURL"
+          v-model:codexApiKey="providerCodexApiKey"
+          v-model:codexModel="providerCodexModel"
+          v-model:codexReasoningEffort="providerCodexReasoningEffort"
+          v-model:codexSyncLive="providerCodexSyncLive"
+          :codexApiKeyHint="providerCodexApiKeyHint"
+          v-model:secretarySimpleHTTPBaseURL="
+            providerSecretarySimpleHTTPBaseURL
+          "
+          v-model:secretarySimpleHTTPApiKey="providerSecretarySimpleHTTPApiKey"
+          v-model:secretarySimpleHTTPAuthToken="
+            providerSecretarySimpleHTTPAuthToken
+          "
+          v-model:secretarySimpleHTTPModel="providerSecretarySimpleHTTPModel"
+          :secretarySimpleHTTPApiKeyHint="providerSecretarySimpleHTTPApiKeyHint"
+          :secretarySimpleHTTPAuthTokenHint="
+            providerSecretarySimpleHTTPAuthTokenHint
+          "
+          v-model:secretaryBackend="providerSecretaryBackend"
+          v-model:secretaryOpenAIBaseURL="providerSecretaryOpenAIBaseURL"
+          v-model:secretaryOpenAIApiKey="providerSecretaryOpenAIApiKey"
+          v-model:secretaryOpenAIModel="providerSecretaryOpenAIModel"
+          :secretaryOpenAIApiKeyHint="providerSecretaryOpenAIApiKeyHint"
+          :speedTesting="providerSpeedTesting"
+          :speedTestTarget="providerSpeedTestTarget"
+          :claudeSpeedTest="providerClaudeSpeedTest"
+          :codexSpeedTest="providerCodexSpeedTest"
+          :pingTesting="providerPingTesting"
+          :pingResult="providerPingResult"
+          @close="closeProvidersPage"
+          @newProfile="startNewProvider"
+          @refresh="refreshProviders"
+          @importFile="importProvidersFromFile"
+          @importEnv="importProvidersFromEnv"
+          @export="exportProvidersToFile"
+          @speedtest="runProviderSpeedTest"
+          @pingtest="runProviderPingTest"
+          @selectProfile="loadProviderIntoEditor"
+          @delete="deleteProviderProfile"
+          @save="saveProviderProfile"
+          @activate="activateProviderTarget"
+        />
+
+        <AuditPanel v-else-if="auditOpen" @back="closeAuditPage" />
+
+        <section v-else class="panel">
+          <div v-if="!selectedSession" class="detail homeStart">
+            <div class="homeHero">
+              <div class="homeTitle">开始新任务</div>
+              <div class="homeSub">
+                桌面端默认展示会话列表；移动端可点击左上角「≡」打开。
+              </div>
+            </div>
+
+            <div v-if="anyRunning" class="homeStatus">
+              <div class="homeStatusText">
+                <span class="pill running">运行中</span>
+                <span class="tinyHint">有任务正在运行。</span>
+              </div>
+              <div class="homeStatusActions">
+                <button type="button" @click="openLive">打开实时</button>
+                <button type="button" @click="sessionsDrawerOpen = true">
+                  打开会话列表
                 </button>
               </div>
             </div>
-            <div class="rowSub">
-              <span v-if="s.title" class="rowWorkdir mono" :title="s.workdir">{{
-                workdirLabelForSession(s.workdir)
-              }}</span>
-              <span
-                v-if="promptSummary(s.latest.prompt)"
-                class="rowPrompt"
-                :title="s.latest.prompt"
-                >{{ promptSummary(s.latest.prompt) }}</span
-              >
-            </div>
-          </div>
 
-          <button
-            v-if="canLoadMoreSessions"
-            type="button"
-            class="loadMore"
-            @click="loadMoreSessions"
-	          >
-	            Load more
-	          </button>
-	        </div>
-	      </section>
-
-      <ProvidersPanel
-        v-if="providersSettingsOpen"
-        :loading="providersLoading"
-        :saving="providersSaving"
-        :error="providersError"
-        :storagePath="providersStoragePath"
-        :authStatus="authStatus"
-        :profiles="providersProfiles"
-        :active="providersActive"
-        :editID="providerEditID"
-        v-model:editName="providerEditName"
-        v-model:claudeBaseURL="providerClaudeBaseURL"
-        v-model:claudeApiKey="providerClaudeApiKey"
-        v-model:claudeAuthToken="providerClaudeAuthToken"
-        v-model:claudeModel="providerClaudeModel"
-        v-model:claudeSmallFastModel="providerClaudeSmallFastModel"
-        v-model:claudeSyncLive="providerClaudeSyncLive"
-        :claudeApiKeyHint="providerClaudeApiKeyHint"
-        :claudeAuthTokenHint="providerClaudeAuthTokenHint"
-        v-model:codexBaseURL="providerCodexBaseURL"
-        v-model:codexApiKey="providerCodexApiKey"
-        v-model:codexModel="providerCodexModel"
-        v-model:codexReasoningEffort="providerCodexReasoningEffort"
-        v-model:codexSyncLive="providerCodexSyncLive"
-        :codexApiKeyHint="providerCodexApiKeyHint"
-        v-model:secretarySimpleHTTPBaseURL="providerSecretarySimpleHTTPBaseURL"
-        v-model:secretarySimpleHTTPApiKey="providerSecretarySimpleHTTPApiKey"
-        v-model:secretarySimpleHTTPAuthToken="providerSecretarySimpleHTTPAuthToken"
-        v-model:secretarySimpleHTTPModel="providerSecretarySimpleHTTPModel"
-        :secretarySimpleHTTPApiKeyHint="providerSecretarySimpleHTTPApiKeyHint"
-        :secretarySimpleHTTPAuthTokenHint="providerSecretarySimpleHTTPAuthTokenHint"
-        v-model:secretaryBackend="providerSecretaryBackend"
-        v-model:secretaryOpenAIBaseURL="providerSecretaryOpenAIBaseURL"
-        v-model:secretaryOpenAIApiKey="providerSecretaryOpenAIApiKey"
-        v-model:secretaryOpenAIModel="providerSecretaryOpenAIModel"
-        :secretaryOpenAIApiKeyHint="providerSecretaryOpenAIApiKeyHint"
-        :speedTesting="providerSpeedTesting"
-        :speedTestTarget="providerSpeedTestTarget"
-        :claudeSpeedTest="providerClaudeSpeedTest"
-        :codexSpeedTest="providerCodexSpeedTest"
-        :pingTesting="providerPingTesting"
-        :pingResult="providerPingResult"
-        @close="closeProvidersPage"
-        @newProfile="startNewProvider"
-        @refresh="refreshProviders"
-        @importFile="importProvidersFromFile"
-        @importEnv="importProvidersFromEnv"
-        @export="exportProvidersToFile"
-        @speedtest="runProviderSpeedTest"
-        @pingtest="runProviderPingTest"
-        @selectProfile="loadProviderIntoEditor"
-        @delete="deleteProviderProfile"
-        @save="saveProviderProfile"
-        @activate="activateProviderTarget"
-      />
-
-      <AuditPanel
-        v-else-if="auditOpen"
-        @back="closeAuditPage"
-      />
-
-	      <section v-else class="panel">
-	        <div v-if="!selectedSession" class="detail homeStart">
-	          <div class="homeHero">
-	            <div class="homeTitle">开始新任务</div>
-	            <div class="homeSub">
-	              桌面端默认展示会话列表；移动端可点击左上角「≡」打开。
-	            </div>
-	          </div>
-
-          <div v-if="anyRunning" class="homeStatus">
-            <div class="homeStatusText">
-              <span class="pill running">运行中</span>
-              <span class="tinyHint">有任务正在运行。</span>
-            </div>
-            <div class="homeStatusActions">
-              <button type="button" @click="openLive">打开实时</button>
-              <button type="button" @click="sessionsDrawerOpen = true">
-                打开会话列表
-              </button>
-            </div>
-          </div>
-
-          <div class="form homeForm">
-            <label class="full">
-              工作目录
-              <div class="workdirRow">
-                <WorkdirCombobox
-                  v-model="newWorkdir"
-                  :pinned="workdirPinnedOptions"
-                  :recent="workdirRecentOptions"
-                  placeholder="."
-                />
-                <button type="button" @click="openDirPicker">选择</button>
+            <div class="form homeForm">
+              <label class="full">
+                工作目录
+                <div class="workdirRow">
+                  <WorkdirCombobox
+                    v-model="newWorkdir"
+                    :pinned="workdirPinnedOptions"
+                    :recent="workdirRecentOptions"
+                    placeholder="."
+                  />
+                  <button type="button" @click="openDirPicker">选择</button>
+                </div>
+              </label>
+              <div v-if="noWorkerCliDetected" class="setupHint full">
+                <details class="setupDetails">
+                  <summary>
+                    未检测到 Claude Code / Codex：点此查看 Claude Code 安装指南
+                  </summary>
+                  <ol class="setupSteps">
+                    <li>
+                      安装
+                      <a
+                        href="https://nodejs.org/en/download/"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        >Node.js 18 或更新版本环境</a
+                      >。
+                    </li>
+                    <li>
+                      Windows 用户需安装
+                      <a
+                        href="https://git-scm.com/download/win"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        >Git for Windows</a
+                      >。
+                    </li>
+                    <li>
+                      在命令行界面执行：
+                      <span class="mono"
+                        >npm install -g @anthropic-ai/claude-code</span
+                      >
+                    </li>
+                    <li>
+                      安装结束后验证：
+                      <span class="mono">claude --version</span>
+                    </li>
+                  </ol>
+                  <div class="setupProvider">
+                    邀请注册火山作为 provider：
+                    <a
+                      href="https://volcengine.com/L/N2h_TKPIsvA/"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      >volcengine.com</a
+                    >
+                    ，邀请码：<span class="mono">RTGWR7T3</span>
+                  </div>
+                  <div class="tinyHint">
+                    如果已安装但仍未检测到，请在「Tools」里把
+                    <span class="mono">command</span> 指到实际可执行文件路径。
+                  </div>
+                </details>
+                <div class="setupActions">
+                  <button type="button" @click="openToolsSettings">
+                    Tools 设置
+                  </button>
+                  <button type="button" @click="openAuthSettings">
+                    认证设置
+                  </button>
+                </div>
               </div>
-            </label>
-            <div v-if="noWorkerCliDetected" class="setupHint full">
-              <details class="setupDetails">
-                <summary>未检测到 Claude Code / Codex：点此查看 Claude Code 安装指南</summary>
-                <ol class="setupSteps">
-                  <li>
-                    安装
-                    <a
-                      href="https://nodejs.org/en/download/"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      >Node.js 18 或更新版本环境</a
-                    >。
-                  </li>
-                  <li>
-                    Windows 用户需安装
-                    <a
-                      href="https://git-scm.com/download/win"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      >Git for Windows</a
-                    >。
-                  </li>
-                  <li>
-                    在命令行界面执行：
-                    <span class="mono">npm install -g @anthropic-ai/claude-code</span>
-                  </li>
-                  <li>
-                    安装结束后验证：
-                    <span class="mono">claude --version</span>
-                  </li>
-                </ol>
-                <div class="setupProvider">
-                  邀请注册火山作为 provider：
-                  <a
-                    href="https://volcengine.com/L/N2h_TKPIsvA/"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    >volcengine.com</a
-                  >
-                  ，邀请码：<span class="mono">RTGWR7T3</span>
-                </div>
-                <div class="tinyHint">
-                  如果已安装但仍未检测到，请在「Tools」里把
-                  <span class="mono">command</span> 指到实际可执行文件路径。
-                </div>
-              </details>
-              <div class="setupActions">
-                <button type="button" @click="openToolsSettings">Tools 设置</button>
+              <div v-if="missingAuthText" class="authHint full">
+                <div class="text">{{ missingAuthText }}</div>
                 <button type="button" @click="openAuthSettings">
                   认证设置
                 </button>
               </div>
-            </div>
-            <div v-if="missingAuthText" class="authHint full">
-              <div class="text">{{ missingAuthText }}</div>
-              <button type="button" @click="openAuthSettings">
-                认证设置
-              </button>
-	            </div>
-	            <label class="full">
-	              <div class="newRunPromptLabelRow">
-	                <span>任务描述</span>
-	                <button
-	                  type="button"
-	                  class="inlineBtn newRunSkillsOpenBtn"
-	                  @click="openSkillsInsertForHome"
-	                  :disabled="!homeCanUseSkills"
-	                  :title="homeCanUseSkills ? '选择技能（将插入到提示词中）' : '当前工具不支持 skills'"
-	                >
-	                  选择技能
-	                </button>
-	              </div>
-	              <textarea
-	                ref="homePromptEl"
-	                v-model="newPrompt"
-	                class="promptEmphasis"
-	                rows="8"
-	                placeholder="描述你要做的事情…"
-	                @keydown="onHomePromptKeyDown"
-	                @keydown.meta.enter.prevent="runFromHome"
-	                @keydown.ctrl.enter.prevent="runFromHome"
-	              ></textarea>
-	              <div v-if="homeCanUseSkills" class="tinyHint newRunSkillsHint">
-	                技能：点击「选择技能」或在输入框里按 <span class="mono">/</span> 搜索（兼容
-	                TUI）。
-	              </div>
-	              <div v-else class="tinyHint newRunSkillsHint">
-	                当前工具为 <span class="mono">{{ newRunDriver }}</span
-	                >：不支持 skills（仅执行命令）。
-	              </div>
-	              <div class="tinyHint">提示：Ctrl/Cmd + Enter 运行。</div>
-	            </label>
+              <label class="full">
+                <div class="newRunPromptLabelRow">
+                  <span>任务描述</span>
+                  <button
+                    type="button"
+                    class="inlineBtn newRunSkillsOpenBtn"
+                    @click="openSkillsInsertForHome"
+                    :disabled="!homeCanUseSkills"
+                    :title="
+                      homeCanUseSkills
+                        ? '选择技能（将插入到提示词中）'
+                        : '当前工具不支持 skills'
+                    "
+                  >
+                    选择技能
+                  </button>
+                </div>
+                <textarea
+                  ref="homePromptEl"
+                  v-model="newPrompt"
+                  class="promptEmphasis"
+                  rows="8"
+                  placeholder="描述你要做的事情…"
+                  @keydown="onHomePromptKeyDown"
+                  @keydown.meta.enter.prevent="runFromHome"
+                  @keydown.ctrl.enter.prevent="runFromHome"
+                ></textarea>
+                <div v-if="homeCanUseSkills" class="tinyHint newRunSkillsHint">
+                  技能：点击「选择技能」或在输入框里按
+                  <span class="mono">/</span> 搜索（兼容 TUI）。
+                </div>
+                <div v-else class="tinyHint newRunSkillsHint">
+                  当前工具为 <span class="mono">{{ newRunDriver }}</span
+                  >：不支持 skills（仅执行命令）。
+                </div>
+                <div class="tinyHint">提示：Ctrl/Cmd + Enter 运行。</div>
+              </label>
 
-            <div class="homeActions full">
-              <button
-                type="button"
-                class="primary"
-                @click="runFromHome"
-                :disabled="!newPrompt.trim() || highRiskConfirmOpen || homeRunBusy || taskPlaneDegraded"
-                :title="taskPlaneDegraded ? 'runnerd unavailable' : ''"
-              >
-                运行
-              </button>
-              <button type="button" @click="openNewRun">高级设置…</button>
-            </div>
-          </div>
-        </div>
-        <div v-else class="detail">
-          <div class="detailHeader compact">
-            <div class="detailTop">
-              <div class="detailTopLeft">
-                <span
-                  class="mono detailSid"
-                  :title="
-                    (selectedSession.key ?? '').startsWith('c:')
-                      ? selectedSession.key.slice(2)
-                      : selectedSession.session_id || selectedSession.latest.id
-                  "
-                  >{{
-                    sessionShortID(selectedSession)
-                  }}</span
-                >
-                <span
-                  v-if="selectedSession.title"
-                  class="detailName"
-                  :title="selectedSession.title"
-                  >{{ selectedSession.title }}</span
-                >
-                <span v-if="selectedSession.deleted_at" class="pill deleted">deleted</span>
-                <span class="pill" :class="selectedSession.status">{{
-                  selectedSession.status
-                }}</span>
-                <span
-                  v-if="acceptanceState"
-                  class="pill acceptance"
-                  :title="`Acceptance ${acceptanceState.status} · ${acceptanceState.current_gate || '(no gate)'} · ${acceptanceState.summary || ''}`"
-	                >
-	                  Acc {{ acceptanceState.iteration }}/{{ acceptanceState.max_iterations }}
-	                </span>
-	                <span class="pill kind">{{ selectedSession.worker_type }}</span>
-	                <span
-	                  v-if="
-	                    toolDriverForWorkerType(selectedSession.worker_type) === 'codex' ||
-	                    toolDriverForWorkerType(selectedSession.worker_type) === 'claude-code'
-	                  "
-	                  class="pill safety"
-	                  :title="`Safety: ${effectiveSafetyPresetForTask(toolDriverForWorkerType(selectedSession.worker_type), selectedSession.latest)}`"
-	                >
-	                  Safety
-	                  {{
-	                    effectiveSafetyPresetForTask(
-	                      toolDriverForWorkerType(selectedSession.worker_type),
-	                      selectedSession.latest,
-	                    )
-	                  }}
-	                </span>
-	                <button
-	                  type="button"
-	                  class="detailMini detailMiniBtn"
-	                  @click="openRuns"
-                  title="查看运行记录"
-                >
-                  运行记录（{{ selectedSession.runs.length }}）
-                </button>
+              <div class="homeActions full">
                 <button
                   type="button"
-                  class="detailMini detailMiniBtn"
-                  @click="openWorkspaceFilesInNewTab"
-                  title="浏览工作区文件"
+                  class="primary"
+                  @click="runFromHome"
+                  :disabled="
+                    !newPrompt.trim() ||
+                    highRiskConfirmOpen ||
+                    homeRunBusy ||
+                    taskPlaneDegraded
+                  "
+                  :title="taskPlaneDegraded ? 'runnerd unavailable' : ''"
                 >
-                  文件
+                  运行
                 </button>
-                <span
-                  v-if="selectedTask?.warning || selectedSession.warning"
-                  class="warn"
-                  :title="selectedTask?.warning || selectedSession.warning"
-                  >⚠</span
-                >
-                <span
-                  v-if="selectedTask?.error"
-                  class="warn"
-                  :title="selectedTask.error"
-                  >!</span
-                >
-                <span
-                  v-if="selectedRunActivity"
-                  class="detailPrompt running"
-                  :title="`${formatLocalDateTime(selectedRunActivity.time)} · ${selectedRunActivity.summary}`"
-                  >{{ selectedRunActivity.summary }}</span
-                >
-                <div
-                  v-else-if="selectedRunInstruction"
-                  class="detailPromptWrap"
-                  :title="null"
-                  tabindex="0"
-                >
-                  <span class="detailPrompt">{{ selectedRunInstruction }}</span>
-                  <div class="detailPromptFull" aria-hidden="true">
-                    {{ selectedRunInstruction }}
+                <button type="button" @click="openNewRun">高级设置…</button>
+              </div>
+            </div>
+          </div>
+          <div v-else class="detail">
+            <div class="detailHeader compact">
+              <div class="detailTop">
+                <div class="detailTopLeft">
+                  <span
+                    class="mono detailSid"
+                    :title="
+                      (selectedSession.key ?? '').startsWith('c:')
+                        ? selectedSession.key.slice(2)
+                        : selectedSession.session_id ||
+                          selectedSession.latest.id
+                    "
+                    >{{ sessionShortID(selectedSession) }}</span
+                  >
+                  <span
+                    v-if="selectedSession.title"
+                    class="detailName"
+                    :title="selectedSession.title"
+                    >{{ selectedSession.title }}</span
+                  >
+                  <span v-if="selectedSession.deleted_at" class="pill deleted"
+                    >deleted</span
+                  >
+                  <span class="pill" :class="selectedSession.status">{{
+                    selectedSession.status
+                  }}</span>
+                  <span
+                    v-if="acceptanceState"
+                    class="pill acceptance"
+                    :title="`Acceptance ${acceptanceState.status} · ${acceptanceState.current_gate || '(no gate)'} · ${acceptanceState.summary || ''}`"
+                  >
+                    Acc {{ acceptanceState.iteration }}/{{
+                      acceptanceState.max_iterations
+                    }}
+                  </span>
+                  <span class="pill kind">{{
+                    selectedSession.worker_type
+                  }}</span>
+                  <span
+                    v-if="
+                      toolDriverForWorkerType(selectedSession.worker_type) ===
+                        'codex' ||
+                      toolDriverForWorkerType(selectedSession.worker_type) ===
+                        'claude-code'
+                    "
+                    class="pill safety"
+                    :title="`Safety: ${effectiveSafetyPresetForTask(toolDriverForWorkerType(selectedSession.worker_type), selectedSession.latest)}`"
+                  >
+                    Safety
+                    {{
+                      effectiveSafetyPresetForTask(
+                        toolDriverForWorkerType(selectedSession.worker_type),
+                        selectedSession.latest,
+                      )
+                    }}
+                  </span>
+                  <button
+                    type="button"
+                    class="detailMini detailMiniBtn"
+                    @click="openRuns"
+                    title="查看运行记录"
+                  >
+                    运行记录（{{ selectedSession.runs.length }}）
+                  </button>
+                  <button
+                    type="button"
+                    class="detailMini detailMiniBtn"
+                    @click="openWorkspaceFilesInNewTab"
+                    title="浏览工作区文件"
+                  >
+                    文件
+                  </button>
+                  <span
+                    v-if="selectedTask?.warning || selectedSession.warning"
+                    class="warn"
+                    :title="selectedTask?.warning || selectedSession.warning"
+                    >⚠</span
+                  >
+                  <span
+                    v-if="selectedTask?.error"
+                    class="warn"
+                    :title="selectedTask.error"
+                    >!</span
+                  >
+                  <span
+                    v-if="selectedRunActivity"
+                    class="detailPrompt running"
+                    :title="`${formatLocalDateTime(selectedRunActivity.time)} · ${selectedRunActivity.summary}`"
+                    >{{ selectedRunActivity.summary }}</span
+                  >
+                  <div
+                    v-else-if="selectedRunInstruction"
+                    class="detailPromptWrap"
+                    :title="null"
+                    tabindex="0"
+                  >
+                    <span class="detailPrompt">{{
+                      selectedRunInstruction
+                    }}</span>
+                    <div class="detailPromptFull" aria-hidden="true">
+                      {{ selectedRunInstruction }}
+                    </div>
                   </div>
                 </div>
-              </div>
-              <div class="detailTopActions">
-                <button
-                  v-if="selectedTask?.status === 'running'"
-                  type="button"
-                  @click="onCancelTask"
-                >
-                  Cancel
-                </button>
-                <button
-                  v-if="
-                    selectedTask?.workdir_strategy === 'worktree' &&
-                    String(selectedTask?.base_workdir ?? '').trim() &&
-                    String(selectedTask?.worktree_branch ?? '').trim()
-                  "
-                  type="button"
-                  @click="mergeBackSelectedWorktree"
-                  :disabled="
-                    selectedTask?.status === 'running' ||
-                    selectedTask?.status === 'queued' ||
-                    selectedTask?.status === 'waiting'
-                  "
-                  title="Merge worktree branch back to base repo"
-                >
-                  Merge Back
-                </button>
-                <details class="detailMore compact">
-                  <summary title="More" aria-label="More">⋯</summary>
-                  <div class="detailMorePopup">
-                    <div class="detailPopupWorkdir mono" :title="selectedSession.workdir">
-                      {{ selectedSession.workdir }}
-                    </div>
-                    <div
-                      v-if="selectedSessionWorkspace?.run_workdir"
-                      class="detailPopupWorkdir mono"
-                      :title="selectedSessionWorkspace.run_workdir"
-                    >
-                      run: {{ selectedSessionWorkspace.run_workdir }}
-                    </div>
-                    <div class="detailMoreActions">
-                      <button
-                        type="button"
-                        @click="setWorkspace(selectedSession.workdir)"
-                        title="Focus workspace"
+                <div class="detailTopActions">
+                  <button
+                    v-if="selectedTask?.status === 'running'"
+                    type="button"
+                    @click="onCancelTask"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    v-if="
+                      selectedTask?.workdir_strategy === 'worktree' &&
+                      String(selectedTask?.base_workdir ?? '').trim() &&
+                      String(selectedTask?.worktree_branch ?? '').trim()
+                    "
+                    type="button"
+                    @click="mergeBackSelectedWorktree"
+                    :disabled="
+                      selectedTask?.status === 'running' ||
+                      selectedTask?.status === 'queued' ||
+                      selectedTask?.status === 'waiting'
+                    "
+                    title="Merge worktree branch back to base repo"
+                  >
+                    Merge Back
+                  </button>
+                  <details class="detailMore compact">
+                    <summary title="More" aria-label="More">⋯</summary>
+                    <div class="detailMorePopup">
+                      <div
+                        class="detailPopupWorkdir mono"
+                        :title="selectedSession.workdir"
                       >
-                        Focus workspace
-                      </button>
-                      <button
-                        type="button"
-                        @click="copyText(selectedSession.workdir)"
-                        title="Copy workdir"
-                      >
-                        Copy workdir
-                      </button>
-                      <button
-                        v-if="!selectedSessionWorkspace?.run_workdir"
-                        type="button"
-                        @click="ensureSelectedWorkspace"
-                        :disabled="sessionWorkspaceLoading"
-                        title="Create run workspace"
-                      >
-                        Create workspace
-                      </button>
-                      <button
-                        v-if="selectedSessionWorkspace?.run_workdir"
-                        type="button"
-                        @click="openRunWorkspaceFilesInNewTab"
-                        title="Open run workspace"
-                      >
-                        Open run workspace
-                      </button>
-                      <button
-                        v-if="selectedSessionWorkspace?.run_workdir"
-                        type="button"
-                        @click="mergeBackSelectedWorkspace"
-                        :disabled="
-                          sessionWorkspaceLoading ||
-                          selectedTask?.status === 'running' ||
-                          selectedTask?.status === 'queued' ||
-                          selectedTask?.status === 'waiting'
-                        "
-                        title="Merge/apply workspace changes back to base workdir"
-                      >
-                        Merge back
-                      </button>
-                      <button
-                        v-if="selectedSessionWorkspace?.run_workdir"
-                        type="button"
-                        class="dangerBtn"
-                        @click="discardSelectedWorkspace"
-                        :disabled="
-                          sessionWorkspaceLoading ||
-                          selectedTask?.status === 'running' ||
-                          selectedTask?.status === 'queued' ||
-                          selectedTask?.status === 'waiting'
-                        "
-                        title="Discard workspace (delete)"
-                      >
-                        Discard workspace
-                      </button>
-                      <button
-                        type="button"
-                        @click="openSessionRename(selectedSession)"
-                        title="Rename session"
-                      >
-                        Rename session
-                      </button>
-                      <button
-                        type="button"
-                        class="dangerBtn"
-                        @click="openSessionDelete(selectedSession)"
-                        title="Delete session (soft)"
-                      >
-                        Delete session
-                      </button>
-                    </div>
-                    <div v-if="sessionWorkspaceError" class="modalError">{{ sessionWorkspaceError }}</div>
-                    <div v-else-if="sessionWorkspaceLoading" class="tinyHint">Workspace…</div>
-                    <div v-if="sessionWorkspaceNotice" class="tinyHint">{{ sessionWorkspaceNotice }}</div>
-                    <div class="detailMoreGrid">
-                      <div>
-                        <span class="k">Session</span>
-                        <span class="mono">{{
-                          selectedSession.session_id || "(pending)"
-                        }}</span>
-                      </div>
-                      <div>
-                        <span class="k">Score</span> {{ selectedSession.score }} (stderr
-                        {{ selectedSession.stderr_count }})
-                      </div>
-                      <div>
-                        <span class="k">Status</span> {{ selectedSession.status }}
-                      </div>
-                      <div>
-                        <span class="k">Runs</span> {{ selectedSession.runs.length }}
+                        {{ selectedSession.workdir }}
                       </div>
                       <div
-                        v-if="selectedTask?.workdir_strategy === 'worktree' && selectedTask?.worktree_branch"
-                        class="full"
+                        v-if="selectedSessionWorkspace?.run_workdir"
+                        class="detailPopupWorkdir mono"
+                        :title="selectedSessionWorkspace.run_workdir"
                       >
-                        <span class="k">Worktree</span>
-                        <span class="mono">{{ selectedTask.worktree_branch }}</span>
+                        run: {{ selectedSessionWorkspace.run_workdir }}
                       </div>
-                      <div
-                        v-if="selectedTask?.workdir_strategy === 'worktree' && selectedTask?.base_workdir"
-                        class="full"
-                      >
-                        <span class="k">Base</span>
-                        <span class="mono">{{ selectedTask.base_workdir }}</span>
-                      </div>
-                      <div v-if="selectedSessionWorkspace" class="full">
-                        <span class="k">Workspace</span>
-                        <span class="mono"
-                          >{{ selectedSessionWorkspace.kind }} · {{ selectedSessionWorkspace.status }}</span
+                      <div class="detailMoreActions">
+                        <button
+                          type="button"
+                          @click="setWorkspace(selectedSession.workdir)"
+                          title="Focus workspace"
                         >
+                          Focus workspace
+                        </button>
+                        <button
+                          type="button"
+                          @click="copyText(selectedSession.workdir)"
+                          title="Copy workdir"
+                        >
+                          Copy workdir
+                        </button>
+                        <button
+                          v-if="!selectedSessionWorkspace?.run_workdir"
+                          type="button"
+                          @click="ensureSelectedWorkspace"
+                          :disabled="sessionWorkspaceLoading"
+                          title="Create run workspace"
+                        >
+                          Create workspace
+                        </button>
+                        <button
+                          v-if="selectedSessionWorkspace?.run_workdir"
+                          type="button"
+                          @click="openRunWorkspaceFilesInNewTab"
+                          title="Open run workspace"
+                        >
+                          Open run workspace
+                        </button>
+                        <button
+                          v-if="selectedSessionWorkspace?.run_workdir"
+                          type="button"
+                          @click="mergeBackSelectedWorkspace"
+                          :disabled="
+                            sessionWorkspaceLoading ||
+                            selectedTask?.status === 'running' ||
+                            selectedTask?.status === 'queued' ||
+                            selectedTask?.status === 'waiting'
+                          "
+                          title="Merge/apply workspace changes back to base workdir"
+                        >
+                          Merge back
+                        </button>
+                        <button
+                          v-if="selectedSessionWorkspace?.run_workdir"
+                          type="button"
+                          class="dangerBtn"
+                          @click="discardSelectedWorkspace"
+                          :disabled="
+                            sessionWorkspaceLoading ||
+                            selectedTask?.status === 'running' ||
+                            selectedTask?.status === 'queued' ||
+                            selectedTask?.status === 'waiting'
+                          "
+                          title="Discard workspace (delete)"
+                        >
+                          Discard workspace
+                        </button>
+                        <button
+                          type="button"
+                          @click="openSessionRename(selectedSession)"
+                          title="Rename session"
+                        >
+                          Rename session
+                        </button>
+                        <button
+                          type="button"
+                          class="dangerBtn"
+                          @click="openSessionDelete(selectedSession)"
+                          title="Delete session (soft)"
+                        >
+                          Delete session
+                        </button>
                       </div>
-                      <div v-if="selectedSessionWorkspace?.base_branch" class="full">
-                        <span class="k">Base branch</span>
-                        <span class="mono">{{ selectedSessionWorkspace.base_branch }}</span>
+                      <div v-if="sessionWorkspaceError" class="modalError">
+                        {{ sessionWorkspaceError }}
                       </div>
-                      <div v-if="selectedSessionWorkspace?.work_branch" class="full">
-                        <span class="k">Work branch</span>
-                        <span class="mono">{{ selectedSessionWorkspace.work_branch }}</span>
+                      <div v-else-if="sessionWorkspaceLoading" class="tinyHint">
+                        Workspace…
                       </div>
-                      <div v-if="selectedSession.title" class="full">
-                        <span class="k">Title</span>
-                        <span>{{ selectedSession.title }}</span>
+                      <div v-if="sessionWorkspaceNotice" class="tinyHint">
+                        {{ sessionWorkspaceNotice }}
                       </div>
-                      <div v-if="selectedSession.deleted_at" class="full">
-                        <span class="k">Deleted</span>
-                        <span class="mono">{{
-                          formatLocalDateTime(selectedSession.deleted_at)
-                        }}</span>
-                      </div>
-                      <div
-                        v-if="selectedTask?.warning || selectedSession.warning"
-                        class="full"
-                      >
-                        <span class="k">Warning</span>
-                        {{ selectedTask?.warning || selectedSession.warning }}
-                      </div>
-                      <div v-if="selectedTask?.error" class="full">
-                        <span class="k">Last Err</span> {{ selectedTask.error }}
-                      </div>
-                      <div class="full">
-                        <span class="k">Prompt</span>
-                        <span>{{ selectedSession.latest.prompt }}</span>
+                      <div class="detailMoreGrid">
+                        <div>
+                          <span class="k">Session</span>
+                          <span class="mono">{{
+                            selectedSession.session_id || "(pending)"
+                          }}</span>
+                        </div>
+                        <div>
+                          <span class="k">Score</span>
+                          {{ selectedSession.score }} (stderr
+                          {{ selectedSession.stderr_count }})
+                        </div>
+                        <div>
+                          <span class="k">Status</span>
+                          {{ selectedSession.status }}
+                        </div>
+                        <div>
+                          <span class="k">Runs</span>
+                          {{ selectedSession.runs.length }}
+                        </div>
+                        <div
+                          v-if="
+                            selectedTask?.workdir_strategy === 'worktree' &&
+                            selectedTask?.worktree_branch
+                          "
+                          class="full"
+                        >
+                          <span class="k">Worktree</span>
+                          <span class="mono">{{
+                            selectedTask.worktree_branch
+                          }}</span>
+                        </div>
+                        <div
+                          v-if="
+                            selectedTask?.workdir_strategy === 'worktree' &&
+                            selectedTask?.base_workdir
+                          "
+                          class="full"
+                        >
+                          <span class="k">Base</span>
+                          <span class="mono">{{
+                            selectedTask.base_workdir
+                          }}</span>
+                        </div>
+                        <div v-if="selectedSessionWorkspace" class="full">
+                          <span class="k">Workspace</span>
+                          <span class="mono"
+                            >{{ selectedSessionWorkspace.kind }} ·
+                            {{ selectedSessionWorkspace.status }}</span
+                          >
+                        </div>
+                        <div
+                          v-if="selectedSessionWorkspace?.base_branch"
+                          class="full"
+                        >
+                          <span class="k">Base branch</span>
+                          <span class="mono">{{
+                            selectedSessionWorkspace.base_branch
+                          }}</span>
+                        </div>
+                        <div
+                          v-if="selectedSessionWorkspace?.work_branch"
+                          class="full"
+                        >
+                          <span class="k">Work branch</span>
+                          <span class="mono">{{
+                            selectedSessionWorkspace.work_branch
+                          }}</span>
+                        </div>
+                        <div v-if="selectedSession.title" class="full">
+                          <span class="k">Title</span>
+                          <span>{{ selectedSession.title }}</span>
+                        </div>
+                        <div v-if="selectedSession.deleted_at" class="full">
+                          <span class="k">Deleted</span>
+                          <span class="mono">{{
+                            formatLocalDateTime(selectedSession.deleted_at)
+                          }}</span>
+                        </div>
+                        <div
+                          v-if="
+                            selectedTask?.warning || selectedSession.warning
+                          "
+                          class="full"
+                        >
+                          <span class="k">Warning</span>
+                          {{ selectedTask?.warning || selectedSession.warning }}
+                        </div>
+                        <div v-if="selectedTask?.error" class="full">
+                          <span class="k">Last Err</span>
+                          {{ selectedTask.error }}
+                        </div>
+                        <div class="full">
+                          <span class="k">Prompt</span>
+                          <span>{{ selectedSession.latest.prompt }}</span>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                </details>
+                  </details>
+                </div>
               </div>
             </div>
-          </div>
 
-            <div v-if="selectedTask?.status === 'awaiting_approval'" class="approvalHint">
+            <div
+              v-if="selectedTask?.status === 'awaiting_approval'"
+              class="approvalHint"
+            >
               <div class="text">
                 等待审批：当前 run 已暂停，等待你批准/拒绝一次工具调用。
               </div>
               <div class="actions">
-                <button type="button" @click="openApprovalPromptForSelected">审批…</button>
+                <button type="button" @click="openApprovalPromptForSelected">
+                  审批…
+                </button>
               </div>
             </div>
 
-	          <div v-if="selectedTask?.status === 'blocked'" class="blockedHint">
-	            <div class="text">
-	              运行被阻塞：触发了需要人工确认的操作，但当前为非交互运行，无法点击批准继续。
-	            </div>
-	            <div class="actions">
-	              <button type="button" @click="openBlockedPromptForSelected">处理…</button>
-	            </div>
-	          </div>
+            <div v-if="selectedTask?.status === 'blocked'" class="blockedHint">
+              <div class="text">
+                运行被阻塞：触发了需要人工确认的操作，但当前为非交互运行，无法点击批准继续。
+              </div>
+              <div class="actions">
+                <button type="button" @click="openBlockedPromptForSelected">
+                  处理…
+                </button>
+              </div>
+            </div>
 
-          <div v-if="acceptanceState || acceptanceLoading || acceptanceError" class="acceptanceHint">
-            <div class="text">
-              <span class="k">Acceptance</span>
-              <span v-if="acceptanceLoading">Loading…</span>
-              <template v-else-if="acceptanceError">
-                {{ acceptanceError }}
-              </template>
-              <template v-else-if="acceptanceState">
-                {{ acceptanceState.status }} · {{ acceptanceState.iteration }}/{{
-                  acceptanceState.max_iterations
-                }}
-                <span v-if="acceptanceState.current_gate" class="mono"
-                  >· {{ acceptanceState.current_gate }}</span
+            <div
+              v-if="acceptanceState || acceptanceLoading || acceptanceError"
+              class="acceptanceHint"
+            >
+              <div class="text">
+                <span class="k">Acceptance</span>
+                <span v-if="acceptanceLoading">Loading…</span>
+                <template v-else-if="acceptanceError">
+                  {{ acceptanceError }}
+                </template>
+                <template v-else-if="acceptanceState">
+                  {{ acceptanceState.status }} ·
+                  {{ acceptanceState.iteration }}/{{
+                    acceptanceState.max_iterations
+                  }}
+                  <span v-if="acceptanceState.current_gate" class="mono"
+                    >· {{ acceptanceState.current_gate }}</span
+                  >
+                  <span v-if="acceptanceState.summary"
+                    >· {{ acceptanceState.summary }}</span
+                  >
+                </template>
+              </div>
+              <div class="actions">
+                <button
+                  type="button"
+                  @click="refreshAcceptance"
+                  :disabled="acceptanceLoading"
                 >
-                <span v-if="acceptanceState.summary">· {{ acceptanceState.summary }}</span>
-              </template>
+                  Refresh
+                </button>
+                <button
+                  v-if="
+                    acceptanceState &&
+                    (acceptanceState.report || acceptanceState.plan_json)
+                  "
+                  type="button"
+                  @click="acceptanceExpanded = !acceptanceExpanded"
+                >
+                  {{ acceptanceExpanded ? "Hide" : "View" }}
+                </button>
+              </div>
             </div>
-            <div class="actions">
-              <button type="button" @click="refreshAcceptance" :disabled="acceptanceLoading">
-                Refresh
-              </button>
-              <button
-                v-if="acceptanceState && (acceptanceState.report || acceptanceState.plan_json)"
-                type="button"
-                @click="acceptanceExpanded = !acceptanceExpanded"
-              >
-                {{ acceptanceExpanded ? "Hide" : "View" }}
-              </button>
+
+            <div
+              v-if="
+                acceptanceExpanded &&
+                acceptanceState &&
+                (acceptanceState.report || acceptanceState.plan_json)
+              "
+              class="acceptanceReport"
+            >
+              <div
+                class="resultBox markdown"
+                v-html="
+                  renderMarkdownSafe(
+                    acceptanceState.report || acceptanceState.plan_json || '',
+                  )
+                "
+              ></div>
             </div>
-          </div>
 
-          <div
-            v-if="acceptanceExpanded && acceptanceState && (acceptanceState.report || acceptanceState.plan_json)"
-            class="acceptanceReport"
-          >
-            <div class="resultBox markdown" v-html="renderMarkdownSafe(acceptanceState.report || acceptanceState.plan_json || '')"></div>
-          </div>
-
-	          <div class="resumeBar">
+            <div class="resumeBar">
               <div class="resumeComposerTop">
                 <div class="resumeComposerTitle">
                   <span class="resumeComposerDot" aria-hidden="true"></span>
@@ -6740,454 +7302,589 @@ watch(
               <div class="nextActionBar">
                 <span class="pill low">推荐动作</span>
                 <span class="mono">{{ sessionPrimaryAction.action }}</span>
-                <span v-if="sessionPrimaryActionReason">· {{ sessionPrimaryActionReason }}</span>
-                <span v-if="sessionNextActionLoading" class="tinyHint">同步中…</span>
-                <button type="button" class="tinyBtn" @click="refreshSessionNextAction" :disabled="sessionNextActionLoading">
+                <span v-if="sessionPrimaryActionReason"
+                  >· {{ sessionPrimaryActionReason }}</span
+                >
+                <span v-if="sessionNextActionLoading" class="tinyHint"
+                  >同步中…</span
+                >
+                <button
+                  type="button"
+                  class="tinyBtn"
+                  @click="refreshSessionNextAction"
+                  :disabled="sessionNextActionLoading"
+                >
                   刷新
                 </button>
               </div>
-	            <div class="resumeRow">
-	              <input
-	                v-if="!resumeExpanded"
-	                ref="resumePromptInputEl"
-	                v-model="resumePrompt"
-	                class="promptEmphasis"
-	                placeholder="输入下一步指令…"
-	                aria-label="继续指令"
-	                @keydown="onResumePromptKeyDown"
-	                @keydown.enter="onResumeEnter"
-	              />
-	              <textarea
-	                v-else
-	                ref="resumePromptTextEl"
-	                v-model="resumePrompt"
-	                class="promptEmphasis"
-	                rows="3"
-	                placeholder="输入下一步指令…"
-	                aria-label="继续指令"
-	                @keydown="onResumePromptKeyDown"
-	                @keydown.ctrl.enter="onResumeEnter"
-	                @keydown.meta.enter="onResumeEnter"
-	              ></textarea>
-	              <div
-	                v-if="resumeDriver === 'codex' || resumeDriver === 'claude-code'"
-	                class="resumeSafetyControls"
-	              >
-	                <span class="pill" :class="resumeUseAutopilot ? 'low' : 'warn'">{{
-	                  resumeUseAutopilot ? "自动" : "手动"
-	                }}</span>
-	                <span class="mono">
-	                  <template v-if="resumeShowManualSafety">
-	                    {{ resumeSafetyPreset }}
-	                  </template>
-	                  <template v-else-if="selectedSession">
-	                    {{ effectiveSafetyPresetForTask(resumeDriver, selectedSession.latest) }}
-	                  </template>
-	                </span>
-	              </div>
-              <button
-                type="button"
-                class="primary resumePrimaryAction"
-                @click="onPrimarySessionAction"
-                :disabled="sessionPrimaryActionDisabled"
-	              >
-                {{ sessionPrimaryAction.label }}
-              </button>
-            </div>
-            <details class="resumeSecondary">
-              <summary>更多操作</summary>
-              <div class="resumeSecondaryActions">
-                <button
-                  type="button"
-                  class="secondary"
-                  @click="onResumeTask"
-                  :disabled="!resumePrompt.trim() || !selectedSession.session_id || !!selectedSession.deleted_at || highRiskConfirmOpen"
-                >
-                  手动继续（高级）
-                </button>
-                <button
-                  type="button"
-                  class="secondary"
-                  @click="onPreemptResumeTask"
-                  :disabled="
-                    !resumePrompt.trim() ||
-                    !selectedSession.session_id ||
-                    !!selectedSession.deleted_at ||
-                    highRiskConfirmOpen ||
-                    !selectedSessionInFlightTask
-                  "
-                >
-                  抢占当前并继续
-                </button>
-                <button
-                  type="button"
-                  class="secondary"
-                  @click="resumeExpanded = !resumeExpanded"
-                  :title="resumeExpanded ? 'Collapse' : 'Expand'"
-                >
-                  {{ resumeExpanded ? "收起高级设置" : "展开高级设置" }}
-                </button>
-              </div>
-            </details>
-            <div v-if="selectedSessionInFlightTask || sessionContinueQueueLoading || sessionContinueQueue.length > 0" class="tinyHint">
-              <span v-if="selectedSessionInFlightTask">
-                运行中：{{ selectedSessionInFlightTask.id.slice(0, 8) }}（{{ selectedSessionInFlightTask.status }}）
-              </span>
-              <span v-if="sessionContinueQueueLoading">
-                {{ selectedSessionInFlightTask ? " · " : "" }}队列加载中…
-              </span>
-              <span v-else-if="sessionContinueQueue.length > 0">
-                {{ selectedSessionInFlightTask ? " · " : "" }}队列 {{ sessionContinueQueue.length }}
-              </span>
-            </div>
-            <div v-if="resumeExpanded && sessionContinueQueue.length > 0" class="resumeQueue">
-              <div v-for="(q, idx) in sessionContinueQueue" :key="q.id" class="resumeQueueItem">
-                <span class="mono">#{{ idx + 1 }}</span>
-                <span>{{ promptSummary(q.prompt) || "(empty prompt)" }}</span>
-                <span class="pill small">{{ q.source }}</span>
-              </div>
-            </div>
-	            <div
-	              v-if="resumeExpanded && (resumeDriver === 'codex' || resumeDriver === 'claude-code')"
-	              class="resumeSafetyExtra"
-	            >
-		              <div class="resumeSafetyExtraGrid">
-		                <label class="full">
-		                  <input type="checkbox" v-model="runSafetyInstallUnlock" />
-		                  <span class="mono">安装解锁 (Install unlock)</span>
-		                  <span class="tinyHint">开启下载/安装权限（允许 agent 下载/安装依赖）</span>
-		                </label>
-		                <label class="full">
-		                  <input type="checkbox" v-model="runSafetyAutopilotEnabled" />
-		                  <span>安全自动驾驶（推荐）</span>
-		                </label>
-		                <label v-if="runSafetyAutopilotEnabled" class="full">
-		                  <input type="checkbox" v-model="resumeSafetyOverride" />
-		                  <span>覆盖自动驾驶（手动设置预设）</span>
-		                </label>
-		              </div>
-
-		              <template v-if="resumeShowManualSafety">
-		                <div class="resumeSafetyGrid">
-		                  <label class="resumeSafetyLabel">
-		                    安全预设
-		                    <select v-model="resumeSafetyPreset">
-		                      <option
-		                        v-for="p in safetyPresetsForDriver(resumeDriver)"
-		                        :key="p.value"
-		                        :value="p.value"
-		                      >
-		                        {{ p.label }}
-		                      </option>
-		                    </select>
-		                  </label>
-		                </div>
-	                <div
-	                  v-if="resumeDriver === 'claude-code' && resumeSafetyPreset === 'search-browse'"
-	                  class="tinyHint"
-	                >
-	                  Enables Claude Code WebFetch/WebSearch and allows <span class="mono">curl</span>/<span class="mono">wget</span> in bash (still subject to Claude bash sandbox).
-	                </div>
-	                <div
-	                  v-else-if="resumeDriver === 'codex' && resumeSafetyPreset === 'search-browse'"
-	                  class="tinyHint"
-	                >
-	                  Enables Codex <span class="mono">--search</span> (native web_search tool). Search/browse is distinct from downloading/executing scripts.
-	                </div>
-	                <div
-	                  v-if="isHighRiskPreset(resumeDriver, resumeSafetyPreset)"
-	                  class="resumeSafetyWarn"
-	                >
-	                  <div class="tinyHint warn">
-	                    <template v-if="resumeDriver === 'codex' && resumeSafetyPreset === 'unsafe'">
-	                      将以 <span class="mono">--dangerously-bypass-approvals-and-sandbox</span> 运行：跳过审批并关闭 sandbox 隔离，agent 可直接执行命令并访问系统资源（文件/网络）。
-	                    </template>
-	                    <template v-else-if="resumeDriver === 'codex' && resumeSafetyPreset === 'danger-full-access'">
-	                      将以 <span class="mono">--sandbox danger-full-access</span> 运行：允许访问 workspace 外的文件/目录（权限更大）。
-	                    </template>
-	                    <template v-else-if="resumeDriver === 'claude-code' && resumeSafetyPreset === 'unsafe'">
-	                      将以 <span class="mono">--dangerously-skip-permissions</span> 运行：跳过权限确认，并关闭 bash sandbox（脚本可直接访问系统文件/网络）。
-	                    </template>
-	                  </div>
-	                  <label class="resumeSafetyOptIn">
-	                    <input type="checkbox" v-model="resumeHighRiskOptIn" />
-	                    <span>我已知晓将开放的权限并希望继续</span>
-	                  </label>
-	                </div>
-	              </template>
-	              <template v-else>
-	                <div v-if="resumeAutopilotHighRiskBlocked" class="tinyHint warn">
-	                  检测到需要更高权限的设置。启用 <span class="mono">Install unlock</span> 或使用手动覆盖后继续。
-	                </div>
-	                <div class="tinyHint">
-	                  Uses last run’s safety settings.
-	                </div>
-	              </template>
-	            </div>
-            <div v-if="selectedSession.deleted_at" class="tinyHint">
-              会话已删除：无法继续
-            </div>
-            <div v-else-if="!selectedSession.session_id" class="tinyHint">
-              session_id 未就绪：暂时无法继续
-            </div>
-          </div>
-
-          <div class="logs">
-            <RunUsageMeter :usage="selectedRunUsage" :status="selectedTask?.status" />
-            <div class="outputTabs">
-              <button
-                type="button"
-                class="tabBtn"
-                :class="{ active: outputTab === 'result' }"
-                @click="outputTab = 'result'"
-              >
-                Result
-              </button>
-              <button
-                type="button"
-                class="tabBtn"
-                :class="{ active: outputTab === 'logs' }"
-                @click="outputTab = 'logs'"
-              >
-                Logs
-              </button>
-              <button
-                type="button"
-                class="tabBtn"
-                :class="{ active: outputTab === 'trace' }"
-                @click="outputTab = 'trace'"
-              >
-                Trace
-              </button>
-              <template v-if="outputTab === 'result'">
-                <span class="tabDivider"></span>
-                <button
-                  type="button"
-                  class="tabBtn"
-                  :class="{ active: resultPreviewTab === 'markdown' }"
-                  @click="resultPreviewTab = 'markdown'"
-                  title="Markdown preview"
-                >
-                  Markdown
-                </button>
-                <button
-                  type="button"
-                  class="tabBtn"
-                  :class="{ active: resultPreviewTab === 'raw' }"
-                  @click="resultPreviewTab = 'raw'"
-                  title="Raw text"
-                >
-                  Raw
-                </button>
-                <button
-                  type="button"
-                  class="tabBtn"
-                  :class="{ active: resultPreviewTab === 'html' }"
-                  @click="resultPreviewTab = 'html'"
-                  title="HTML preview (sandboxed)"
-                >
-                  HTML
-                </button>
-              </template>
-              <template v-else-if="outputTab === 'logs'">
-                <span class="tabDivider"></span>
-                <button
-                  type="button"
-                  class="tabBtn"
-                  :class="{ active: logPreviewTab === 'pretty' }"
-                  @click="logPreviewTab = 'pretty'"
-                  title="Pretty view (summaries + expandable JSON)"
-                >
-                  Pretty
-                </button>
-                <button
-                  type="button"
-                  class="tabBtn"
-                  :class="{ active: logPreviewTab === 'raw' }"
-                  @click="logPreviewTab = 'raw'"
-                  title="Raw text"
-                >
-                  Raw
-                </button>
-              </template>
-              <div class="tabSpacer"></div>
-              <button
-                v-if="outputTab === 'result'"
-                type="button"
-                @click="copySelectedResult"
-                :disabled="!selectedResultText"
-              >
-                Copy
-              </button>
-              <template v-else-if="outputTab === 'logs'">
-                <button type="button" @click="copyFilteredLogs" :disabled="!filteredLogs.length">
-                  Copy
-                </button>
-                <button type="button" @click="downloadSelectedLogs" :disabled="!selectedTask">
-                  Download
-                </button>
-              </template>
-              <button
-                v-if="selectedTask"
-                type="button"
-                @click="replaySelectedRun"
-                title="Replay run"
-              >
-                Replay
-              </button>
-            </div>
-
-            <div v-if="outputTab === 'result'" class="resultPanel">
-              <div v-if="!selectedResultText" class="empty">
-                {{
-                  selectedTask?.status === "waiting"
-                    ? "Task is waiting…"
-                    : selectedTask?.status === "running" ||
-                        selectedTask?.status === "queued"
-                      ? "Task is running…"
-                      : "No result yet."
-                }}
-              </div>
-              <template v-else>
+              <div class="resumeRow">
+                <input
+                  v-if="!resumeExpanded"
+                  ref="resumePromptInputEl"
+                  v-model="resumePrompt"
+                  class="promptEmphasis"
+                  placeholder="输入下一步指令…"
+                  aria-label="继续指令"
+                  @keydown="onResumePromptKeyDown"
+                  @keydown.enter="onResumeEnter"
+                />
+                <textarea
+                  v-else
+                  ref="resumePromptTextEl"
+                  v-model="resumePrompt"
+                  class="promptEmphasis"
+                  rows="3"
+                  placeholder="输入下一步指令…"
+                  aria-label="继续指令"
+                  @keydown="onResumePromptKeyDown"
+                  @keydown.ctrl.enter="onResumeEnter"
+                  @keydown.meta.enter="onResumeEnter"
+                ></textarea>
                 <div
-                  v-if="resultPreviewTab === 'markdown'"
-                  class="resultBox markdown"
-                  v-html="selectedResultHtml"
-                  @click="onResultMarkdownClick"
-                ></div>
-                <div v-else-if="resultPreviewTab === 'raw'" class="resultBox">
-                  <pre class="rawBox">{{ selectedResultText }}</pre>
-                </div>
-                <div v-else class="resultBox">
-                  <iframe
-                    class="htmlPreviewFrame"
-                    sandbox
-                    referrerpolicy="no-referrer"
-                    :srcdoc="selectedResultHtmlSrcDoc"
-                    title="HTML preview"
-                  ></iframe>
-                </div>
-              </template>
-            </div>
-
-            <div v-else-if="outputTab === 'trace'" class="tracePanel">
-              <div v-if="traceError" class="modalError">{{ traceError }}</div>
-              <div v-else-if="traceLoading" class="loading">Loading...</div>
-              <template v-else>
-                <div v-if="!selectedTrace?.invocation" class="empty">
-                  No trace yet.
-                </div>
-                <div v-else class="traceBox">
-                  <div v-if="selectedSessionWorkspace" class="traceRow">
-                    <span class="k">workspace</span>
-                    <span class="mono"
-                      >{{ selectedSessionWorkspace.kind }} · {{ selectedSessionWorkspace.status }}</span
-                    >
-                  </div>
-                  <div v-if="selectedSessionWorkspace?.base_workdir" class="traceRow">
-                    <span class="k">base</span>
-                    <span class="mono">{{ selectedSessionWorkspace.base_workdir }}</span>
-                  </div>
-                  <div v-if="selectedSessionWorkspace?.run_workdir" class="traceRow">
-                    <span class="k">run</span>
-                    <span class="mono">{{ selectedSessionWorkspace.run_workdir }}</span>
-                  </div>
-                  <div class="traceRow">
-                    <span class="k">cmd</span>
-                    <span class="mono">{{ selectedTrace.invocation.cmd }}</span>
-                  </div>
-                  <div class="traceRow">
-                    <span class="k">dir</span>
-                    <span class="mono">{{ selectedTrace.invocation.dir }}</span>
-                  </div>
-                  <div class="traceRow">
-                    <span class="k">args</span>
-                    <span class="mono">{{ (selectedTrace.invocation.args ?? []).join(" ") }}</span>
-                  </div>
-                  <div class="traceRow">
-                    <span class="k">env</span>
-                    <div class="traceEnv">
-                      <span
-                        v-for="k in selectedTrace.invocation.env_injected_keys ?? []"
-                        :key="k"
-                        class="pill mono"
-                        >{{ k }}</span
-                      >
-                      <span v-if="!(selectedTrace.invocation.env_injected_keys ?? []).length" class="tinyHint"
-                        >none</span
-                      >
-                    </div>
-                  </div>
-                </div>
-              </template>
-            </div>
-
-            <div v-else class="logsPanel">
-              <div class="logControls">
-                <div class="logFilters">
-                  <label class="logFilter">
-                    <input type="checkbox" v-model="logShowAssistant" />
-                    assistant
-                  </label>
-                  <label class="logFilter">
-                    <input type="checkbox" v-model="logShowStdout" />
-                    stdout
-                  </label>
-                  <label class="logFilter">
-                    <input type="checkbox" v-model="logShowStderr" />
-                    stderr
-                  </label>
-                  <label class="logFilter">
-                    <input type="checkbox" v-model="logShowSystem" />
-                    system
-                  </label>
-                </div>
-                <div class="logMeta">
-                  {{ filteredLogs.length }} / {{ selectedLogs.length }}
-                </div>
-                <input v-model="logSearch" placeholder="Filter logs..." />
-              </div>
-
-              <div class="logbox" :class="logPreviewTab">
-                <template v-if="logPreviewTab === 'raw'">
-                  <div
-                    v-for="l in filteredLogs"
-                    :key="l.id"
-                    class="logLine"
-                    :class="`s-${l.stream}`"
+                  v-if="
+                    resumeDriver === 'codex' || resumeDriver === 'claude-code'
+                  "
+                  class="resumeSafetyControls"
+                >
+                  <span
+                    class="pill"
+                    :class="resumeUseAutopilot ? 'low' : 'warn'"
+                    >{{ resumeUseAutopilot ? "自动" : "手动" }}</span
                   >
-                    <span class="logTime" :title="formatLocalDateTime(l.time)">{{
-                      formatLogTime(l.time)
-                    }}</span>
-                    <span class="logTag" :class="l.stream">{{ l.stream }}</span>
-                    <span class="logMsg">{{ l.message }}</span>
+                  <span class="mono">
+                    <template v-if="resumeShowManualSafety">
+                      {{ resumeSafetyPreset }}
+                    </template>
+                    <template v-else-if="selectedSession">
+                      {{
+                        effectiveSafetyPresetForTask(
+                          resumeDriver,
+                          selectedSession.latest,
+                        )
+                      }}
+                    </template>
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  class="primary resumePrimaryAction"
+                  @click="onPrimarySessionAction"
+                  :disabled="sessionPrimaryActionDisabled"
+                >
+                  {{ sessionPrimaryAction.label }}
+                </button>
+              </div>
+              <details class="resumeSecondary">
+                <summary>更多操作</summary>
+                <div class="resumeSecondaryActions">
+                  <button
+                    type="button"
+                    class="secondary"
+                    @click="onResumeTask"
+                    :disabled="
+                      !resumePrompt.trim() ||
+                      !selectedSession.session_id ||
+                      !!selectedSession.deleted_at ||
+                      highRiskConfirmOpen
+                    "
+                  >
+                    手动继续（高级）
+                  </button>
+                  <button
+                    type="button"
+                    class="secondary"
+                    @click="onPreemptResumeTask"
+                    :disabled="
+                      !resumePrompt.trim() ||
+                      !selectedSession.session_id ||
+                      !!selectedSession.deleted_at ||
+                      highRiskConfirmOpen ||
+                      !selectedSessionInFlightTask
+                    "
+                  >
+                    抢占当前并继续
+                  </button>
+                  <button
+                    type="button"
+                    class="secondary"
+                    @click="resumeExpanded = !resumeExpanded"
+                    :title="resumeExpanded ? 'Collapse' : 'Expand'"
+                  >
+                    {{ resumeExpanded ? "收起高级设置" : "展开高级设置" }}
+                  </button>
+                </div>
+              </details>
+              <div
+                v-if="
+                  selectedSessionInFlightTask ||
+                  sessionContinueQueueLoading ||
+                  sessionContinueQueue.length > 0
+                "
+                class="tinyHint"
+              >
+                <span v-if="selectedSessionInFlightTask">
+                  运行中：{{ selectedSessionInFlightTask.id.slice(0, 8) }}（{{
+                    selectedSessionInFlightTask.status
+                  }}）
+                </span>
+                <span v-if="sessionContinueQueueLoading">
+                  {{ selectedSessionInFlightTask ? " · " : "" }}队列加载中…
+                </span>
+                <span v-else-if="sessionContinueQueue.length > 0">
+                  {{ selectedSessionInFlightTask ? " · " : "" }}队列
+                  {{ sessionContinueQueue.length }}
+                </span>
+              </div>
+              <div
+                v-if="resumeExpanded && sessionContinueQueue.length > 0"
+                class="resumeQueue"
+              >
+                <div
+                  v-for="(q, idx) in sessionContinueQueue"
+                  :key="q.id"
+                  class="resumeQueueItem"
+                >
+                  <span class="mono">#{{ idx + 1 }}</span>
+                  <span>{{ promptSummary(q.prompt) || "(empty prompt)" }}</span>
+                  <span class="pill small">{{ q.source }}</span>
+                </div>
+              </div>
+              <div
+                v-if="
+                  resumeExpanded &&
+                  (resumeDriver === 'codex' || resumeDriver === 'claude-code')
+                "
+                class="resumeSafetyExtra"
+              >
+                <div class="resumeSafetyExtraGrid">
+                  <label class="full">
+                    <input type="checkbox" v-model="runSafetyInstallUnlock" />
+                    <span class="mono">安装解锁 (Install unlock)</span>
+                    <span class="tinyHint"
+                      >开启下载/安装权限（允许 agent 下载/安装依赖）</span
+                    >
+                  </label>
+                  <label class="full">
+                    <input
+                      type="checkbox"
+                      v-model="runSafetyAutopilotEnabled"
+                    />
+                    <span>安全自动驾驶（推荐）</span>
+                  </label>
+                  <label v-if="runSafetyAutopilotEnabled" class="full">
+                    <input type="checkbox" v-model="resumeSafetyOverride" />
+                    <span>覆盖自动驾驶（手动设置预设）</span>
+                  </label>
+                </div>
+
+                <template v-if="resumeShowManualSafety">
+                  <div class="resumeSafetyGrid">
+                    <label class="resumeSafetyLabel">
+                      安全预设
+                      <select v-model="resumeSafetyPreset">
+                        <option
+                          v-for="p in safetyPresetsForDriver(resumeDriver)"
+                          :key="p.value"
+                          :value="p.value"
+                        >
+                          {{ p.label }}
+                        </option>
+                      </select>
+                    </label>
+                  </div>
+                  <div
+                    v-if="
+                      resumeDriver === 'claude-code' &&
+                      resumeSafetyPreset === 'search-browse'
+                    "
+                    class="tinyHint"
+                  >
+                    Enables Claude Code WebFetch/WebSearch and allows
+                    <span class="mono">curl</span>/<span class="mono"
+                      >wget</span
+                    >
+                    in bash (still subject to Claude bash sandbox).
+                  </div>
+                  <div
+                    v-else-if="
+                      resumeDriver === 'codex' &&
+                      resumeSafetyPreset === 'search-browse'
+                    "
+                    class="tinyHint"
+                  >
+                    Enables Codex <span class="mono">--search</span> (native
+                    web_search tool). Search/browse is distinct from
+                    downloading/executing scripts.
+                  </div>
+                  <div
+                    v-if="isHighRiskPreset(resumeDriver, resumeSafetyPreset)"
+                    class="resumeSafetyWarn"
+                  >
+                    <div class="tinyHint warn">
+                      <template
+                        v-if="
+                          resumeDriver === 'codex' &&
+                          resumeSafetyPreset === 'unsafe'
+                        "
+                      >
+                        将以
+                        <span class="mono"
+                          >--dangerously-bypass-approvals-and-sandbox</span
+                        >
+                        运行：跳过审批并关闭 sandbox 隔离，agent
+                        可直接执行命令并访问系统资源（文件/网络）。
+                      </template>
+                      <template
+                        v-else-if="
+                          resumeDriver === 'codex' &&
+                          resumeSafetyPreset === 'danger-full-access'
+                        "
+                      >
+                        将以
+                        <span class="mono">--sandbox danger-full-access</span>
+                        运行：允许访问 workspace 外的文件/目录（权限更大）。
+                      </template>
+                      <template
+                        v-else-if="
+                          resumeDriver === 'claude-code' &&
+                          resumeSafetyPreset === 'unsafe'
+                        "
+                      >
+                        将以
+                        <span class="mono">--dangerously-skip-permissions</span>
+                        运行：跳过权限确认，并关闭 bash
+                        sandbox（脚本可直接访问系统文件/网络）。
+                      </template>
+                    </div>
+                    <label class="resumeSafetyOptIn">
+                      <input type="checkbox" v-model="resumeHighRiskOptIn" />
+                      <span>我已知晓将开放的权限并希望继续</span>
+                    </label>
                   </div>
                 </template>
                 <template v-else>
-                  <details
-                    v-for="p in prettyLogs"
-                    :key="p.id"
-                    class="logEvent"
-                    :class="`s-${p.stream}`"
+                  <div
+                    v-if="resumeAutopilotHighRiskBlocked"
+                    class="tinyHint warn"
                   >
-                    <summary class="logEventSummary">
-                      <span class="logTime" :title="formatLocalDateTime(p.time)">{{
-                        formatLogTime(p.time)
-                      }}</span>
-                      <span class="logTag" :class="p.stream">{{ p.stream }}</span>
-                      <span class="logSummary">{{ p.summary }}</span>
-                    </summary>
-                    <div class="logEventBody">
-                      <pre v-if="p.kind === 'text'" class="logDetail">{{ p.details }}</pre>
-                      <pre v-else class="hljs logDetail"><code v-html="p.jsonHtml"></code></pre>
-                    </div>
-                  </details>
+                    检测到需要更高权限的设置。启用
+                    <span class="mono">Install unlock</span>
+                    或使用手动覆盖后继续。
+                  </div>
+                  <div class="tinyHint">Uses last run’s safety settings.</div>
                 </template>
+              </div>
+              <div v-if="selectedSession.deleted_at" class="tinyHint">
+                会话已删除：无法继续
+              </div>
+              <div v-else-if="!selectedSession.session_id" class="tinyHint">
+                session_id 未就绪：暂时无法继续
+              </div>
+            </div>
+
+            <div class="logs">
+              <RunUsageMeter
+                :usage="selectedRunUsage"
+                :status="selectedTask?.status"
+              />
+              <div class="outputTabs">
+                <button
+                  type="button"
+                  class="tabBtn"
+                  :class="{ active: outputTab === 'result' }"
+                  @click="outputTab = 'result'"
+                >
+                  Result
+                </button>
+                <button
+                  type="button"
+                  class="tabBtn"
+                  :class="{ active: outputTab === 'logs' }"
+                  @click="outputTab = 'logs'"
+                >
+                  Logs
+                </button>
+                <button
+                  type="button"
+                  class="tabBtn"
+                  :class="{ active: outputTab === 'trace' }"
+                  @click="outputTab = 'trace'"
+                >
+                  Trace
+                </button>
+                <template v-if="outputTab === 'result'">
+                  <span class="tabDivider"></span>
+                  <button
+                    type="button"
+                    class="tabBtn"
+                    :class="{ active: resultPreviewTab === 'markdown' }"
+                    @click="resultPreviewTab = 'markdown'"
+                    title="Markdown preview"
+                  >
+                    Markdown
+                  </button>
+                  <button
+                    type="button"
+                    class="tabBtn"
+                    :class="{ active: resultPreviewTab === 'raw' }"
+                    @click="resultPreviewTab = 'raw'"
+                    title="Raw text"
+                  >
+                    Raw
+                  </button>
+                  <button
+                    type="button"
+                    class="tabBtn"
+                    :class="{ active: resultPreviewTab === 'html' }"
+                    @click="resultPreviewTab = 'html'"
+                    title="HTML preview (sandboxed)"
+                  >
+                    HTML
+                  </button>
+                </template>
+                <template v-else-if="outputTab === 'logs'">
+                  <span class="tabDivider"></span>
+                  <button
+                    type="button"
+                    class="tabBtn"
+                    :class="{ active: logPreviewTab === 'pretty' }"
+                    @click="logPreviewTab = 'pretty'"
+                    title="Pretty view (summaries + expandable JSON)"
+                  >
+                    Pretty
+                  </button>
+                  <button
+                    type="button"
+                    class="tabBtn"
+                    :class="{ active: logPreviewTab === 'raw' }"
+                    @click="logPreviewTab = 'raw'"
+                    title="Raw text"
+                  >
+                    Raw
+                  </button>
+                </template>
+                <div class="tabSpacer"></div>
+                <button
+                  v-if="outputTab === 'result'"
+                  type="button"
+                  @click="copySelectedResult"
+                  :disabled="!selectedResultText"
+                >
+                  Copy
+                </button>
+                <template v-else-if="outputTab === 'logs'">
+                  <button
+                    type="button"
+                    @click="copyFilteredLogs"
+                    :disabled="!filteredLogs.length"
+                  >
+                    Copy
+                  </button>
+                  <button
+                    type="button"
+                    @click="downloadSelectedLogs"
+                    :disabled="!selectedTask"
+                  >
+                    Download
+                  </button>
+                </template>
+                <button
+                  v-if="selectedTask"
+                  type="button"
+                  @click="replaySelectedRun"
+                  title="Replay run"
+                >
+                  Replay
+                </button>
+              </div>
+
+              <div v-if="outputTab === 'result'" class="resultPanel">
+                <div v-if="!selectedResultText" class="empty">
+                  {{
+                    selectedTask?.status === "waiting"
+                      ? "Task is waiting…"
+                      : selectedTask?.status === "running" ||
+                          selectedTask?.status === "queued"
+                        ? "Task is running…"
+                        : "No result yet."
+                  }}
+                </div>
+                <template v-else>
+                  <div
+                    v-if="resultPreviewTab === 'markdown'"
+                    class="resultBox markdown"
+                    v-html="selectedResultHtml"
+                    @click="onResultMarkdownClick"
+                  ></div>
+                  <div v-else-if="resultPreviewTab === 'raw'" class="resultBox">
+                    <pre class="rawBox">{{ selectedResultText }}</pre>
+                  </div>
+                  <div v-else class="resultBox">
+                    <iframe
+                      class="htmlPreviewFrame"
+                      sandbox
+                      referrerpolicy="no-referrer"
+                      :srcdoc="selectedResultHtmlSrcDoc"
+                      title="HTML preview"
+                    ></iframe>
+                  </div>
+                </template>
+              </div>
+
+              <div v-else-if="outputTab === 'trace'" class="tracePanel">
+                <div v-if="traceError" class="modalError">{{ traceError }}</div>
+                <div v-else-if="traceLoading" class="loading">Loading...</div>
+                <template v-else>
+                  <div v-if="!selectedTrace?.invocation" class="empty">
+                    No trace yet.
+                  </div>
+                  <div v-else class="traceBox">
+                    <div v-if="selectedSessionWorkspace" class="traceRow">
+                      <span class="k">workspace</span>
+                      <span class="mono"
+                        >{{ selectedSessionWorkspace.kind }} ·
+                        {{ selectedSessionWorkspace.status }}</span
+                      >
+                    </div>
+                    <div
+                      v-if="selectedSessionWorkspace?.base_workdir"
+                      class="traceRow"
+                    >
+                      <span class="k">base</span>
+                      <span class="mono">{{
+                        selectedSessionWorkspace.base_workdir
+                      }}</span>
+                    </div>
+                    <div
+                      v-if="selectedSessionWorkspace?.run_workdir"
+                      class="traceRow"
+                    >
+                      <span class="k">run</span>
+                      <span class="mono">{{
+                        selectedSessionWorkspace.run_workdir
+                      }}</span>
+                    </div>
+                    <div class="traceRow">
+                      <span class="k">cmd</span>
+                      <span class="mono">{{
+                        selectedTrace.invocation.cmd
+                      }}</span>
+                    </div>
+                    <div class="traceRow">
+                      <span class="k">dir</span>
+                      <span class="mono">{{
+                        selectedTrace.invocation.dir
+                      }}</span>
+                    </div>
+                    <div class="traceRow">
+                      <span class="k">args</span>
+                      <span class="mono">{{
+                        (selectedTrace.invocation.args ?? []).join(" ")
+                      }}</span>
+                    </div>
+                    <div class="traceRow">
+                      <span class="k">env</span>
+                      <div class="traceEnv">
+                        <span
+                          v-for="k in selectedTrace.invocation
+                            .env_injected_keys ?? []"
+                          :key="k"
+                          class="pill mono"
+                          >{{ k }}</span
+                        >
+                        <span
+                          v-if="
+                            !(selectedTrace.invocation.env_injected_keys ?? [])
+                              .length
+                          "
+                          class="tinyHint"
+                          >none</span
+                        >
+                      </div>
+                    </div>
+                  </div>
+                </template>
+              </div>
+
+              <div v-else class="logsPanel">
+                <div class="logControls">
+                  <div class="logFilters">
+                    <label class="logFilter">
+                      <input type="checkbox" v-model="logShowAssistant" />
+                      assistant
+                    </label>
+                    <label class="logFilter">
+                      <input type="checkbox" v-model="logShowStdout" />
+                      stdout
+                    </label>
+                    <label class="logFilter">
+                      <input type="checkbox" v-model="logShowStderr" />
+                      stderr
+                    </label>
+                    <label class="logFilter">
+                      <input type="checkbox" v-model="logShowSystem" />
+                      system
+                    </label>
+                  </div>
+                  <div class="logMeta">
+                    {{ filteredLogs.length }} / {{ selectedLogs.length }}
+                  </div>
+                  <input v-model="logSearch" placeholder="Filter logs..." />
+                </div>
+
+                <div class="logbox" :class="logPreviewTab">
+                  <template v-if="logPreviewTab === 'raw'">
+                    <div
+                      v-for="l in filteredLogs"
+                      :key="l.id"
+                      class="logLine"
+                      :class="`s-${l.stream}`"
+                    >
+                      <span
+                        class="logTime"
+                        :title="formatLocalDateTime(l.time)"
+                        >{{ formatLogTime(l.time) }}</span
+                      >
+                      <span class="logTag" :class="l.stream">{{
+                        l.stream
+                      }}</span>
+                      <span class="logMsg">{{ l.message }}</span>
+                    </div>
+                  </template>
+                  <template v-else>
+                    <details
+                      v-for="p in prettyLogs"
+                      :key="p.id"
+                      class="logEvent"
+                      :class="`s-${p.stream}`"
+                    >
+                      <summary class="logEventSummary">
+                        <span
+                          class="logTime"
+                          :title="formatLocalDateTime(p.time)"
+                          >{{ formatLogTime(p.time) }}</span
+                        >
+                        <span class="logTag" :class="p.stream">{{
+                          p.stream
+                        }}</span>
+                        <span class="logSummary">{{ p.summary }}</span>
+                      </summary>
+                      <div class="logEventBody">
+                        <pre v-if="p.kind === 'text'" class="logDetail">{{
+                          p.details
+                        }}</pre>
+                        <pre
+                          v-else
+                          class="hljs logDetail"
+                        ><code v-html="p.jsonHtml"></code></pre>
+                      </div>
+                    </details>
+                  </template>
+                </div>
               </div>
             </div>
           </div>
-        </div>
-      </section>
+        </section>
       </template>
     </div>
 
@@ -7202,244 +7899,252 @@ watch(
       </div>
     </div>
 
-		    <LiveDrawer
-		      v-if="liveOpen"
-		      v-model:full="liveFull"
-		      v-model:scope="liveScope"
-		      v-model:mode="liveMode"
-		      v-model:wrap="liveWrap"
-		      v-model:paused="livePaused"
-		      :width="liveWidth"
-		      :resizing="liveResizing"
-		      :items="liveItems"
-		      :eventsConnected="eventsConnected"
-		      :eventsIdleSeconds="eventsIdleSeconds"
-		      :feedIdleSeconds="feedIdleSeconds"
-		      :selectedTaskStatus="selectedTask?.status ?? ''"
-		      :boxElRef="liveBoxEl"
-		      :formatLogTime="formatLogTime"
-		      :formatLocalDateTime="formatLocalDateTime"
-		      @close="liveOpen = false"
-		      @reconnect="reconnectEvents"
-		      @startResize="startLiveResize"
-		    />
+    <LiveDrawer
+      v-if="liveOpen"
+      v-model:full="liveFull"
+      v-model:scope="liveScope"
+      v-model:mode="liveMode"
+      v-model:wrap="liveWrap"
+      v-model:paused="livePaused"
+      :width="liveWidth"
+      :resizing="liveResizing"
+      :items="liveItems"
+      :eventsConnected="eventsConnected"
+      :eventsIdleSeconds="eventsIdleSeconds"
+      :feedIdleSeconds="feedIdleSeconds"
+      :selectedTaskStatus="selectedTask?.status ?? ''"
+      :boxElRef="liveBoxEl"
+      :formatLogTime="formatLogTime"
+      :formatLocalDateTime="formatLocalDateTime"
+      @close="liveOpen = false"
+      @reconnect="reconnectEvents"
+      @startResize="startLiveResize"
+    />
 
-        <SecretaryDrawer
-          v-if="secretaryOpen"
-          :messages="secretaryMessages"
-          :loading="secretaryLoading"
-          :sending="secretarySending"
-          :error="secretaryError"
-          :thinkingLines="secretaryThinkingLines"
-          :streamingReply="secretaryStreamingReply"
-          v-model:input="secretaryInput"
-          @close="closeSecretaryDrawer"
-          @refresh="refreshSecretary"
-          @clear="onSecretaryClear"
-          @send="sendSecretaryChat"
-          @quick="onSecretaryQuick"
-        />
+    <SecretaryDrawer
+      v-if="secretaryOpen"
+      :messages="secretaryMessages"
+      :loading="secretaryLoading"
+      :sending="secretarySending"
+      :error="secretaryError"
+      :thinkingLines="secretaryThinkingLines"
+      :streamingReply="secretaryStreamingReply"
+      v-model:input="secretaryInput"
+      @close="closeSecretaryDrawer"
+      @refresh="refreshSecretary"
+      @clear="onSecretaryClear"
+      @send="sendSecretaryChat"
+      @quick="onSecretaryQuick"
+    />
 
-		    <div v-if="runsOpen" class="modalOverlay" @click.self="runsOpen = false">
-		      <div class="modal runsModal">
-		        <div class="modalHeader">
-		          <div class="modalTitle">
-		            Runs <span class="runsCount">{{ selectedSession?.runs.length ?? 0 }}</span>
-	          </div>
-	          <button class="iconBtn" type="button" @click="runsOpen = false">✕</button>
-	        </div>
-	        <div class="modalBody runsModalBody">
-	          <div v-if="!selectedSession" class="empty">No session selected</div>
-	          <div v-else class="runList runsModalList">
-	            <button
-	              v-for="r in selectedSession.runs.slice().reverse()"
-	              :key="r.id"
-	              type="button"
-	              class="runRow"
-	              :class="{ active: r.id === selectedTaskId }"
-	              @click="onSelectTask(r.id)"
-	            >
-	              <div class="runTop">
-                  <div class="runTopLeft">
-                    <span class="mono runId">{{ r.id.slice(0, 8) }}</span>
-                    <span class="pill kind">{{ r.mode }}</span>
-                    <span class="score">score {{ r.score }}</span>
-                    <span class="mono runTime" :title="r.created_at">{{
-                      formatLocalDateTime(r.created_at)
-                    }}</span>
-                  </div>
-                  <span class="pill" :class="r.status">{{ r.status }}</span>
-	              </div>
-	              <div class="runBottom">{{ r.prompt }}</div>
-	            </button>
-	          </div>
-	        </div>
-	        <div class="modalFooter">
-	          <button type="button" @click="runsOpen = false">Close</button>
-	        </div>
-		      </div>
-		    </div>
-
-        <InstanceTokenModal
-          :open="instanceTokenOpen"
-          :busy="instanceTokenBusy"
-          :error="instanceTokenError"
-          :initialToken="instanceTokenInitial"
-          @close="closeInstanceTokenModal"
-          @clear="clearInstanceTokenModal"
-          @save="saveInstanceTokenModal"
-        />
-
-        <ApprovalPromptModal
-          :open="approvalPromptOpen"
-          :task="approvalPromptTask"
-          @close="closeApprovalPrompt"
-          @tokenRequired="openInstanceTokenModal"
-          @enterUnsafe="onApprovalEnterUnsafe"
-        />
-
-        <BlockedPromptModal
-          :open="blockedPromptOpen"
-          :busy="blockedPromptBusy"
-          :error="blockedPromptError"
-          :warning="blockedPromptTask?.warning ?? ''"
-          :confirmOpen="highRiskConfirmOpen"
-          :safeRetryEnabled="blockedPromptSafeRetryEnabled"
-          @close="closeBlockedPrompt"
-          @copyConfigSnippet="copyText('workers:\\n  unsafe_automation: true\\n')"
-          @proceed="confirmBlockedPromptUnsafe"
-          @safeRetry="confirmBlockedPromptSafeRetry"
-        />
-
-        <RehydratePromptModal
-          :open="rehydratePromptOpen"
-          :busy="rehydratePromptBusy"
-          :error="rehydratePromptError"
-          @close="closeRehydratePrompt"
-          @confirm="confirmRehydratePrompt"
-        />
-
-	      <div
-	        v-if="workspaceRenameOpen"
-	        class="modalOverlay"
-	        @click.self="closeWorkspaceRename"
-	      >
-        <div class="modal smallModal">
-          <div class="modalHeader">
-            <div class="modalTitle">Rename Workspace</div>
-            <button class="iconBtn" type="button" @click="closeWorkspaceRename">
-              ✕
-            </button>
+    <div v-if="runsOpen" class="modalOverlay" @click.self="runsOpen = false">
+      <div class="modal runsModal">
+        <div class="modalHeader">
+          <div class="modalTitle">
+            Runs
+            <span class="runsCount">{{
+              selectedSession?.runs.length ?? 0
+            }}</span>
           </div>
-          <div class="modalBody">
-            <div class="tinyHint">
-              Workspace: <span class="mono">{{ workspaceRenamePath }}</span>
-            </div>
-            <label class="full">
-              Name
-              <input
-                ref="workspaceRenameInputEl"
-                v-model="workspaceRenameValue"
-                placeholder="(optional)"
-              />
-            </label>
-            <div class="tinyHint">
-              Name is stored locally and shown in the workspace selector / pinned list.
-            </div>
-          </div>
-          <div class="modalFooter">
-            <button type="button" @click="closeWorkspaceRename">Cancel</button>
-            <button type="button" class="primary" @click="saveWorkspaceRename">
-              Save
-            </button>
-          </div>
+          <button class="iconBtn" type="button" @click="runsOpen = false">
+            ✕
+          </button>
         </div>
-      </div>
-
-      <div
-        v-if="sessionRenameOpen"
-        class="modalOverlay"
-        @click.self="closeSessionRename"
-      >
-        <div class="modal smallModal">
-          <div class="modalHeader">
-            <div class="modalTitle">Rename Session</div>
-            <button class="iconBtn" type="button" @click="closeSessionRename">
-              ✕
-            </button>
-          </div>
-          <div class="modalBody">
-            <div v-if="sessionRenameError" class="modalError">
-              {{ sessionRenameError }}
-            </div>
-            <label class="full">
-              Title
-              <input
-                ref="sessionRenameInputEl"
-                v-model="sessionRenameTitle"
-                placeholder="(optional)"
-              />
-            </label>
-            <div class="tinyHint">
-              Title is stored locally (soft) and shown in Sessions list/detail.
-            </div>
-          </div>
-          <div class="modalFooter">
-            <button type="button" @click="closeSessionRename">Cancel</button>
+        <div class="modalBody runsModalBody">
+          <div v-if="!selectedSession" class="empty">No session selected</div>
+          <div v-else class="runList runsModalList">
             <button
+              v-for="r in selectedSession.runs.slice().reverse()"
+              :key="r.id"
               type="button"
-              class="primary"
-              @click="saveSessionRename"
-              :disabled="sessionRenameSaving"
+              class="runRow"
+              :class="{ active: r.id === selectedTaskId }"
+              @click="onSelectTask(r.id)"
             >
-              Save
+              <div class="runTop">
+                <div class="runTopLeft">
+                  <span class="mono runId">{{ r.id.slice(0, 8) }}</span>
+                  <span class="pill kind">{{ r.mode }}</span>
+                  <span class="score">score {{ r.score }}</span>
+                  <span class="mono runTime" :title="r.created_at">{{
+                    formatLocalDateTime(r.created_at)
+                  }}</span>
+                </div>
+                <span class="pill" :class="r.status">{{ r.status }}</span>
+              </div>
+              <div class="runBottom">{{ r.prompt }}</div>
             </button>
           </div>
         </div>
+        <div class="modalFooter">
+          <button type="button" @click="runsOpen = false">Close</button>
+        </div>
       </div>
+    </div>
 
-      <div
-        v-if="sessionDeleteOpen"
-        class="modalOverlay"
-        @click.self="closeSessionDelete"
-      >
-        <div class="modal smallModal">
-          <div class="modalHeader">
-            <div class="modalTitle">Delete Session</div>
-            <button class="iconBtn" type="button" @click="closeSessionDelete">
-              ✕
-            </button>
+    <InstanceTokenModal
+      :open="instanceTokenOpen"
+      :busy="instanceTokenBusy"
+      :error="instanceTokenError"
+      :initialToken="instanceTokenInitial"
+      @close="closeInstanceTokenModal"
+      @clear="clearInstanceTokenModal"
+      @save="saveInstanceTokenModal"
+    />
+
+    <ApprovalPromptModal
+      :open="approvalPromptOpen"
+      :task="approvalPromptTask"
+      @close="closeApprovalPrompt"
+      @tokenRequired="openInstanceTokenModal"
+      @enterUnsafe="onApprovalEnterUnsafe"
+    />
+
+    <BlockedPromptModal
+      :open="blockedPromptOpen"
+      :busy="blockedPromptBusy"
+      :error="blockedPromptError"
+      :warning="blockedPromptTask?.warning ?? ''"
+      :confirmOpen="highRiskConfirmOpen"
+      :safeRetryEnabled="blockedPromptSafeRetryEnabled"
+      @close="closeBlockedPrompt"
+      @copyConfigSnippet="copyText('workers:\\n  unsafe_automation: true\\n')"
+      @proceed="confirmBlockedPromptUnsafe"
+      @safeRetry="confirmBlockedPromptSafeRetry"
+    />
+
+    <RehydratePromptModal
+      :open="rehydratePromptOpen"
+      :busy="rehydratePromptBusy"
+      :error="rehydratePromptError"
+      @close="closeRehydratePrompt"
+      @confirm="confirmRehydratePrompt"
+    />
+
+    <div
+      v-if="workspaceRenameOpen"
+      class="modalOverlay"
+      @click.self="closeWorkspaceRename"
+    >
+      <div class="modal smallModal">
+        <div class="modalHeader">
+          <div class="modalTitle">Rename Workspace</div>
+          <button class="iconBtn" type="button" @click="closeWorkspaceRename">
+            ✕
+          </button>
+        </div>
+        <div class="modalBody">
+          <div class="tinyHint">
+            Workspace: <span class="mono">{{ workspaceRenamePath }}</span>
           </div>
-          <div class="modalBody">
-            <div v-if="sessionDeleteError" class="modalError">
-              {{ sessionDeleteError }}
-            </div>
-            <div class="confirmText">
-              Delete <span class="mono">{{ sessionDeleteLabel }}</span> ? (soft delete)
-            </div>
-            <div class="tinyHint">
-              Deleted sessions are hidden by default. You can enable “Show deleted” to view them.
-            </div>
-          </div>
-          <div class="modalFooter">
-            <button type="button" @click="closeSessionDelete">Cancel</button>
-            <button
-              type="button"
-              class="dangerBtn"
-              @click="confirmSessionDelete"
-              :disabled="sessionDeleteSaving"
-            >
-              Delete
-            </button>
+          <label class="full">
+            Name
+            <input
+              ref="workspaceRenameInputEl"
+              v-model="workspaceRenameValue"
+              placeholder="(optional)"
+            />
+          </label>
+          <div class="tinyHint">
+            Name is stored locally and shown in the workspace selector / pinned
+            list.
           </div>
         </div>
+        <div class="modalFooter">
+          <button type="button" @click="closeWorkspaceRename">Cancel</button>
+          <button type="button" class="primary" @click="saveWorkspaceRename">
+            Save
+          </button>
+        </div>
       </div>
-	
-		    <NewRunModal
-	      v-model:open="newRunOpen"
-	      v-model:workdir="newWorkdir"
-	      v-model:prompt="newPrompt"
-	      v-model:workerType="newWorkerType"
+    </div>
+
+    <div
+      v-if="sessionRenameOpen"
+      class="modalOverlay"
+      @click.self="closeSessionRename"
+    >
+      <div class="modal smallModal">
+        <div class="modalHeader">
+          <div class="modalTitle">Rename Session</div>
+          <button class="iconBtn" type="button" @click="closeSessionRename">
+            ✕
+          </button>
+        </div>
+        <div class="modalBody">
+          <div v-if="sessionRenameError" class="modalError">
+            {{ sessionRenameError }}
+          </div>
+          <label class="full">
+            Title
+            <input
+              ref="sessionRenameInputEl"
+              v-model="sessionRenameTitle"
+              placeholder="(optional)"
+            />
+          </label>
+          <div class="tinyHint">
+            Title is stored locally (soft) and shown in Sessions list/detail.
+          </div>
+        </div>
+        <div class="modalFooter">
+          <button type="button" @click="closeSessionRename">Cancel</button>
+          <button
+            type="button"
+            class="primary"
+            @click="saveSessionRename"
+            :disabled="sessionRenameSaving"
+          >
+            Save
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div
+      v-if="sessionDeleteOpen"
+      class="modalOverlay"
+      @click.self="closeSessionDelete"
+    >
+      <div class="modal smallModal">
+        <div class="modalHeader">
+          <div class="modalTitle">Delete Session</div>
+          <button class="iconBtn" type="button" @click="closeSessionDelete">
+            ✕
+          </button>
+        </div>
+        <div class="modalBody">
+          <div v-if="sessionDeleteError" class="modalError">
+            {{ sessionDeleteError }}
+          </div>
+          <div class="confirmText">
+            Delete <span class="mono">{{ sessionDeleteLabel }}</span> ? (soft
+            delete)
+          </div>
+          <div class="tinyHint">
+            Deleted sessions are hidden by default. You can enable “Show
+            deleted” to view them.
+          </div>
+        </div>
+        <div class="modalFooter">
+          <button type="button" @click="closeSessionDelete">Cancel</button>
+          <button
+            type="button"
+            class="dangerBtn"
+            @click="confirmSessionDelete"
+            :disabled="sessionDeleteSaving"
+          >
+            Delete
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <NewRunModal
+      v-model:open="newRunOpen"
+      v-model:workdir="newWorkdir"
+      v-model:prompt="newPrompt"
+      v-model:workerType="newWorkerType"
       v-model:safetyOverride="newRunSafetyOverride"
       v-model:installUnlock="runSafetyInstallUnlock"
       v-model:autopilotEnabled="runSafetyAutopilotEnabled"
@@ -7455,137 +8160,137 @@ watch(
       :highRiskConfirmOpen="highRiskConfirmOpen"
       @close="closeNewRun"
       @create="onCreateTaskFromModal"
-	      @openDirPicker="openDirPicker"
-	      @openAuthSettings="openAuthSettings"
-	    />
+      @openDirPicker="openDirPicker"
+      @openAuthSettings="openAuthSettings"
+    />
 
-        <WorkdirBusyModal
-          :open="workdirBusyOpen"
-          :busy="workdirBusyBusy"
-          :error="workdirBusyError"
-          :message="workdirBusyMessage"
-          :workdir="workdirBusyWorkdir"
-          :existingTaskID="workdirBusyExistingTaskID"
-          :existingStatus="workdirBusyExistingStatus"
-          @close="closeWorkdirBusyModal"
-          @wait="confirmWorkdirBusyWait"
-          @worktree="confirmWorkdirBusyWorktree"
-          @viewExisting="viewWorkdirBusyExisting"
-        />
+    <WorkdirBusyModal
+      :open="workdirBusyOpen"
+      :busy="workdirBusyBusy"
+      :error="workdirBusyError"
+      :message="workdirBusyMessage"
+      :workdir="workdirBusyWorkdir"
+      :existingTaskID="workdirBusyExistingTaskID"
+      :existingStatus="workdirBusyExistingStatus"
+      @close="closeWorkdirBusyModal"
+      @wait="confirmWorkdirBusyWait"
+      @worktree="confirmWorkdirBusyWorktree"
+      @viewExisting="viewWorkdirBusyExisting"
+    />
 
-        <WorktreeUntrackedModal
-          :open="worktreeUntrackedOpen"
-          :busy="worktreeUntrackedBusy"
-          :error="worktreeUntrackedError"
-          :files="worktreeUntrackedData?.files ?? 0"
-          :bytes="worktreeUntrackedData?.bytes ?? 0"
-          :maxFiles="worktreeUntrackedData?.maxFiles ?? 0"
-          :maxBytes="worktreeUntrackedData?.maxBytes ?? 0"
-          :largest="worktreeUntrackedData?.largest ?? []"
-          @close="closeWorktreeUntrackedModal"
-          @skip="confirmWorktreeUntrackedSkip"
-          @force="confirmWorktreeUntrackedForce"
-        />
+    <WorktreeUntrackedModal
+      :open="worktreeUntrackedOpen"
+      :busy="worktreeUntrackedBusy"
+      :error="worktreeUntrackedError"
+      :files="worktreeUntrackedData?.files ?? 0"
+      :bytes="worktreeUntrackedData?.bytes ?? 0"
+      :maxFiles="worktreeUntrackedData?.maxFiles ?? 0"
+      :maxBytes="worktreeUntrackedData?.maxBytes ?? 0"
+      :largest="worktreeUntrackedData?.largest ?? []"
+      @close="closeWorktreeUntrackedModal"
+      @skip="confirmWorktreeUntrackedSkip"
+      @force="confirmWorktreeUntrackedForce"
+    />
 
-		    <SkillsInsertModal
-		      :open="skillsInsertOpen"
-		      :driver="skillsInsertDriver"
-		      :prompt="skillsInsertPrompt"
-		      :promptEl="skillsInsertPromptEl"
-		      @close="closeSkillsInsert"
-		      @update:prompt="skillsInsertPrompt = $event"
-		    />
+    <SkillsInsertModal
+      :open="skillsInsertOpen"
+      :driver="skillsInsertDriver"
+      :prompt="skillsInsertPrompt"
+      :promptEl="skillsInsertPromptEl"
+      @close="closeSkillsInsert"
+      @update:prompt="skillsInsertPrompt = $event"
+    />
 
-        <RunningSessionsStartupModal
-          :open="runningSessionsStartupOpen"
-          :items="runningSessionsStartupItems"
-          @close="closeRunningSessionsStartupModal"
-          @select="selectRunningSessionFromStartup"
-        />
+    <RunningSessionsStartupModal
+      :open="runningSessionsStartupOpen"
+      :items="runningSessionsStartupItems"
+      @close="closeRunningSessionsStartupModal"
+      @select="selectRunningSessionFromStartup"
+    />
 
-		    <SkillMountConfirmModal
-		      :open="skillMountConfirmOpen"
-		      :driver="skillMountConfirmDriver"
-		      :items="skillMountConfirmItems"
-		      :busy="skillMountConfirmBusy"
-		      :error="skillMountConfirmError"
-		      @cancel="cancelSkillMountConfirm"
-		      @continue="continueSkillMountConfirm"
-		      @mount="confirmSkillMountAndContinue"
-		    />
+    <SkillMountConfirmModal
+      :open="skillMountConfirmOpen"
+      :driver="skillMountConfirmDriver"
+      :items="skillMountConfirmItems"
+      :busy="skillMountConfirmBusy"
+      :error="skillMountConfirmError"
+      @cancel="cancelSkillMountConfirm"
+      @continue="continueSkillMountConfirm"
+      @mount="confirmSkillMountAndContinue"
+    />
 
-		    <HighRiskConfirmModal
-		      :open="highRiskConfirmOpen"
-		      :title="highRiskConfirmTitle"
-	      :message="highRiskConfirmMessage"
-	      :detail="highRiskConfirmDetail"
+    <HighRiskConfirmModal
+      :open="highRiskConfirmOpen"
+      :title="highRiskConfirmTitle"
+      :message="highRiskConfirmMessage"
+      :detail="highRiskConfirmDetail"
       :confirmLabel="highRiskConfirmConfirmLabel"
       :busy="highRiskConfirmBusy"
       @cancel="cancelHighRiskConfirm"
       @confirm="confirmHighRiskConfirm"
     />
 
-	    <AuthSettingsModal
-	      :open="authSettingsOpen"
-	      :saving="authSaving"
-	      :error="authSettingsError"
-	      :notice="authSettingsNotice"
-	      :storagePath="authInfo?.storage_path ?? ''"
-	      :authStatus="authStatus"
-	      :toolsStatus="toolsStatus"
-	      v-model:autoDeliveryForeman="autoDeliveryForeman"
-	      v-model:anthropicBaseURL="authAnthropicBaseURL"
-	      v-model:anthropicApiKey="authAnthropicApiKey"
-	      v-model:anthropicAuthToken="authAnthropicAuthToken"
-	      v-model:anthropicModel="authAnthropicModel"
-	      v-model:anthropicSmallFastModel="authAnthropicSmallFastModel"
-	      v-model:openAIApiKey="authOpenAIApiKey"
-	      v-model:codexModel="authCodexModel"
-	      v-model:codexReasoningEffort="authCodexReasoningEffort"
-	      @close="authSettingsOpen = false"
-	      @openTools="openToolsSettings"
-	      @openProviders="openProvidersSettings"
-	      @openAudit="openAuditPage"
-	      @importEnv="importAuthEnv"
-	      @save="saveAuthSettings"
-	      @clearStored="clearStoredAuth"
-	    />
+    <AuthSettingsModal
+      :open="authSettingsOpen"
+      :saving="authSaving"
+      :error="authSettingsError"
+      :notice="authSettingsNotice"
+      :storagePath="authInfo?.storage_path ?? ''"
+      :authStatus="authStatus"
+      :toolsStatus="toolsStatus"
+      v-model:autoDeliveryForeman="autoDeliveryForeman"
+      v-model:anthropicBaseURL="authAnthropicBaseURL"
+      v-model:anthropicApiKey="authAnthropicApiKey"
+      v-model:anthropicAuthToken="authAnthropicAuthToken"
+      v-model:anthropicModel="authAnthropicModel"
+      v-model:anthropicSmallFastModel="authAnthropicSmallFastModel"
+      v-model:openAIApiKey="authOpenAIApiKey"
+      v-model:codexModel="authCodexModel"
+      v-model:codexReasoningEffort="authCodexReasoningEffort"
+      @close="authSettingsOpen = false"
+      @openTools="openToolsSettings"
+      @openProviders="openProvidersSettings"
+      @openAudit="openAuditPage"
+      @importEnv="importAuthEnv"
+      @save="saveAuthSettings"
+      @clearStored="clearStoredAuth"
+    />
 
-		    <ToolsSettingsModal
-		      :open="toolsSettingsOpen"
-		      :loading="toolsLoading"
-		      :saving="toolsSaving"
-		      :error="toolsError"
-	      :tools="toolsList"
-	      :selectedID="toolsSelectedID"
-	      v-model:editCommand="toolEditCommand"
-	      v-model:editArgs="toolEditArgs"
-	      v-model:editEnv="toolEditEnv"
-	      @close="toolsSettingsOpen = false"
-	      @refresh="refreshTools"
-	      @selectTool="loadToolIntoEditor"
-		      @reset="resetToolOverride"
-		      @save="saveTool"
-		    />
+    <ToolsSettingsModal
+      :open="toolsSettingsOpen"
+      :loading="toolsLoading"
+      :saving="toolsSaving"
+      :error="toolsError"
+      :tools="toolsList"
+      :selectedID="toolsSelectedID"
+      v-model:editCommand="toolEditCommand"
+      v-model:editArgs="toolEditArgs"
+      v-model:editEnv="toolEditEnv"
+      @close="toolsSettingsOpen = false"
+      @refresh="refreshTools"
+      @selectTool="loadToolIntoEditor"
+      @reset="resetToolOverride"
+      @save="saveTool"
+    />
 
-	        <SkillsGovernanceModal
-	          :open="skillsGovernanceOpen"
-	          :prefill="skillsGovernancePrefill"
-	          @close="skillsGovernanceOpen = false"
-	        />
+    <SkillsGovernanceModal
+      :open="skillsGovernanceOpen"
+      :prefill="skillsGovernancePrefill"
+      @close="skillsGovernanceOpen = false"
+    />
 
-        <SkillVersionsModal
-          :open="skillVersionsOpen"
-          :skill="skillVersionsSkill"
-          :has-source="skillVersionsHasSource"
-          @close="closeSkillVersions"
-        />
-	
-		    <div
-		      v-if="filePreviewOpen"
-		      class="modalOverlay"
-	      @click.self="closeFilePreview"
-	    >
+    <SkillVersionsModal
+      :open="skillVersionsOpen"
+      :skill="skillVersionsSkill"
+      :has-source="skillVersionsHasSource"
+      @close="closeSkillVersions"
+    />
+
+    <div
+      v-if="filePreviewOpen"
+      class="modalOverlay"
+      @click.self="closeFilePreview"
+    >
       <div class="modal fileModal">
         <div class="modalHeader">
           <div class="modalTitle mono">
@@ -7626,7 +8331,11 @@ watch(
                 class="tabBtn"
                 :class="{ active: filePreviewTab === 'preview' }"
                 :disabled="filePreviewPreviewDisabled"
-                :title="filePreviewPreviewDisabled ? filePreviewPreviewDisabledTitle : ''"
+                :title="
+                  filePreviewPreviewDisabled
+                    ? filePreviewPreviewDisabledTitle
+                    : ''
+                "
                 @click="filePreviewTab = 'preview'"
               >
                 Preview
@@ -7677,7 +8386,9 @@ watch(
               ></div>
 
               <div v-else class="resultBox fileCodeBox">
-                <pre class="hljs"><code v-html="filePreviewCodeHtml"></code></pre>
+                <pre
+                  class="hljs"
+                ><code v-html="filePreviewCodeHtml"></code></pre>
               </div>
             </template>
           </template>
@@ -7715,55 +8426,61 @@ watch(
             </button>
           </div>
 
-	          <div class="pathRow">
-	            <button
-	              type="button"
-	              @click="dirParent && loadDir(dirParent)"
-	              :disabled="!dirParent"
-	            >
-	              Up
-	            </button>
-	            <div class="path mono">{{ dirPath }}</div>
-	            <div class="pathActions">
-	              <button
-	                type="button"
-	                @click="openDirMkdir"
-	                :disabled="dirLoading || !dirPath || dirMkdirOpen"
-	              >
-	                New folder
-	              </button>
-	              <button
-	                type="button"
-	                class="primary"
-	                @click="selectDir(dirPath)"
-	                :disabled="!dirPath"
-	              >
-	                Select
-	              </button>
-	            </div>
-	          </div>
+          <div class="pathRow">
+            <button
+              type="button"
+              @click="dirParent && loadDir(dirParent)"
+              :disabled="!dirParent"
+            >
+              Up
+            </button>
+            <div class="path mono">{{ dirPath }}</div>
+            <div class="pathActions">
+              <button
+                type="button"
+                @click="openDirMkdir"
+                :disabled="dirLoading || !dirPath || dirMkdirOpen"
+              >
+                New folder
+              </button>
+              <button
+                type="button"
+                class="primary"
+                @click="selectDir(dirPath)"
+                :disabled="!dirPath"
+              >
+                Select
+              </button>
+            </div>
+          </div>
 
-	          <div v-if="dirMkdirOpen" class="mkdirRow">
-	            <input
-	              ref="dirMkdirInputEl"
-	              v-model="dirMkdirName"
-	              placeholder="New folder name"
-	              :disabled="dirMkdirBusy"
-	              @keydown="onDirMkdirKeydown"
-	            />
-	            <button type="button" :disabled="dirMkdirBusy" @click="closeDirMkdir">Cancel</button>
-	            <button
-	              type="button"
-	              class="primary"
-	              :disabled="!dirMkdirCanCreate"
-	              @click="createDirMkdir"
-	            >
-	              <span v-if="dirMkdirBusy" class="loading">Creating...</span>
-	              <span v-else>Create</span>
-	            </button>
-	          </div>
+          <div v-if="dirMkdirOpen" class="mkdirRow">
+            <input
+              ref="dirMkdirInputEl"
+              v-model="dirMkdirName"
+              placeholder="New folder name"
+              :disabled="dirMkdirBusy"
+              @keydown="onDirMkdirKeydown"
+            />
+            <button
+              type="button"
+              :disabled="dirMkdirBusy"
+              @click="closeDirMkdir"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              class="primary"
+              :disabled="!dirMkdirCanCreate"
+              @click="createDirMkdir"
+            >
+              <span v-if="dirMkdirBusy" class="loading">Creating...</span>
+              <span v-else>Create</span>
+            </button>
+          </div>
 
-	          <div v-if="dirError" class="modalError">{{ dirError }}</div>
+          <div v-if="dirError" class="modalError">{{ dirError }}</div>
 
           <div class="filterRow">
             <input v-model="dirFilter" placeholder="Filter folders..." />
