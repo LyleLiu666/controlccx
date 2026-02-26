@@ -45,7 +45,20 @@ func TestManager_consumeStdout_ClaudeCode_StoresRawStdout(t *testing.T) {
 		`{"type":"assistant","session_id":"sess-1","result":"final answer"}`,
 	}, "\n")
 
-	m.consumeStdout(ctx, task, tasks.WorkerClaudeCode, strings.NewReader(out), nil, nil, false, false, &sidMu, &sid, func() {}, &resumeFailureState{}, &blockedState{}, nil)
+	pctx := &managerProtocolContext{
+		m:             m,
+		ctx:           ctx,
+		task:          task,
+		driver:        tasks.WorkerClaudeCode,
+		sidMu:         &sidMu,
+		sid:           &sid,
+		cancel:        func() {},
+		resumeFailure: &resumeFailureState{},
+		blocked:       &blockedState{},
+		toolErrors:    &toolErrorState{},
+	}
+	handler := newClaudeProtocolHandler(nil)
+	_ = handler.ConsumeStdout(pctx, strings.NewReader(out))
 
 	logs, err := store.ListLogs(ctx, task.ID, 0, 2000)
 	if err != nil {
@@ -108,7 +121,20 @@ func TestManager_consumeStdout_ClaudeCode_StoresRawWhenParseFails(t *testing.T) 
 		sidMu sync.Mutex
 		sid   string
 	)
-	m.consumeStdout(ctx, task, tasks.WorkerClaudeCode, strings.NewReader("not-json\n"), nil, nil, false, false, &sidMu, &sid, func() {}, &resumeFailureState{}, &blockedState{}, nil)
+	pctx := &managerProtocolContext{
+		m:             m,
+		ctx:           ctx,
+		task:          task,
+		driver:        tasks.WorkerClaudeCode,
+		sidMu:         &sidMu,
+		sid:           &sid,
+		cancel:        func() {},
+		resumeFailure: &resumeFailureState{},
+		blocked:       &blockedState{},
+		toolErrors:    &toolErrorState{},
+	}
+	handler := newClaudeProtocolHandler(nil)
+	_ = handler.ConsumeStdout(pctx, strings.NewReader("not-json\n"))
 
 	logs, err := store.ListLogs(ctx, task.ID, 0, 2000)
 	if err != nil {
@@ -158,7 +184,20 @@ func TestManager_consumeStdout_Codex_StoresRawStdout(t *testing.T) {
 		`{"method":"item/completed","params":{"threadId":"thr-1","turnId":"turn-1","item":{"id":"it-1","type":"agentMessage","text":"hello"}}}`,
 	}, "\n")
 
-	m.consumeStdout(ctx, task, tasks.WorkerCodex, strings.NewReader(out), nil, nil, false, false, &sidMu, &sid, func() {}, &resumeFailureState{}, &blockedState{}, nil)
+	pctx := &managerProtocolContext{
+		m:             m,
+		ctx:           ctx,
+		task:          task,
+		driver:        tasks.WorkerCodex,
+		sidMu:         &sidMu,
+		sid:           &sid,
+		cancel:        func() {},
+		resumeFailure: &resumeFailureState{},
+		blocked:       &blockedState{},
+		toolErrors:    &toolErrorState{},
+	}
+	handler := newCodexProtocolHandler(nil)
+	_ = handler.ConsumeStdout(pctx, strings.NewReader(out))
 
 	logs, err := store.ListLogs(ctx, task.ID, 0, 2000)
 	if err != nil {
@@ -227,7 +266,20 @@ func TestManager_consumeStdout_Codex_KeepsWorkspaceGreeting(t *testing.T) {
 		`{"method":"item/completed","params":{"threadId":"thr-1","turnId":"turn-1","item":{"id":"it-2","type":"agentMessage","text":"real answer"}}}`,
 	}, "\n")
 
-	m.consumeStdout(ctx, task, tasks.WorkerCodex, strings.NewReader(out), nil, nil, false, false, &sidMu, &sid, func() {}, &resumeFailureState{}, &blockedState{}, nil)
+	pctx := &managerProtocolContext{
+		m:             m,
+		ctx:           ctx,
+		task:          task,
+		driver:        tasks.WorkerCodex,
+		sidMu:         &sidMu,
+		sid:           &sid,
+		cancel:        func() {},
+		resumeFailure: &resumeFailureState{},
+		blocked:       &blockedState{},
+		toolErrors:    &toolErrorState{},
+	}
+	handler := newCodexProtocolHandler(nil)
+	_ = handler.ConsumeStdout(pctx, strings.NewReader(out))
 
 	logs, err := store.ListLogs(ctx, task.ID, 0, 2000)
 	if err != nil {

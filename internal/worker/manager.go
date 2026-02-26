@@ -451,17 +451,42 @@ func (m *Manager) run(ctx context.Context, task tasks.Task) error {
 	blockedState := &blockedState{}
 	toolErrors := &toolErrorState{}
 
+	pctx := &managerProtocolContext{
+		m:                  m,
+		ctx:                ctx,
+		task:               task,
+		driver:             driver,
+		runWorkspaceActive: runWorkspaceActive,
+		initProject:        initProject,
+		sidMu:              &lastSessionIDMu,
+		sid:                &lastSessionID,
+		cancel:             cancel,
+		resumeFailure:      resumeFailure,
+		blocked:            blockedState,
+		toolErrors:         toolErrors,
+		codexPeer:          codexPeer,
+	}
+
+	var handler ProtocolHandler
+	if driver == tasks.WorkerClaudeCode {
+		handler = newClaudeProtocolHandler(claudePeer)
+	} else if driver == tasks.WorkerCodex {
+		handler = newCodexProtocolHandler(codexPeer)
+	} else {
+		handler = newDefaultProtocolHandler()
+	}
+
 	wg := sync.WaitGroup{}
 	wg.Add(2)
 
 	go func() {
 		defer wg.Done()
-		m.consumeStdout(ctx, task, driver, stdout, claudePeer, codexPeer, runWorkspaceActive, initProject, &lastSessionIDMu, &lastSessionID, cancel, resumeFailure, blockedState, toolErrors)
+		_ = handler.ConsumeStdout(pctx, stdout)
 	}()
 
 	go func() {
 		defer wg.Done()
-		m.consumeLines(task, driver, tasks.LogStderr, stderr, cancel, resumeFailure, blockedState)
+		_ = handler.ConsumeStderr(pctx, stderr)
 	}()
 
 	if driver == tasks.WorkerClaudeCode && claudePeer != nil {
@@ -907,109 +932,6 @@ func mergeEnvWithReport(base []string, additions map[string]string) ([]string, [
 	return out, applied
 }
 
-func (m *Manager) consumeStdout(ctx context.Context, task tasks.Task, driver tasks.WorkerType, stdout io.Reader, claudePeer *claudeProtocolPeer, codexPeer *codexAppServerPeer, runWorkspaceActive bool, initProject bool, sidMu *sync.Mutex, sid *string, cancel context.CancelFunc, resumeFailure *resumeFailureState, blocked *blockedState, toolErrors *toolErrorState) {
-	reader := newLineReader(stdout)
-	toolUseNames := map[string]string{}
-	for {
-		line, tooLong, err := readLineWithLimit(reader, defaultJSONLineMaxBytes)
-		if err != nil {
-			if isEOF(err) {
-				return
-			}
-			m.appendLog(task.ID, tasks.LogSystem, formatReadError(err).Error())
-			return
-		}
-		if tooLong {
-			m.appendLog(task.ID, tasks.LogSystem, "skipped overlong output line")
-			continue
-		}
-		if len(line) == 0 {
-			continue
-		}
-
-		// Persist raw stdout for debugging/details (UI can filter by stream).
-		m.appendLog(task.ID, tasks.LogStdout, string(line))
-
-		m.handleResumeNotFound(task, driver, string(line), cancel, resumeFailure)
-
-		if claudePeer == nil {
-			m.handleApprovalRequired(task, driver, string(line), line, blocked)
-		} else if driver == tasks.WorkerClaudeCode {
-			m.handleClaudeControlRequest(ctx, task, line, claudePeer, runWorkspaceActive, initProject, blocked)
-		}
-		if driver == tasks.WorkerCodex && codexPeer != nil {
-			codexPeer.HandleLine(line, func(id json.RawMessage, method string, params json.RawMessage) {
-				go m.handleCodexServerRequest(ctx, task, codexPeer, id, method, params, runWorkspaceActive, initProject, blocked)
-			}, nil)
-		}
-
-		var parsed parsedLine
-		switch driver {
-		case tasks.WorkerClaudeCode:
-			parsed, err = parseClaudeJSONLine(line)
-		case tasks.WorkerCodex:
-			parsed, err = parseCodexJSONLine(line)
-		default:
-			parsed, err = parsedLine{}, nil
-		}
-
-		if err == nil {
-			if driver == tasks.WorkerClaudeCode {
-				for _, u := range parsed.ToolUses {
-					id := strings.TrimSpace(u.ID)
-					if id == "" {
-						continue
-					}
-					toolUseNames[id] = strings.TrimSpace(u.Name)
-				}
-				for _, r := range parsed.ToolResults {
-					if !r.IsError {
-						continue
-					}
-					toolErrors.mark()
-
-					id := strings.TrimSpace(r.ToolUseID)
-					toolName := strings.TrimSpace(toolUseNames[id])
-					if toolName == "" {
-						toolName = id
-					}
-					if toolName == "" {
-						toolName = "unknown"
-					}
-
-					exitPart := "exit=?"
-					if code, ok := parseToolResultExitCode(r.Content); ok {
-						exitPart = fmt.Sprintf("exit=%d", code)
-					}
-
-					summary := summarizeToolResultContent(r.Content, 500)
-					msg := strings.TrimSpace(fmt.Sprintf("tool_error: %s tool_use_id=%s %s %s", toolName, id, exitPart, summary))
-					m.appendLog(task.ID, tasks.LogStderr, msg)
-				}
-			}
-			if parsed.SessionID != "" {
-				shouldPublish := false
-				sidMu.Lock()
-				if strings.TrimSpace(*sid) == "" {
-					*sid = parsed.SessionID
-					shouldPublish = true
-				}
-				sidMu.Unlock()
-				_ = m.store.SetSessionID(context.Background(), task.ID, parsed.SessionID)
-				if shouldPublish {
-					m.publishTaskUpdatedForce(task.ID)
-				}
-			}
-			if parsed.AssistantText != "" {
-				m.appendLog(task.ID, tasks.LogAssistant, parsed.AssistantText)
-			}
-			if driver == tasks.WorkerClaudeCode && parsed.IsResult && claudePeer != nil {
-				_ = claudePeer.CloseStdin()
-			}
-		}
-	}
-}
-
 func isApprovalRequiredLine(line []byte) bool {
 	s := strings.ToLower(string(line))
 	if strings.Contains(s, "requires approval") {
@@ -1435,31 +1357,6 @@ func extractResumeNotFoundMessage(message string) string {
 		return msg
 	}
 	return strings.TrimSpace(msg[idx:])
-}
-
-func (m *Manager) consumeLines(task tasks.Task, driver tasks.WorkerType, stream tasks.LogStream, r io.Reader, cancel context.CancelFunc, resumeFailure *resumeFailureState, blocked *blockedState) {
-	reader := newLineReader(r)
-	for {
-		line, tooLong, err := readLineWithLimit(reader, 1024*1024)
-		if err != nil {
-			if isEOF(err) {
-				return
-			}
-			m.appendLog(task.ID, tasks.LogSystem, formatReadError(err).Error())
-			return
-		}
-		if tooLong {
-			m.appendLog(task.ID, tasks.LogSystem, "skipped overlong output line")
-			continue
-		}
-		if len(line) == 0 {
-			continue
-		}
-		msg := string(line)
-		m.appendLog(task.ID, stream, msg)
-		m.handleResumeNotFound(task, driver, msg, cancel, resumeFailure)
-		m.handleApprovalRequired(task, driver, msg, nil, blocked)
-	}
 }
 
 func (m *Manager) publishTaskUpdated(taskID string) {

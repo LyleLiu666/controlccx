@@ -3,6 +3,7 @@ package worker
 import (
 	"bufio"
 	"context"
+	"controlccx/internal/tasks"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -320,4 +321,92 @@ func (p *codexAppServerPeer) HandleLine(line []byte, onRequest func(id json.RawM
 	if onNotification != nil {
 		onNotification(method, env.Params)
 	}
+}
+
+type codexProtocolHandler struct {
+	peer *codexAppServerPeer
+}
+
+func newCodexProtocolHandler(peer *codexAppServerPeer) ProtocolHandler {
+	return &codexProtocolHandler{
+		peer: peer,
+	}
+}
+
+func (h *codexProtocolHandler) ConsumeStdout(pctx ProtocolContext, r io.Reader) error {
+	reader := newLineReader(r)
+	for {
+		line, tooLong, err := readLineWithLimit(reader, defaultJSONLineMaxBytes)
+		if err != nil {
+			if isEOF(err) {
+				return nil
+			}
+			pctx.AppendLog(tasks.LogSystem, formatReadError(err).Error())
+			return err
+		}
+		if tooLong {
+			pctx.AppendLog(tasks.LogSystem, "skipped overlong output line")
+			continue
+		}
+		if len(line) == 0 {
+			continue
+		}
+
+		pctx.AppendLog(tasks.LogStdout, string(line))
+		pctx.SetResumeFailure(string(line))
+
+		if h.peer == nil {
+			pctx.SetBlocked(string(line))
+		} else {
+			h.peer.HandleLine(line, func(id json.RawMessage, method string, params json.RawMessage) {
+				go pctx.OnCodexServerRequest(id, method, params)
+			}, nil)
+		}
+
+		parsed, err := parseCodexJSONLine(line)
+		if err == nil {
+			if parsed.SessionID != "" {
+				pctx.SetSessionID(parsed.SessionID)
+			}
+			if parsed.AssistantText != "" {
+				pctx.AppendLog(tasks.LogAssistant, parsed.AssistantText)
+			}
+		}
+	}
+}
+
+func (h *codexProtocolHandler) ConsumeStderr(pctx ProtocolContext, r io.Reader) error {
+	reader := newLineReader(r)
+	for {
+		line, tooLong, err := readLineWithLimit(reader, defaultJSONLineMaxBytes)
+		if err != nil {
+			if isEOF(err) {
+				return nil
+			}
+			pctx.AppendLog(tasks.LogSystem, formatReadError(err).Error())
+			return err
+		}
+		if tooLong {
+			pctx.AppendLog(tasks.LogSystem, "skipped overlong output line")
+			continue
+		}
+		if len(line) == 0 {
+			continue
+		}
+
+		sLine := string(line)
+		pctx.AppendLog(tasks.LogStderr, sLine)
+		pctx.SetResumeFailure(sLine)
+
+		if h.peer == nil {
+			pctx.SetBlocked(sLine)
+		}
+	}
+}
+
+func (h *codexProtocolHandler) CloseStdin() error {
+	if h.peer != nil {
+		return h.peer.CloseStdin()
+	}
+	return nil
 }

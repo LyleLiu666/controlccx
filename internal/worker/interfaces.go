@@ -70,3 +70,28 @@ type ManagedRun interface {
 type ProcessRunner interface {
 	Spawn(ctx context.Context, opts SpawnOpts) (ManagedRun, error)
 }
+
+// ProtocolContext provides callbacks to the Manager for protocol handlers.
+type ProtocolContext interface {
+	Task() tasks.Task
+	Context() context.Context
+
+	AppendLog(stream tasks.LogStream, message string)
+	SetSessionID(sid string)
+	PublishTaskUpdated()
+
+	SetResumeFailure(msg string)
+	SetBlocked(reason string)
+	MarkToolError()
+
+	// Protocol-specific callbacks (to be abstracted further in the future if needed)
+	OnClaudeCanUseTool(toolName string, input map[string]any, suggestions []byte, toolUseID string) (any, error)
+	OnCodexServerRequest(id []byte, method string, params []byte)
+}
+
+// ProtocolHandler is responsible for parsing standard streams from an agent process.
+type ProtocolHandler interface {
+	ConsumeStdout(pctx ProtocolContext, r io.Reader) error
+	ConsumeStderr(pctx ProtocolContext, r io.Reader) error
+	CloseStdin() error
+}

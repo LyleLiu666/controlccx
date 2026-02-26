@@ -2,6 +2,7 @@ package worker
 
 import (
 	"bufio"
+	"controlccx/internal/tasks"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -205,5 +206,156 @@ func normalizeClaudePermissionMode(raw string) string {
 		return "bypassPermissions"
 	default:
 		return "default"
+	}
+}
+
+type claudeProtocolHandler struct {
+	peer         *claudeProtocolPeer
+	toolUseNames map[string]string
+}
+
+func newClaudeProtocolHandler(peer *claudeProtocolPeer) ProtocolHandler {
+	return &claudeProtocolHandler{
+		peer:         peer,
+		toolUseNames: make(map[string]string),
+	}
+}
+
+func (h *claudeProtocolHandler) ConsumeStdout(pctx ProtocolContext, r io.Reader) error {
+	reader := newLineReader(r)
+	for {
+		line, tooLong, err := readLineWithLimit(reader, defaultJSONLineMaxBytes)
+		if err != nil {
+			if isEOF(err) {
+				return nil
+			}
+			pctx.AppendLog(tasks.LogSystem, formatReadError(err).Error())
+			return err
+		}
+		if tooLong {
+			pctx.AppendLog(tasks.LogSystem, "skipped overlong output line")
+			continue
+		}
+		if len(line) == 0 {
+			continue
+		}
+
+		pctx.AppendLog(tasks.LogStdout, string(line))
+		pctx.SetResumeFailure(string(line))
+
+		if h.peer == nil {
+			pctx.SetBlocked(string(line))
+		} else {
+			h.handleControlRequest(pctx, line)
+		}
+
+		parsed, err := parseClaudeJSONLine(line)
+		if err == nil {
+			for _, u := range parsed.ToolUses {
+				id := strings.TrimSpace(u.ID)
+				if id != "" {
+					h.toolUseNames[id] = strings.TrimSpace(u.Name)
+				}
+			}
+			for _, res := range parsed.ToolResults {
+				if !res.IsError {
+					continue
+				}
+				pctx.MarkToolError()
+				id := strings.TrimSpace(res.ToolUseID)
+				toolName := strings.TrimSpace(h.toolUseNames[id])
+				if toolName == "" {
+					toolName = id
+				}
+				if toolName == "" {
+					toolName = "unknown"
+				}
+
+				exitPart := "exit=?"
+				if code, ok := parseToolResultExitCode(res.Content); ok {
+					exitPart = fmt.Sprintf("exit=%d", code)
+				}
+				summary := summarizeToolResultContent(res.Content, 500)
+				msg := strings.TrimSpace(fmt.Sprintf("tool_error: %s tool_use_id=%s %s %s", toolName, id, exitPart, summary))
+				pctx.AppendLog(tasks.LogStderr, msg)
+			}
+			if parsed.SessionID != "" {
+				pctx.SetSessionID(parsed.SessionID)
+			}
+			if parsed.AssistantText != "" {
+				pctx.AppendLog(tasks.LogAssistant, parsed.AssistantText)
+			}
+			if parsed.IsResult && h.peer != nil {
+				_ = h.peer.CloseStdin()
+			}
+		}
+	}
+}
+
+func (h *claudeProtocolHandler) ConsumeStderr(pctx ProtocolContext, r io.Reader) error {
+	reader := newLineReader(r)
+	for {
+		line, tooLong, err := readLineWithLimit(reader, defaultJSONLineMaxBytes)
+		if err != nil {
+			if isEOF(err) {
+				return nil
+			}
+			pctx.AppendLog(tasks.LogSystem, formatReadError(err).Error())
+			return err
+		}
+		if tooLong {
+			pctx.AppendLog(tasks.LogSystem, "skipped overlong output line")
+			continue
+		}
+		if len(line) == 0 {
+			continue
+		}
+
+		sLine := string(line)
+		pctx.AppendLog(tasks.LogStderr, sLine)
+		pctx.SetResumeFailure(sLine)
+
+		if h.peer == nil {
+			pctx.SetBlocked(sLine)
+		}
+	}
+}
+
+func (h *claudeProtocolHandler) CloseStdin() error {
+	if h.peer != nil {
+		return h.peer.CloseStdin()
+	}
+	return nil
+}
+
+func (h *claudeProtocolHandler) handleControlRequest(pctx ProtocolContext, line []byte) {
+	var env claudeControlRequestEnvelope
+	if err := json.Unmarshal(line, &env); err != nil {
+		return
+	}
+	if strings.TrimSpace(env.Type) != "control_request" {
+		return
+	}
+	requestID := strings.TrimSpace(env.RequestID)
+	if requestID == "" {
+		return
+	}
+
+	switch strings.TrimSpace(env.Request.Subtype) {
+	case "can_use_tool":
+		toolName := strings.TrimSpace(env.Request.ToolName)
+		var inputMap map[string]any
+		_ = json.Unmarshal(env.Request.Input, &inputMap)
+
+		result, err := pctx.OnClaudeCanUseTool(toolName, inputMap, env.Request.PermissionSuggestions, env.Request.ToolUseID)
+		if err != nil {
+			_ = h.peer.SendControlResponseError(requestID, err.Error())
+			return
+		}
+		_ = h.peer.SendControlResponseSuccess(requestID, result)
+	case "hook_callback":
+		_ = h.peer.SendControlResponseSuccess(requestID, map[string]any{})
+	default:
+		_ = h.peer.SendControlResponseSuccess(requestID, map[string]any{})
 	}
 }
