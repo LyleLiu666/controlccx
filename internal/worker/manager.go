@@ -27,12 +27,13 @@ import (
 )
 
 type Manager struct {
-	cfg   config.Config
-	store *tasks.Store
-	hub   *events.Hub
-	auth  *auth.Store
-	tools *tooling.Service
-	ws    *runworkspace.Service
+	cfg    config.Config
+	store  TaskStore
+	hub    EventPublisher
+	auth   *auth.Store
+	tools  *tooling.Service
+	ws     *runworkspace.Service
+	runner ProcessRunner
 
 	mu      sync.Mutex
 	cancels map[string]context.CancelFunc
@@ -149,18 +150,25 @@ func NewManager(cfg config.Config, store *tasks.Store, hub *events.Hub, authStor
 	if store != nil {
 		ws = runworkspace.NewService(store, runworkspace.Options{})
 	}
-	return &Manager{
+	m := &Manager{
 		cfg:     cfg,
 		store:   store,
-		hub:     hub,
 		auth:    authStore,
 		tools:   tools,
 		ws:      ws,
+		runner:  newOSProcessRunner(),
 		cancels: make(map[string]context.CancelFunc),
 
 		approvalWaiters: make(map[string]approvalWaiter),
 		approvalTimeout: 5 * time.Minute,
 	}
+	// Avoid the nil-interface trap: a typed-nil *events.Hub stored in an
+	// interface field is non-nil from the interface's perspective, which
+	// breaks existing "if m.hub == nil" guards.
+	if hub != nil {
+		m.hub = hub
+	}
+	return m
 }
 
 func (m *Manager) Start(ctx context.Context, taskID string) error {
@@ -376,10 +384,14 @@ func (m *Manager) run(ctx context.Context, task tasks.Task) error {
 		m.publishTaskUpdated(task.ID)
 	}
 
-	cmd := exec.CommandContext(ctx, tool.Command, tool.Args...)
-	cmd.Dir = tool.Dir
 	env, injectedEnvKeys := m.envForToolWithReport(task.WorkerType, driver)
-	cmd.Env = env
+
+	opts := SpawnOpts{
+		Command: tool.Command,
+		Args:    tool.Args,
+		Dir:     tool.Dir,
+		Env:     env,
+	}
 
 	// Persist trace metadata (best-effort; should not block execution).
 	if m != nil && m.store != nil {
@@ -390,14 +402,21 @@ func (m *Manager) run(ctx context.Context, task tasks.Task) error {
 
 	m.appendLog(task.ID, tasks.LogSystem, formatRunStartLog(task.WorkerType, driver, tool, injectedEnvKeys))
 
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return m.failTask(task.ID, fmt.Errorf("stdout pipe: %w", err))
+	if m.runner == nil {
+		m.runner = newOSProcessRunner()
 	}
-	stderr, err := cmd.StderrPipe()
+
+	run, err := m.runner.Spawn(ctx, opts)
 	if err != nil {
-		return m.failTask(task.ID, fmt.Errorf("stderr pipe: %w", err))
+		if isExecutableNotFound(err) {
+			m.appendLog(task.ID, tasks.LogSystem, missingExecutableHint(tool.Command, driver))
+		}
+		return m.failTask(task.ID, fmt.Errorf("spawn: %w", err))
 	}
+
+	stdout := run.Stdout()
+	stderr := run.Stderr()
+
 	var (
 		claudePeer  *claudeProtocolPeer
 		claudeStdin io.WriteCloser
@@ -405,26 +424,17 @@ func (m *Manager) run(ctx context.Context, task tasks.Task) error {
 		codexStdin  io.WriteCloser
 	)
 	if driver == tasks.WorkerClaudeCode {
-		claudeStdin, err = cmd.StdinPipe()
-		if err != nil {
-			return m.failTask(task.ID, fmt.Errorf("stdin pipe: %w", err))
-		}
+		claudeStdin = run.Stdin()
 		claudePeer = newClaudeProtocolPeer(claudeStdin)
 	} else if driver == tasks.WorkerCodex {
-		codexStdin, err = cmd.StdinPipe()
-		if err != nil {
-			return m.failTask(task.ID, fmt.Errorf("stdin pipe: %w", err))
-		}
+		codexStdin = run.Stdin()
 		codexPeer = newCodexAppServerPeer(codexStdin)
 	} else if tool.Stdin != "" {
-		cmd.Stdin = stringsReader(tool.Stdin)
-	}
-
-	if err := cmd.Start(); err != nil {
-		if isExecutableNotFound(err) {
-			m.appendLog(task.ID, tasks.LogSystem, missingExecutableHint(tool.Command, driver))
-		}
-		return m.failTask(task.ID, fmt.Errorf("start: %w", err))
+		stdin := run.Stdin()
+		go func() {
+			_, _ = io.WriteString(stdin, tool.Stdin)
+			_ = stdin.Close()
+		}()
 	}
 	if claudePeer != nil {
 		defer func() { _ = claudePeer.CloseStdin() }()
@@ -477,9 +487,8 @@ func (m *Manager) run(ctx context.Context, task tasks.Task) error {
 	}
 
 	wg.Wait()
-	waitErr := cmd.Wait()
+	exitCode, waitErr := run.Wait()
 
-	exitCode := exitCode(waitErr)
 	status := tasks.StatusSucceeded
 	errText := ""
 	if errors.Is(ctx.Err(), context.Canceled) {
@@ -513,7 +522,7 @@ func (m *Manager) run(ctx context.Context, task tasks.Task) error {
 		}
 	}
 
-	m.appendLog(task.ID, tasks.LogSystem, formatRunFinishLog(status, exitCode, errText))
+	m.appendLog(task.ID, tasks.LogSystem, formatRunFinishLog(status, &exitCode, errText))
 
 	lastSessionIDMu.Lock()
 	sid := lastSessionID
@@ -526,7 +535,7 @@ func (m *Manager) run(ctx context.Context, task tasks.Task) error {
 
 	_ = m.store.FinishTask(context.Background(), task.ID, tasks.FinishTaskInput{
 		Status:     status,
-		ExitCode:   exitCode,
+		ExitCode:   &exitCode,
 		Error:      errText,
 		SessionID:  sidToPersist,
 		FinishedAt: time.Now().UTC(),
