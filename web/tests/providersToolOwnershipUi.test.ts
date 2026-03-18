@@ -15,9 +15,15 @@ test("Providers editor save action carries current target tab", () => {
 
 test("App persists provider tool ownership on save and activate", () => {
   const appVue = readText("../src/App.vue");
-  assert.match(appVue, /async function saveProviderProfile\(target: "claude" \| "codex" \| "secretary"\)/);
+  assert.match(
+    appVue,
+    /async function saveProviderProfile\(\s*target: "claude" \| "codex" \| "secretary"\s*\)/,
+  );
   assert.match(appVue, /tool:\s*target,/);
-  assert.match(appVue, /async function activateProviderTarget\(target: "claude" \| "codex" \| "secretary"\)/);
+  assert.match(
+    appVue,
+    /async function activateProviderTarget\(\s*target: "claude" \| "codex" \| "secretary",?\s*\)/,
+  );
 });
 
 test("Provider profile type exposes explicit tool ownership", () => {

@@ -11,11 +11,11 @@ test("Providers page can show Sessions panel in the same grid", () => {
 
   assert.match(
     appVue,
-    /const sessionsHostAllowsPanel = computed\([\s\S]*!skillsOpen\.value && !contextOpen\.value && !filesOpen\.value[\s\S]*\);/,
+    /const sessionsHostAllowsPanel = computed\([\s\S]*!skillsOpen\.value\s*&&\s*!contextOpen\.value\s*&&\s*!filesOpen\.value[\s\S]*\);/,
   );
   assert.match(
     appVue,
-    /const showSessionsPanel = computed\([\s\S]*sessionsHostAllowsPanel\.value && sessionsDrawerOpen\.value[\s\S]*\);/,
+    /const showSessionsPanel = computed\([\s\S]*sessionsHostAllowsPanel\.value\s*&&\s*sessionsDrawerOpen\.value[\s\S]*\);/,
   );
   assert.match(appVue, /<div class="grid" :class="\{ gridSingle: !showSessionsPanel \}">/);
 

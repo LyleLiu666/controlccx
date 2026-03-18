@@ -35,9 +35,10 @@ pnpm start
 
 When a GitHub Release is **published**, GitHub Actions builds and uploads binaries (with embedded web UI):
 
-- `controlccx_<tag>_linux_amd64.tar.gz`
-- `controlccx_<tag>_darwin_amd64.tar.gz`
-- `controlccx_<tag>_windows_amd64.zip`
+- `controlccx_<tag>_linux_amd.tar.gz`
+- `controlccx_<tag>_mac_amd.tar.gz`
+- `controlccx_<tag>_mac_arm.tar.gz`
+- `controlccx_<tag>_win_amd.zip`
 - `SHA256SUMS.txt`
 
 ## Tests
@@ -83,7 +84,9 @@ You can also override the secretary LLM timeout via env var: `CONTROLCCX_SECRETA
 
 ## Worker authentication
 
-Workers inherit environment variables from the ControlCCX server process. You can also set keys/tokens in the web UI (Settings), which persists them to `~/.controlccx/secrets.json` and injects them into newly started worker processes (env vars take precedence).
+Workers inherit environment variables from the ControlCCX server process. You can also set keys/tokens in the web UI (Settings), which persists them to `~/.controlccx/secrets.json` and injects them into newly started worker processes (**stored secrets take precedence over inherited env vars**).
+
+If you want to force env-only auth, clear the corresponding stored fields in Settings first.
 
 - Claude Code (API key): `ANTHROPIC_API_KEY`
 - Claude Code (subscription token): `ANTHROPIC_AUTH_TOKEN` (or run `claude /login` once in a terminal on this machine)

@@ -25,11 +25,11 @@ test("App wires Secretary provider backend fields", () => {
   assert.match(appVue, /v-model:secretaryBackend=\"providerSecretaryBackend\"/);
   assert.match(
     appVue,
-    /v-model:secretarySimpleHTTPBaseURL=\"providerSecretarySimpleHTTPBaseURL\"/,
+    /v-model:secretarySimpleHTTPBaseURL=\"\s*providerSecretarySimpleHTTPBaseURL\s*\"/,
   );
   assert.match(
     appVue,
-    /v-model:secretarySimpleHTTPAuthToken=\"providerSecretarySimpleHTTPAuthToken\"/,
+    /v-model:secretarySimpleHTTPAuthToken=\"\s*providerSecretarySimpleHTTPAuthToken\s*\"/,
   );
   assert.match(appVue, /v-model:secretaryOpenAIBaseURL=\"providerSecretaryOpenAIBaseURL\"/);
   assert.match(appVue, /v-model:secretaryOpenAIApiKey=\"providerSecretaryOpenAIApiKey\"/);
