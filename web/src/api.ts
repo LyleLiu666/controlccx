@@ -344,10 +344,7 @@ export async function clearSecretaryMessages(
   if (opts?.scopeAll) {
     return postJSON<SecretaryClearResponse>("/api/secretary/clear", { scope: "all" });
   }
-  if (!cid) {
-    return postJSON<SecretaryClearResponse>("/api/secretary/clear", {});
-  }
-  return postJSON<SecretaryClearResponse>("/api/secretary/clear", { conversation_id: cid });
+  return postJSON<SecretaryClearResponse>("/api/secretary/clear", { conversation_id: cid || "__global__" });
 }
 
 export async function fetchAuditEntries(query: AuditQuery): Promise<AuditEntriesResponse> {
