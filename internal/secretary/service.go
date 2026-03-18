@@ -282,7 +282,7 @@ func (s *Service) send(ctx context.Context, conversationID string, userText stri
 	if err := s.appendRunLoopTranscript(ctx, conversationID, msg, stepRecords, finalAssistantContent, reply); err != nil {
 		return "", err
 	}
-	_ = s.chat.PruneKeepLast(ctx, 2000)
+	_ = s.chat.PruneKeepLastInConversation(ctx, conversationID, 2000)
 	if s.events != nil {
 		s.maybePruneEvents(ctx, true)
 	}
@@ -417,7 +417,7 @@ func (s *Service) HistoryByConversation(ctx context.Context, conversationID stri
 	if s == nil || s.chat == nil {
 		return nil, fmt.Errorf("secretary: chat store is required")
 	}
-	_ = normalizeConversationID(conversationID)
+	conversationID = normalizeConversationID(conversationID)
 	if limit <= 0 || limit > 500 {
 		limit = 200
 	}
@@ -427,7 +427,7 @@ func (s *Service) HistoryByConversation(ctx context.Context, conversationID stri
 	filtered := make([]chat.Message, 0, limit)
 
 	for {
-		page, err := s.chat.List(ctx, afterID, pageSize)
+		page, err := s.chat.ListInConversation(ctx, conversationID, afterID, pageSize)
 		if err != nil {
 			return nil, err
 		}
@@ -456,15 +456,17 @@ func (s *Service) HistoryByConversation(ctx context.Context, conversationID stri
 }
 
 func (s *Service) Clear(ctx context.Context) error {
-	return s.ClearByConversation(ctx, "")
+	if s == nil || s.chat == nil {
+		return fmt.Errorf("secretary: chat store is required")
+	}
+	return s.chat.Clear(ctx)
 }
 
 func (s *Service) ClearByConversation(ctx context.Context, conversationID string) error {
 	if s == nil || s.chat == nil {
 		return fmt.Errorf("secretary: chat store is required")
 	}
-	_ = normalizeConversationID(conversationID)
-	return s.chat.Clear(ctx)
+	return s.chat.ClearConversation(ctx, conversationID)
 }
 
 func backendNameBestEffort(client agentsdk.Client) string {
@@ -554,7 +556,7 @@ func (s *Service) appendChatMessageIfNonEmpty(ctx context.Context, conversationI
 	if text == "" {
 		return nil
 	}
-	_, err := s.chat.Append(ctx, role, text)
+	_, err := s.chat.AppendInConversation(ctx, conversationID, role, text)
 	return err
 }
 
@@ -583,11 +585,7 @@ func newRunID() string {
 }
 
 func normalizeConversationID(conversationID string) string {
-	id := strings.TrimSpace(conversationID)
-	if id == "" {
-		return "__global__"
-	}
-	return id
+	return chat.NormalizeConversationID(conversationID)
 }
 
 func (s *Service) llmOptionsBestEffort(ctx context.Context) *agentsdk.ChatCompletionOptions {

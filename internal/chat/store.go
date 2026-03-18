@@ -18,11 +18,16 @@ func NewStore(db *sql.DB) *Store {
 }
 
 func (s *Store) Append(ctx context.Context, role Role, content string) (Message, error) {
+	return s.AppendInConversation(ctx, "", role, content)
+}
+
+func (s *Store) AppendInConversation(ctx context.Context, conversationID string, role Role, content string) (Message, error) {
 	ts := s.now().UTC()
+	conversationID = NormalizeConversationID(conversationID)
 	res, err := s.db.ExecContext(ctx, `
-		INSERT INTO chat_messages (ts, role, content)
-		VALUES (?, ?, ?);
-	`, toMillis(ts), string(role), content)
+		INSERT INTO chat_messages (ts, role, content, conversation_id)
+		VALUES (?, ?, ?, ?);
+	`, toMillis(ts), string(role), content, conversationID)
 	if err != nil {
 		return Message{}, fmt.Errorf("chat: append: %w", err)
 	}
@@ -34,16 +39,21 @@ func (s *Store) Append(ctx context.Context, role Role, content string) (Message,
 }
 
 func (s *Store) List(ctx context.Context, afterID int64, limit int) ([]Message, error) {
+	return s.ListInConversation(ctx, "", afterID, limit)
+}
+
+func (s *Store) ListInConversation(ctx context.Context, conversationID string, afterID int64, limit int) ([]Message, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 200
 	}
+	conversationID = NormalizeConversationID(conversationID)
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, ts, role, content
 		FROM chat_messages
-		WHERE id > ?
+		WHERE conversation_id = ? AND id > ?
 		ORDER BY id ASC
 		LIMIT ?;
-	`, afterID, limit)
+	`, conversationID, afterID, limit)
 	if err != nil {
 		return nil, fmt.Errorf("chat: list: %w", err)
 	}
@@ -71,15 +81,22 @@ func (s *Store) List(ctx context.Context, afterID int64, limit int) ([]Message, 
 
 // Tail returns the most recent messages in chronological order (oldest first).
 func (s *Store) Tail(ctx context.Context, limit int) ([]Message, error) {
+	return s.TailInConversation(ctx, "", limit)
+}
+
+// TailInConversation returns the most recent messages for one conversation in chronological order.
+func (s *Store) TailInConversation(ctx context.Context, conversationID string, limit int) ([]Message, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 200
 	}
+	conversationID = NormalizeConversationID(conversationID)
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, ts, role, content
 		FROM chat_messages
+		WHERE conversation_id = ?
 		ORDER BY id DESC
 		LIMIT ?;
-	`, limit)
+	`, conversationID, limit)
 	if err != nil {
 		return nil, fmt.Errorf("chat: tail: %w", err)
 	}
@@ -112,16 +129,22 @@ func (s *Store) Tail(ctx context.Context, limit int) ([]Message, error) {
 
 // TailAfter returns the most recent messages with id > afterID in chronological order (oldest first).
 func (s *Store) TailAfter(ctx context.Context, afterID int64, limit int) ([]Message, error) {
+	return s.TailAfterInConversation(ctx, "", afterID, limit)
+}
+
+// TailAfterInConversation returns the most recent messages in one conversation with id > afterID.
+func (s *Store) TailAfterInConversation(ctx context.Context, conversationID string, afterID int64, limit int) ([]Message, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 200
 	}
+	conversationID = NormalizeConversationID(conversationID)
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, ts, role, content
 		FROM chat_messages
-		WHERE id > ?
+		WHERE conversation_id = ? AND id > ?
 		ORDER BY id DESC
 		LIMIT ?;
-	`, afterID, limit)
+	`, conversationID, afterID, limit)
 	if err != nil {
 		return nil, fmt.Errorf("chat: tail_after: %w", err)
 	}
@@ -162,6 +185,17 @@ func (s *Store) Clear(ctx context.Context) error {
 	return nil
 }
 
+func (s *Store) ClearConversation(ctx context.Context, conversationID string) error {
+	if s == nil || s.db == nil {
+		return errors.New("chat: store not initialized")
+	}
+	conversationID = NormalizeConversationID(conversationID)
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM chat_messages WHERE conversation_id = ?;`, conversationID); err != nil {
+		return fmt.Errorf("chat: clear: %w", err)
+	}
+	return nil
+}
+
 // PruneKeepLast keeps the most recent N messages (by autoincrement id) and deletes older entries.
 func (s *Store) PruneKeepLast(ctx context.Context, keep int) error {
 	if s == nil || s.db == nil {
@@ -184,6 +218,38 @@ func (s *Store) PruneKeepLast(ctx context.Context, keep int) error {
 		return fmt.Errorf("chat: prune cutoff: %w", err)
 	}
 	if _, err := s.db.ExecContext(ctx, `DELETE FROM chat_messages WHERE id < ?;`, cutoff); err != nil {
+		return fmt.Errorf("chat: prune: %w", err)
+	}
+	return nil
+}
+
+// PruneKeepLastInConversation keeps the most recent N messages in one conversation.
+func (s *Store) PruneKeepLastInConversation(ctx context.Context, conversationID string, keep int) error {
+	if s == nil || s.db == nil {
+		return errors.New("chat: store not initialized")
+	}
+	conversationID = NormalizeConversationID(conversationID)
+	if keep <= 0 {
+		return s.ClearConversation(ctx, conversationID)
+	}
+	var cutoff int64
+	err := s.db.QueryRowContext(ctx, `
+		SELECT id
+		FROM chat_messages
+		WHERE conversation_id = ?
+		ORDER BY id DESC
+		LIMIT 1 OFFSET ?;
+	`, conversationID, keep-1).Scan(&cutoff)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		return fmt.Errorf("chat: prune cutoff: %w", err)
+	}
+	if _, err := s.db.ExecContext(ctx, `
+		DELETE FROM chat_messages
+		WHERE conversation_id = ? AND id < ?;
+	`, conversationID, cutoff); err != nil {
 		return fmt.Errorf("chat: prune: %w", err)
 	}
 	return nil

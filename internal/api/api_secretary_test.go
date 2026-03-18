@@ -120,7 +120,7 @@ func TestAPI_SecretaryEndpoints(t *testing.T) {
 		t.Fatalf("clear status=%d want %d", clearRes.StatusCode, http.StatusOK)
 	}
 
-	getRes2, err := http.Get(srv.URL + "/api/secretary/messages?limit=10")
+	getRes2, err := http.Get(srv.URL + "/api/secretary/messages?limit=10&conversation_id=conv-a")
 	if err != nil {
 		t.Fatalf("get after clear: %v", err)
 	}

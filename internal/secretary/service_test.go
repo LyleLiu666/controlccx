@@ -202,6 +202,75 @@ func TestService_Send_ToolLoopAndPersistsVisibleMessages(t *testing.T) {
 	}
 }
 
+func TestService_SendByConversation_IsolatesHistory(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "controlccx.db")
+
+	conn, err := db.Open(ctx, db.Options{Path: dbPath})
+	if err != nil {
+		t.Fatalf("db open: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+
+	taskStore := tasks.NewStore(conn)
+	chatStore := chat.NewStore(conn)
+
+	c := &scriptedClient{
+		responses: []string{
+			"A1",
+			"B1",
+		},
+	}
+	svc := NewService(config.Default(), taskStore, chatStore, nil, nil, WithClient(c))
+
+	replyA, err := svc.SendByConversation(ctx, "conv-a", "hello a")
+	if err != nil {
+		t.Fatalf("send conv-a: %v", err)
+	}
+	if strings.TrimSpace(replyA) != "A1" {
+		t.Fatalf("replyA=%q want %q", replyA, "A1")
+	}
+
+	replyB, err := svc.SendByConversation(ctx, "conv-b", "hello b")
+	if err != nil {
+		t.Fatalf("send conv-b: %v", err)
+	}
+	if strings.TrimSpace(replyB) != "B1" {
+		t.Fatalf("replyB=%q want %q", replyB, "B1")
+	}
+
+	histA, err := svc.HistoryByConversation(ctx, "conv-a", 10)
+	if err != nil {
+		t.Fatalf("history conv-a: %v", err)
+	}
+	if len(histA) != 2 {
+		t.Fatalf("conv-a len=%d want 2", len(histA))
+	}
+	if strings.TrimSpace(histA[0].Content) != "hello a" || strings.TrimSpace(histA[1].Content) != "A1" {
+		t.Fatalf("unexpected conv-a history: %+v", histA)
+	}
+
+	histB, err := svc.HistoryByConversation(ctx, "conv-b", 10)
+	if err != nil {
+		t.Fatalf("history conv-b: %v", err)
+	}
+	if len(histB) != 2 {
+		t.Fatalf("conv-b len=%d want 2", len(histB))
+	}
+	if strings.TrimSpace(histB[0].Content) != "hello b" || strings.TrimSpace(histB[1].Content) != "B1" {
+		t.Fatalf("unexpected conv-b history: %+v", histB)
+	}
+
+	if len(c.messages) < 2 {
+		t.Fatalf("captured messages len=%d want >=2", len(c.messages))
+	}
+	for _, m := range c.messages[1] {
+		if strings.Contains(m.Content, "hello a") {
+			t.Fatalf("conv-b llm request leaked conv-a history: %+v", c.messages[1])
+		}
+	}
+}
+
 func TestService_Send_BindsMissionContractViaChatTool(t *testing.T) {
 	ctx := context.Background()
 	dbPath := filepath.Join(t.TempDir(), "controlccx.db")

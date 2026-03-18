@@ -72,7 +72,7 @@ func (s *Service) promptHistory(ctx context.Context, client agentsdk.Client, run
 	}
 	_ = normalizeConversationID(conversationID)
 	if s.compress == nil {
-		history, err := s.chat.Tail(ctx, 40)
+		history, err := s.chat.TailInConversation(ctx, conversationID, 40)
 		if err != nil {
 			return nil, err
 		}
@@ -92,7 +92,7 @@ func (s *Service) promptHistory(ctx context.Context, client agentsdk.Client, run
 		summary = rec.Summary
 	}
 
-	summary, cursor, err = s.maybeCompress(ctx, client, runID, summary, cursor)
+	summary, cursor, err = s.maybeCompress(ctx, client, runID, conversationID, summary, cursor)
 	if err != nil {
 		return nil, err
 	}
@@ -103,7 +103,7 @@ func (s *Service) promptHistory(ctx context.Context, client agentsdk.Client, run
 		out = append(out, agentsdk.Message{Role: "system", Content: formatSummaryForPrompt(summary)})
 	}
 
-	list, err := s.chat.TailAfter(ctx, cursor, s.compressOpts.KeepTextMessages)
+	list, err := s.chat.TailAfterInConversation(ctx, conversationID, cursor, s.compressOpts.KeepTextMessages)
 	if err != nil {
 		return nil, err
 	}
@@ -135,13 +135,14 @@ func formatSummaryForPrompt(summary string) string {
 	return strings.TrimSpace("以下是系统自动生成的对话摘要（用于节省上下文，不一定逐字准确，仅供参考）：\n\n" + s)
 }
 
-func (s *Service) maybeCompress(ctx context.Context, client agentsdk.Client, runID string, summary string, cursor int64) (string, int64, error) {
+func (s *Service) maybeCompress(ctx context.Context, client agentsdk.Client, runID string, conversationID string, summary string, cursor int64) (string, int64, error) {
 	if s == nil || s.chat == nil {
 		return "", 0, fmt.Errorf("secretary: chat store is required")
 	}
 	if s.compress == nil {
 		return truncateRunes(summary, s.compressOpts.MaxSummaryRunes), cursor, nil
 	}
+	conversationID = normalizeConversationID(conversationID)
 
 	cur := cursor
 	if cur < 0 {
@@ -150,7 +151,7 @@ func (s *Service) maybeCompress(ctx context.Context, client agentsdk.Client, run
 	sum := truncateRunes(summary, s.compressOpts.MaxSummaryRunes)
 
 	for i := 0; i < s.compressOpts.MaxCompressionSteps; i++ {
-		tail, err := s.chat.TailAfter(ctx, cur, s.compressOpts.KeepTextMessages)
+		tail, err := s.chat.TailAfterInConversation(ctx, conversationID, cur, s.compressOpts.KeepTextMessages)
 		if err != nil {
 			return sum, cur, err
 		}
@@ -160,7 +161,7 @@ func (s *Service) maybeCompress(ctx context.Context, client agentsdk.Client, run
 		keepFrom := tail[0].ID
 
 		// Summarize only messages strictly before the kept tail window.
-		head, err := s.chat.List(ctx, cur, s.compressOpts.MaxMessagesToSummarize)
+		head, err := s.chat.ListInConversation(ctx, conversationID, cur, s.compressOpts.MaxMessagesToSummarize)
 		if err != nil {
 			return sum, cur, err
 		}

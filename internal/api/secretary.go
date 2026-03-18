@@ -96,7 +96,7 @@ func (a *API) handleSecretaryClear(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := a.Secretary.ClearByConversation(r.Context(), ""); err != nil {
+	if err := a.Secretary.Clear(r.Context()); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
