@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
 
@@ -50,6 +51,10 @@ type Service struct {
 	eventsSincePrune int
 
 	compressOpts CompressionOptions
+
+	writeGuardBlockCount uint64
+	actionPlanEmitCount  uint64
+	writeGuardSideErrs   uint64
 }
 
 type Option func(*Service)
@@ -72,6 +77,12 @@ type SendHooks struct {
 
 	// OnError receives loop-level errors emitted by the agent runtime.
 	OnError func(step int, message string)
+}
+
+type GuardStats struct {
+	ActionPlanEmitted   uint64
+	WriteGuardBlocked   uint64
+	WriteGuardSideError uint64
 }
 
 func WithClient(client agentsdk.Client) Option {
@@ -180,7 +191,7 @@ func (s *Service) send(ctx context.Context, conversationID string, userText stri
 	if s.chat == nil {
 		return "", fmt.Errorf("secretary: chat store is required")
 	}
-	conversationID = normalizeConversationID(conversationID)
+	conversationID = s.normalizeConversationID(conversationID)
 	msg := strings.TrimSpace(userText)
 	if msg == "" {
 		return "请先输入你的问题。", nil
@@ -410,7 +421,7 @@ func (s *Service) HistoryByConversation(ctx context.Context, conversationID stri
 	if s == nil || s.chat == nil {
 		return nil, fmt.Errorf("secretary: chat store is required")
 	}
-	conversationID = normalizeConversationID(conversationID)
+	conversationID = s.normalizeConversationID(conversationID)
 	if limit <= 0 || limit > 500 {
 		limit = 200
 	}
@@ -459,6 +470,7 @@ func (s *Service) ClearByConversation(ctx context.Context, conversationID string
 	if s == nil || s.chat == nil {
 		return fmt.Errorf("secretary: chat store is required")
 	}
+	conversationID = s.normalizeConversationID(conversationID)
 	return s.chat.ClearConversation(ctx, conversationID)
 }
 
@@ -544,7 +556,7 @@ func (s *Service) appendChatMessageIfNonEmpty(ctx context.Context, conversationI
 	if s == nil || s.chat == nil {
 		return fmt.Errorf("secretary: chat store is required")
 	}
-	_ = normalizeConversationID(conversationID)
+	conversationID = s.normalizeConversationID(conversationID)
 	text := strings.TrimSpace(content)
 	if text == "" {
 		return nil
@@ -577,7 +589,10 @@ func newRunID() string {
 	return fmt.Sprintf("%d", time.Now().UnixNano())
 }
 
-func normalizeConversationID(conversationID string) string {
+func (s *Service) normalizeConversationID(conversationID string) string {
+	if s == nil || !s.cfg.Secretary.ConversationMemoryEnabled {
+		return chat.GlobalConversationID
+	}
 	return chat.NormalizeConversationID(conversationID)
 }
 
@@ -609,11 +624,33 @@ func (s *Service) toolDeps(runID string) sectools.Deps {
 		Ops:                     s.taskOps,
 		Scheduler:               s,
 		FSRoots:                 s.fsRoots,
-		WriteGuardEnabled:       true,
+		WriteGuardEnabled:       s.cfg.Secretary.WriteGuardEnabled,
 		ActionPlanMainRecorder:  newActionPlanMainRecorder(s, runID),
 		ActionPlanEventRecorder: newActionPlanEventRecorder(s, runID),
 		OnWriteGuardSideEffectErr: func(err error) {
-			_ = err
+			if err != nil {
+				atomic.AddUint64(&s.writeGuardSideErrs, 1)
+			}
 		},
+		OnWriteGuardBlock: func(err error) {
+			if err != nil {
+				atomic.AddUint64(&s.writeGuardBlockCount, 1)
+			}
+		},
+		OnActionPlanEmitted: func(plan sectools.ActionPlan) {
+			_ = plan
+			atomic.AddUint64(&s.actionPlanEmitCount, 1)
+		},
+	}
+}
+
+func (s *Service) CurrentGuardStats() GuardStats {
+	if s == nil {
+		return GuardStats{}
+	}
+	return GuardStats{
+		ActionPlanEmitted:   atomic.LoadUint64(&s.actionPlanEmitCount),
+		WriteGuardBlocked:   atomic.LoadUint64(&s.writeGuardBlockCount),
+		WriteGuardSideError: atomic.LoadUint64(&s.writeGuardSideErrs),
 	}
 }

@@ -69,6 +69,12 @@ secretary:
   # Per LLM request timeout for the built-in secretary agent. Example: 30m / 90s.
   # Set to "0" to disable (not recommended; can hang until the client disconnects).
   llm_timeout: 30m
+  # When true, secretary history is partitioned by conversation_id.
+  conversation_memory_enabled: true
+  # When true, write-capable tools require server-side action_plan guard.
+  write_guard_enabled: true
+  # Proactive mode policy: conservative | aggressive (default conservative).
+  proactive_enabled: conservative
 paths:
   claude: /path/to/claude
   codex: /path/to/codex
@@ -115,10 +121,13 @@ If you want to force env-only auth, clear the corresponding stored fields in Set
 
 - UI：右上角 `⋯` 菜单 → `秘书`
 - API：
-  - `GET  /api/secretary/messages?limit=200`
-  - `POST /api/secretary/messages` body `{ "message": "..." }` → `{ "reply": "..." }`
-  - `POST /api/secretary/clear` → `{ "ok": true }`
-- 历史：服务端持久化到 SQLite `chat_messages`（全局 1 条历史，自动保留最近 2000 条）
+  - `GET  /api/secretary/messages?limit=200&conversation_id=...`
+  - `POST /api/secretary/messages` body `{ "message": "...", "conversation_id": "..." }` → `{ "reply": "..." }`
+  - `POST /api/secretary/messages/stream` body `{ "message": "...", "conversation_id": "..." }` (SSE)
+  - `POST /api/secretary/clear`：
+    - `{ "conversation_id": "..." }` 清单会话
+    - `{ "scope": "all" }` 全局清空（仅受信请求允许）
+- 历史：服务端持久化到 SQLite `chat_messages`（按 `conversation_id` 分区，默认兜底 `__global__`，每分区自动保留最近 2000 条）
 - 旧接口：`/api/chat` 仍保持移除，统一使用 `/api/secretary/*`
 
 ## Task Mutation Contract（Breaking Change）

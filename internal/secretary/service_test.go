@@ -271,6 +271,138 @@ func TestService_SendByConversation_IsolatesHistory(t *testing.T) {
 	}
 }
 
+func TestService_SendByConversation_DisabledConversationMemoryFallsBackToGlobal(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "controlccx.db")
+
+	conn, err := db.Open(ctx, db.Options{Path: dbPath})
+	if err != nil {
+		t.Fatalf("db open: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+
+	taskStore := tasks.NewStore(conn)
+	chatStore := chat.NewStore(conn)
+	c := &scriptedClient{responses: []string{"A1", "B1"}}
+
+	cfg := config.Default()
+	cfg.Secretary.ConversationMemoryEnabled = false
+	svc := NewService(cfg, taskStore, chatStore, nil, nil, WithClient(c))
+
+	if _, err := svc.SendByConversation(ctx, "conv-a", "hello a"); err != nil {
+		t.Fatalf("send conv-a: %v", err)
+	}
+	if _, err := svc.SendByConversation(ctx, "conv-b", "hello b"); err != nil {
+		t.Fatalf("send conv-b: %v", err)
+	}
+
+	histA, err := svc.HistoryByConversation(ctx, "conv-a", 20)
+	if err != nil {
+		t.Fatalf("history conv-a: %v", err)
+	}
+	histB, err := svc.HistoryByConversation(ctx, "conv-b", 20)
+	if err != nil {
+		t.Fatalf("history conv-b: %v", err)
+	}
+	if len(histA) != 4 || len(histB) != 4 {
+		t.Fatalf("expected both histories to use global fallback, got conv-a=%d conv-b=%d", len(histA), len(histB))
+	}
+	if strings.TrimSpace(histA[0].Content) != "hello a" || strings.TrimSpace(histA[2].Content) != "hello b" {
+		t.Fatalf("unexpected globalized history: %+v", histA)
+	}
+}
+
+func TestService_WriteGuardStats_EmitAndBlock(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "controlccx.db")
+
+	conn, err := db.Open(ctx, db.Options{Path: dbPath})
+	if err != nil {
+		t.Fatalf("db open: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+
+	taskStore := tasks.NewStore(conn)
+	chatStore := chat.NewStore(conn)
+
+	task, err := taskStore.CreateTask(ctx, tasks.CreateTaskInput{
+		WorkerType: tasks.WorkerExec,
+		Prompt:     "seed",
+		WorkDir:    ".",
+	})
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	c := &scriptedClient{
+		responses: []string{
+			"<tool_data><call><tool_name>mission_contract_upsert</tool_name><task_id>" + task.ID + "</task_id><goal>g1</goal></call></tool_data>",
+			"ok",
+		},
+	}
+	svc := NewService(config.Default(), taskStore, chatStore, nil, nil, WithClient(c))
+	if _, err := svc.Send(ctx, "写任务契约"); err != nil {
+		t.Fatalf("send with task_id write: %v", err)
+	}
+	stats := svc.CurrentGuardStats()
+	if stats.ActionPlanEmitted == 0 {
+		t.Fatalf("expected action plan emitted > 0")
+	}
+	if stats.WriteGuardBlocked != 0 {
+		t.Fatalf("expected no write guard block, got %d", stats.WriteGuardBlocked)
+	}
+
+	c2 := &scriptedClient{
+		responses: []string{
+			"<tool_data><call><tool_name>mission_contract_upsert</tool_name><key>c:k1</key><goal>g2</goal></call></tool_data>",
+			"ok",
+		},
+	}
+	svc2 := NewService(config.Default(), taskStore, chatStore, nil, nil, WithClient(c2))
+	if _, err := svc2.Send(ctx, "写任务契约2"); err != nil {
+		t.Fatalf("send taskless write: %v", err)
+	}
+	stats2 := svc2.CurrentGuardStats()
+	if stats2.WriteGuardBlocked == 0 {
+		t.Fatalf("expected write guard blocked > 0 for taskless write without event store")
+	}
+}
+
+func TestService_WriteGuardDisabled_DoesNotBlockTasklessWrite(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "controlccx.db")
+
+	conn, err := db.Open(ctx, db.Options{Path: dbPath})
+	if err != nil {
+		t.Fatalf("db open: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+
+	taskStore := tasks.NewStore(conn)
+	chatStore := chat.NewStore(conn)
+	c := &scriptedClient{
+		responses: []string{
+			"<tool_data><call><tool_name>mission_contract_upsert</tool_name><key>c:k2</key><goal>g2</goal></call></tool_data>",
+			"ok",
+		},
+	}
+
+	cfg := config.Default()
+	cfg.Secretary.WriteGuardEnabled = false
+	svc := NewService(cfg, taskStore, chatStore, nil, nil, WithClient(c))
+	if _, err := svc.Send(ctx, "写任务契约3"); err != nil {
+		t.Fatalf("send: %v", err)
+	}
+
+	stats := svc.CurrentGuardStats()
+	if stats.WriteGuardBlocked != 0 {
+		t.Fatalf("expected blocked=0 when guard disabled, got %d", stats.WriteGuardBlocked)
+	}
+	if stats.ActionPlanEmitted != 0 {
+		t.Fatalf("expected emitted=0 when guard disabled, got %d", stats.ActionPlanEmitted)
+	}
+}
+
 func TestService_Send_BindsMissionContractViaChatTool(t *testing.T) {
 	ctx := context.Background()
 	dbPath := filepath.Join(t.TempDir(), "controlccx.db")

@@ -52,6 +52,8 @@ type Deps struct {
 	ActionPlanMainRecorder    ActionPlanRecorder
 	ActionPlanEventRecorder   ActionPlanRecorder
 	OnWriteGuardSideEffectErr func(error)
+	OnWriteGuardBlock         func(error)
+	OnActionPlanEmitted       func(ActionPlan)
 }
 
 type Descriptor struct {

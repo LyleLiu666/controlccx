@@ -44,6 +44,12 @@ type SecretaryConfig struct {
 	// LLMTimeout controls the maximum duration of a single Secretary LLM request.
 	// Supports Go duration strings (e.g. "30m", "90s"). Use "0" to disable the internal timeout.
 	LLMTimeout string `yaml:"llm_timeout"`
+	// ConversationMemoryEnabled controls whether secretary memory is partitioned by conversation_id.
+	ConversationMemoryEnabled bool `yaml:"conversation_memory_enabled"`
+	// WriteGuardEnabled controls whether write-capable tools require server-side action_plan guard.
+	WriteGuardEnabled bool `yaml:"write_guard_enabled"`
+	// ProactiveEnabled controls proactive mode policy; conservative is safest default.
+	ProactiveEnabled string `yaml:"proactive_enabled"`
 }
 
 func DefaultDataDir() (string, error) {
@@ -66,7 +72,10 @@ func Default() Config {
 			UnsafeAutomation: false,
 		},
 		Secretary: SecretaryConfig{
-			LLMTimeout: "30m",
+			LLMTimeout:                "30m",
+			ConversationMemoryEnabled: true,
+			WriteGuardEnabled:         true,
+			ProactiveEnabled:          "conservative",
 		},
 		AuditRetentionDays:    90,
 		AuditMaxRowsPerSource: 500000,

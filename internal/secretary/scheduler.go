@@ -727,19 +727,19 @@ func (s *Service) snapshotSchedule(job *scheduleJob) sectools.ScheduleInfo {
 
 func (s *Service) resolveScheduleConversationID(ctx context.Context, req sectools.SchedulerCreateRequest, fields map[string]string) string {
 	if v := strings.TrimSpace(req.ConversationID); v != "" {
-		return normalizeConversationID(v)
+		return s.normalizeConversationID(v)
 	}
 	if meta, ok := schedulerContextFrom(ctx); ok {
 		if v := strings.TrimSpace(meta.ConversationID); v != "" {
-			return normalizeConversationID(v)
+			return s.normalizeConversationID(v)
 		}
 	}
 	if v := strings.TrimSpace(fields["conversation_id"]); v != "" {
-		return normalizeConversationID(v)
+		return s.normalizeConversationID(v)
 	}
 	taskID := strings.TrimSpace(fields["task_id"])
 	if s == nil || s.tasks == nil || taskID == "" {
-		return normalizeConversationID("")
+		return s.normalizeConversationID("")
 	}
 	taskCtx := ctx
 	if taskCtx == nil {
@@ -747,9 +747,9 @@ func (s *Service) resolveScheduleConversationID(ctx context.Context, req sectool
 	}
 	task, err := s.tasks.GetTask(taskCtx, taskID)
 	if err != nil {
-		return normalizeConversationID("")
+		return s.normalizeConversationID("")
 	}
-	return normalizeConversationID(task.ConversationID)
+	return s.normalizeConversationID(task.ConversationID)
 }
 
 func (s *Service) appendScheduleEvent(runID string, ev agentsdk.Event) {

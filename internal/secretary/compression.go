@@ -70,7 +70,7 @@ func (s *Service) promptHistory(ctx context.Context, client agentsdk.Client, run
 	if s == nil || s.chat == nil {
 		return nil, fmt.Errorf("secretary: chat store is required")
 	}
-	_ = normalizeConversationID(conversationID)
+	conversationID = s.normalizeConversationID(conversationID)
 	if s.compress == nil {
 		history, err := s.chat.TailInConversation(ctx, conversationID, 40)
 		if err != nil {
@@ -142,7 +142,7 @@ func (s *Service) maybeCompress(ctx context.Context, client agentsdk.Client, run
 	if s.compress == nil {
 		return truncateRunes(summary, s.compressOpts.MaxSummaryRunes), cursor, nil
 	}
-	conversationID = normalizeConversationID(conversationID)
+	conversationID = s.normalizeConversationID(conversationID)
 
 	cur := cursor
 	if cur < 0 {

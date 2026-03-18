@@ -137,13 +137,26 @@ func enforceWriteActionPlanGuard(ctx context.Context, deps Deps, call agentsdk.T
 	}
 	plan, err := builder(call)
 	if err != nil {
+		if deps.OnWriteGuardBlock != nil {
+			deps.OnWriteGuardBlock(err)
+		}
 		return fmt.Errorf("action_plan generate failed: %w", err)
 	}
 	if deps.ActionPlanMainRecorder == nil {
-		return fmt.Errorf("action_plan audit recorder is required for write-capable tool %q", strings.TrimSpace(call.Name))
+		recErr := fmt.Errorf("action_plan audit recorder is required for write-capable tool %q", strings.TrimSpace(call.Name))
+		if deps.OnWriteGuardBlock != nil {
+			deps.OnWriteGuardBlock(recErr)
+		}
+		return recErr
 	}
 	if err := deps.ActionPlanMainRecorder.RecordActionPlan(ctx, plan); err != nil {
+		if deps.OnWriteGuardBlock != nil {
+			deps.OnWriteGuardBlock(err)
+		}
 		return fmt.Errorf("action_plan audit record failed: %w", err)
+	}
+	if deps.OnActionPlanEmitted != nil {
+		deps.OnActionPlanEmitted(plan)
 	}
 	if deps.ActionPlanEventRecorder != nil {
 		if err := deps.ActionPlanEventRecorder.RecordActionPlan(ctx, plan); err != nil && deps.OnWriteGuardSideEffectErr != nil {

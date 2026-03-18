@@ -73,9 +73,15 @@ func TestWriteGuard_AuditFailureIsFailClosed(t *testing.T) {
 	ctx := context.Background()
 	executed := false
 	mainRecorder := &guardRecorder{err: errors.New("boom-audit")}
+	blockCount := 0
 	reg := newRegistryWithTools(Deps{
 		WriteGuardEnabled:      true,
 		ActionPlanMainRecorder: mainRecorder,
+		OnWriteGuardBlock: func(err error) {
+			if err != nil {
+				blockCount++
+			}
+		},
 	}, []Tool{guardWriteTool{executed: &executed}})
 
 	_, err := reg.Execute(ctx, agentsdk.ToolCall{
@@ -94,6 +100,9 @@ func TestWriteGuard_AuditFailureIsFailClosed(t *testing.T) {
 	if len(mainRecorder.plans) != 1 {
 		t.Fatalf("main recorder calls=%d want 1", len(mainRecorder.plans))
 	}
+	if blockCount != 1 {
+		t.Fatalf("blockCount=%d want 1", blockCount)
+	}
 }
 
 func TestWriteGuard_EventFailureIsFailOpen(t *testing.T) {
@@ -102,11 +111,17 @@ func TestWriteGuard_EventFailureIsFailOpen(t *testing.T) {
 	mainRecorder := &guardRecorder{}
 	eventRecorder := &guardRecorder{err: errors.New("boom-event")}
 	sideErrCount := 0
+	emittedCount := 0
 
 	reg := newRegistryWithTools(Deps{
 		WriteGuardEnabled:       true,
 		ActionPlanMainRecorder:  mainRecorder,
 		ActionPlanEventRecorder: eventRecorder,
+		OnActionPlanEmitted: func(plan ActionPlan) {
+			if strings.TrimSpace(plan.ID) != "" {
+				emittedCount++
+			}
+		},
 		OnWriteGuardSideEffectErr: func(err error) {
 			if err != nil {
 				sideErrCount++
@@ -132,5 +147,8 @@ func TestWriteGuard_EventFailureIsFailOpen(t *testing.T) {
 	}
 	if sideErrCount != 1 {
 		t.Fatalf("sideErrCount=%d want 1", sideErrCount)
+	}
+	if emittedCount != 1 {
+		t.Fatalf("emittedCount=%d want 1", emittedCount)
 	}
 }
