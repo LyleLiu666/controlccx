@@ -110,8 +110,8 @@ func TestAPI_SecretaryEndpoints(t *testing.T) {
 		t.Fatalf("unexpected assistant message: %+v", hist.Messages[1])
 	}
 
-	// Clear
-	clearRes, err := http.Post(srv.URL+"/api/secretary/clear", "application/json", bytes.NewReader([]byte(`{}`)))
+	// Clear current conversation
+	clearRes, err := http.Post(srv.URL+"/api/secretary/clear", "application/json", bytes.NewReader([]byte(`{"conversation_id":"conv-a"}`)))
 	if err != nil {
 		t.Fatalf("post clear: %v", err)
 	}
@@ -136,6 +136,60 @@ func TestAPI_SecretaryEndpoints(t *testing.T) {
 	}
 	if len(hist2.Messages) != 0 {
 		t.Fatalf("messages len=%d want 0", len(hist2.Messages))
+	}
+}
+
+func TestAPI_SecretaryClearScopeRules(t *testing.T) {
+	ctx := context.Background()
+	conn, err := db.Open(ctx, db.Options{Path: filepath.Join(t.TempDir(), "controlccx.db")})
+	if err != nil {
+		t.Fatalf("db open: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+
+	taskStore := tasks.NewStore(conn)
+	chatStore := chat.NewStore(conn)
+
+	llmClient := &scriptedClient{
+		responses: []string{
+			"<tool_data><call><tool_name>tasks_count</tool_name></call></tool_data>",
+			"ok",
+		},
+	}
+	sec := secretary.NewService(config.Default(), taskStore, chatStore, nil, nil, secretary.WithClient(llmClient))
+	apiSvc := &API{Tasks: taskStore, Secretary: sec}
+	handler := apiSvc.Handler()
+
+	{
+		req := httptest.NewRequest(http.MethodPost, "/api/secretary/clear", bytes.NewReader([]byte(`{}`)))
+		req.RemoteAddr = "127.0.0.1:12345"
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("status=%d want %d body=%s", rec.Code, http.StatusBadRequest, rec.Body.String())
+		}
+	}
+
+	{
+		req := httptest.NewRequest(http.MethodPost, "/api/secretary/clear", bytes.NewReader([]byte(`{"scope":"all"}`)))
+		req.Header.Set("Content-Type", "application/json")
+		req.RemoteAddr = "8.8.8.8:34567"
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusForbidden {
+			t.Fatalf("status=%d want %d body=%s", rec.Code, http.StatusForbidden, rec.Body.String())
+		}
+	}
+
+	{
+		req := httptest.NewRequest(http.MethodPost, "/api/secretary/clear", bytes.NewReader([]byte(`{"scope":"all"}`)))
+		req.Header.Set("Content-Type", "application/json")
+		req.RemoteAddr = "127.0.0.1:12345"
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status=%d want %d body=%s", rec.Code, http.StatusOK, rec.Body.String())
+		}
 	}
 }
 

@@ -2,7 +2,9 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 
@@ -59,11 +61,49 @@ func (a *API) handleSecretaryClear(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	if err := a.Secretary.Clear(r.Context()); err != nil {
+
+	var body struct {
+		ConversationID string `json:"conversation_id"`
+		Scope          string `json:"scope"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil && !errors.Is(err, io.EOF) {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+
+	conversationID := strings.TrimSpace(body.ConversationID)
+	scope := strings.ToLower(strings.TrimSpace(body.Scope))
+
+	if conversationID != "" {
+		if err := a.Secretary.ClearByConversation(r.Context(), conversationID); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, map[string]any{
+			"ok":              true,
+			"scope":           "conversation",
+			"conversation_id": conversationID,
+		})
+		return
+	}
+
+	if scope != "all" {
+		http.Error(w, "conversation_id is required; use scope=all for global clear", http.StatusBadRequest)
+		return
+	}
+	if !a.allowSensitiveRequest(r) {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+
+	if err := a.Secretary.ClearByConversation(r.Context(), ""); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, map[string]any{"ok": true})
+	writeJSON(w, map[string]any{
+		"ok":    true,
+		"scope": "all",
+	})
 }
 
 func (a *API) handleSecretaryMessagesStream(w http.ResponseWriter, r *http.Request) {
