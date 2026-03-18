@@ -10,6 +10,20 @@ import (
 	"controlccx/internal/tasks"
 )
 
+type ActionPlan struct {
+	ID             string
+	ToolName       string
+	TaskID         string
+	ConversationID string
+	RiskLevel      string
+	Fields         map[string]string
+	CreatedAt      time.Time
+}
+
+type ActionPlanRecorder interface {
+	RecordActionPlan(ctx context.Context, plan ActionPlan) error
+}
+
 type Tool interface {
 	Name() string
 	DescriptionZH() string
@@ -32,6 +46,12 @@ type Deps struct {
 	Ops       *taskops.Service
 	Scheduler Scheduler
 	FSRoots   []string
+
+	WriteGuardEnabled         bool
+	ActionPlanBuilder         func(call agentsdk.ToolCall) (ActionPlan, error)
+	ActionPlanMainRecorder    ActionPlanRecorder
+	ActionPlanEventRecorder   ActionPlanRecorder
+	OnWriteGuardSideEffectErr func(error)
 }
 
 type Descriptor struct {

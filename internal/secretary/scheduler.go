@@ -322,13 +322,7 @@ func (s *Service) executeScheduledTool(job *scheduleJob, tickNo int, runID strin
 		"line":             fmt.Sprintf("定时调用工具：%s", toolName),
 	})
 
-	reg := sectools.NewRegistry(sectools.Deps{
-		Tasks:     s.tasks,
-		Skills:    s.skills,
-		Ops:       s.taskOps,
-		Scheduler: s,
-		FSRoots:   s.fsRoots,
-	})
+	reg := sectools.NewRegistry(s.toolDeps(runID))
 	payload, toolErr := reg.Execute(job.ctx, agentsdk.ToolCall{
 		ID:     callID,
 		Name:   toolName,
@@ -438,13 +432,13 @@ func (s *Service) runScheduleCallback(job *scheduleJob, tickNo int, runID string
 	history, err := s.promptHistory(callbackCtx, client, runID, job.conversationID)
 	if err != nil {
 		s.publishSecretaryThinking(job.id, tickNo, map[string]any{
-			"source":      "timer",
-			"schedule_id": job.id,
-			"tick_no":     tickNo,
+			"source":          "timer",
+			"schedule_id":     job.id,
+			"tick_no":         tickNo,
 			"conversation_id": strings.TrimSpace(job.conversationID),
-			"kind":        "error",
-			"error":       err.Error(),
-			"line":        "定时回调构建上下文失败：" + strings.TrimSpace(err.Error()),
+			"kind":            "error",
+			"error":           err.Error(),
+			"line":            "定时回调构建上下文失败：" + strings.TrimSpace(err.Error()),
 		})
 		return
 	}
@@ -466,14 +460,8 @@ func (s *Service) runScheduleCallback(job *scheduleJob, tickNo int, runID string
 		Messages:                      messages,
 		LLMOptions:                    s.llmOptionsBestEffort(callbackCtx),
 		ContextCompressThresholdRunes: contextCompressThreshold,
-		Executor: sectools.NewRegistry(sectools.Deps{
-			Tasks:     s.tasks,
-			Skills:    s.skills,
-			Ops:       s.taskOps,
-			Scheduler: s,
-			FSRoots:   s.fsRoots,
-		}),
-		MaxSteps: 500,
+		Executor:                      sectools.NewRegistry(s.toolDeps(runID)),
+		MaxSteps:                      500,
 		Callbacks: xmlprotocol.Callbacks{
 			EventSink: s.scheduleCallbackEventSink(runID, job.id, tickNo),
 			ObserveStep: func(record xmlprotocol.StepRecord) {
@@ -489,13 +477,13 @@ func (s *Service) runScheduleCallback(job *scheduleJob, tickNo int, runID string
 	reply := strings.TrimSpace(out)
 	if runErr != nil {
 		s.publishSecretaryThinking(job.id, tickNo, map[string]any{
-			"source":      "timer",
-			"schedule_id": job.id,
-			"tick_no":     tickNo,
+			"source":          "timer",
+			"schedule_id":     job.id,
+			"tick_no":         tickNo,
 			"conversation_id": strings.TrimSpace(job.conversationID),
-			"kind":        "error",
-			"error":       strings.TrimSpace(runErr.Error()),
-			"line":        "定时回调执行失败：" + strings.TrimSpace(runErr.Error()),
+			"kind":            "error",
+			"error":           strings.TrimSpace(runErr.Error()),
+			"line":            "定时回调执行失败：" + strings.TrimSpace(runErr.Error()),
 		})
 	}
 	if reply == "" {
@@ -506,13 +494,13 @@ func (s *Service) runScheduleCallback(job *scheduleJob, tickNo int, runID string
 	if err := s.appendRunLoopTranscript(callbackCtx, job.conversationID, toolResultMessage, stepRecords, finalAssistantContent, reply); err != nil {
 		s.sendMu.Unlock()
 		s.publishSecretaryThinking(job.id, tickNo, map[string]any{
-			"source":      "timer",
-			"schedule_id": job.id,
-			"tick_no":     tickNo,
+			"source":          "timer",
+			"schedule_id":     job.id,
+			"tick_no":         tickNo,
 			"conversation_id": strings.TrimSpace(job.conversationID),
-			"kind":        "error",
-			"error":       strings.TrimSpace(err.Error()),
-			"line":        "定时回调写入聊天失败：" + strings.TrimSpace(err.Error()),
+			"kind":            "error",
+			"error":           strings.TrimSpace(err.Error()),
+			"line":            "定时回调写入聊天失败：" + strings.TrimSpace(err.Error()),
 		})
 		return
 	}
@@ -520,13 +508,13 @@ func (s *Service) runScheduleCallback(job *scheduleJob, tickNo int, runID string
 	s.sendMu.Unlock()
 
 	s.publishSecretaryMessage(map[string]any{
-		"source":      "timer",
-		"schedule_id": job.id,
-		"tick_no":     tickNo,
+		"source":          "timer",
+		"schedule_id":     job.id,
+		"tick_no":         tickNo,
 		"conversation_id": strings.TrimSpace(job.conversationID),
-		"role":        "assistant",
-		"content":     reply,
-		"time":        time.Now().UTC(),
+		"role":            "assistant",
+		"content":         reply,
+		"time":            time.Now().UTC(),
 	})
 }
 
@@ -695,15 +683,15 @@ func (s *Service) expireSchedule(job *scheduleJob, reason string) {
 		},
 	})
 	s.publishSecretaryThinking(job.id, tickNo, map[string]any{
-		"source":      "timer",
-		"schedule_id": job.id,
-		"tick_no":     tickNo,
+		"source":          "timer",
+		"schedule_id":     job.id,
+		"tick_no":         tickNo,
 		"conversation_id": strings.TrimSpace(job.conversationID),
-		"kind":        "tool_result",
-		"tool_name":   "scheduler_expire",
-		"ok":          false,
-		"error":       errText,
-		"line":        "调度已到期并自动停止",
+		"kind":            "tool_result",
+		"tool_name":       "scheduler_expire",
+		"ok":              false,
+		"error":           errText,
+		"line":            "调度已到期并自动停止",
 	})
 
 	s.runScheduleCallback(job, tickNo, runID, "scheduler_expire", scheduleInvocationResult{

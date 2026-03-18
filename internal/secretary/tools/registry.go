@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"controlccx/internal/agentsdk"
 )
@@ -91,8 +92,12 @@ func trimStringGroups(in [][]string) [][]string {
 }
 
 func NewRegistry(deps Deps) *agentsdk.ToolRegistry {
+	return newRegistryWithTools(deps, DefaultTools())
+}
+
+func newRegistryWithTools(deps Deps, tools []Tool) *agentsdk.ToolRegistry {
 	reg := agentsdk.NewToolRegistry()
-	for _, t := range DefaultTools() {
+	for _, t := range tools {
 		tool := t
 		_ = reg.Register(tool.Name(), func(ctx context.Context, call agentsdk.ToolCall) (any, error) {
 			if pd, ok := tool.(ParamDescriber); ok {
@@ -100,6 +105,9 @@ func NewRegistry(deps Deps) *agentsdk.ToolRegistry {
 					appendValidationAuditLog(ctx, deps, call, err)
 					return nil, err
 				}
+			}
+			if err := enforceWriteActionPlanGuard(ctx, deps, call); err != nil {
+				return nil, err
 			}
 			return tool.Execute(ctx, call, deps)
 		})
@@ -113,6 +121,94 @@ func NewRegistry(deps Deps) *agentsdk.ToolRegistry {
 		return nil, fmt.Errorf("%w: %s", agentsdk.ErrToolNotFound, name)
 	}
 	return reg
+}
+
+func enforceWriteActionPlanGuard(ctx context.Context, deps Deps, call agentsdk.ToolCall) error {
+	if !deps.WriteGuardEnabled {
+		return nil
+	}
+	if !isWriteCapableTool(call.Name) {
+		return nil
+	}
+
+	builder := deps.ActionPlanBuilder
+	if builder == nil {
+		builder = buildActionPlan
+	}
+	plan, err := builder(call)
+	if err != nil {
+		return fmt.Errorf("action_plan generate failed: %w", err)
+	}
+	if deps.ActionPlanMainRecorder == nil {
+		return fmt.Errorf("action_plan audit recorder is required for write-capable tool %q", strings.TrimSpace(call.Name))
+	}
+	if err := deps.ActionPlanMainRecorder.RecordActionPlan(ctx, plan); err != nil {
+		return fmt.Errorf("action_plan audit record failed: %w", err)
+	}
+	if deps.ActionPlanEventRecorder != nil {
+		if err := deps.ActionPlanEventRecorder.RecordActionPlan(ctx, plan); err != nil && deps.OnWriteGuardSideEffectErr != nil {
+			deps.OnWriteGuardSideEffectErr(err)
+		}
+	}
+	return nil
+}
+
+func buildActionPlan(call agentsdk.ToolCall) (ActionPlan, error) {
+	toolName := strings.TrimSpace(call.Name)
+	if toolName == "" {
+		return ActionPlan{}, fmt.Errorf("tool name is required")
+	}
+	id := strings.TrimSpace(call.ID)
+	if id == "" {
+		id = fmt.Sprintf("ap_%d", time.Now().UTC().UnixNano())
+	}
+	fields := copyStringMap(call.Fields)
+	taskID := strings.TrimSpace(fields["task_id"])
+	conversationID := strings.TrimSpace(fields["conversation_id"])
+
+	return ActionPlan{
+		ID:             id,
+		ToolName:       toolName,
+		TaskID:         taskID,
+		ConversationID: conversationID,
+		RiskLevel:      riskLevelForTool(toolName),
+		Fields:         fields,
+		CreatedAt:      time.Now().UTC(),
+	}, nil
+}
+
+func isWriteCapableTool(toolName string) bool {
+	_, ok := writeCapableTools[strings.TrimSpace(toolName)]
+	return ok
+}
+
+func riskLevelForTool(toolName string) string {
+	if _, ok := highRiskWriteTools[strings.TrimSpace(toolName)]; ok {
+		return "high"
+	}
+	return "medium"
+}
+
+var writeCapableTools = map[string]struct{}{
+	"task_new_submit":                {},
+	"task_cancel_submit":             {},
+	"task_continue_submit":           {},
+	"task_preempt_continue_submit":   {},
+	"task_resume_submit":             {},
+	"task_rehydrate_submit":          {},
+	"mission_contract_upsert":        {},
+	"project_autonomy_policy_upsert": {},
+	"execution_plan_loop_submit":     {},
+	"task_approval_decide":           {},
+	"task_enter_unsafe_submit":       {},
+	"scheduler_create":               {},
+	"scheduler_cancel":               {},
+}
+
+var highRiskWriteTools = map[string]struct{}{
+	"task_enter_unsafe_submit": {},
+	"task_approval_decide":     {},
+	"task_cancel_submit":       {},
 }
 
 func appendValidationAuditLog(ctx context.Context, deps Deps, call agentsdk.ToolCall, err error) {

@@ -191,14 +191,6 @@ func (s *Service) send(ctx context.Context, conversationID string, userText stri
 	s.sendMu.Lock()
 	defer s.sendMu.Unlock()
 
-	reg := sectools.NewRegistry(sectools.Deps{
-		Tasks:     s.tasks,
-		Skills:    s.skills,
-		Ops:       s.taskOps,
-		Scheduler: s,
-		FSRoots:   s.fsRoots,
-	})
-
 	client := s.client
 	if client == nil {
 		backend := llm.NewProviderBackendWithProviders(s.cfg, s.auth, s.providers)
@@ -217,6 +209,7 @@ func (s *Service) send(ctx context.Context, conversationID string, userText stri
 		sinks = append(sinks, hookSink)
 	}
 	sink := composeEventSink(sinks...)
+	reg := sectools.NewRegistry(s.toolDeps(runID))
 
 	promptHistory, err := s.promptHistory(ctx, client, runID, conversationID)
 	if err != nil {
@@ -607,4 +600,20 @@ func (s *Service) llmOptionsBestEffort(ctx context.Context) *agentsdk.ChatComple
 	}
 	opts.CacheEpoch = int(rec.ID)
 	return opts
+}
+
+func (s *Service) toolDeps(runID string) sectools.Deps {
+	return sectools.Deps{
+		Tasks:                   s.tasks,
+		Skills:                  s.skills,
+		Ops:                     s.taskOps,
+		Scheduler:               s,
+		FSRoots:                 s.fsRoots,
+		WriteGuardEnabled:       true,
+		ActionPlanMainRecorder:  newActionPlanMainRecorder(s, runID),
+		ActionPlanEventRecorder: newActionPlanEventRecorder(s, runID),
+		OnWriteGuardSideEffectErr: func(err error) {
+			_ = err
+		},
+	}
 }
