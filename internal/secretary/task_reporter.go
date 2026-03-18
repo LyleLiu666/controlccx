@@ -16,6 +16,10 @@ func (s *Service) StartTaskStatusReporter(ctx context.Context, hub *events.Hub) 
 	if s == nil || s.tasks == nil || s.chat == nil || hub == nil {
 		return func() {}
 	}
+	mode := s.proactiveMode()
+	if mode == "off" {
+		return func() {}
+	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -64,7 +68,7 @@ func (s *Service) StartTaskStatusReporter(ctx context.Context, hub *events.Hub) 
 					}
 					_, _ = s.Send(reportCtx, buildTaskAwaitingApprovalSystemUserPrompt(task, pending))
 				default:
-					if !isTaskStatusReportable(task.Status) {
+					if !isTaskStatusReportableWithMode(task.Status, mode) {
 						continue
 					}
 					_, _ = s.Send(reportCtx, buildTaskStatusSystemUserPrompt(task))
@@ -74,6 +78,21 @@ func (s *Service) StartTaskStatusReporter(ctx context.Context, hub *events.Hub) 
 	}()
 
 	return stop
+}
+
+func (s *Service) proactiveMode() string {
+	if s == nil {
+		return "conservative"
+	}
+	raw := strings.ToLower(strings.TrimSpace(s.cfg.Secretary.ProactiveEnabled))
+	switch raw {
+	case "off", "disabled", "none":
+		return "off"
+	case "aggressive":
+		return "aggressive"
+	default:
+		return "conservative"
+	}
 }
 
 func decodeTaskFromEventPayload(payload any) (tasks.Task, bool) {
@@ -109,6 +128,19 @@ func isTaskStatusReportable(status tasks.Status) bool {
 	default:
 		return false
 	}
+}
+
+func isTaskStatusReportableWithMode(status tasks.Status, mode string) bool {
+	if isTaskStatusReportable(status) {
+		return true
+	}
+	if strings.TrimSpace(mode) == "aggressive" {
+		switch status {
+		case tasks.StatusRunning, tasks.StatusQueued, tasks.StatusWaiting:
+			return true
+		}
+	}
+	return false
 }
 
 func humanTaskStatus(status tasks.Status) string {

@@ -338,6 +338,100 @@ func TestService_StartTaskStatusReporter_ForwardsAwaitingApprovalOncePerTransiti
 	}
 }
 
+func TestService_StartTaskStatusReporter_ProactiveModeOff_NoForward(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "controlccx.db")
+
+	conn, err := db.Open(ctx, db.Options{Path: dbPath})
+	if err != nil {
+		t.Fatalf("db open: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+
+	taskStore := tasks.NewStore(conn)
+	chatStore := chat.NewStore(conn)
+	client := &scriptedClient{responses: []string{"should-not-send"}}
+
+	cfg := config.Default()
+	cfg.Secretary.ProactiveEnabled = "off"
+	svc := NewService(cfg, taskStore, chatStore, nil, nil, WithClient(client))
+
+	hub := events.NewHub()
+	stop := svc.StartTaskStatusReporter(context.Background(), hub)
+	defer stop()
+
+	hub.Publish(events.Event{
+		Type: "task.updated",
+		Time: time.Now().UTC(),
+		Payload: tasks.Task{
+			ID:         "task-succeeded",
+			Status:     tasks.StatusSucceeded,
+			WorkerType: tasks.WorkerCodex,
+			Prompt:     "do work",
+		},
+	})
+
+	time.Sleep(200 * time.Millisecond)
+	msgs, err := chatStore.Tail(ctx, 20)
+	if err != nil {
+		t.Fatalf("tail chat messages: %v", err)
+	}
+	if len(msgs) != 0 {
+		t.Fatalf("expected no forwarded messages when proactive mode off, got %d", len(msgs))
+	}
+}
+
+func TestService_StartTaskStatusReporter_Aggressive_ReportsRunning(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "controlccx.db")
+
+	conn, err := db.Open(ctx, db.Options{Path: dbPath})
+	if err != nil {
+		t.Fatalf("db open: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+
+	taskStore := tasks.NewStore(conn)
+	chatStore := chat.NewStore(conn)
+	client := &scriptedClient{responses: []string{"已收到运行中汇报。"}}
+
+	cfg := config.Default()
+	cfg.Secretary.ProactiveEnabled = "aggressive"
+	svc := NewService(cfg, taskStore, chatStore, nil, nil, WithClient(client))
+
+	hub := events.NewHub()
+	stop := svc.StartTaskStatusReporter(context.Background(), hub)
+	defer stop()
+
+	hub.Publish(events.Event{
+		Type: "task.updated",
+		Time: time.Now().UTC(),
+		Payload: tasks.Task{
+			ID:         "task-running",
+			Status:     tasks.StatusRunning,
+			WorkerType: tasks.WorkerCodex,
+			Prompt:     "run smoke",
+		},
+	})
+
+	msgs := waitForChatMessagesAtLeast(t, chatStore, 2, 2*time.Second)
+	if len(msgs) != 2 {
+		t.Fatalf("messages len=%d want 2; msgs=%+v", len(msgs), msgs)
+	}
+	if msgs[0].Role != chat.RoleUser {
+		t.Fatalf("first role=%q want user", msgs[0].Role)
+	}
+	if !strings.Contains(msgs[0].Content, "task-running") {
+		t.Fatalf("running prompt missing task id: %q", msgs[0].Content)
+	}
+	if msgs[1].Role != chat.RoleAssistant {
+		t.Fatalf("second role=%q want assistant", msgs[1].Role)
+	}
+	if !strings.Contains(msgs[1].Content, "运行中汇报") {
+		t.Fatalf("assistant reply=%q", msgs[1].Content)
+	}
+}
+
 func waitForChatMessagesAtLeast(t *testing.T, store *chat.Store, min int, timeout time.Duration) []chat.Message {
 	t.Helper()
 	deadline := time.Now().Add(timeout)

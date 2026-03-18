@@ -79,7 +79,7 @@ func (s *Service) promptHistory(ctx context.Context, client agentsdk.Client, run
 		return chatMessagesToPromptHistory(history, s.compressOpts.MaxMsgRunesForHistory), nil
 	}
 
-	rec, ok, err := s.compress.Latest(ctx)
+	rec, ok, err := s.compress.LatestInConversation(ctx, conversationID)
 	if err != nil {
 		return nil, err
 	}
@@ -196,7 +196,7 @@ func (s *Service) maybeCompress(ctx context.Context, client agentsdk.Client, run
 		newSummary, sumErr := s.summarizeSecretaryHistory(ctx, client, runID, sum, deltaTranscript, s.compressOpts.SummaryMaxTokens)
 		if sumErr != nil {
 			// Append an error record for observability; keep current summary/cursor.
-			_, _ = s.compress.Append(ctx, CompressionRecord{
+			_, _ = s.compress.AppendInConversation(ctx, conversationID, CompressionRecord{
 				CursorBefore: cur,
 				CursorAfter:  cur,
 				KeepFrom:     keepFrom,
@@ -209,7 +209,7 @@ func (s *Service) maybeCompress(ctx context.Context, client agentsdk.Client, run
 
 		newSummary = truncateRunes(newSummary, s.compressOpts.MaxSummaryRunes)
 		if strings.TrimSpace(newSummary) == "" {
-			_, _ = s.compress.Append(ctx, CompressionRecord{
+			_, _ = s.compress.AppendInConversation(ctx, conversationID, CompressionRecord{
 				CursorBefore: cur,
 				CursorAfter:  cur,
 				KeepFrom:     keepFrom,
@@ -222,7 +222,7 @@ func (s *Service) maybeCompress(ctx context.Context, client agentsdk.Client, run
 
 		cursorAfter := toSummarize[len(toSummarize)-1].ID
 
-		_, err = s.compress.Append(ctx, CompressionRecord{
+		_, err = s.compress.AppendInConversation(ctx, conversationID, CompressionRecord{
 			CursorBefore: cur,
 			CursorAfter:  cursorAfter,
 			KeepFrom:     keepFrom,

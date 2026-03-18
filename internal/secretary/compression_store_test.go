@@ -76,3 +76,57 @@ func TestCompressionStore_AppendAndLatest(t *testing.T) {
 		t.Fatalf("latest summary=%q", latest.Summary)
 	}
 }
+
+func TestCompressionStore_ConversationPartition(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "controlccx.db")
+
+	conn, err := db.Open(ctx, db.Options{Path: dbPath})
+	if err != nil {
+		t.Fatalf("db open: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+
+	store := NewCompressionStore(conn)
+
+	if _, err := store.AppendInConversation(ctx, "conv-a", CompressionRecord{
+		CursorBefore: 0,
+		CursorAfter:  10,
+		KeepFrom:     11,
+		Summary:      "sum-a",
+		Backend:      "claude",
+	}); err != nil {
+		t.Fatalf("append conv-a: %v", err)
+	}
+	if _, err := store.AppendInConversation(ctx, "conv-b", CompressionRecord{
+		CursorBefore: 0,
+		CursorAfter:  4,
+		KeepFrom:     5,
+		Summary:      "sum-b",
+		Backend:      "claude",
+	}); err != nil {
+		t.Fatalf("append conv-b: %v", err)
+	}
+
+	a, ok, err := store.LatestInConversation(ctx, "conv-a")
+	if err != nil {
+		t.Fatalf("latest conv-a: %v", err)
+	}
+	if !ok {
+		t.Fatalf("expected latest for conv-a")
+	}
+	if a.Summary != "sum-a" {
+		t.Fatalf("conv-a summary=%q want %q", a.Summary, "sum-a")
+	}
+
+	b, ok, err := store.LatestInConversation(ctx, "conv-b")
+	if err != nil {
+		t.Fatalf("latest conv-b: %v", err)
+	}
+	if !ok {
+		t.Fatalf("expected latest for conv-b")
+	}
+	if b.Summary != "sum-b" {
+		t.Fatalf("conv-b summary=%q want %q", b.Summary, "sum-b")
+	}
+}

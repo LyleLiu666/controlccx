@@ -2,7 +2,11 @@ import { nextTick, onBeforeUnmount, ref } from "vue";
 import type { SecretaryMessage, SecretaryMessageRole, SecretaryThinkingEvent, ServerEvent } from "../types";
 import { clearSecretaryMessages, fetchSecretaryMessages, sendSecretaryMessageStream } from "../api";
 
-export function useSecretaryChat() {
+type UseSecretaryChatOptions = {
+  getConversationID?: () => string;
+};
+
+export function useSecretaryChat(opts?: UseSecretaryChatOptions) {
   const autoRefreshMs = 2500;
   const open = ref(false);
   const messages = ref<SecretaryMessage[]>([]);
@@ -12,13 +16,22 @@ export function useSecretaryChat() {
   const error = ref("");
   const thinkingLines = ref<string[]>([]);
   const streamingReply = ref("");
+  const conversationID = ref("");
   let autoRefreshTimer: ReturnType<typeof setInterval> | null = null;
+
+  function resolveConversationID() {
+    const fromOpts = String(opts?.getConversationID?.() ?? "").trim();
+    if (fromOpts) return fromOpts;
+    const local = String(conversationID.value ?? "").trim();
+    if (local) return local;
+    return "__global__";
+  }
 
   async function refresh(limit = 200) {
     if (loading.value) return;
     loading.value = true;
     try {
-      messages.value = await fetchSecretaryMessages(limit);
+      messages.value = await fetchSecretaryMessages(limit, resolveConversationID());
       error.value = "";
     } catch (e: any) {
       error.value = e?.message ?? String(e);
@@ -29,7 +42,7 @@ export function useSecretaryChat() {
 
   async function refreshSilently(limit = 200) {
     try {
-      messages.value = await fetchSecretaryMessages(limit);
+      messages.value = await fetchSecretaryMessages(limit, resolveConversationID());
       error.value = "";
     } catch {
       // Keep current UI state on background refresh failures.
@@ -92,6 +105,10 @@ export function useSecretaryChat() {
     if (!evt || typeof evt.type !== "string") return;
     if (evt.type === "secretary.thinking") {
       const payload = (evt.payload ?? {}) as Record<string, any>;
+      const eventConversationID = String(payload.conversation_id ?? "").trim();
+      if (eventConversationID && eventConversationID !== resolveConversationID()) {
+        return;
+      }
       const thinking: SecretaryThinkingEvent = {
         kind: typeof payload.kind === "string" ? payload.kind : undefined,
         step: Number.isFinite(payload.step) ? Number(payload.step) : undefined,
@@ -106,6 +123,10 @@ export function useSecretaryChat() {
     if (evt.type !== "secretary.message") return;
 
     const payload = (evt.payload ?? {}) as Record<string, any>;
+    const eventConversationID = String(payload.conversation_id ?? "").trim();
+    if (eventConversationID && eventConversationID !== resolveConversationID()) {
+      return;
+    }
     const content =
       typeof payload.content === "string"
         ? payload.content.trim()
@@ -159,7 +180,7 @@ export function useSecretaryChat() {
             streamingReply.value = String(reply ?? "");
           }
         },
-      });
+      }, { conversationID: resolveConversationID() });
 
       let finalReply = String(res?.reply ?? "").trim();
       if (!finalReply) {
@@ -202,7 +223,7 @@ export function useSecretaryChat() {
     loading.value = true;
     error.value = "";
     try {
-      await clearSecretaryMessages();
+      await clearSecretaryMessages(resolveConversationID());
       messages.value = [];
     } catch (e: any) {
       error.value = e?.message ?? String(e);
@@ -218,6 +239,7 @@ export function useSecretaryChat() {
   return {
     open,
     messages,
+    conversationID,
     input,
     loading,
     sending,

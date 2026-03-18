@@ -255,7 +255,8 @@ func Migrate(ctx context.Context, conn *sql.DB) error {
 			keep_from INTEGER NOT NULL,
 			summary TEXT NOT NULL,
 			backend TEXT NOT NULL DEFAULT '',
-			error TEXT NOT NULL DEFAULT ''
+			error TEXT NOT NULL DEFAULT '',
+			conversation_id TEXT NOT NULL DEFAULT '__global__'
 		);`,
 		`CREATE TABLE IF NOT EXISTS session_continue_queue (
 			id TEXT PRIMARY KEY,
@@ -286,6 +287,9 @@ func Migrate(ctx context.Context, conn *sql.DB) error {
 		return err
 	}
 	if err := ensureChatMessagesColumns(ctx, tx); err != nil {
+		return err
+	}
+	if err := ensureSecretaryCompressionsColumns(ctx, tx); err != nil {
 		return err
 	}
 
@@ -472,6 +476,71 @@ func ensureChatMessagesColumns(ctx context.Context, tx *sql.Tx) error {
 		ON chat_messages(conversation_id, id);
 	`); err != nil {
 		return fmt.Errorf("db: ensure chat_messages indexes: %w", err)
+	}
+	return nil
+}
+
+func ensureSecretaryCompressionsColumns(ctx context.Context, tx *sql.Tx) error {
+	if tx == nil {
+		return fmt.Errorf("db: ensure secretary_compressions columns: tx is nil")
+	}
+
+	var tableCount int
+	if err := tx.QueryRowContext(ctx, `
+		SELECT COUNT(1)
+		FROM sqlite_master
+		WHERE type='table' AND name='secretary_compressions';
+	`).Scan(&tableCount); err != nil {
+		return fmt.Errorf("db: ensure secretary_compressions columns: check table exists: %w", err)
+	}
+	if tableCount == 0 {
+		return nil
+	}
+
+	rows, err := tx.QueryContext(ctx, "PRAGMA table_info(secretary_compressions);")
+	if err != nil {
+		return fmt.Errorf("db: ensure secretary_compressions columns: table_info: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	existing := map[string]bool{}
+	for rows.Next() {
+		var (
+			cid     int
+			name    string
+			typ     string
+			notnull int
+			dflt    any
+			pk      int
+		)
+		if err := rows.Scan(&cid, &name, &typ, &notnull, &dflt, &pk); err != nil {
+			return fmt.Errorf("db: ensure secretary_compressions columns: scan: %w", err)
+		}
+		existing[name] = true
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("db: ensure secretary_compressions columns: rows: %w", err)
+	}
+
+	if !existing["conversation_id"] {
+		if _, err := tx.ExecContext(ctx, "ALTER TABLE secretary_compressions ADD COLUMN conversation_id TEXT NOT NULL DEFAULT '__global__';"); err != nil {
+			return fmt.Errorf("db: ensure secretary_compressions columns: add conversation_id: %w", err)
+		}
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE secretary_compressions
+		SET conversation_id='__global__'
+		WHERE conversation_id IS NULL OR TRIM(conversation_id) = '';
+	`); err != nil {
+		return fmt.Errorf("db: ensure secretary_compressions columns: backfill conversation_id: %w", err)
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+		CREATE INDEX IF NOT EXISTS idx_secretary_compressions_conversation_id_id
+		ON secretary_compressions(conversation_id, id);
+	`); err != nil {
+		return fmt.Errorf("db: ensure secretary_compressions indexes: %w", err)
 	}
 	return nil
 }

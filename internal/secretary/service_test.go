@@ -1191,6 +1191,97 @@ func TestService_Send_AutoCompressesHistory(t *testing.T) {
 	}
 }
 
+func TestService_SendByConversation_CompressionSummaryIsIsolated(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "controlccx.db")
+
+	conn, err := db.Open(ctx, db.Options{Path: dbPath})
+	if err != nil {
+		t.Fatalf("db open: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+
+	taskStore := tasks.NewStore(conn)
+	chatStore := chat.NewStore(conn)
+	compressStore := NewCompressionStore(conn)
+
+	for i := 0; i < 6; i++ {
+		if _, err := chatStore.AppendInConversation(ctx, "conv-a", chat.RoleUser, strings.Repeat("u", 600)); err != nil {
+			t.Fatalf("append conv-a user: %v", err)
+		}
+		if _, err := chatStore.AppendInConversation(ctx, "conv-a", chat.RoleAssistant, strings.Repeat("a", 600)); err != nil {
+			t.Fatalf("append conv-a assistant: %v", err)
+		}
+	}
+
+	c := &scriptedClient{
+		responses: []string{
+			"这是A会话摘要",
+			"A-final",
+			"B-final",
+		},
+	}
+
+	compOpts := DefaultCompressionOptions()
+	compOpts.MaxContextRunes = 2000
+	compOpts.KeepTextMessages = 4
+	compOpts.MaxCompressionSteps = 1
+
+	svc := NewService(
+		config.Default(),
+		taskStore,
+		chatStore,
+		nil,
+		nil,
+		WithClient(c),
+		WithCompressionStore(compressStore),
+		WithCompressionOptions(compOpts),
+	)
+
+	replyA, err := svc.SendByConversation(ctx, "conv-a", "hi A")
+	if err != nil {
+		t.Fatalf("send conv-a: %v", err)
+	}
+	if strings.TrimSpace(replyA) != "A-final" {
+		t.Fatalf("replyA=%q want %q", replyA, "A-final")
+	}
+
+	replyB, err := svc.SendByConversation(ctx, "conv-b", "hi B")
+	if err != nil {
+		t.Fatalf("send conv-b: %v", err)
+	}
+	if strings.TrimSpace(replyB) != "B-final" {
+		t.Fatalf("replyB=%q want %q", replyB, "B-final")
+	}
+
+	recA, ok, err := compressStore.LatestInConversation(ctx, "conv-a")
+	if err != nil {
+		t.Fatalf("latest conv-a compression: %v", err)
+	}
+	if !ok {
+		t.Fatalf("expected compression record for conv-a")
+	}
+	if strings.TrimSpace(recA.Summary) != "这是A会话摘要" {
+		t.Fatalf("conv-a summary=%q", recA.Summary)
+	}
+
+	if _, ok, err := compressStore.LatestInConversation(ctx, "conv-b"); err != nil {
+		t.Fatalf("latest conv-b compression: %v", err)
+	} else if ok {
+		t.Fatalf("expected no compression record for conv-b")
+	}
+
+	if len(c.messages) < 3 {
+		t.Fatalf("captured llm requests=%d want >=3", len(c.messages))
+	}
+	reqB := c.messages[2]
+	for _, m := range reqB {
+		if m.Role == "system" && strings.Contains(m.Content, "这是A会话摘要") {
+			t.Fatalf("conv-b prompt leaked conv-a summary: %+v", reqB)
+		}
+	}
+}
+
 func pad3(i int) string {
 	if i < 10 {
 		return "00" + strconv.Itoa(i)

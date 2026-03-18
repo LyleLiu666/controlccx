@@ -212,14 +212,19 @@ export async function fetchSystemInfo(): Promise<SystemInfo> {
   return getJSON<SystemInfo>("/api/system");
 }
 
-export async function fetchSecretaryMessages(limit = 200): Promise<SecretaryMessage[]> {
+export async function fetchSecretaryMessages(limit = 200, conversationID = ""): Promise<SecretaryMessage[]> {
   const qs = new URLSearchParams({ limit: String(limit) });
+  const cid = String(conversationID ?? "").trim();
+  if (cid) qs.set("conversation_id", cid);
   const res = await getJSON<SecretaryMessagesResponse>(`/api/secretary/messages?${qs.toString()}`);
   return res.messages ?? [];
 }
 
-export async function sendSecretaryMessage(message: string): Promise<SecretarySendResponse> {
-  return postJSON<SecretarySendResponse>("/api/secretary/messages", { message: String(message ?? "") });
+export async function sendSecretaryMessage(message: string, conversationID = ""): Promise<SecretarySendResponse> {
+  const cid = String(conversationID ?? "").trim();
+  const body: Record<string, string> = { message: String(message ?? "") };
+  if (cid) body.conversation_id = cid;
+  return postJSON<SecretarySendResponse>("/api/secretary/messages", body);
 }
 
 export async function sendSecretaryMessageStream(
@@ -230,14 +235,18 @@ export async function sendSecretaryMessageStream(
     onDone?: (reply: string) => void;
     onError?: (message: string) => void;
   },
+  opts?: { conversationID?: string },
 ): Promise<SecretaryStreamResult> {
+  const cid = String(opts?.conversationID ?? "").trim();
+  const body: Record<string, string> = { message: String(message ?? "") };
+  if (cid) body.conversation_id = cid;
   const res = await fetch("/api/secretary/messages/stream", {
     method: "POST",
     headers: buildInstanceTokenHeaders({
       "Content-Type": "application/json",
       "Accept": "text/event-stream",
     }),
-    body: JSON.stringify({ message: String(message ?? "") }),
+    body: JSON.stringify(body),
     credentials: "same-origin",
   });
   if (!res.ok) throw await buildAPIError(res);
@@ -327,8 +336,18 @@ export async function sendSecretaryMessageStream(
   return { reply: finalReply };
 }
 
-export async function clearSecretaryMessages(): Promise<SecretaryClearResponse> {
-  return postJSON<SecretaryClearResponse>("/api/secretary/clear", {});
+export async function clearSecretaryMessages(
+  conversationID = "",
+  opts?: { scopeAll?: boolean },
+): Promise<SecretaryClearResponse> {
+  const cid = String(conversationID ?? "").trim();
+  if (opts?.scopeAll) {
+    return postJSON<SecretaryClearResponse>("/api/secretary/clear", { scope: "all" });
+  }
+  if (!cid) {
+    return postJSON<SecretaryClearResponse>("/api/secretary/clear", {});
+  }
+  return postJSON<SecretaryClearResponse>("/api/secretary/clear", { conversation_id: cid });
 }
 
 export async function fetchAuditEntries(query: AuditQuery): Promise<AuditEntriesResponse> {

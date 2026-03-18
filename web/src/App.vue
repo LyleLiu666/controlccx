@@ -1098,7 +1098,13 @@ const {
   send: sendSecretaryChat,
   clear: clearSecretaryChat,
   handleServerEvent: handleSecretaryServerEvent,
-} = useSecretaryChat();
+} = useSecretaryChat({
+  getConversationID: () => {
+    const key = String(selectedSessionKey.value ?? "").trim();
+    if (key.startsWith("c:")) return key.slice(2).trim();
+    return "";
+  },
+});
 
 const feedCoachDismissed = ref(false);
 const feedCoachOpen = ref(false);
