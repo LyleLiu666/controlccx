@@ -57,6 +57,7 @@ func TestSchedulerCreateTool_ParsesDefaultsAndBounds(t *testing.T) {
 		Fields: map[string]string{
 			"target_tool_name": "tasks_list",
 			"tool_fields_json": `{"limit":5,"include_deleted":true}`,
+			"conversation_id": "conv-a",
 		},
 	})
 	if err != nil {
@@ -74,6 +75,9 @@ func TestSchedulerCreateTool_ParsesDefaultsAndBounds(t *testing.T) {
 	}
 	if req.ToolFields["include_deleted"] != "true" {
 		t.Fatalf("include_deleted=%q want true", req.ToolFields["include_deleted"])
+	}
+	if req.ConversationID != "conv-a" {
+		t.Fatalf("conversation_id=%q want conv-a", req.ConversationID)
 	}
 	if req.IntervalSec != 10 {
 		t.Fatalf("interval_sec=%d want 10", req.IntervalSec)

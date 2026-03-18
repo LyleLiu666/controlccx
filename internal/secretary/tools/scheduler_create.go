@@ -14,11 +14,11 @@ type schedulerCreateTool struct{}
 func (schedulerCreateTool) Name() string { return "scheduler_create" }
 
 func (schedulerCreateTool) DescriptionZH() string {
-	return "创建定时调度。参数：tool_name（或 target_tool_name，必填，目标工具名）、tool_fields_json（必填，JSON object string）、interval_sec（可选，默认10，最大60）、ttl_sec（可选，默认300）、allow_write（可选，默认false）。"
+	return "创建定时调度。参数：tool_name（或 target_tool_name，必填，目标工具名）、tool_fields_json（必填，JSON object string）、conversation_id（可选，缺省时按上下文推导/回退 __global__）、interval_sec（可选，默认10，最大60）、ttl_sec（可选，默认300）、allow_write（可选，默认false）。"
 }
 
 func (schedulerCreateTool) ReturnsZH() string {
-	return "schedule_id、state、target_tool_name、target_fields_json、interval_sec、ttl_sec、allow_write、created_at、expires_at、next_tick_at"
+	return "schedule_id、state、target_tool_name、target_fields_json、conversation_id、interval_sec、ttl_sec、allow_write、created_at、expires_at、next_tick_at"
 }
 
 func (schedulerCreateTool) Params() []string {
@@ -27,6 +27,7 @@ func (schedulerCreateTool) Params() []string {
 		"target_tool_name",
 		"name",
 		"tool_fields_json",
+		"conversation_id",
 		"interval_sec",
 		"ttl_sec",
 		"allow_write",
@@ -71,6 +72,7 @@ func (schedulerCreateTool) Execute(ctx context.Context, call agentsdk.ToolCall, 
 		ToolName:       strings.TrimSpace(targetToolName),
 		ToolFields:     copyStringMap(targetFields),
 		ToolFieldsJSON: strings.TrimSpace(targetFieldsJSON),
+		ConversationID: strings.TrimSpace(call.Fields["conversation_id"]),
 		IntervalSec:    intervalSec,
 		TTLSec:         ttlSec,
 		AllowWrite:     allowWrite,

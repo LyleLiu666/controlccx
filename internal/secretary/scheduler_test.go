@@ -302,6 +302,62 @@ func TestService_SchedulerTick_ProducesCallbackAuditAndSSE(t *testing.T) {
 	}
 }
 
+func TestService_SchedulerTick_BindsConversationContext(t *testing.T) {
+	client := &schedulerScriptClient{
+		responses:    []string{"seed-b-ok"},
+		defaultReply: "conv-a-callback",
+	}
+	ctx, svc, chatStore, _, _ := setupSchedulerServiceTest(t, client)
+
+	if _, err := svc.SendByConversation(ctx, "conv-b", "seed b"); err != nil {
+		t.Fatalf("seed conv-b: %v", err)
+	}
+
+	info, err := svc.CreateSchedule(ctx, sectools.SchedulerCreateRequest{
+		ToolName:       "tasks_count",
+		ToolFieldsJSON: `{}`,
+		ToolFields:     map[string]string{},
+		ConversationID: "conv-a",
+		IntervalSec:    1,
+		TTLSec:         3,
+		AllowWrite:     false,
+	})
+	if err != nil {
+		t.Fatalf("create schedule: %v", err)
+	}
+	defer func() { _, _ = svc.CancelSchedule(context.Background(), info.ID) }()
+
+	if strings.TrimSpace(info.ConversationID) != "conv-a" {
+		t.Fatalf("conversation_id=%q want %q", info.ConversationID, "conv-a")
+	}
+
+	ok := waitForCondition(4*time.Second, func() bool {
+		msgs, err := chatStore.TailInConversation(context.Background(), "conv-a", 20)
+		if err != nil {
+			return false
+		}
+		for _, m := range msgs {
+			if m.Role == chat.RoleAssistant && strings.Contains(m.Content, "conv-a-callback") {
+				return true
+			}
+		}
+		return false
+	})
+	if !ok {
+		t.Fatalf("expected callback assistant message in conv-a")
+	}
+
+	convBMsgs, err := chatStore.TailInConversation(context.Background(), "conv-b", 20)
+	if err != nil {
+		t.Fatalf("tail conv-b: %v", err)
+	}
+	for _, m := range convBMsgs {
+		if strings.Contains(m.Content, "conv-a-callback") {
+			t.Fatalf("conv-b was polluted by conv-a callback: %+v", convBMsgs)
+		}
+	}
+}
+
 func TestService_SchedulerCallback_DisallowsSchedulerCreate(t *testing.T) {
 	client := &schedulerScriptClient{
 		responses: []string{

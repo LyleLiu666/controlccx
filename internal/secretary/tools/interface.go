@@ -56,6 +56,7 @@ type SchedulerCreateRequest struct {
 	ToolName       string
 	ToolFields     map[string]string
 	ToolFieldsJSON string
+	ConversationID string
 	IntervalSec    int
 	TTLSec         int
 	AllowWrite     bool
@@ -65,6 +66,7 @@ type ScheduleInfo struct {
 	ID               string        `json:"id"`
 	TargetToolName   string        `json:"target_tool_name"`
 	TargetFieldsJSON string        `json:"target_fields_json"`
+	ConversationID   string        `json:"conversation_id"`
 	IntervalSec      int           `json:"interval_sec"`
 	TTLSec           int           `json:"ttl_sec"`
 	AllowWrite       bool          `json:"allow_write"`

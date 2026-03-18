@@ -39,8 +39,9 @@ var schedulerReadOnlyTools = map[string]struct{}{
 type schedulerCallbackContextKey struct{}
 
 type schedulerCallbackContext struct {
-	ScheduleID string
-	TickNo     int
+	ScheduleID     string
+	TickNo         int
+	ConversationID string
 }
 
 type scheduleJob struct {
@@ -48,6 +49,7 @@ type scheduleJob struct {
 	targetToolName   string
 	targetFields     map[string]string
 	targetFieldsJSON string
+	conversationID   string
 
 	intervalSec int
 	ttlSec      int
@@ -133,6 +135,7 @@ func (s *Service) CreateSchedule(ctx context.Context, req sectools.SchedulerCrea
 		}
 		fieldsJSON = string(b)
 	}
+	conversationID := s.resolveScheduleConversationID(ctx, req, fields)
 
 	now := time.Now().UTC()
 	jobCtx, cancel := context.WithCancel(context.Background())
@@ -141,6 +144,7 @@ func (s *Service) CreateSchedule(ctx context.Context, req sectools.SchedulerCrea
 		targetToolName:   toolName,
 		targetFields:     fields,
 		targetFieldsJSON: fieldsJSON,
+		conversationID:   conversationID,
 		intervalSec:      intervalSec,
 		ttlSec:           ttlSec,
 		allowWrite:       allowWrite,
@@ -311,6 +315,7 @@ func (s *Service) executeScheduledTool(job *scheduleJob, tickNo int, runID strin
 		"source":           "timer",
 		"schedule_id":      job.id,
 		"tick_no":          tickNo,
+		"conversation_id":  strings.TrimSpace(job.conversationID),
 		"target_tool_name": toolName,
 		"kind":             "tool_call",
 		"tool_name":        toolName,
@@ -363,6 +368,7 @@ func (s *Service) executeScheduledTool(job *scheduleJob, tickNo int, runID strin
 		"source":           "timer",
 		"schedule_id":      job.id,
 		"tick_no":          tickNo,
+		"conversation_id":  strings.TrimSpace(job.conversationID),
 		"target_tool_name": toolName,
 		"kind":             "tool_result",
 		"tool_name":        toolName,
@@ -388,14 +394,16 @@ func (s *Service) runScheduleCallback(job *scheduleJob, tickNo int, runID string
 	defer cancel()
 
 	callbackCtx := context.WithValue(callbackBase, schedulerCallbackContextKey{}, schedulerCallbackContext{
-		ScheduleID: job.id,
-		TickNo:     tickNo,
+		ScheduleID:     job.id,
+		TickNo:         tickNo,
+		ConversationID: strings.TrimSpace(job.conversationID),
 	})
 
 	payload := map[string]any{
 		"source":           "timer",
 		"schedule_id":      job.id,
 		"tick_no":          tickNo,
+		"conversation_id":  strings.TrimSpace(job.conversationID),
 		"target_tool_name": strings.TrimSpace(targetToolName),
 		"tool_result": map[string]any{
 			"ok":     result.OK,
@@ -427,12 +435,13 @@ func (s *Service) runScheduleCallback(job *scheduleJob, tickNo int, runID string
 		client = &llm.Client{Backend: backend}
 	}
 
-	history, err := s.promptHistory(callbackCtx, client, runID, "")
+	history, err := s.promptHistory(callbackCtx, client, runID, job.conversationID)
 	if err != nil {
 		s.publishSecretaryThinking(job.id, tickNo, map[string]any{
 			"source":      "timer",
 			"schedule_id": job.id,
 			"tick_no":     tickNo,
+			"conversation_id": strings.TrimSpace(job.conversationID),
 			"kind":        "error",
 			"error":       err.Error(),
 			"line":        "定时回调构建上下文失败：" + strings.TrimSpace(err.Error()),
@@ -483,6 +492,7 @@ func (s *Service) runScheduleCallback(job *scheduleJob, tickNo int, runID string
 			"source":      "timer",
 			"schedule_id": job.id,
 			"tick_no":     tickNo,
+			"conversation_id": strings.TrimSpace(job.conversationID),
 			"kind":        "error",
 			"error":       strings.TrimSpace(runErr.Error()),
 			"line":        "定时回调执行失败：" + strings.TrimSpace(runErr.Error()),
@@ -493,25 +503,27 @@ func (s *Service) runScheduleCallback(job *scheduleJob, tickNo int, runID string
 	}
 
 	s.sendMu.Lock()
-	if err := s.appendRunLoopTranscript(callbackCtx, "", toolResultMessage, stepRecords, finalAssistantContent, reply); err != nil {
+	if err := s.appendRunLoopTranscript(callbackCtx, job.conversationID, toolResultMessage, stepRecords, finalAssistantContent, reply); err != nil {
 		s.sendMu.Unlock()
 		s.publishSecretaryThinking(job.id, tickNo, map[string]any{
 			"source":      "timer",
 			"schedule_id": job.id,
 			"tick_no":     tickNo,
+			"conversation_id": strings.TrimSpace(job.conversationID),
 			"kind":        "error",
 			"error":       strings.TrimSpace(err.Error()),
 			"line":        "定时回调写入聊天失败：" + strings.TrimSpace(err.Error()),
 		})
 		return
 	}
-	_ = s.chat.PruneKeepLast(callbackCtx, 2000)
+	_ = s.chat.PruneKeepLastInConversation(callbackCtx, job.conversationID, 2000)
 	s.sendMu.Unlock()
 
 	s.publishSecretaryMessage(map[string]any{
 		"source":      "timer",
 		"schedule_id": job.id,
 		"tick_no":     tickNo,
+		"conversation_id": strings.TrimSpace(job.conversationID),
 		"role":        "assistant",
 		"content":     reply,
 		"time":        time.Now().UTC(),
@@ -686,6 +698,7 @@ func (s *Service) expireSchedule(job *scheduleJob, reason string) {
 		"source":      "timer",
 		"schedule_id": job.id,
 		"tick_no":     tickNo,
+		"conversation_id": strings.TrimSpace(job.conversationID),
 		"kind":        "tool_result",
 		"tool_name":   "scheduler_expire",
 		"ok":          false,
@@ -710,6 +723,7 @@ func (s *Service) snapshotSchedule(job *scheduleJob) sectools.ScheduleInfo {
 		ID:               strings.TrimSpace(job.id),
 		TargetToolName:   strings.TrimSpace(job.targetToolName),
 		TargetFieldsJSON: strings.TrimSpace(job.targetFieldsJSON),
+		ConversationID:   strings.TrimSpace(job.conversationID),
 		IntervalSec:      job.intervalSec,
 		TTLSec:           job.ttlSec,
 		AllowWrite:       job.allowWrite,
@@ -721,6 +735,33 @@ func (s *Service) snapshotSchedule(job *scheduleJob) sectools.ScheduleInfo {
 		Running:          job.running,
 		Pending:          job.pending,
 	}
+}
+
+func (s *Service) resolveScheduleConversationID(ctx context.Context, req sectools.SchedulerCreateRequest, fields map[string]string) string {
+	if v := strings.TrimSpace(req.ConversationID); v != "" {
+		return normalizeConversationID(v)
+	}
+	if meta, ok := schedulerContextFrom(ctx); ok {
+		if v := strings.TrimSpace(meta.ConversationID); v != "" {
+			return normalizeConversationID(v)
+		}
+	}
+	if v := strings.TrimSpace(fields["conversation_id"]); v != "" {
+		return normalizeConversationID(v)
+	}
+	taskID := strings.TrimSpace(fields["task_id"])
+	if s == nil || s.tasks == nil || taskID == "" {
+		return normalizeConversationID("")
+	}
+	taskCtx := ctx
+	if taskCtx == nil {
+		taskCtx = context.Background()
+	}
+	task, err := s.tasks.GetTask(taskCtx, taskID)
+	if err != nil {
+		return normalizeConversationID("")
+	}
+	return normalizeConversationID(task.ConversationID)
 }
 
 func (s *Service) appendScheduleEvent(runID string, ev agentsdk.Event) {

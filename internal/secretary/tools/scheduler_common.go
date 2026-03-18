@@ -105,6 +105,7 @@ func scheduleInfoToResult(info ScheduleInfo) map[string]any {
 		"state":              string(info.State),
 		"target_tool_name":   strings.TrimSpace(info.TargetToolName),
 		"target_fields_json": strings.TrimSpace(info.TargetFieldsJSON),
+		"conversation_id":    strings.TrimSpace(info.ConversationID),
 		"interval_sec":       info.IntervalSec,
 		"ttl_sec":            info.TTLSec,
 		"allow_write":        info.AllowWrite,
