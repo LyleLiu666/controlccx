@@ -59,8 +59,11 @@ func Migrate(ctx context.Context, conn *sql.DB) error {
 				id INTEGER PRIMARY KEY AUTOINCREMENT,
 				ts INTEGER NOT NULL,
 				role TEXT NOT NULL,
-				content TEXT NOT NULL
+				content TEXT NOT NULL,
+				conversation_id TEXT NOT NULL DEFAULT '__global__'
 			);`,
+			`CREATE INDEX IF NOT EXISTS idx_chat_messages_conversation_id_id
+				ON chat_messages(conversation_id, id);`,
 			fmt.Sprintf("PRAGMA user_version = %d;", schemaVersion),
 		)
 	}
@@ -282,6 +285,9 @@ func Migrate(ctx context.Context, conn *sql.DB) error {
 	if err := ensureTasksColumns(ctx, tx); err != nil {
 		return err
 	}
+	if err := ensureChatMessagesColumns(ctx, tx); err != nil {
+		return err
+	}
 
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("db: migrate commit: %w", err)
@@ -401,6 +407,71 @@ func ensureTaskRunOptionsColumns(ctx context.Context, tx *sql.Tx) error {
 		if _, err := tx.ExecContext(ctx, "ALTER TABLE task_run_options ADD COLUMN "+c.Def+";"); err != nil {
 			return fmt.Errorf("db: ensure task_run_options columns: add %s: %w", c.Name, err)
 		}
+	}
+	return nil
+}
+
+func ensureChatMessagesColumns(ctx context.Context, tx *sql.Tx) error {
+	if tx == nil {
+		return fmt.Errorf("db: ensure chat_messages columns: tx is nil")
+	}
+
+	var tableCount int
+	if err := tx.QueryRowContext(ctx, `
+		SELECT COUNT(1)
+		FROM sqlite_master
+		WHERE type='table' AND name='chat_messages';
+	`).Scan(&tableCount); err != nil {
+		return fmt.Errorf("db: ensure chat_messages columns: check table exists: %w", err)
+	}
+	if tableCount == 0 {
+		return nil
+	}
+
+	rows, err := tx.QueryContext(ctx, "PRAGMA table_info(chat_messages);")
+	if err != nil {
+		return fmt.Errorf("db: ensure chat_messages columns: table_info: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	existing := map[string]bool{}
+	for rows.Next() {
+		var (
+			cid     int
+			name    string
+			typ     string
+			notnull int
+			dflt    any
+			pk      int
+		)
+		if err := rows.Scan(&cid, &name, &typ, &notnull, &dflt, &pk); err != nil {
+			return fmt.Errorf("db: ensure chat_messages columns: scan: %w", err)
+		}
+		existing[name] = true
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("db: ensure chat_messages columns: rows: %w", err)
+	}
+
+	if !existing["conversation_id"] {
+		if _, err := tx.ExecContext(ctx, "ALTER TABLE chat_messages ADD COLUMN conversation_id TEXT NOT NULL DEFAULT '__global__';"); err != nil {
+			return fmt.Errorf("db: ensure chat_messages columns: add conversation_id: %w", err)
+		}
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE chat_messages
+		SET conversation_id='__global__'
+		WHERE conversation_id IS NULL OR TRIM(conversation_id) = '';
+	`); err != nil {
+		return fmt.Errorf("db: ensure chat_messages columns: backfill conversation_id: %w", err)
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+		CREATE INDEX IF NOT EXISTS idx_chat_messages_conversation_id_id
+		ON chat_messages(conversation_id, id);
+	`); err != nil {
+		return fmt.Errorf("db: ensure chat_messages indexes: %w", err)
 	}
 	return nil
 }
