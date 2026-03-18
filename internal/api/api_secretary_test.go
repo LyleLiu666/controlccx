@@ -63,7 +63,10 @@ func TestAPI_SecretaryEndpoints(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	// POST message -> reply
-	body, _ := json.Marshal(map[string]any{"message": "hi"})
+	body, _ := json.Marshal(map[string]any{
+		"message":         "hi",
+		"conversation_id": "conv-a",
+	})
 	res, err := http.Post(srv.URL+"/api/secretary/messages", "application/json", bytes.NewReader(body))
 	if err != nil {
 		t.Fatalf("post: %v", err)
@@ -83,7 +86,7 @@ func TestAPI_SecretaryEndpoints(t *testing.T) {
 	}
 
 	// GET history
-	getRes, err := http.Get(srv.URL + "/api/secretary/messages?limit=10")
+	getRes, err := http.Get(srv.URL + "/api/secretary/messages?limit=10&conversation_id=conv-a")
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
@@ -162,7 +165,10 @@ func TestAPI_SecretaryStreamEndpoint(t *testing.T) {
 	srv := httptest.NewServer(apiSvc.Handler())
 	t.Cleanup(srv.Close)
 
-	body, _ := json.Marshal(map[string]any{"message": "统计一下"})
+	body, _ := json.Marshal(map[string]any{
+		"message":         "统计一下",
+		"conversation_id": "conv-stream",
+	})
 	req, err := http.NewRequest(http.MethodPost, srv.URL+"/api/secretary/messages/stream", bytes.NewReader(body))
 	if err != nil {
 		t.Fatalf("new request: %v", err)

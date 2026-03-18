@@ -18,7 +18,8 @@ func (a *API) handleSecretaryMessages(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		limit := parseInt(r.URL.Query().Get("limit"), 200)
-		msgs, err := a.Secretary.History(r.Context(), limit)
+		conversationID := strings.TrimSpace(r.URL.Query().Get("conversation_id"))
+		msgs, err := a.Secretary.HistoryByConversation(r.Context(), conversationID, limit)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -26,7 +27,8 @@ func (a *API) handleSecretaryMessages(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, map[string]any{"messages": msgs})
 	case http.MethodPost:
 		var body struct {
-			Message string `json:"message"`
+			Message        string `json:"message"`
+			ConversationID string `json:"conversation_id"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			http.Error(w, "invalid json", http.StatusBadRequest)
@@ -37,7 +39,7 @@ func (a *API) handleSecretaryMessages(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "message is required", http.StatusBadRequest)
 			return
 		}
-		reply, err := a.Secretary.Send(r.Context(), msg)
+		reply, err := a.Secretary.SendByConversation(r.Context(), body.ConversationID, msg)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -75,7 +77,8 @@ func (a *API) handleSecretaryMessagesStream(w http.ResponseWriter, r *http.Reque
 	}
 
 	var body struct {
-		Message string `json:"message"`
+		Message        string `json:"message"`
+		ConversationID string `json:"conversation_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, "invalid json", http.StatusBadRequest)
@@ -176,7 +179,7 @@ func (a *API) handleSecretaryMessagesStream(w http.ResponseWriter, r *http.Reque
 		},
 	}
 
-	reply, err := a.Secretary.SendStream(r.Context(), msg, hooks)
+	reply, err := a.Secretary.SendStreamByConversation(r.Context(), body.ConversationID, msg, hooks)
 	if err != nil {
 		emit("error", map[string]any{"error": err.Error()})
 		return

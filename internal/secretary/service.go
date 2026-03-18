@@ -158,20 +158,29 @@ func NewService(cfg config.Config, taskStore *tasks.Store, chatStore *chat.Store
 }
 
 func (s *Service) Send(ctx context.Context, userText string) (string, error) {
-	return s.send(ctx, userText, nil)
+	return s.SendByConversation(ctx, "", userText)
+}
+
+func (s *Service) SendByConversation(ctx context.Context, conversationID string, userText string) (string, error) {
+	return s.send(ctx, conversationID, userText, nil)
 }
 
 func (s *Service) SendStream(ctx context.Context, userText string, hooks *SendHooks) (string, error) {
-	return s.send(ctx, userText, hooks)
+	return s.SendStreamByConversation(ctx, "", userText, hooks)
 }
 
-func (s *Service) send(ctx context.Context, userText string, hooks *SendHooks) (string, error) {
+func (s *Service) SendStreamByConversation(ctx context.Context, conversationID string, userText string, hooks *SendHooks) (string, error) {
+	return s.send(ctx, conversationID, userText, hooks)
+}
+
+func (s *Service) send(ctx context.Context, conversationID string, userText string, hooks *SendHooks) (string, error) {
 	if s == nil || s.tasks == nil {
 		return "", fmt.Errorf("secretary: tasks store is required")
 	}
 	if s.chat == nil {
 		return "", fmt.Errorf("secretary: chat store is required")
 	}
+	conversationID = normalizeConversationID(conversationID)
 	msg := strings.TrimSpace(userText)
 	if msg == "" {
 		return "请先输入你的问题。", nil
@@ -209,7 +218,7 @@ func (s *Service) send(ctx context.Context, userText string, hooks *SendHooks) (
 	}
 	sink := composeEventSink(sinks...)
 
-	promptHistory, err := s.promptHistory(ctx, client, runID)
+	promptHistory, err := s.promptHistory(ctx, client, runID, conversationID)
 	if err != nil {
 		return "", err
 	}
@@ -270,7 +279,7 @@ func (s *Service) send(ctx context.Context, userText string, hooks *SendHooks) (
 		}
 	}
 
-	if err := s.appendRunLoopTranscript(ctx, msg, stepRecords, finalAssistantContent, reply); err != nil {
+	if err := s.appendRunLoopTranscript(ctx, conversationID, msg, stepRecords, finalAssistantContent, reply); err != nil {
 		return "", err
 	}
 	_ = s.chat.PruneKeepLast(ctx, 2000)
@@ -401,9 +410,14 @@ func providerReceiptBestEffort(client agentsdk.Client) (map[string]any, bool) {
 }
 
 func (s *Service) History(ctx context.Context, limit int) ([]chat.Message, error) {
+	return s.HistoryByConversation(ctx, "", limit)
+}
+
+func (s *Service) HistoryByConversation(ctx context.Context, conversationID string, limit int) ([]chat.Message, error) {
 	if s == nil || s.chat == nil {
 		return nil, fmt.Errorf("secretary: chat store is required")
 	}
+	_ = normalizeConversationID(conversationID)
 	if limit <= 0 || limit > 500 {
 		limit = 200
 	}
@@ -442,9 +456,14 @@ func (s *Service) History(ctx context.Context, limit int) ([]chat.Message, error
 }
 
 func (s *Service) Clear(ctx context.Context) error {
+	return s.ClearByConversation(ctx, "")
+}
+
+func (s *Service) ClearByConversation(ctx context.Context, conversationID string) error {
 	if s == nil || s.chat == nil {
 		return fmt.Errorf("secretary: chat store is required")
 	}
+	_ = normalizeConversationID(conversationID)
 	return s.chat.Clear(ctx)
 }
 
@@ -503,18 +522,18 @@ func truncateRunes(s string, max int) string {
 	return b.String()
 }
 
-func (s *Service) appendRunLoopTranscript(ctx context.Context, initialUser string, stepRecords []xmlprotocol.StepRecord, finalAssistantContent string, fallbackReply string) error {
+func (s *Service) appendRunLoopTranscript(ctx context.Context, conversationID string, initialUser string, stepRecords []xmlprotocol.StepRecord, finalAssistantContent string, fallbackReply string) error {
 	if s == nil || s.chat == nil {
 		return fmt.Errorf("secretary: chat store is required")
 	}
-	if err := s.appendChatMessageIfNonEmpty(ctx, chat.RoleUser, initialUser); err != nil {
+	if err := s.appendChatMessageIfNonEmpty(ctx, conversationID, chat.RoleUser, initialUser); err != nil {
 		return err
 	}
 	for _, step := range stepRecords {
-		if err := s.appendChatMessageIfNonEmpty(ctx, chat.RoleAssistant, step.AssistantContent); err != nil {
+		if err := s.appendChatMessageIfNonEmpty(ctx, conversationID, chat.RoleAssistant, step.AssistantContent); err != nil {
 			return err
 		}
-		if err := s.appendChatMessageIfNonEmpty(ctx, chat.RoleUser, step.ToolResultMessage); err != nil {
+		if err := s.appendChatMessageIfNonEmpty(ctx, conversationID, chat.RoleUser, step.ToolResultMessage); err != nil {
 			return err
 		}
 	}
@@ -523,13 +542,14 @@ func (s *Service) appendRunLoopTranscript(ctx context.Context, initialUser strin
 	if final == "" {
 		final = strings.TrimSpace(finalAssistantContent)
 	}
-	return s.appendChatMessageIfNonEmpty(ctx, chat.RoleAssistant, final)
+	return s.appendChatMessageIfNonEmpty(ctx, conversationID, chat.RoleAssistant, final)
 }
 
-func (s *Service) appendChatMessageIfNonEmpty(ctx context.Context, role chat.Role, content string) error {
+func (s *Service) appendChatMessageIfNonEmpty(ctx context.Context, conversationID string, role chat.Role, content string) error {
 	if s == nil || s.chat == nil {
 		return fmt.Errorf("secretary: chat store is required")
 	}
+	_ = normalizeConversationID(conversationID)
 	text := strings.TrimSpace(content)
 	if text == "" {
 		return nil
@@ -560,6 +580,14 @@ func newRunID() string {
 		return hex.EncodeToString(b[:])
 	}
 	return fmt.Sprintf("%d", time.Now().UnixNano())
+}
+
+func normalizeConversationID(conversationID string) string {
+	id := strings.TrimSpace(conversationID)
+	if id == "" {
+		return "__global__"
+	}
+	return id
 }
 
 func (s *Service) llmOptionsBestEffort(ctx context.Context) *agentsdk.ChatCompletionOptions {

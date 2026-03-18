@@ -66,10 +66,11 @@ func normalizeCompressionOptions(opts CompressionOptions) CompressionOptions {
 	return opts
 }
 
-func (s *Service) promptHistory(ctx context.Context, client agentsdk.Client, runID string) ([]agentsdk.Message, error) {
+func (s *Service) promptHistory(ctx context.Context, client agentsdk.Client, runID string, conversationID string) ([]agentsdk.Message, error) {
 	if s == nil || s.chat == nil {
 		return nil, fmt.Errorf("secretary: chat store is required")
 	}
+	_ = normalizeConversationID(conversationID)
 	if s.compress == nil {
 		history, err := s.chat.Tail(ctx, 40)
 		if err != nil {

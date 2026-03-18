@@ -427,7 +427,7 @@ func (s *Service) runScheduleCallback(job *scheduleJob, tickNo int, runID string
 		client = &llm.Client{Backend: backend}
 	}
 
-	history, err := s.promptHistory(callbackCtx, client, runID)
+	history, err := s.promptHistory(callbackCtx, client, runID, "")
 	if err != nil {
 		s.publishSecretaryThinking(job.id, tickNo, map[string]any{
 			"source":      "timer",
@@ -493,7 +493,7 @@ func (s *Service) runScheduleCallback(job *scheduleJob, tickNo int, runID string
 	}
 
 	s.sendMu.Lock()
-	if err := s.appendRunLoopTranscript(callbackCtx, toolResultMessage, stepRecords, finalAssistantContent, reply); err != nil {
+	if err := s.appendRunLoopTranscript(callbackCtx, "", toolResultMessage, stepRecords, finalAssistantContent, reply); err != nil {
 		s.sendMu.Unlock()
 		s.publishSecretaryThinking(job.id, tickNo, map[string]any{
 			"source":      "timer",
